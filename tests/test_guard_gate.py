@@ -122,5 +122,62 @@ class RegressionTest(unittest.TestCase):
         self.assertEqual(decide(msgs, is_ours=lambda m: m is ours).reason, "own_echo")
 
 
+class WiringTest(unittest.TestCase):
+    """The gate is only worth anything if it actually reaches the send decision."""
+
+    def test_conv_to_item_attaches_a_decision(self):
+        import inspect, bot
+        src = inspect.getsource(bot._conv_to_item)
+        self.assertIn("_gate_decision", src)
+        self.assertIn('"_gate"', src)
+
+    def test_ops_capture_still_runs_for_every_conversation(self):
+        # C5: response-time capture must keep running for EVERY scanned conversation,
+        # gate-silenced ones included. It sits before every early return and the gate
+        # was added after it — assert the order, not the intention.
+        import inspect, bot
+        src = inspect.getsource(bot._conv_to_item)
+        self.assertLess(src.index("_ops_capture_conversation"), src.index("_gate_decision"),
+                        "the gate must never be able to skip response-time capture")
+
+    def test_can_auto_consults_both_the_gate_and_the_claim(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        i = src.index("can_auto = (")
+        window = src[i:i + 600]
+        self.assertIn("_gate", window)
+        self.assertIn("_claimed_convos", window,
+                      "an auto-send could land on a conversation a human already took")
+
+    def test_a_silent_decision_is_shown_on_the_card_and_counted(self):
+        import inspect, bot
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn("🔇 صامت", src)
+        self.assertIn('metric_bump("silent_total")', src)
+
+    def test_the_send_time_recheck_exists_and_counts_collisions(self):
+        import inspect, bot
+        self.assertTrue(callable(bot._gate_recheck))
+        src = inspect.getsource(bot.post_assistant_card)
+        self.assertIn("_gate_recheck", src)
+        self.assertIn('metric_bump("collisions_avoided")', src)
+
+    def test_every_reason_has_arabic_for_the_team(self):
+        import bot
+        from guard.gate import REASONS
+        for r in REASONS:
+            if r == "ok":
+                continue
+            self.assertIn(r, bot._GATE_REASON_AR)
+            self.assertTrue(bot._GATE_REASON_AR[r].strip())
+
+    def test_a_broken_gate_does_not_become_an_accidental_kill_switch(self):
+        import bot
+        from unittest import mock as _m
+        with _m.patch.object(bot, "_guard_gate") as g:
+            g.should_speak.side_effect = RuntimeError("boom")
+            self.assertIsNone(bot._gate_decision("1", [{"body": "hi"}], 0))
+
+
 if __name__ == "__main__":
     unittest.main()

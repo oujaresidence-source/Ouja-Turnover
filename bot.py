@@ -7703,6 +7703,81 @@ def _msg_is_inbound(m):
 def _msg_time(m):
     return str(m.get("date") or m.get("insertedOn") or m.get("latestMessageDate") or "")
 
+# Arabic for every silence verdict — the team reads these on the Discord card.
+_GATE_REASON_AR = {
+    "already_answered": "أحد من الفريق رد على الضيف بعد سؤاله",
+    "human_active":     "فيه زميل شغّال بالمحادثة الحين",
+    "claimed":          "المحادثة مستلمة من أحد الفريق",
+    "own_echo":         "آخر رسالة منّا إحنا — ما نرد على نفسنا",
+    "template_echo":    "آخر شي بالمحادثة قالب تلقائي، والضيف ما رد عليه",
+    "stale":            "سؤال الضيف قديم وما أحد ينتظر رد الحين",
+}
+
+
+def _gate_epoch(m):
+    """A Hostaway message timestamp as epoch seconds, or None. guard.gate needs a number;
+    _msg_time returns the raw string."""
+    try:
+        dt = _parse_msg_dt(_msg_time(m))
+        return dt.timestamp() if dt else None
+    except Exception:
+        return None
+
+
+def _gate_decision(cid, msgs, guest_idx):
+    """Should we SEND into this thread? Returns a guard.gate.Decision, or None meaning
+    "no opinion" (gate off or unavailable) — in which case behaviour is exactly today's.
+
+    A crash here degrades to today's behaviour rather than muting the assistant: a broken
+    gate must not become an accidental global kill switch. Real silence decisions are made
+    inside guard.gate, which fails closed on its own.
+    """
+    if not (GATE_SILENCE and _HAS_GUARD and _guard_gate):
+        return None
+    try:
+        _claimed = {str(c) for c in _claimed_convos}
+        def _is_ours(m, _cid=cid):
+            if not _guard_ledger:
+                return False
+            try:
+                return bool(_guard_ledger.lookup(_cid, (m.get("body") or "")))
+            except Exception:
+                return False
+        return _guard_gate.should_speak(
+            msgs=msgs, guest_idx=guest_idx, claimed=str(cid) in _claimed,
+            now=time.time(), looks_automated=_looks_automated,
+            is_outbound=lambda m: not _msg_is_inbound(m),
+            msg_time=_gate_epoch, is_ours=_is_ours, stale_hours=GATE_STALE_HOURS)
+    except Exception as e:
+        print("[gate] decision failed (no opinion, behaving as before):", e)
+        return None
+
+
+def _gate_recheck(item):
+    """Ask the thread again, immediately before sending. BLOCKING (one Hostaway read) —
+    call it from a thread.
+
+    Minutes pass between the poll that drafted this and the send, and teammates reply
+    inside that window; that gap is most of the 80.6% collision rate. Returns a fresh
+    Decision, or None meaning "no fresh opinion" — a Hostaway hiccup must not block a
+    legitimate reply, so on failure we proceed with the decision already made.
+    """
+    if not (GATE_RECHECK and _HAS_GUARD and _guard_gate):
+        return None
+    cid = item.get("conversation_id")
+    try:
+        msgs = (api_get(f"/conversations/{cid}/messages") or {}).get("result") or []
+        msgs = sorted([m for m in msgs if (m.get("body") or "").strip()], key=_msg_sort_key)
+        if not msgs:
+            return None
+        guest_idx = next((i for i in range(len(msgs) - 1, -1, -1)
+                          if _msg_is_inbound(msgs[i])), None)
+        return _gate_decision(cid, msgs, guest_idx)
+    except Exception as e:
+        print("[gate] recheck failed (proceeding as already decided):", e)
+        return None
+
+
 def _msg_sort_key(m):
     """Sortable timestamp so the guest's *latest* message is reliably the newest.
     (Within one conversation the tz skew is uniform, so relative order stays correct.)"""
@@ -9780,7 +9855,13 @@ def _conv_to_item(c, listings, seen, debug=False):
     # means the second caller's `mid in seen` check returns None instead of drafting a
     # duplicate. process_assistant_item's own add stays as an idempotent no-op.
     seen.add(mid)
+    # T4: decided HERE, where the full message list is already in hand — no second fetch.
+    # The item is still produced and the draft still happens: a card a human can read is
+    # harmless. Only SENDING is gated. (_ops_capture_conversation above is untouched and
+    # still runs for every scanned conversation, gate-silenced ones included — C5.)
+    _gate = _gate_decision(cid, msgs, guest_idx)
     return {
+        "_gate": _gate,
         "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
         "listing_id": lm,
         "reservation_id": c.get("reservationId") or res.get("id"),
@@ -11921,8 +12002,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     # isn't around to approve, and the owner explicitly asked the bot to
     # "answer as much as possible" outside hours.
     offhours = bool(item.get("_offhours"))
+    # T4: the gate, and the claim check that was missing here entirely — bot.py checks
+    # _claimed_convos in the escalate branch above, but never here, so until now an
+    # auto-send could land on a conversation a human had already taken.
+    _gate = item.get("_gate")
     can_auto = (not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF and
-                (ASSISTANT_AUTO or offhours))
+                (ASSISTANT_AUTO or offhours) and
+                (_gate is None or _gate.speak) and
+                str(item["conversation_id"]) not in {str(c) for c in _claimed_convos})
     if can_auto:
         if not _auto_send_claim(item.get("message_id"), item["conversation_id"]):
             print(f"[dedup] auto-send skipped (duplicate) · conv {item['conversation_id']} · "
@@ -11932,46 +12019,78 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             except Exception:
                 pass
             return
-        try:
-            r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
-                                        item["comm_type"])
-            if r == SEND_SUPPRESSED:
-                log_event("assistant", f"⏭️ رد تلقائي مكرّر — ما انرسل · {g} · {item['unit']}")
-                return
-            if r in _SEND_NOT_DELIVERED:
-                print(f"auto-send not delivered ({r}) — falling back to approval card")
-                # C1/T3: never silently drop. The except below falls through to a card a
-                # human can read, so a blocked auto-send becomes a human decision.
-                raise RuntimeError(r)
-            # learning: auto-sent at high confidence (still useful — confirms the
-            # bot's wording on simple replies, helps reinforce the pattern)
-            record_learning(item, reply, reply, via="auto", approver="(auto)")
-            embed = discord.Embed(title=f"⚡ رد تلقائي · {g} · {item['unit']}", color=0x3BA55D)
-            embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
-            embed.add_field(name="✅ تم الرد تلقائياً (Stage 1)", value=reply[:1000], inline=False)
-            embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · رد تلقائي للعلم")
-            await channel.send(embed=embed)
-            log_event("guest", f"رد تلقائي ({round(conf*100)}%) · {g} · {item['unit']}")
-            # --- auto-reply audit: keep a record + post to the dedicated audit channel ---
-            _auto_replies.appendleft({"ts": datetime.now(TZ).isoformat(timespec="seconds"),
-                                      "guest": g, "unit": item["unit"], "conf": round(conf * 100),
-                                      "guest_text": (item["guest_text"] or "")[:600], "reply": reply[:1000]})
+        # T4/GATE_RECHECK: minutes pass between the poll and this send, and humans reply
+        # inside that window — that gap is most of the 80.6% collision rate. Ask the
+        # thread again, right now, and abort if the answer changed.
+        if GATE_RECHECK and _HAS_GUARD and _guard_gate:
+            _fresh = await asyncio.to_thread(_gate_recheck, item)
+            if _fresh is not None and not _fresh.speak:
+                print(f"[gate] collision avoided at send time ({_fresh.reason}) · "
+                      f"conv {item['conversation_id']}")
+                try:
+                    metric_bump("collisions_avoided")
+                    metric_bump(f"silent_by_reason.{_fresh.reason}")
+                    log_event("assistant",
+                              f"🔇 توقّفنا قبل الإرسال — {_GATE_REASON_AR.get(_fresh.reason, _fresh.reason)}"
+                              f" · {g} · {item['unit']}")
+                except Exception:
+                    pass
+                # The auto-send claim is deliberately NOT released: if a human answered
+                # in the gap, we must not auto-send for this message later either. The
+                # approval card below still carries the draft for a human to send.
+                item["_gate"] = _fresh
+                _gate = _fresh
+                can_auto = False
+        if can_auto:
             try:
-                audit = await ensure_channel(channel.guild, AUTO_REPLY_CHANNEL,
-                                             await get_assistant_category(channel.guild))
-                if audit:
-                    a = discord.Embed(title=f"⚡ {g} · {item['unit']}", color=0x3BA55D,
-                                      timestamp=datetime.now(TZ))
-                    a.add_field(name="📩 الضيف", value=(item["guest_text"] or "—")[:1000], inline=False)
-                    a.add_field(name="🤍 رد المساعد (تلقائي)", value=reply[:1000], inline=False)
-                    a.set_footer(text=f"ثقة {round(conf*100)}% · أُرسل بدون مراجعة")
-                    await audit.send(embed=a)
+                r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
+                                            item["comm_type"],
+                                            listing_id=item.get("listing_id"),
+                                            via="auto", actor="(auto)",
+                                            guard_ctx={"guest_text": item.get("guest_text") or "",
+                                                       "intent": intent, "unit": item.get("unit") or "",
+                                                       "history": item.get("history") or ""},
+                                            shadow_ctx={"guest_text": item.get("guest_text") or "",
+                                                        "action": action, "confidence": conf,
+                                                        "gate_decision": (_gate.reason if _gate else "ok"),
+                                                        "used_memory": bool(result.get("used_memory"))})
+                if r == SEND_SUPPRESSED:
+                    log_event("assistant", f"⏭️ رد تلقائي مكرّر — ما انرسل · {g} · {item['unit']}")
+                    return
+                if r in _SEND_NOT_DELIVERED:
+                    print(f"auto-send not delivered ({r}) — falling back to approval card")
+                    # C1/T3: never silently drop. The except below falls through to a card a
+                    # human can read, so a blocked auto-send becomes a human decision.
+                    raise RuntimeError(r)
+                # learning: auto-sent at high confidence (still useful — confirms the
+                # bot's wording on simple replies, helps reinforce the pattern)
+                record_learning(item, reply, reply, via="auto", approver="(auto)")
+                embed = discord.Embed(title=f"⚡ رد تلقائي · {g} · {item['unit']}", color=0x3BA55D)
+                embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
+                embed.add_field(name="✅ تم الرد تلقائياً (Stage 1)", value=reply[:1000], inline=False)
+                embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · رد تلقائي للعلم")
+                await channel.send(embed=embed)
+                log_event("guest", f"رد تلقائي ({round(conf*100)}%) · {g} · {item['unit']}")
+                # --- auto-reply audit: keep a record + post to the dedicated audit channel ---
+                _auto_replies.appendleft({"ts": datetime.now(TZ).isoformat(timespec="seconds"),
+                                          "guest": g, "unit": item["unit"], "conf": round(conf * 100),
+                                          "guest_text": (item["guest_text"] or "")[:600], "reply": reply[:1000]})
+                try:
+                    audit = await ensure_channel(channel.guild, AUTO_REPLY_CHANNEL,
+                                                 await get_assistant_category(channel.guild))
+                    if audit:
+                        a = discord.Embed(title=f"⚡ {g} · {item['unit']}", color=0x3BA55D,
+                                          timestamp=datetime.now(TZ))
+                        a.add_field(name="📩 الضيف", value=(item["guest_text"] or "—")[:1000], inline=False)
+                        a.add_field(name="🤍 رد المساعد (تلقائي)", value=reply[:1000], inline=False)
+                        a.set_footer(text=f"ثقة {round(conf*100)}% · أُرسل بدون مراجعة")
+                        await audit.send(embed=a)
+                except Exception as e:
+                    print("auto-reply audit post error:", e)
+                return
             except Exception as e:
-                print("auto-reply audit post error:", e)
-            return
-        except Exception as e:
-            print("auto-send failed, falling back to approval:", e)
-            # fall through to the approval card if the send failed
+                print("auto-send failed, falling back to approval:", e)
+                # fall through to the approval card if the send failed
 
     # ---- needs approval: draft + buttons ----
     embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=GOLD)
@@ -11979,6 +12098,18 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1024], inline=False)
     embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · راجعه قبل الإرسال · "
                           f"التوقيع يُضاف تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
+    # T4: say out loud that we chose silence, and why. COPY-5: no guest-facing copy —
+    # that is the point. The draft is still on the card for a human to send if they want.
+    if _gate is not None and not _gate.speak:
+        embed.color = 0x8A8F98
+        embed.add_field(
+            name=f"🔇 صامت — {_GATE_REASON_AR.get(_gate.reason, _gate.reason)}",
+            value="ما أرسلنا شي للضيف. الرد فوق موجود لو تبي ترسله يدوياً.", inline=False)
+        try:
+            metric_bump("silent_total")
+            metric_bump(f"silent_by_reason.{_gate.reason}")
+        except Exception:
+            pass
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
                                  "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
