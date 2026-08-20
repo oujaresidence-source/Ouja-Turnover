@@ -298,7 +298,10 @@ class RecoveryOwnerTest(LeaveTypeTest):
                         (2000 + i, a["id"]))
         apt = sdb.q1("SELECT a.id id, a.listing_id lid, a.name name FROM schedule_apartments a "
                      "JOIN schedule_employees e ON a.owner_id=e.id WHERE e.name='مآثر' LIMIT 1")
-        today = "2026-08-18"
+        # _recovery_unit_owner reads the REAL clock, so the absence and the pin have to
+        # land on the day it will actually look at. A hard-coded date silently stops
+        # testing anything the moment it passes.
+        today = bot.datetime.now(bot.TZ).date().isoformat()
         self.assertEqual(bot._recovery_unit_owner(lid=apt["lid"]), "مآثر")
         sdb.execute("INSERT INTO schedule_absences(employee_id,start_date,end_date,type,"
                     "status,affects_coverage,created_at) VALUES(?,?,?,?,?,?,?)",

@@ -1,9 +1,24 @@
 """Deterministic apartment qualification and verified Hostaway matching."""
 
+import contextlib
+import datetime as _dt
 import unittest
 from unittest import mock
 
 import bot
+
+
+@contextlib.contextmanager
+def _frozen_now(year, month, day):
+    """Freeze the wall clock bot reads. Only bot.datetime is swapped — bot.date stays
+    real, so the date(...) the parser builds is untouched. Without this, any test of a
+    yearless month asserts a calendar date and dies the day that month passes."""
+    class _Clock:
+        @staticmethod
+        def now(tz=None):
+            return _dt.datetime(year, month, day, 12, 0)
+    with mock.patch.object(bot, "datetime", _Clock):
+        yield
 
 
 class TestApartmentQualification(unittest.TestCase):
@@ -68,12 +83,24 @@ class TestApartmentQualification(unittest.TestCase):
         self.assertEqual((en["checkin"], en["checkout"]),
                          ("2026-08-10", "2026-08-13"))
 
+    _YEARLESS_AUGUST = ("Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
+                        "أي حي، 700 لليلة، بدون متطلبات")
+
     def test_shared_month_yearless_range_is_understood(self):
-        req = bot._apartment_requirements(
-            "Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
-            "أي حي، 700 لليلة، بدون متطلبات")
+        # «من 5 إلى 8 أغسطس» names no year: still-to-come this year means THIS year.
+        with _frozen_now(2026, 7, 1):
+            req = bot._apartment_requirements(self._YEARLESS_AUGUST)
         self.assertEqual((req["checkin"], req["checkout"]),
                          ("2026-08-05", "2026-08-08"))
+
+    def test_shared_month_yearless_range_rolls_forward_once_it_has_passed(self):
+        # Same sentence, asked after those days are gone: the guest means next August,
+        # not a stay in the past. (Live-caught 2026-08-20 — the old test hard-coded the
+        # year and started failing on 2026-08-09.)
+        with _frozen_now(2026, 8, 20):
+            req = bot._apartment_requirements(self._YEARLESS_AUGUST)
+        self.assertEqual((req["checkin"], req["checkout"]),
+                         ("2027-08-05", "2027-08-08"))
 
     def test_explicit_no_preferences_fulfils_optional_questions(self):
         history = (
