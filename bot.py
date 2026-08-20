@@ -190,11 +190,14 @@ except Exception as _ops_err:           # pragma: no cover
 try:
     import guard as _guard
     from guard import (gate as _guard_gate, ledger as _guard_ledger,
-                       mode as _guard_mode, shadow as _guard_shadow)
+                       mode as _guard_mode, shadow as _guard_shadow,
+                       commit as _guard_commit, incident as _guard_incident,
+                       watchdog as _guard_watchdog)
     _HAS_GUARD = True
 except Exception as _guard_err:         # pragma: no cover
     print("[guard] import failed (assistant guards disabled, bot unaffected):", _guard_err)
     _guard = _guard_gate = _guard_ledger = _guard_mode = _guard_shadow = None
+    _guard_commit = _guard_incident = _guard_watchdog = None
     _HAS_GUARD = False
 
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
@@ -7753,6 +7756,42 @@ def _gate_decision(cid, msgs, guest_idx):
         return None
 
 
+def _template_watchdog_scan(cid, listing_id, msgs):
+    """T8: run the content guard over OUTBOUND messages and open ONE deduped ticket per
+    (unit, rule, day) when a template ships broken.
+
+    The four worst templates are Hostaway-side — grepped, zero hits in all 407 files — so
+    we cannot fix them from here. We can notice on send #1 instead of send #14. Costs no
+    extra API call: _conv_to_item already has every message in hand.
+
+    Fully swallowed: this runs in the live guest path and must never block a reply.
+    """
+    if not (GUARD_OUTBOUND and _HAS_GUARD and _guard_watchdog and _guard):
+        return
+    try:
+        findings = _guard_watchdog.scan(
+            msgs, listing_id=listing_id, check_outbound=_guard.check_outbound,
+            is_outbound=lambda m: not _msg_is_inbound(m))
+        for f in findings:
+            try:
+                t = _ticket_create(
+                    f"قالب مكسور · {f['code']}",
+                    description=(f"{f['detail']}\n\nنص الرسالة اللي طلعت للضيف:\n"
+                                 f"{(f['body'] or '')[:500]}\n\n"
+                                 "⚠️ هذا قالب من Hostaway مو من كودنا — لازم يتصلّح من "
+                                 "لوحة Hostaway، ما نقدر نصلحه من هنا."),
+                    lid=listing_id, priority="high", category="صيانة",
+                    source="template-watchdog", source_ref=f"tpl:{f['key']}",
+                    created_by="musaed")
+                log_event("escalation",
+                          f"⚠️ قالب مكسور · {f['code']} · وحدة {listing_id} · "
+                          f"تذكرة {(t or {}).get('id')}")
+            except Exception as e:
+                print("[watchdog] ticket failed:", e)
+    except Exception as e:
+        print("[watchdog] scan failed:", e)
+
+
 def _gate_recheck(item):
     """Ask the thread again, immediately before sending. BLOCKING (one Hostaway read) —
     call it from a thread.
@@ -9860,6 +9899,7 @@ def _conv_to_item(c, listings, seen, debug=False):
     # harmless. Only SENDING is gated. (_ops_capture_conversation above is untouched and
     # still runs for every scanned conversation, gate-silenced ones included — C5.)
     _gate = _gate_decision(cid, msgs, guest_idx)
+    _template_watchdog_scan(cid, c.get("listingMapId"), msgs)
     return {
         "_gate": _gate,
         "conversation_id": cid, "message_id": mid, "guest": guest, "unit": unit,
@@ -10105,11 +10145,13 @@ SEND_BLOCKED_KILL = "blocked_kill_switch"   # kill switch on — nothing was sen
 SEND_SUPPRESSED = "suppressed_duplicate"    # identical message already delivered — nothing sent
 SEND_SHADOW = "shadow_mode"                 # shadow/canary — decided and logged, nothing sent
 SEND_BLOCKED_GUARD = "blocked_guard"        # the content guard refused it — nothing sent
+SEND_BLOCKED_HOLD = "blocked_harm_hold"     # a harm hold is open on this thread — nothing sent
 
 # Every outcome that means "the guest did NOT receive this". A caller that treats any of
 # these as success turns a blocked message into a guest who is simply never answered —
 # which is worse than an error, because nobody finds out.
-_SEND_NOT_DELIVERED = (SEND_BLOCKED_KILL, SEND_SHADOW, SEND_BLOCKED_GUARD)
+_SEND_NOT_DELIVERED = (SEND_BLOCKED_KILL, SEND_SHADOW, SEND_BLOCKED_GUARD,
+                       SEND_BLOCKED_HOLD)
 
 
 def _send_block_reason_ar(outcome):
@@ -10118,12 +10160,13 @@ def _send_block_reason_ar(outcome):
         SEND_BLOCKED_KILL: "إيقاف رسائل الضيوف مفعّل (kill switch)",
         SEND_SHADOW: "المساعد في وضع المراقبة — يقرّر ويسجّل بس ما يرسل",
         SEND_BLOCKED_GUARD: "حارس المحتوى منع الرسالة",
+        SEND_BLOCKED_HOLD: "فيه بلاغ سلامة مفتوح على هذي المحادثة — كل شي موقوف لين يفكّه أحد من الفريق",
     }.get(outcome, "ما انرسلت")
 # success → the Hostaway api_post result (a dict); failure → the exception propagates.
 
 def send_guest_message(conversation_id, body, comm_type="email", *,
                        listing_id=None, guard_ctx=None, ticket_id=None,
-                       via="", actor="", shadow_ctx=None):
+                       via="", actor="", shadow_ctx=None, safety_notice=False):
     # ── C4: the kill switch is checked FIRST, always, before any new logic. A kill must
     # never be masked by a mode or a guard verdict deciding something else first. ──
     if ASSISTANT_SEND_KILL:
@@ -10133,6 +10176,25 @@ def send_guest_message(conversation_id, body, comm_type="email", *,
         except Exception:
             pass
         return SEND_BLOCKED_KILL
+
+    # ── T7: a harm hold silences EVERYTHING on this thread except the safety notice
+    # itself, until a named human clears it. This is the only in-repo defence against the
+    # Hostaway review-request template landing on an injury thread — and it CANNOT stop
+    # Hostaway's own send. It stops ours, and makes the hold visible so somebody goes and
+    # pauses the automation on that reservation. Nobody should believe otherwise. ──
+    if INCIDENT_TIER and _HAS_GUARD and _guard_incident and not safety_notice:
+        try:
+            _hold = _guard_incident.held(conversation_id)
+        except Exception:
+            _hold = None
+        if _hold:
+            print(f"[HOLD] harm hold blocks a send (conv {conversation_id})")
+            try:
+                log_event("escalation",
+                          f"⛔ بلاغ سلامة مفتوح — ما أرسلنا شي · conv {conversation_id}")
+            except Exception:
+                pass
+            return SEND_BLOCKED_HOLD
 
     # ── C2: shadow first. Everything above ran for real; nothing below reaches a guest. ──
     if _HAS_GUARD and _guard_mode:
@@ -11869,6 +11931,52 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     reply = (result.get("reply") or "").strip()
     escalate = action == "escalate" or sentiment in _NEG_SENTIMENTS or conf < ESCALATE_BELOW
 
+    # ── T7: is anyone HURT OR UNSAFE? This outranks everything — confidence, the
+    # ASSISTANT_AUTO flag, off-hours, and the gate's silence verdict. T014 i25: the guest
+    # wrote «the blood on the pillow due to my head injury» and the next system message
+    # was a 10% discount-for-review offer, because no tier above «maintenance» existed. ──
+    _incident = _inc_phrase = None
+    if INCIDENT_TIER and _HAS_GUARD and _guard_incident:
+        try:
+            _incident, _inc_phrase = _guard_incident.match_detail(item.get("guest_text") or "")
+        except Exception as e:
+            print("[incident] classify failed:", e)
+    if _incident:
+        try:
+            metric_bump(f"incidents_{_incident}")
+        except Exception:
+            pass
+        if _incident == "harm":
+            escalate = True
+            sentiment = "unsafe"
+            sent_ar = _SENTIMENT_AR.get(sentiment, sentiment)
+            result["reason"] = (f"⚠️ بلاغ سلامة — الضيف ذكر «{_inc_phrase}». "
+                                "تواصل معه الحين. أعلى أولوية.")
+
+    # ── T6: a promise nobody recorded is a lie with good manners. 17 of 62 messages
+    # promised a follow-up with no ticket, no owner and no SLA. _wm_promise_allowed
+    # (63845) deliberately refuses to let an AI create accountability for a human — that
+    # rule stands. So invert the flow: detect the promise BEFORE the send and refuse to
+    # make it unbacked. The escalate path below opens a real ticket with a real owner. ──
+    _commitment = None
+    if COMMIT_REQUIRES_TICKET and _HAS_GUARD and _guard_commit and reply and not escalate:
+        try:
+            _commitment = _guard_commit.detect_commitment(reply)
+        except Exception as e:
+            print("[commit] detect failed:", e)
+        if _commitment and not result.get("ticket_id"):
+            escalate = True
+            result["reason"] = f"وعد بدون تذكرة: {_commitment['span'][:80]}"
+            try:
+                metric_bump("commitments_blocked")
+            except Exception:
+                pass
+        elif _commitment:
+            try:
+                metric_bump("commitments_backed")
+            except Exception:
+                pass
+
     # daily metrics: every draft counts, with confidence + topic + apartment
     metric_bump("drafts_made")
     metric_record_confidence(conf)
@@ -11878,11 +11986,47 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     # ---- needs a human: tell the guest it's escalated, then alert the team ----
     if escalate:
         metric_bump("escalations_created")
-        embed = discord.Embed(title=f"🚨 تصعيد · {g} · {item['unit']}", color=0xD64545)
+        _title = f"🚨 تصعيد · {g} · {item['unit']}"
+        if _incident == "harm":
+            _title = f"🆘 بلاغ سلامة · {g} · {item['unit']}"
+        embed = discord.Embed(title=_title, color=0xD64545)
+        if _incident:
+            embed.add_field(
+                name={"harm": "🆘 سلامة — أعلى أولوية",
+                      "habitability": "🏚️ الشقة مو صالحة للسكن الحين",
+                      "security": "🔒 أمن الوحدة"}.get(_incident, "⚠️ بلاغ"),
+                value=(f"الضيف ذكر: «{_inc_phrase}»\n"
+                       + ("⛔ أوقفنا كل الرسايل التلقائية على هذي المحادثة. "
+                          "⚠️ لكن قوالب Hostaway تنرسل من عندهم مو من عندنا — "
+                          "لازم أحد يوقف الأتمتة على هذا الحجز يدوياً."
+                          if _incident == "harm" else "")), inline=False)
         embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
         embed.add_field(name="🔴 يحتاج تدخل بشري",
                         value=result.get("reason", "تم التصعيد — تعامل معه يدوياً."), inline=False)
         cid = item["conversation_id"]
+        # T7: harm opens an URGENT ticket under its own category and holds the thread.
+        # The hold is set BEFORE any ack goes out, so the ack itself is the only thing
+        # that can still leave (safety_notice=True) and nothing else can slip past it.
+        if _incident == "harm" and INCIDENT_TIER and _HAS_GUARD and _guard_incident:
+            try:
+                _t = _ticket_create(
+                    f"بلاغ سلامة · {item.get('unit') or ''} · {g}",
+                    description=(f"الضيف كتب: {(item.get('guest_text') or '')[:500]}\n"
+                                 f"الكلمة اللي أطلقت البلاغ: {_inc_phrase}"),
+                    lid=item.get("listing_id"), priority="urgent", category="سلامة",
+                    source="musaed-harm", source_ref=f"harm:{cid}:{item.get('message_id')}",
+                    guest=g, created_by="musaed")
+                _guard_incident.set_hold(cid, ticket_id=(_t or {}).get("id"),
+                                         detail=_inc_phrase or "")
+                log_event("escalation",
+                          f"🆘 بلاغ سلامة · {g} · {item.get('unit')} · تذكرة {(_t or {}).get('id')}")
+            except Exception as e:
+                # A failure here must NOT swallow the escalation — the card still posts.
+                print("[incident] harm ticket/hold failed:", e)
+                try:
+                    _guard_incident.set_hold(cid, detail=_inc_phrase or "")
+                except Exception:
+                    pass
         if cid in _claimed_convos:
             embed.add_field(name="🙋 مستلمة",
                             value="الموضوع مستلم من أحد الفريق — ما أرسلنا رد تلقائي.", inline=False)

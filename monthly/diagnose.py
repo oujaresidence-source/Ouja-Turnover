@@ -126,7 +126,9 @@ def run(units, cost_set=None, today=None):
             u.get("lid"), u.get("month"), own=u.get("own"),
             district=u.get("district_pool"), bedroom=u.get("bedroom_pool"),
             attr_values=u.get("attr_values") or {}, cost_set=c,
-            ejar_row=u.get("ejar_row"), today=today)
+            ejar_row=u.get("ejar_row"), today=today,
+            own_all=u.get("own_all") or [], rung2=u.get("rung2"),
+            factors=u.get("factors"))
         results.append(p)
         d = p.get("data") or {}
         nightly = (p.get("floor_detail") or {}).get("nightly") or {}
@@ -346,6 +348,22 @@ def render_text(multi):
         lm = r.get("loss_making_nightly") or []
         A("    loss-making nightly: %d    band-closed/no-price: %d"
           % (len(lm), len(r.get("no_price") or [])))
+        bt = r.get("backtest") or {}
+        if bt.get("methods"):
+            A("    FALLBACK LADDER — median error per method, held-out backtest")
+            names = {"same_month": "same-month history (rung 1)",
+                     "recent": "recent months, any month",
+                     "pool": "district/size pool",
+                     "seasonal": "recent x pool seasonal shape"}
+            for k in ("same_month", "recent", "pool", "seasonal"):
+                m = bt["methods"].get(k) or {}
+                mp = m.get("mape")
+                A("        %-32s %8s   n=%s%s"
+                  % (names[k], ("%.1f%%" % (mp * 100)) if mp is not None else "—",
+                     m.get("n"), "   <- rung 2" if bt.get("rung2") == k else ""))
+            A("        adopted rung 2: %s   (seasonal factors: %s)"
+              % (bt.get("rung2") or "none — kept the pool",
+                 bt.get("n_seasonal_factors")))
         A("    turnover cost used: %s SAR  (%s)"
           % (r.get("turnover_cost_used"), r.get("turnover_cost_source")))
         A("    reservations read: %s   partial months dropped: %s"
