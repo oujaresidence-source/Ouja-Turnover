@@ -57521,7 +57521,12 @@ async def start_web_server():
     global _web_runner
     if _web_runner is not None or not _HAS_AIOHTTP:
         return
-    app = web.Application(middlewares=[_security_headers_mw, _role_enforce_mw])
+    # 25 MB so an admin can upload a Hostaway reservations export (the real one
+    # is ~6 MB). aiohttp defaults to 1 MB, which rejects it. Every write route is
+    # role-gated, so the larger ceiling widens what an ALREADY-AUTHORISED admin
+    # may send, not who may send it.
+    app = web.Application(client_max_size=25 * 1024 * 1024,
+                          middlewares=[_security_headers_mw, _role_enforce_mw])
     app.router.add_get("/", _handle_health)                 # health check / browser test
     app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser

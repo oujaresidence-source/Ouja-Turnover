@@ -14,6 +14,23 @@ from . import diagnose as _diag
 from .host import HOST
 
 
+def _imported_rows(unit_meta):
+    """The uploaded export, joined to listing ids by name. None when nothing has
+    been uploaded, which keeps the live path exactly as it was."""
+    from . import importer
+    try:
+        blob = HOST.load_json("monthly_reservations.json", None) if HOST.load_json else None
+    except Exception:
+        blob = None
+    if not blob or not blob.get("rows"):
+        return None
+    rows, unmatched = importer.attach_listing_ids(blob["rows"], unit_meta)
+    if unmatched:
+        print("[monthly] import: %d listing names had no match: %s"
+              % (len(unmatched), list(unmatched)[:6]))
+    return rows or None
+
+
 def _kb_district_lookup():
     """listing id -> canonical Arabic district from the knowledge base, which is
     the only place that spelling is curated. Hostaway's `city` is 'Riyadh' for
@@ -147,12 +164,22 @@ def month_state(month, force=False, today=None):
     today = today or (HOST.now().date() if HOST.now else datetime.date.today())
     today_key = data.month_key(today)
 
-    reservations = data.fetch_history(month, today=today)
     unit_meta = data.listing_meta(HOST.require("api_get"), _kb_district_lookup())
+
+    # AN UPLOADED EXPORT WINS OVER THE API. It is complete, it has no arrival
+    # window, and it cannot time out — which is the entire reason this feature
+    # kept taking pages down. The live pull stays as the fallback for when no
+    # file has been uploaded yet.
+    imported = _imported_rows(unit_meta)
+    if imported is not None:
+        reservations = imported
+        recent_res = imported
+    else:
+        reservations = data.fetch_history(month, today=today)
+        recent_res = data.fetch_recent(today=today)
 
     # The recent corpus: every month of the last year, for every unit. This is
     # what lets a unit with no Augusts still be described by its own record.
-    recent_res = data.fetch_recent(today=today)
     seen = {r.get("id") for r in reservations}
     merged = list(reservations) + [r for r in recent_res if r.get("id") not in seen]
     all_obs = data.unit_month_rows_all(merged, today_key)

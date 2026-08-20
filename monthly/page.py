@@ -617,6 +617,27 @@ function viewAdmin(){
   }
   h += '</div>';
 
+  var im = CFG.import_state || {};
+  h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">ملف الحجوزات</h3>';
+  h += '<div class="muted" style="font-size:13px;margin-bottom:10px">' +
+       'ارفع ملف الحجوزات من هوستاواي (CSV). الحسابات تعتمد عليه بدل ما تسحب من ' +
+       'هوستاواي مباشرة — أسرع وما يعلّق الصفحة.</div>';
+  if(im.loaded){
+    var rp = im.report || {};
+    h += '<div class="quality"><b>محمّل:</b> ' + rp.kept + ' حجز من ' +
+         rp.n_listings + ' شقة · من ' + he(rp.first || '') + ' إلى ' +
+         he(rp.last || '') + '<br>آخر رفع: ' + he(im.uploaded_at || '') +
+         (im.uploaded_by ? ' · ' + he(im.uploaded_by) : '') + '</div>';
+  } else {
+    h += '<div class="ovwarn">ما فيه ملف — النظام يسحب من هوستاواي مباشرة، ' +
+         'وهذا اللي كان يعلّق الصفحة.</div>';
+  }
+  h += '<div class="ovbox" style="margin-top:10px">' +
+       '<input type="file" id="csvfile" accept=".csv,text/csv">' +
+       '<button class="btn primary" id="uploadcsv">ارفع الملف</button></div>';
+  h += '<div id="upstat" class="muted" style="font-size:13px;margin-top:8px"></div>';
+  h += '</div>';
+
   var gp = CFG.guest_discount_pct;
   var gpNum = (gp === null || gp === undefined) ? null : Math.round(gp * 100);
   h += '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">خصم موقع الضيوف</h3>';
@@ -796,6 +817,27 @@ document.addEventListener('click', function(e){
         if(!d.ok){ toast(d.message || 'مرفوض'); return; }
         toast('انحفظ'); CFG = null; loadCfg();
       });
+    return;
+  }
+  if(t.id === 'uploadcsv'){
+    var fi = $('csvfile');
+    if(!fi || !fi.files || !fi.files.length){ toast('اختر الملف أول'); return; }
+    var f = fi.files[0];
+    $('upstat').textContent = 'نقرأ الملف…';
+    var rd = new FileReader();
+    rd.onload = function(){
+      $('upstat').textContent = 'نرفع ' + Math.round(f.size / 1024) + ' كيلوبايت…';
+      fetch('/api/mrent/import', {method: 'POST',
+        headers: {'Content-Type': 'text/csv'}, body: rd.result})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          $('upstat').textContent = d.message || '';
+          if(d.ok){ toast('تم رفع الملف'); CFG = null; UNITS = null; PRICE = null; loadCfg(); }
+          else { toast(d.message || 'ما نجح الرفع'); }
+        })
+        .catch(function(){ $('upstat').textContent = 'ما وصل الملف — جرّب مرة ثانية'; });
+    };
+    rd.readAsText(f);
     return;
   }
   if(t.id === 'savedisc'){

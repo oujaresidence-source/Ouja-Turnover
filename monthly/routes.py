@@ -373,9 +373,14 @@ async def _api_settings_get(request):
     cur = settings.load()
     g = _guest_cfg()
     from . import collect as _c
+    imp = HOST.load_json(IMPORT_FILE, None) if HOST.load_json else None
     return HOST.json_response({
         "ok": True,
         "coverage_status": _c.month_status(month),
+        "import_state": ({"loaded": True, "report": imp.get("report"),
+                          "uploaded_at": imp.get("uploaded_at"),
+                          "uploaded_by": imp.get("uploaded_by")}
+                         if imp else {"loaded": False}),
         "guest_discount_pct": g.get("default_pct"),
         "guest_ceiling_pct": g.get("ceiling_pct"),
         "flip": settings.flip_state(cov),
@@ -454,6 +459,56 @@ async def _api_licence_set(request):
                                "licence": db.licence_get(int(lid))})
 
 
+IMPORT_FILE = "monthly_reservations.json"
+
+
+async def _api_import_get(request):
+    from . import importer  # noqa: F401
+    blob = HOST.load_json(IMPORT_FILE, None) if HOST.load_json else None
+    if not blob:
+        return HOST.json_response({"ok": True, "loaded": False})
+    return HOST.json_response({"ok": True, "loaded": True,
+                               "report": blob.get("report"),
+                               "uploaded_at": blob.get("uploaded_at"),
+                               "uploaded_by": blob.get("uploaded_by")})
+
+
+async def _api_import_post(request):
+    """Take a Hostaway reservations CSV and keep it.
+
+    This is the answer to every crash in this feature: a file has no API to call,
+    no pagination, no arrival window and nothing to time out. Parsing happens
+    here, in Python, with the same reader the numbers were checked against —
+    rather than in the browser, where a CSV with quoted commas becomes its own
+    small bug.
+    """
+    import asyncio
+    import datetime
+    from . import collect, importer
+    raw = await request.text()
+    if not raw or len(raw) < 40:
+        return _bad("الملف فاضي أو ما وصل")
+
+    rows, rep = await asyncio.to_thread(importer.parse, raw)
+    if not rep.get("ok"):
+        return HOST.json_response(
+            {"ok": False, "error": rep.get("error"), "report": rep,
+             "message": "أعمدة ناقصة في الملف: %s" % ", ".join(rep.get("missing") or [])}, 200)
+    if not rows:
+        return HOST.json_response({"ok": False, "report": rep,
+                                   "message": "ما فيه صفوف صالحة في الملف"}, 200)
+
+    actor = HOST.actor(request) if HOST.actor else None
+    HOST.save_json(IMPORT_FILE, {
+        "rows": rows, "report": rep,
+        "uploaded_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "uploaded_by": actor})
+    collect._CACHE.clear()
+    return HOST.json_response({"ok": True, "report": rep,
+                               "message": "تم — %d حجز من %d شقة"
+                                          % (rep["kept"], rep["n_listings"])})
+
+
 async def _page(request):
     g = _guard(request)
     if g:
@@ -480,3 +535,5 @@ def register(app):
     app.router.add_get("/api/mrent/settings", _safe(_api_settings_get))
     app.router.add_post("/api/mrent/settings", _safe(_api_settings_set))
     app.router.add_post("/api/mrent/licence", _safe(_api_licence_set))
+    app.router.add_get("/api/mrent/import", _safe(_api_import_get))
+    app.router.add_post("/api/mrent/import", _safe(_api_import_post))
