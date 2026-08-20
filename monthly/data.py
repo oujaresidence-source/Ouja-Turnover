@@ -35,6 +35,24 @@ CANCELLED_STATUSES = {"cancelled", "canceled", "declined", "expired", "denied"}
 # 7-month-old one. It cost real time and bought a rounding error.
 YEARS_BACK = 2
 
+# THE 45-DAY BLIND SPOT. fetch_reservations_window filters on arrivalDate in
+# [start - pad, end]. At the default pad of 45 days, a guest who checked in on
+# 1 June for three months covers every night of August and is NEVER FETCHED —
+# their arrival is outside the window. So the engine reported «0 ليالي» for
+# exactly the units that do long stays, which are exactly the units monthly
+# pricing exists to price. Five units failed identically across three months;
+# that was never a booking pattern.
+#
+# 200 days covers a stay of about six and a half months spanning the target
+# month. Longer than that is still missed, and that limit is stated rather than
+# hidden. The cost is more rows per window, which is affordable now that nothing
+# fetches inside a request.
+ARRIVAL_PAD_DAYS = 200
+
+# For the recent-months rung: one window over the last N months, every month
+# kept rather than only the target month number.
+RECENT_MONTHS = 12
+
 
 def _d(s):
     try:
@@ -221,7 +239,8 @@ def fetch_history(target_month, years_back=None, today=None, max_windows=None):
         last = datetime.date(y, m, calendar.monthrange(y, m)[1])
         if first > today:
             continue
-        got = HOST.require("fetch_reservations_window")(first, last) or []
+        got = HOST.require("fetch_reservations_window")(
+            first, last, ARRIVAL_PAD_DAYS) or []
         used.append("%s..%s" % (first, last))
         for r in got:
             rid = r.get("id")
@@ -337,3 +356,68 @@ def _is_active(L):
         if key in (L or {}) and L.get(key) in (0, "0", False, "false", "False"):
             return False
     return True
+
+
+def fetch_recent(today=None, months_back=RECENT_MONTHS):
+    """One window over the last N months. Feeds the recent-months rung, which
+    exists because a unit onboarded eight months ago has NO same-month history
+    and yet eight months of evidence about what it earns."""
+    today = today or datetime.date.today()
+    y, m = today.year, today.month - months_back
+    while m <= 0:
+        m += 12
+        y -= 1
+    first = datetime.date(y, m, 1)
+    last = today
+    return HOST.require("fetch_reservations_window")(
+        first, last, ARRIVAL_PAD_DAYS) or []
+
+
+def unit_month_rows_all(reservations, today_key):
+    """Observations for EVERY calendar month, not only the target month number.
+
+    unit_month_rows answers "what did this unit do in Octobers"; this answers
+    "what has this unit been doing", which is the only question a unit with no
+    Octobers can answer at all.
+    """
+    buckets = {}
+    for r in (reservations or []):
+        if not is_confirmed(r):
+            continue
+        lid = r.get("listingMapId")
+        ci, co = _d(r.get("arrivalDate")), _d(r.get("departureDate"))
+        if lid is None or not ci or not co:
+            continue
+        total = _num(r.get("totalPrice"))
+        stay_nights = (co - ci).days
+        if not total or stay_nights <= 0:
+            continue
+        adr_of_stay = total / float(stay_nights)
+        d = datetime.date(ci.year, ci.month, 1)
+        while d <= co:
+            key = month_key(d)
+            first, last = month_bounds(key)
+            n = nights_in_month(r, first, last)
+            if n > 0:
+                b = buckets.setdefault((int(lid), key), {"nights": 0, "revenue": 0.0})
+                b["nights"] += n
+                b["revenue"] += adr_of_stay * n
+            d = datetime.date(d.year + (d.month // 12), (d.month % 12) + 1, 1)
+
+    out = {}
+    for (lid, key), b in buckets.items():
+        first, last = month_bounds(key)
+        days = (last - first).days + 1
+        age = months_between(key, today_key)
+        out.setdefault(lid, []).append({
+            "month": key,
+            "month_num": int(key[5:7]),
+            "adr": b["revenue"] / b["nights"],
+            "occ": min(1.0, b["nights"] / float(days)),
+            "nights": b["nights"],
+            "months_old": max(0, age),
+            "partial": age <= 0,
+        })
+    for lid in out:
+        out[lid].sort(key=lambda o: o["month"], reverse=True)
+    return out

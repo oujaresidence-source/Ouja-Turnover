@@ -120,7 +120,9 @@ def _nights(observations):
     return int(sum(_num((o or {}).get("nights")) or 0 for o in (observations or [])))
 
 
-def forecast_unit(own=None, district=None, bedroom=None, quality_index=1.0):
+def forecast_unit(own=None, district=None, bedroom=None, quality_index=1.0,
+                  own_all=None, pool_all=None, month_num=None, rung2=None,
+                  factors=None):
     """The fallback ladder (§3.1).
 
         1. our own history for this unit and month
@@ -140,6 +142,18 @@ def forecast_unit(own=None, district=None, bedroom=None, quality_index=1.0):
     if f and own_nights >= MIN_OWN_OBS:
         return {"adr": f["adr"], "occ": f["occ"], "basis": "own_history",
                 "own_obs": own_nights, "pool_obs": f["n"], "quality_index": qi}
+
+    # RUNG 2, chosen by the corpus rather than by preference. A unit with no
+    # Augusts but eight months of its own record is described far better by that
+    # record than by its neighbours — and the backtest says by how much.
+    if rung2 in ("recent", "seasonal") and own_all:
+        cand = (recent_forecast(own_all) if rung2 == "recent"
+                else seasonal_forecast(own_all, month_num, factors))
+        if cand:
+            return {"adr": cand["adr"], "occ": cand["occ"],
+                    "basis": "own_recent" if rung2 == "recent" else "own_seasonal",
+                    "own_obs": own_nights, "pool_obs": cand.get("n", 0),
+                    "quality_index": qi}
 
     for rows, basis in ((district, "district_pool"), (bedroom, "bedroom_pool")):
         pf = forecast(rows)
@@ -483,7 +497,9 @@ def _confidence(basis, own_obs, unanswered_count):
     if basis == "insufficient":
         return "insufficient"
     i = 0
-    if basis != "own_history":
+    if basis in ("own_recent", "own_seasonal"):
+        i += 0                      # the unit's own record, just not its own August
+    elif basis != "own_history":
         i += 1
     if (own_obs or 0) < 20:
         i += 1
@@ -512,7 +528,7 @@ def _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar, ejar_row,
 
 def price_unit(unit_id, month, own=None, district=None, bedroom=None,
                attr_values=None, cost_set=None, ejar_row=None, paired_obs=0,
-               today=None):
+               today=None, own_all=None, pool_all=None, rung2=None, factors=None):
     """THE ANSWER, and the reason for it.
 
     One producer, two surfaces: page.py renders the waterfall from `components`
@@ -526,9 +542,18 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
 
     q = quality_multiplier(attr_values)
     fc = forecast_unit(own=own, district=district, bedroom=bedroom,
-                       quality_index=q["mult"])
+                       quality_index=q["mult"], own_all=own_all, pool_all=pool_all,
+                       month_num=int(str(month)[5:7]) if month else None,
+                       rung2=rung2, factors=factors)
 
     base = base_rate(district=district, bedroom=bedroom)
+    if fc["basis"] in ("own_recent", "own_seasonal") and fc["adr"]:
+        # The model gate compares against what units LIKE this one earn. When the
+        # unit's own recent record is the better evidence, that record is the
+        # comparison — otherwise a strong unit is measured against a pool it has
+        # already outgrown, which is the whole complaint.
+        base = {"base": 30.0 * fc["adr"] * fc["occ"], "basis": fc["basis"],
+                "pool_obs": fc["pool_obs"]}
     fl = floor_price(fc["adr"], fc["occ"], c)
     mp = model_price(base["base"], attr_values)
 
@@ -617,8 +642,10 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
         # would pay night-by-night. That is a signal about the model, not about
         # the unit.
         warnings.append("model_above_ceiling")
-    if fc["basis"] != "own_history":
+    if fc["basis"] in ("district_pool", "bedroom_pool"):
         warnings.append("priced_from_pool")
+    elif fc["basis"] in ("own_recent", "own_seasonal"):
+        warnings.append("priced_from_own_recent")
     if q["clamped"]:
         warnings.append("quality_clamped")
     if q["unanswered"] > attrs.MAX_UNANSWERED_BEFORE_LOW:
@@ -874,3 +901,152 @@ def sensitivity_sweep(units, steps=None, cost_set=None):
         bands[b] = {"n": len(members), "curve": curve, "crossover": crossover,
                     "already_crossed": crossover == steps[0] if crossover else False}
     return {"steps": steps, "bands": bands}
+
+
+# ═════════════ the fallback ladder, decided by evidence rather than by me ═════════════
+#
+# THE DESIGN FLAW THIS FIXES. Same-month-only history means a unit onboarded
+# eight months ago has NO evidence for August and drops straight to a district
+# average — which is why a 4BR with a private cinema priced identically to
+# fifteen other units. Eight months of that unit's own earnings were sitting
+# unused because none of them happened to be an August.
+#
+# Four candidates for rung 2, and the corpus picks the winner:
+#   1 same_month   the unit's own Augusts                      (rung 1, unchanged)
+#   2 recent       the unit's own recent months, any month
+#   3 pool         the district/size average                   (today's rung 2)
+#   4 seasonal     the unit's recent level x the pool's August-vs-average shape
+#
+# (4) is the interesting one: it keeps the UNIT's earning level and borrows only
+# the SEASONAL SHAPE from the pool, which is the part a pool actually knows.
+
+MIN_RECENT_OBS = 3          # months of recent history before "recent" may speak
+MIN_SEASONAL_UNITS = 3      # units with multi-year history before a factor is trusted
+MIN_BACKTEST_CASES = 12     # cases before the corpus is allowed to pick a rung
+
+
+def recent_forecast(all_obs, exclude_month=None):
+    """Freshness-weighted ADR and occupancy over the unit's recent months,
+    whatever month number they are."""
+    rows = [o for o in (all_obs or [])
+            if not o.get("partial") and o.get("month") != exclude_month]
+    if len(rows) < MIN_RECENT_OBS:
+        return None
+    return forecast(rows)
+
+
+def seasonal_factors(pool_all_obs, min_units=MIN_SEASONAL_UNITS):
+    """month_num -> (adr_factor, occ_factor) against the pool's own average.
+
+    Built ONLY from units with more than one calendar year of history: a unit
+    that has existed for four months cannot tell you what August does, and
+    including it would let recent growth masquerade as seasonality.
+    """
+    import collections
+    by_unit = collections.defaultdict(list)
+    for lid, rows in (pool_all_obs or {}).items():
+        by_unit[lid] = [o for o in rows if not o.get("partial")]
+
+    qualified = {lid: rows for lid, rows in by_unit.items()
+                 if len({o["month"][:4] for o in rows}) >= 2 and len(rows) >= 12}
+    if len(qualified) < min_units:
+        return {}
+
+    adr_by_month, occ_by_month = collections.defaultdict(list), collections.defaultdict(list)
+    for lid, rows in qualified.items():
+        adrs = [o["adr"] for o in rows if o.get("adr")]
+        occs = [o["occ"] for o in rows if o.get("occ") is not None]
+        if not adrs or not occs:
+            continue
+        base_adr = sum(adrs) / len(adrs)
+        base_occ = sum(occs) / len(occs)
+        if base_adr <= 0 or base_occ <= 0:
+            continue
+        for o in rows:
+            if o.get("adr"):
+                adr_by_month[o["month_num"]].append(o["adr"] / base_adr)
+            if o.get("occ") is not None:
+                occ_by_month[o["month_num"]].append(o["occ"] / base_occ)
+
+    out = {}
+    for m in range(1, 13):
+        a, oc = adr_by_month.get(m), occ_by_month.get(m)
+        if a and oc:
+            out[m] = (sum(a) / len(a), sum(oc) / len(oc))
+    return out
+
+
+def seasonal_forecast(all_obs, month_num, factors, exclude_month=None):
+    """The unit's own recent level, shaped by the pool's seasonality."""
+    r = recent_forecast(all_obs, exclude_month=exclude_month)
+    f = (factors or {}).get(int(month_num))
+    if not r or not f:
+        return None
+    adr_f, occ_f = f
+    return {"adr": r["adr"] * adr_f,
+            "occ": min(1.0, max(0.0, r["occ"] * occ_f)),
+            "n": r["n"]}
+
+
+def _ape(pred, actual):
+    if pred is None or actual is None or actual <= 0:
+        return None
+    return abs(pred - actual) / actual
+
+
+def backtest_methods(units_all_obs, pools_all_obs, pool_of, min_cases=MIN_BACKTEST_CASES):
+    """Hold out one real unit-month at a time and score every rung against it.
+
+    The held-out month is excluded from its own prediction, so a method cannot
+    score well by remembering the answer.
+    """
+    import statistics
+    factors = seasonal_factors(pools_all_obs)
+    errs = {"same_month": [], "recent": [], "pool": [], "seasonal": []}
+
+    for lid, rows in (units_all_obs or {}).items():
+        rows = [o for o in rows if not o.get("partial")]
+        if len(rows) < MIN_RECENT_OBS + 1:
+            continue
+        pool_rows = (pool_of(lid) or []) if pool_of else []
+        for held in rows:
+            actual = held.get("adr")
+            if not actual or actual <= 0:
+                continue
+            others = [o for o in rows if o["month"] != held["month"]]
+
+            same = forecast([o for o in others if o["month_num"] == held["month_num"]])
+            if same:
+                errs["same_month"].append(_ape(same["adr"], actual))
+
+            rec = recent_forecast(others)
+            if rec:
+                errs["recent"].append(_ape(rec["adr"], actual))
+
+            pf = forecast([o for o in pool_rows
+                           if o.get("month_num") == held["month_num"]
+                           and o.get("month") != held["month"]])
+            if pf:
+                errs["pool"].append(_ape(pf["adr"], actual))
+
+            se = seasonal_forecast(others, held["month_num"], factors)
+            if se:
+                errs["seasonal"].append(_ape(se["adr"], actual))
+
+    out = {}
+    for k, v in errs.items():
+        vals = [x for x in v if x is not None]
+        out[k] = {"mape": statistics.median(vals) if vals else None, "n": len(vals)}
+
+    ranked = [(v["mape"], k) for k, v in out.items()
+              if v["mape"] is not None and v["n"] >= min_cases]
+    ranked.sort()
+    # rung 1 is always the unit's own same-month history; this picks rung 2.
+    rung2 = None
+    for _m, k in ranked:
+        if k != "same_month":
+            rung2 = k
+            break
+    return {"methods": out, "winner": ranked[0][1] if ranked else None,
+            "rung2": rung2, "n_seasonal_factors": len(factors),
+            "min_cases": min_cases}
