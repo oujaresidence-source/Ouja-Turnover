@@ -8935,6 +8935,307 @@ def _promise_state_line(conversation_id):
             f"بدلاً منه: قل له إن طلبه مرفوع من {when} وإنك متابعه، واذكر المهلة.")
 
 
+# ---------------------------------------------------------------------------
+# MUSAED v3 — dates from the guest's own words.
+# 753 booking-intent threads produced 13 real price quotes (1.7%), because the
+# price gate required `dates` from a RESERVATION — and a pre-booking inquiry has
+# no reservation. The one moment somebody is deciding whether to pay was the one
+# moment Musaed could not quote. Dates now come from what the guest typed.
+# ---------------------------------------------------------------------------
+_BOOK_INTENT_TERMS = (
+    "متاح", "متاحه", "متاحة", "متوفر", "متوفره", "متوفرة", "فاضي", "فاضية",
+    "أحجز", "احجز", "بحجز", "نحجز", "الحجز", "حجزها", "أبي أحجز", "ابي احجز",
+    "available", "book", "booking", "can i book", "is it free", "reserve",
+)
+_WEEKDAYS_AR = {
+    "الأحد": 6, "الاحد": 6, "الإثنين": 0, "الاثنين": 0, "الثلاثاء": 1,
+    "الأربعاء": 2, "الاربعاء": 2, "الخميس": 3, "الجمعة": 4, "الجمعه": 4,
+    "السبت": 5,
+}
+_WEEKDAYS_EN = {"sunday": 6, "monday": 0, "tuesday": 1, "wednesday": 2,
+                "thursday": 3, "friday": 4, "saturday": 5,
+                "sun": 6, "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5}
+_MONTHS = {
+    "يناير": 1, "فبراير": 2, "مارس": 3, "أبريل": 4, "ابريل": 4, "مايو": 5,
+    "يونيو": 6, "يوليو": 7, "أغسطس": 8, "اغسطس": 8, "سبتمبر": 9,
+    "أكتوبر": 10, "اكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7,
+    "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+# Saudi weekend is Thursday–Friday, so "the weekend" means Thu -> Sat (2 nights).
+_WEEKEND_TERMS = ("نهاية الاسبوع", "نهاية الأسبوع", "نهايه الاسبوع", "الويكند",
+                  "ويكند", "this weekend", "the weekend", "weekend")
+
+
+def _is_booking_intent(text):
+    low = (text or "").lower()
+    return any(t.lower() in low for t in _BOOK_INTENT_TERMS)
+
+
+def _next_weekday(today, target_wd, allow_today=True):
+    delta = (target_wd - today.weekday()) % 7
+    if delta == 0 and not allow_today:
+        delta = 7
+    return today + timedelta(days=delta)
+
+
+def _next_day_of_month(today, day, month=None, year=None):
+    """The next occurrence of a day-of-month. Never returns a past date."""
+    if not (1 <= day <= 31):
+        return None
+    y = year or today.year
+    m = month or today.month
+    for _ in range(14):
+        try:
+            cand = date(y, m, day)
+        except ValueError:
+            cand = None
+        if cand and cand >= today:
+            return cand
+        if month and year:
+            return cand
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return None
+
+
+def _guest_lines(history_text, limit=3):
+    """The most recent guest lines, newest first."""
+    out = []
+    for line in reversed(str(history_text or "").splitlines()):
+        s = line.strip()
+        low = s.lower()
+        if low.startswith("guest:") or low.startswith("الضيف:"):
+            out.append(s.split(":", 1)[1].strip())
+        elif not out and s and not low.startswith(("host:", "المضيف:")):
+            out.append(s)
+        if len(out) >= limit:
+            break
+    return out or [str(history_text or "").strip()]
+
+
+def _dates_from_text(history_text, today=None):
+    """(start_iso, end_iso, confidence) parsed from what the GUEST wrote.
+
+    confidence: 'high' explicit range · 'medium' weekday/relative · 'low' a bare
+    number we refuse to act on. Never returns a start date in the past, and never
+    guesses: an unparseable phrasing returns (None, None, 'low') so Musaed ASKS.
+    """
+    today = today or datetime.now(TZ).date()
+    for raw in _guest_lines(history_text):
+        got = _parse_one_date_phrase(raw, today)
+        if got and got[0]:
+            return got
+    return (None, None, "low")
+
+
+def _parse_one_date_phrase(raw, today):
+    t = (raw or "").translate(_ARABIC_DIGITS)
+    low = t.lower()
+    month_rx = "|".join(sorted(_MONTHS, key=len, reverse=True))
+    wd_rx = "|".join(sorted(list(_WEEKDAYS_AR) + list(_WEEKDAYS_EN),
+                            key=len, reverse=True))
+    sep = r"(?:-|–|—|إلى|الى|الي|to|حتى|till|until|/)"
+
+    # 1) explicit range carrying a month: "٢٠ إلى ٢٢ سبتمبر" / "20-22 Sep"
+    m = re.search(rf"(?<!\d)(\d{{1,2}})\s*{sep}\s*(\d{{1,2}})\s*(?:من\s+)?({month_rx})", low)
+    if m:
+        mon = _MONTHS[m.group(3)]
+        s = _next_day_of_month(today, int(m.group(1)), mon)
+        e = _next_day_of_month(today, int(m.group(2)), mon)
+        if s and e:
+            if e <= s:
+                e = _next_day_of_month(s, int(m.group(2)), (mon % 12) + 1)
+            if e and e > s:
+                return (s.isoformat(), e.isoformat(), "high")
+
+    # 2) dd/mm - dd/mm
+    m = re.search(rf"(?<!\d)(\d{{1,2}})/(\d{{1,2}})\s*{sep}\s*(\d{{1,2}})/(\d{{1,2}})", low)
+    if m:
+        s = _next_day_of_month(today, int(m.group(1)), int(m.group(2)))
+        e = _next_day_of_month(today, int(m.group(3)), int(m.group(4)))
+        if s and e and e > s:
+            return (s.isoformat(), e.isoformat(), "high")
+
+    # 3) "3 nights from Friday" / "3 ليالي من الخميس"
+    m = re.search(rf"(\d{{1,2}})\s*(?:nights?|ليالي|ليله|ليلة|ايام|أيام|days?)\s*"
+                  rf"(?:from|من|starting|تبدأ من)?\s*({wd_rx})?", low)
+    if m and m.group(1):
+        n = int(m.group(1))
+        if 1 <= n <= 30:
+            if m.group(2):
+                wd = _WEEKDAYS_AR.get(m.group(2)) if m.group(2) in _WEEKDAYS_AR \
+                    else _WEEKDAYS_EN.get(m.group(2))
+                s = _next_weekday(today, wd)
+                return (s.isoformat(), (s + timedelta(days=n)).isoformat(), "medium")
+
+    # 4) the weekend — Saudi Thu–Fri, so Thu -> Sat
+    if any(w in low for w in _WEEKEND_TERMS):
+        s = _next_weekday(today, 3)
+        return (s.isoformat(), (s + timedelta(days=2)).isoformat(), "medium")
+
+    # 5) "من اليوم/بكرة/<weekday> إلى <weekday>"
+    m = re.search(rf"من\s+(اليوم|بكرة|بكره|غدا|غداً|{wd_rx})\s*{sep}\s*({wd_rx})", low)
+    if m:
+        a = m.group(1)
+        if a in ("اليوم",):
+            s = today
+        elif a in ("بكرة", "بكره", "غدا", "غداً"):
+            s = today + timedelta(days=1)
+        else:
+            wd = _WEEKDAYS_AR.get(a, _WEEKDAYS_EN.get(a))
+            s = _next_weekday(today, wd)
+        wd2 = _WEEKDAYS_AR.get(m.group(2), _WEEKDAYS_EN.get(m.group(2)))
+        e = _next_weekday(s, wd2, allow_today=False)
+        if e > s:
+            return (s.isoformat(), e.isoformat(), "medium")
+
+    # 6) two weekdays joined by "و" — "الخميس والجمعة" = Thu -> Sat
+    m = re.search(rf"({wd_rx})\s*و\s*({wd_rx})", low)
+    if m:
+        w1 = _WEEKDAYS_AR.get(m.group(1), _WEEKDAYS_EN.get(m.group(1)))
+        w2 = _WEEKDAYS_AR.get(m.group(2), _WEEKDAYS_EN.get(m.group(2)))
+        s = _next_weekday(today, w1)
+        e = _next_weekday(s, w2, allow_today=False) + timedelta(days=1)
+        if e > s:
+            return (s.isoformat(), e.isoformat(), "medium")
+
+    # 7) bare explicit range "من ٥ إلى ٧"
+    m = re.search(rf"من\s*(\d{{1,2}})\s*{sep}\s*(\d{{1,2}})(?!\d)", low)
+    if m:
+        s = _next_day_of_month(today, int(m.group(1)))
+        if s:
+            e = _next_day_of_month(s, int(m.group(2)))
+            if e and e > s:
+                return (s.isoformat(), e.isoformat(), "high")
+
+    # 8) relative single days
+    if re.search(r"\b(اليوم|الليلة|هالليلة|today|tonight)\b", low):
+        return (today.isoformat(), (today + timedelta(days=1)).isoformat(), "medium")
+    if re.search(r"\b(بكرة|بكره|غدا|غداً|tomorrow)\b", low):
+        s = today + timedelta(days=1)
+        return (s.isoformat(), (s + timedelta(days=1)).isoformat(), "medium")
+
+    # 9) a lone weekday -> that night only
+    m = re.search(rf"(?:^|\s)({wd_rx})(?:\s|$|؟|\?|\.)", low)
+    if m:
+        wd = _WEEKDAYS_AR.get(m.group(1), _WEEKDAYS_EN.get(m.group(1)))
+        s = _next_weekday(today, wd)
+        return (s.isoformat(), (s + timedelta(days=1)).isoformat(), "medium")
+
+    # A single bare number is NOT a date we will act on. Ask instead of guessing.
+    return (None, None, "low")
+
+# ---------------------------------------------------------------------------
+# MUSAED v3 — the paid-services catalogue.
+# 99 upsell mentions in 90 days, 82 of them early check-in, only 10 with any
+# price context: the catalogue existed only as prose in the prompt, so the model
+# improvised or stayed silent. Structured, triggered, and rate-limited in CODE.
+# `price_sar` is deliberately absent — public prices are not set yet, and an
+# invented number is worse than no number. The shape accepts one later.
+# ---------------------------------------------------------------------------
+OUJA_EXTRAS = [
+    {"key": "early_checkin", "ar": "دخول مبكر", "en": "Early check-in",
+     "triggers": ["دخول مبكر", "اوصل بدري", "أوصل بدري", "ادخل بدري",
+                  "early check", "arrive early"],
+     "fee_ar": "حسب توفّر الوحدة وعليه رسوم إضافية — الفريق يأكد لك المبلغ والتوفّر",
+     "fee_en": "Subject to availability and an additional fee — the team confirms the amount"},
+    {"key": "late_checkout", "ar": "خروج متأخر", "en": "Late check-out",
+     "triggers": ["خروج متأخر", "اتأخر بالخروج", "أتأخر بالخروج", "late check",
+                  "late out", "رحلتي متأخرة"],
+     "fee_ar": "حسب جدول الوحدة وعليه رسوم إضافية — الفريق يأكد لك المبلغ",
+     "fee_en": "Subject to the unit's schedule and an additional fee — the team confirms the amount"},
+    {"key": "chauffeur", "ar": "سواري المسافر — سائق خاص",
+     "en": "Sawari Al Musafir — private chauffeur",
+     "triggers": ["سائق", "توصيل", "المطار", "مشوار", "chauffeur", "driver",
+                  "airport", "pickup", "transport"],
+     "fee_ar": "خدمة مدفوعة حسب الوجهة — الفريق يأكد لك السعر والتوفّر",
+     "fee_en": "A paid service priced by destination — the team confirms price and availability"},
+    {"key": "barber", "ar": "حلاق منزلي", "en": "In-home barber",
+     "triggers": ["حلاق", "قص شعر", "barber", "haircut"],
+     "fee_ar": "خدمة مدفوعة حسب التوفّر — الفريق يأكد لك السعر والموعد",
+     "fee_en": "A paid service subject to availability — the team confirms price and timing"},
+    {"key": "event_styling", "ar": "تنسيق مناسبات", "en": "Event styling",
+     "triggers": ["مناسبة", "عيد ميلاد", "احتفال", "تنسيق", "ورد",
+                  "birthday", "celebration", "decor", "surprise"],
+     "fee_ar": "خدمة مدفوعة حسب التنسيق المطلوب — الفريق يأكد لك السعر والتوفّر",
+     "fee_en": "A paid service priced by the setup requested — the team confirms price and availability"},
+    {"key": "mid_stay_clean", "ar": "تنظيف منتصف الإقامة", "en": "Mid-stay cleaning",
+     "triggers": ["تنظيف", "منظف", "ترتيب", "cleaning", "housekeeping", "clean the"],
+     "fee_ar": "خدمة مدفوعة حسب جدول الفريق — يأكدون لك المبلغ والموعد",
+     "fee_en": "A paid service subject to the team's schedule — they confirm amount and timing"},
+]
+_EXTRAS_FILE = "extras_offered.json"
+_EXTRAS_COOLDOWN_H = 24
+_extras_offered = None          # conversation_id -> {key: epoch seconds}
+_extras_lock = threading.Lock()
+
+
+def _extras_map():
+    global _extras_offered
+    if _extras_offered is None:
+        try:
+            _extras_offered = dict(_load_json(_EXTRAS_FILE, {}) or {})
+        except Exception:
+            _extras_offered = {}
+    return _extras_offered
+
+
+def _extras_mark(conversation_id, key):
+    cid = str(conversation_id or "")
+    if not cid or not key:
+        return
+    with _extras_lock:
+        m = _extras_map()
+        row = dict(m.get(cid) or {})
+        row[key] = time.time()
+        m[cid] = row
+        try:
+            _save_json(_EXTRAS_FILE, m)
+        except Exception as e:
+            print("extras_offered save error:", e)
+
+
+def _extras_recently_offered(conversation_id, key):
+    row = (_extras_map().get(str(conversation_id or "")) or {})
+    ts = row.get(key)
+    if not ts:
+        return False
+    return (time.time() - float(ts)) < _EXTRAS_COOLDOWN_H * 3600
+
+
+def relevant_extras(guest_text, conversation_id=None, sentiment="ok"):
+    """The extras this message actually asked about — at most one, never to an
+    upset guest, never twice in 24h. Silence is the default, not a fallback."""
+    if not MUSAED_V3:
+        return []
+    if sentiment in _NEG_SENTIMENTS:
+        return []
+    if _is_risk_class(guest_text):
+        return []
+    low = (guest_text or "").lower()
+    for ex in OUJA_EXTRAS:
+        if not any(t.lower() in low for t in ex["triggers"]):
+            continue
+        if conversation_id and _extras_recently_offered(conversation_id, ex["key"]):
+            continue
+        return [ex]
+    return []
+
+
+def _extras_block(guest_text, conversation_id=None, sentiment="ok", arabic=True):
+    hits = relevant_extras(guest_text, conversation_id, sentiment)
+    if not hits:
+        return ""
+    ex = hits[0]
+    if conversation_id:
+        _extras_mark(conversation_id, ex["key"])
+    name = ex["ar"] if arabic else ex["en"]
+    fee = ex["fee_ar"] if arabic else ex["fee_en"]
+    return ("\n\nخدمة مدفوعة يسأل عنها الضيف (اذكرها مرة واحدة فقط، بلا أي رقم "
+            f"من عندك):\n- {name} — {fee}")
+
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
                  dates=None, listing_id=None, reservation_id=None, profile_key=None,
                  conversation_id=None):
@@ -8962,6 +9263,14 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     # two different official check-in times because the number lived in the prose.
     promise_line = (_promise_state_line(conversation_id)
                     if (MUSAED_V3 and conversation_id) else "")
+    extras_line = ""
+    if MUSAED_V3:
+        try:
+            _last_guest = _guest_lines(history_text, 1)[0]
+            extras_line = _extras_block(_last_guest, conversation_id,
+                                        arabic=_has_arabic(_last_guest))
+        except Exception as _xe:
+            print("extras block error:", _xe)
     times_line = ""
     if listing_id:
         try:
@@ -9000,9 +9309,16 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     want_catalog = bool(_catalog_text) and _is_asking_alternatives(history_text)
     # ---- real pricing for the guest's OWN unit (when dates known + a price/availability question) ----
     own_price_line = ""
-    if (dates and dates[0] and listing_id
-            and (want_catalog or any(h in low for h in _PRICE_HINTS))):
-        info = unit_availability_price(listing_id, dates[0], dates[1])
+    # v3: an inquiry has no reservation, so `dates` is empty exactly when somebody
+    # is deciding whether to pay. Fall back to the dates the guest typed.
+    _txt_dates = _dates_from_text(history_text) if MUSAED_V3 else (None, None, "low")
+    _eff_dates = (dates if (dates and dates[0]) else (_txt_dates[0], _txt_dates[1]))
+    _price_intent = (want_catalog
+                     or any(h in low for h in _PRICE_HINTS)
+                     or (_is_booking_intent(history_text) if MUSAED_V3 else False))
+    if _eff_dates and _eff_dates[0] and listing_id and _price_intent:
+        dates = _eff_dates if not (dates and dates[0]) else dates
+        info = unit_availability_price(listing_id, _eff_dates[0], _eff_dates[1])
         if info and info.get("total") is not None:
             avail = "متاحة" if info["available"] else "غير متاحة حالياً"
             own_price_line = (
@@ -9011,6 +9327,16 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
         elif info and info.get("available") is not None:
             own_price_line = (f"\nوحدة الضيف ({unit}) "
                               f"{'متاحة' if info['available'] else 'غير متاحة'} لتواريخه.")
+        if own_price_line and not (dates and dates[0] and confirmed):
+            own_price_line += (f"\n(التواريخ مفهومة من كلام الضيف: {_eff_dates[0]} → "
+                               f"{_eff_dates[1]} — أكّدها معه في نفس الرد.)")
+    elif MUSAED_V3 and _price_intent and listing_id and not (_eff_dates and _eff_dates[0]):
+        # Clear booking intent, no usable dates: ask ONE short question. Never punt
+        # to "you can book on Airbnb" as a SUBSTITUTE for answering — that happened
+        # 81 times. The link is an extra way to book, never a replacement.
+        own_price_line = ("\nالضيف يسأل عن الحجز/السعر لكن ما ذكر تواريخ واضحة. "
+                          "اسأله سؤال واحد قصير عن تاريخ الدخول والخروج، ووعده بالسعر "
+                          "الدقيق أول ما يعطيك التواريخ. لا تحيله للمنصة بدل ما تجاوبه.")
     # ---- early check-in detection + pre-computation ----
     # Done HERE (in claude_draft) rather than in the system prompt because the bot
     # can't call functions on its own — we precompute prev-night occupancy +
@@ -9308,8 +9634,9 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     _budget_chars = int(os.environ.get("ASSISTANT_PROMPT_BUDGET", "40000"))
     _fixed_len = sum(len(x or "") for x in (unit_guard, profile_block, guest_name, unit,
                                             status_line, stay_line, guide_line, dates_line,
-                                            times_line, promise_line, own_price_line,
-                                            early_block, late_block, code_block)) + 600
+                                            times_line, promise_line, extras_line,
+                                            own_price_line, early_block, late_block,
+                                            code_block)) + 600
     _trimmed = []
     if _fixed_len + len(facts_block) + len(catalog_block) + len(history_text) > _budget_chars:
         if catalog_block:
@@ -9331,7 +9658,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     if _trimmed:
         print(f"assistant: prompt budget ({_budget_chars}ch) trimmed -> {', '.join(_trimmed)}")
     user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}{stay_line}\n{guide_line}{dates_line}{times_line}{promise_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+            f"{status_line}{stay_line}\n{guide_line}{dates_line}{times_line}{promise_line}{extras_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
