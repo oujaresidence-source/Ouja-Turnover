@@ -10026,10 +10026,15 @@ def record_learning(item, original_draft, final_reply, via, approver=None):
             "final_reply": (final_reply or "")[:1400],
             "diff_ratio": round(diff, 2),
             "was_edited": diff >= 0.20,                # human reshaped the bot >20%
+            "quality_sample": bool((item or {}).get("_v3_sample")),
             "via": via,
             "approver": approver or "",
         }
         _learning_log.append(entry)
+        # v3.1: if this counter stays at zero the learning loop is still dead,
+        # whatever the sample rate says.
+        if entry["quality_sample"] and entry["was_edited"]:
+            metric_bump("v3_quality_sample_edited")
         # ---- daily metrics ----
         metric_bump("replies_total")
         if via == "auto":           metric_bump("replies_auto")
@@ -12827,6 +12832,17 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             # fall through to the approval card if the send failed
 
     # ---- needs approval: draft + buttons ----
+    # v3.1: the quality sample used to sit on the AUTO path, but the gate had
+    # narrowed that path to greetings and thank-yous — so it could only ever
+    # harvest «حياك الله», and a human reviewing that learns nothing. It now
+    # marks high-confidence QUEUED drafts: substantive replies a reviewer might
+    # otherwise rubber-stamp. Their edits are the only training signal there is.
+    if (_v3_gate_on() and not escalate and reply
+            and conf >= ASSISTANT_AUTO_CONF
+            and random.randint(1, 100) <= ASSISTANT_REVIEW_SAMPLE_PCT):
+        item["_v3_sample"] = True
+        metric_bump("v3_quality_sample")
+
     # A diverted quality sample is labelled as one, so the reviewer knows the draft
     # was good enough to send and that editing it is the point — that edit is the
     # only training signal record_learning() ever gets.
