@@ -64675,11 +64675,40 @@ async def musaed_volume_loop():
 
 
 MUSAED_NIGHTLY_EVAL = os.environ.get("MUSAED_NIGHTLY_EVAL", "1") in ("1", "true", "True", "yes")
+# 163 Sonnet-5 drafts a night is more than this needs. Weeknights run the
+# regression-critical set plus a rotating slice; Saturday runs everything.
+MUSAED_EVAL_NIGHTLY_N = int(os.environ.get("MUSAED_EVAL_NIGHTLY_N", "60"))
+MUSAED_EVAL_FULL_WEEKDAY = int(os.environ.get("MUSAED_EVAL_FULL_WEEKDAY", "5"))  # 5 = Saturday
+# There are more v3_* guards (74) than the nightly budget (60), so pinning them all
+# would leave ZERO rotating slots and the other cases would run only on Saturday.
+# A floor keeps the rest cycling; the whole set is still seen within ~9 days.
+MUSAED_EVAL_MIN_ROTATE = int(os.environ.get("MUSAED_EVAL_MIN_ROTATE", "10"))
+
+
+def _musaed_eval_subset(all_cases, day_index, full=False):
+    """(cases, label). Every v3_* case runs EVERY night — they are the guards on
+    the rules that actually broke. The rest rotate so the whole set is still seen
+    across a week, and Saturday runs the lot."""
+    rows = list(all_cases or [])
+    if full or len(rows) <= MUSAED_EVAL_NIGHTLY_N:
+        return rows, f"كامل ({len(rows)})"
+    pinned = [c for c in rows if str(c.get("id") or "").startswith("v3_")]
+    others = [c for c in rows if c not in pinned]
+    slots = max(MUSAED_EVAL_MIN_ROTATE, MUSAED_EVAL_NIGHTLY_N - len(pinned))
+    if slots and others:
+        start = (day_index * slots) % len(others)
+        rotated = others[start:] + others[:start]
+        picked = rotated[:slots]
+    else:
+        picked = []
+    chosen = pinned + picked
+    return chosen, f"{len(chosen)} من {len(rows)} (كل حالات v3 + {len(picked)} بالتناوب)"
 
 
 @tasks.loop(time=dt_time(hour=3, minute=20, tzinfo=TZ))
 async def musaed_nightly_eval():
-    """Run the golden set nightly and post the result. Never crashes the bot."""
+    """Run the golden set nightly and post the result. Never crashes the bot.
+    QUIET on pass — one line. LOUD only on a regression or a blocker."""
     if not (MUSAED_NIGHTLY_EVAL and ASSISTANT_ENABLED):
         return
     try:
@@ -64699,8 +64728,14 @@ async def musaed_nightly_eval():
         if not eval_musaed.golden_exists():
             print("nightly eval: no golden set — skipping")
             return
+        now = datetime.now(TZ)
+        full = (now.weekday() == MUSAED_EVAL_FULL_WEEKDAY)
+        all_cases = await asyncio.to_thread(eval_musaed.load_golden_cases)
+        subset, label = _musaed_eval_subset(all_cases, now.timetuple().tm_yday, full)
+        if not subset:
+            return
         summary, results, diff, html_path = await asyncio.to_thread(
-            eval_musaed.run_quality_check)
+            eval_musaed.run_quality_check, None, cases=subset)
     except Exception as e:
         print("nightly eval run error:", e)
         try:
@@ -64716,40 +64751,52 @@ async def musaed_nightly_eval():
         regressed = (not inconclusive) and (hf > 0 or mean_delta < 0)
         cat = await get_assistant_category(guild)
         ch = await ensure_channel(guild, EVAL_CHANNEL, cat)
-        if ch:
+        bad_ids = [str(r.get("id")) for r in results
+                   if (r.get("hard_fails") or [])][:10]
+        if ch and not regressed and not inconclusive:
+            # Quiet on pass: one compact line, no card.
+            await ch.send(
+                f"🌙 فحص ليلي · {label} · متوسط "
+                f"**{summary.get('mean_overall', 0):.0f}**/100 · نجاح "
+                f"{summary.get('pass_rate', 0)*100:.0f}% · بدون حالات حرجة"
+                + (f" · فرق {mean_delta:+.1f}" if diff.get("has_baseline") else ""))
+        elif ch:
             emb = discord.Embed(
-                title="🌙 فحص الجودة الليلي / Nightly quality check",
-                color=(0x9A6B00 if inconclusive else
-                       (0xB3261E if regressed else 0x1F7A4D)))
-            emb.add_field(name="متوسط الجودة / Mean",
+                title=("🌙 فحص ليلي — غير حاسم" if inconclusive
+                       else "🔻 تراجع في جودة المساعد"),
+                color=(0x9A6B00 if inconclusive else 0xB3261E))
+            emb.add_field(name="متوسط الجودة",
                           value=f"**{summary.get('mean_overall', 0):.0f}**/100", inline=True)
-            emb.add_field(name="نسبة النجاح / Pass",
-                          value=f"{summary.get('pass_rate', 0)*100:.0f}%", inline=True)
-            emb.add_field(name="حالات حرجة / Hard fails",
-                          value=str(hf), inline=True)
+            emb.add_field(name="حالات حرجة", value=str(hf), inline=True)
             if diff.get("has_baseline"):
-                emb.add_field(name="مقارنة بالأساس / vs baseline",
-                              value=f"{mean_delta:+.1f}", inline=True)
+                emb.add_field(name="مقارنة بالأساس", value=f"{mean_delta:+.1f}", inline=True)
+            if bad_ids:
+                emb.add_field(name="الحالات التي سقطت",
+                              value="، ".join(bad_ids)[:1000], inline=False)
             names = [str(r.get("id")) for r in (diff.get("regressions") or [])][:10]
             if names:
-                emb.add_field(name="تراجعت / Regressed",
-                              value="، ".join(names)[:1000], inline=False)
-            emb.set_footer(text=f"{summary.get('n', 0)} حالة · تلقائي 03:20")
+                emb.add_field(name="تراجعت", value="، ".join(names)[:1000], inline=False)
+            emb.set_footer(text=f"{label} · {musaed_posture()[0]}")
             await ch.send(embed=emb)
-        # A regression is not a log line — it is an alert.
+        # Loud in ops ONLY when it matters, and name the gate that is in force.
         if regressed:
             esc = await ensure_channel(guild, ESCALATION_CHANNEL, cat)
             if esc:
                 alert = discord.Embed(
                     title="🔻 تراجع في جودة المساعد",
-                    description=(f"الفحص الليلي رصد تراجعاً: {hf} حالة حرجة · "
-                                 f"فرق المتوسط {mean_delta:+.1f}.\n"
-                                 f"شوف #{EVAL_CHANNEL} للتفاصيل."),
+                    description=(f"الفحص الليلي رصد تراجعاً: **{hf}** حالة حرجة · "
+                                 f"فرق المتوسط {mean_delta:+.1f}."),
                     color=0xB3261E)
+                if bad_ids:
+                    alert.add_field(name="الحالات", value="، ".join(bad_ids)[:1000],
+                                    inline=False)
+                alert.add_field(name="الوضع الحالي", value=musaed_posture()[1],
+                                inline=False)
+                alert.set_footer(text=musaed_posture()[0])
                 await esc.send(embed=alert)
             metric_bump("v3_eval_regression")
-        log_event("eval", f"nightly eval · mean {summary.get('mean_overall', 0):.0f} · "
-                          f"hard fails {hf}")
+        log_event("eval", f"nightly eval · {label} · mean "
+                          f"{summary.get('mean_overall', 0):.0f} · hard fails {hf}")
     except Exception as e:
         print("nightly eval post error:", e)
 

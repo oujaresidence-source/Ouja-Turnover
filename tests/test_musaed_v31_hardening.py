@@ -316,5 +316,45 @@ class TestArrivalSurface(unittest.TestCase):
         self.assertEqual(got["requested_minutes"], 120)
 
 
+class TestNightlyEvalRotation(unittest.TestCase):
+    """163 Sonnet-5 drafts a night is more than this needs."""
+
+    CASES = ([{"id": f"v3_case{i}"} for i in range(74)]
+             + [{"id": f"old{i}"} for i in range(89)])
+
+    def test_every_v3_guard_runs_every_night(self):
+        sub, _label = bot._musaed_eval_subset(self.CASES, 100, full=False)
+        pinned = {c["id"] for c in self.CASES if c["id"].startswith("v3_")}
+        self.assertTrue(pinned <= {c["id"] for c in sub})
+
+    def test_a_weeknight_is_cheaper_than_the_full_set(self):
+        sub, _l = bot._musaed_eval_subset(self.CASES, 100, full=False)
+        self.assertLess(len(sub), len(self.CASES))
+
+    def test_there_is_always_some_rotation(self):
+        """With 74 pinned guards and a 60 budget the naive maths gives zero
+        rotating slots, which would strand the other 89 cases until Saturday."""
+        sub, _l = bot._musaed_eval_subset(self.CASES, 100, full=False)
+        rotated = [c for c in sub if not c["id"].startswith("v3_")]
+        self.assertGreaterEqual(len(rotated), bot.MUSAED_EVAL_MIN_ROTATE)
+
+    def test_the_whole_set_is_covered_within_two_weeks(self):
+        seen = set()
+        for day in range(1, 15):
+            sub, _l = bot._musaed_eval_subset(self.CASES, day, full=False)
+            seen |= {c["id"] for c in sub}
+        self.assertEqual(seen, {c["id"] for c in self.CASES})
+
+    def test_saturday_runs_everything(self):
+        sub, label = bot._musaed_eval_subset(self.CASES, 100, full=True)
+        self.assertEqual(len(sub), len(self.CASES))
+        self.assertIn("كامل", label)
+
+    def test_a_small_golden_set_is_never_subset(self):
+        small = [{"id": f"x{i}"} for i in range(12)]
+        sub, _l = bot._musaed_eval_subset(small, 3, full=False)
+        self.assertEqual(len(sub), 12)
+
+
 if __name__ == "__main__":
     unittest.main()

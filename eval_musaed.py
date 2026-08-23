@@ -1066,6 +1066,17 @@ def _ts():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def load_golden_cases(dirpath=None):
+    """Every golden case, as a list. Public so a caller can run a SUBSET
+    (the nightly rotation) without re-reading the file format itself."""
+    gp = active_golden_path(dirpath)
+    try:
+        return _read_jsonl(gp) if os.path.isfile(gp) else []
+    except Exception as e:
+        print("load_golden_cases error:", e)
+        return []
+
+
 def run_quality_check(progress_cb=None, *, cases=None, dirpath=None,
                       draft_fn=None, judge_fn=None, baseline=True, max_workers=None,
                       use_cache=True):
