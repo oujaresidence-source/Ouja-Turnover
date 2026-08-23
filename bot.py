@@ -429,8 +429,11 @@ REVIEW_AUTOANALYZE_MIN    = int(os.environ.get("REVIEW_AUTOANALYZE_MIN", "15")) 
 REVIEW_AUTOANALYZE_BATCH  = int(os.environ.get("REVIEW_AUTOANALYZE_BATCH", "8"))  # how many to analyze per cycle
 ASSISTANT_ENABLED  = os.environ.get("ASSISTANT_ENABLED", "0") in ("1", "true", "True", "yes")
 ASSISTANT_CHANNEL  = os.environ.get("ASSISTANT_CHANNEL", "guest-assistant")
-ASSISTANT_POLL_MIN = float(os.environ.get("ASSISTANT_POLL_MIN", "0.5"))   # check inbox every N min (float ok)
-ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "30"))      # how many recent convos to scan
+# The webhook path (_handle_hook -> _process_conversation_now) is the REAL-TIME path;
+# this poll loop is only the safety net, so it does not need to run twice a minute.
+# 0.5 min x 30 convos was ~62 Hostaway calls/min at idle, on a ~90/min hard ceiling.
+ASSISTANT_POLL_MIN = float(os.environ.get("ASSISTANT_POLL_MIN", "4"))   # check inbox every N min (float ok)
+ASSISTANT_SCAN     = int(os.environ.get("ASSISTANT_SCAN", "20"))      # how many recent convos to scan
 ASSISTANT_HISTORY_MSGS = int(os.environ.get("ASSISTANT_HISTORY_MSGS", "14"))  # messages of thread context Musaed reads
 # ---- Stage 2: Hostaway webhooks (instant replies). 100% optional/backward-compatible:
 # if not set up in Hostaway, the bot just keeps polling as before. ----
@@ -702,19 +705,34 @@ def _state_path(name):
 
 _save_failures = {"count": 0, "last": "", "at": 0}   # M9: writers can check & surface
 
+_save_hashes = {}                                    # full path -> md5 of the last SUCCESSFUL write
+
 def _save_json(name, obj):
     """Atomic JSON write. Returns True on success, False on failure — a caller
     that reports ok:true after a swallowed disk error is lying to the user
-    (M9: the edit evaporates on the next restart)."""
+    (M9: the edit evaporates on the next restart).
+    Skips the write entirely when the serialized content is byte-identical to the
+    last successful write (persist_state rewrites 55 files/min, most unchanged, on
+    a network-attached volume)."""
+    dest = _state_path(name)
     try:
+        payload = json.dumps(obj, ensure_ascii=False)
+        h = hashlib.md5(payload.encode("utf-8")).hexdigest()
+        # Keyed by the FULL PATH, and only trusted while the file is actually there:
+        # a bare-name key would skip the write after STATE_DIR changed or the volume
+        # came back empty, and the state would silently never land.
+        if _save_hashes.get(dest) == h and os.path.exists(dest):
+            return True                      # nothing changed — no disk I/O
         os.makedirs(STATE_DIR, exist_ok=True)
         tmp = _state_path(name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False)
-        os.replace(tmp, _state_path(name))   # atomic write
+            f.write(payload)
+        os.replace(tmp, dest)                # atomic write
+        _save_hashes[dest] = h
         return True
     except Exception as e:
         print(f"state save error ({name}):", e)
+        _save_hashes.pop(dest, None)         # force a real retry next cycle
         _save_failures["count"] += 1
         _save_failures["last"] = f"{name}: {e}"
         _save_failures["at"] = time.time()
@@ -810,20 +828,60 @@ def get_token(force=False):
 # Hostaway has been observed to use 403; spec says 401 — accept both to be safe.
 _AUTH_RETRY_CODES = (401, 403)
 
+# ---- Hostaway throttle (the single most important perf guard in this file) ----
+# Hostaway allows 15 req/10s per IP and 20 req/10s per account. We deliberately
+# aim BELOW the IP ceiling: exceeding it costs 5s+10s+20s of held-thread backoff
+# per call, which starves the shared to_thread pool and freezes the whole app.
+HOSTAWAY_MAX_PER_10S  = int(os.environ.get("HOSTAWAY_MAX_PER_10S", "11"))
+HOSTAWAY_MAX_INFLIGHT = int(os.environ.get("HOSTAWAY_MAX_INFLIGHT", "4"))
+
+_ha_bucket_lock = threading.Lock()
+_ha_bucket_times = deque()          # timestamps of calls in the trailing 10s window
+_ha_inflight = threading.Semaphore(HOSTAWAY_MAX_INFLIGHT)
+_ha_throttle_stats = {"waited": 0, "wait_s": 0.0, "calls": 0, "429s": 0}
+
+def _ha_throttle_acquire():
+    """Block until this thread may issue a Hostaway call. Sliding 10s window."""
+    while True:
+        with _ha_bucket_lock:
+            now = time.time()
+            while _ha_bucket_times and now - _ha_bucket_times[0] >= 10.0:
+                _ha_bucket_times.popleft()
+            if len(_ha_bucket_times) < HOSTAWAY_MAX_PER_10S:
+                _ha_bucket_times.append(now)
+                _ha_throttle_stats["calls"] += 1
+                return
+            sleep_for = 10.0 - (now - _ha_bucket_times[0]) + 0.01
+        _ha_throttle_stats["waited"] += 1
+        _ha_throttle_stats["wait_s"] += sleep_for
+        time.sleep(min(sleep_for, 10.0))
+
+# One pooled session: `requests.request(...)` opened a NEW TLS connection on every
+# single call (~100-300ms of pure handshake). Keep-alive removes that entirely.
+_ha_session = requests.Session()
+_ha_session.mount("https://", requests.adapters.HTTPAdapter(
+    pool_connections=8, pool_maxsize=16, max_retries=0))
+
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
-    backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3."""
+    backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3.
+    Now throttled: see _ha_throttle_acquire. The throttle is what keeps 429s rare."""
     token = get_token()
     headers = {"Authorization": f"Bearer {token}", "Cache-control": "no-cache"}
     if method != "GET":
         headers["Content-Type"] = "application/json"
-    r = requests.request(method, f"{BASE}{path}", headers=headers,
-                         params=params if method == "GET" else None,
-                         json=body if method != "GET" else None, timeout=60)
+    _ha_throttle_acquire()
+    # The recursive retries below sit OUTSIDE this block on purpose: a thread that is
+    # sleeping off a 429 must not keep holding one of the few in-flight slots.
+    with _ha_inflight:
+        r = _ha_session.request(method, f"{BASE}{path}", headers=headers,
+                                params=params if method == "GET" else None,
+                                json=body if method != "GET" else None, timeout=60)
     if r.status_code in _AUTH_RETRY_CODES and _retry == 0:   # token expired -> refresh once
         get_token(force=True)
         return _api_request(method, path, params=params, body=body, _retry=_retry + 1)
     if r.status_code == 429 and _retry < 3:                  # rate limited -> backoff
+        _ha_throttle_stats["429s"] += 1
         try:
             wait = float(r.headers.get("Retry-After") or 0)
         except (TypeError, ValueError):
@@ -5904,6 +5962,30 @@ def _loop_guard(loop_obj, name):
         except Exception as e:
             print(f"{name} restart failed:", e)
 
+LOOP_STAGGER_SEC = float(os.environ.get("LOOP_STAGGER_SEC", "7"))
+_stagger_running = {"v": False}
+
+async def _staggered_start(loops, gap=None):
+    """Start background loops spread over time so they never fire in one burst.
+    All 44 loops used to start within the same second of boot, which permanently
+    aligned their firing times and blew Hostaway's 15-requests-per-10-seconds
+    window every cycle. Runs as a background task so on_ready is never blocked."""
+    if _stagger_running["v"]:
+        return                              # on_ready can re-fire on re-identify
+    _stagger_running["v"] = True
+    gap = LOOP_STAGGER_SEC if gap is None else gap
+    try:
+        for i, lp in enumerate(loops):
+            if i:
+                await asyncio.sleep(gap)
+            try:
+                if not lp.is_running():
+                    lp.start()
+            except Exception as e:
+                print(f"loop start error ({getattr(lp, 'coro', lp)}):", e)
+    finally:
+        _stagger_running["v"] = False
+
 @tasks.loop(minutes=POLL_MINUTES)
 async def poll_loop():
     try:
@@ -8074,7 +8156,10 @@ _avail_cache = OrderedDict()
 _AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
 INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "80"))   # max units to date-check per msg (parallel — covers full portfolio)
-INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "12"))         # concurrent calendar lookups
+INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "4"))          # concurrent calendar lookups
+# Was 12. Twelve concurrent calendar calls ate ~80% of Hostaway's 15-per-10s budget in
+# under a second; with the throttle above they would only block anyway, so a narrower
+# pool costs nothing and saves the thread churn.
 
 # Model for guest-facing drafts. Always premium by default — Haiku produces too many
 # generic/templated replies that ignore the actual context (e.g. saying "code arrives
@@ -10328,13 +10413,18 @@ def _conv_to_item(c, listings, seen, debug=False):
     cid = c.get("id")
     if not cid:
         return None
-    try:
-        md = api_get(f"/conversations/{cid}/messages")
-        msgs = md.get("result", []) or []
-    except Exception as e:
-        if debug:
-            print(f"  conv {cid}: messages fetch error: {e}")
-        return None
+    # PERF: the scan already asks Hostaway for includeResources=1, so the messages
+    # usually arrive INLINE on the conversation object. Fetching them again per
+    # conversation was ~60 extra calls/min and the single largest source of 429s.
+    msgs = c.get("conversationMessages") or c.get("messages") or None
+    if msgs is None:
+        try:
+            md = api_get(f"/conversations/{cid}/messages")
+            msgs = md.get("result", []) or []
+        except Exception as e:
+            if debug:
+                print(f"  conv {cid}: messages fetch error: {e}")
+            return None
     if not msgs:
         return None
     msgs = sorted(msgs, key=_msg_sort_key)
@@ -67281,54 +67371,55 @@ async def on_ready():
             continue                    # on_ready can re-fire on re-identify
         _loop_guard(_lp, _nm)
         _lp._error_guarded = True
+    _pending = []          # collected here, started staggered below (see _staggered_start)
     if not poll_loop.is_running():
-        poll_loop.start()
+        _pending.append(poll_loop)
     if not oujact_daily_loop.is_running():
-        oujact_daily_loop.start()      # 12 AM: listings auto-sync + OujaCT channels + schedule
+        _pending.append(oujact_daily_loop)      # 12 AM: listings auto-sync + OujaCT channels + schedule
     if not dispatch_daily_loop.is_running():
-        dispatch_daily_loop.start()    # 9 PM: WhatsApp cleaning dispatch for tomorrow
+        _pending.append(dispatch_daily_loop)    # 9 PM: WhatsApp cleaning dispatch for tomorrow
     if not reminder_loop.is_running():
-        reminder_loop.start()
+        _pending.append(reminder_loop)
     if not discount_tier1_loop.is_running():
-        discount_tier1_loop.start()
+        _pending.append(discount_tier1_loop)
     if not discount_tier2_loop.is_running():
-        discount_tier2_loop.start()
+        _pending.append(discount_tier2_loop)
     if not discount_tier3_loop.is_running():
-        discount_tier3_loop.start()
+        _pending.append(discount_tier3_loop)
     if not discount_weekend_loop.is_running():
-        discount_weekend_loop.start()
+        _pending.append(discount_weekend_loop)
     if not discount_catchup_loop.is_running():
-        discount_catchup_loop.start()
+        _pending.append(discount_catchup_loop)
     if not headsup_loop.is_running():
-        headsup_loop.start()
+        _pending.append(headsup_loop)
     if _HAS_SCHEDULE and SCHEDULE_ENABLED and not schedule_digest_loop.is_running():
-        schedule_digest_loop.start()   # morning team-calendar ops summary (default 08:00 Riyadh)
+        _pending.append(schedule_digest_loop)   # morning team-calendar ops summary (default 08:00 Riyadh)
     if _HAS_STUDIO and STUDIO_ENABLED and not studio_digest_loop.is_running():
-        studio_digest_loop.start()     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
+        _pending.append(studio_digest_loop)     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
     if _HAS_BUSINESS and not business_snapshot_loop.is_running():
-        business_snapshot_loop.start()  # nightly 03:00 Riyadh: refresh /business snapshot
+        _pending.append(business_snapshot_loop)  # nightly 03:00 Riyadh: refresh /business snapshot
     if _HAS_STUDIO and STUDIO_ENABLED:
         try:
             await _studio_ensure_channel()
         except Exception as _sce:
             print("[studio] channel setup skipped:", _sce)
     if not owner_warm_loop.is_running():
-        owner_warm_loop.start()        # keeps the owners «دورة الشهر» board warm (never cold)
+        _pending.append(owner_warm_loop)        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():
-        proc_reminder_loop.start()     # nudges the holder of each open purchase ticket
+        _pending.append(proc_reminder_loop)     # nudges the holder of each open purchase ticket
     if WATCHMAN_ENABLED and not watchman_loop.is_running():
-        watchman_loop.start()          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
+        _pending.append(watchman_loop)          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
     if _pk_enabled() and not promise_keeper_loop.is_running():
         if not getattr(promise_keeper_loop, "_error_guarded", False):
             _loop_guard(promise_keeper_loop, "promise_keeper_loop")
             promise_keeper_loop._error_guarded = True
-        promise_keeper_loop.start()    # متتبع الوعود: reping overdue + expire after 24h
+        _pending.append(promise_keeper_loop)    # متتبع الوعود: reping overdue + expire after 24h
     if _HAS_WATCHDOG and WATCHDOG_ENABLED and not watchdog_loop.is_running():
-        watchdog_loop.start()          # «الرقيب التشغيلي»: 30-min ops summary + critical pings
+        _pending.append(watchdog_loop)          # «الرقيب التشغيلي»: 30-min ops summary + critical pings
     if _HAS_OPS and _ops.notify.enabled() and not ops_ladder_loop.is_running():
-        ops_ladder_loop.start()        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
+        _pending.append(ops_ladder_loop)        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
     if _HAS_OPS and _ops.turnover.enabled() and not ops_turnover_loop.is_running():
-        ops_turnover_loop.start()      # «القفل»: private turnover nudges (dry-run by default)
+        _pending.append(ops_turnover_loop)      # «القفل»: private turnover nudges (dry-run by default)
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)
@@ -67356,27 +67447,27 @@ async def on_ready():
                 print("auto-reply room setup:", e)
         await asyncio.to_thread(load_catalog, True)
     if not assistant_loop.is_running():
-        assistant_loop.start()
+        _pending.append(assistant_loop)
     if not escalation_reping_loop.is_running():
-        escalation_reping_loop.start()
+        _pending.append(escalation_reping_loop)
     if not persist_loop.is_running():
-        persist_loop.start()
+        _pending.append(persist_loop)
     if DASHBOARD_ENABLED and DASHBOARD_TOKEN and not dashboard_cache_loop.is_running():
-        dashboard_cache_loop.start()   # warms the cache immediately, then every few minutes
+        _pending.append(dashboard_cache_loop)   # warms the cache immediately, then every few minutes
     if EXPENSE_SHEET_CSV_URL and not expense_sheet_loop.is_running():
-        expense_sheet_loop.start()     # pull-based field-expense intake from the shared sheet
+        _pending.append(expense_sheet_loop)     # pull-based field-expense intake from the shared sheet
     if PRICING_STRATEGY_ENABLED and not pricing_strategy_loop.is_running():
-        pricing_strategy_loop.start()
+        _pending.append(pricing_strategy_loop)
     if not revenue_loop.is_running():
-        revenue_loop.start()
+        _pending.append(revenue_loop)
     if not price_opp_loop.is_running():
-        price_opp_loop.start()
+        _pending.append(price_opp_loop)
     if not weekly_review_loop.is_running():
-        weekly_review_loop.start()
+        _pending.append(weekly_review_loop)
     if not reviews_refresh_loop.is_running():
-        reviews_refresh_loop.start()   # initial pull on boot, then daily
+        _pending.append(reviews_refresh_loop)   # initial pull on boot, then daily
     if REVIEW_AUTOANALYZE_ENABLED and not reviews_autoanalyze_loop.is_running():
-        reviews_autoanalyze_loop.start()   # auto-analyze new reviews in the background
+        _pending.append(reviews_autoanalyze_loop)   # auto-analyze new reviews in the background
     if WEBHOOKS_ENABLED and _HAS_AIOHTTP and _web_runner is None:
         try:
             await start_web_server()
@@ -67385,21 +67476,21 @@ async def on_ready():
     elif WEBHOOKS_ENABLED and not _HAS_AIOHTTP:
         print("webhooks: aiohttp not installed — add 'aiohttp' to requirements.txt to enable")
     if ASSISTANT_ENABLED and not knowledge_loop.is_running():
-        knowledge_loop.start()
+        _pending.append(knowledge_loop)
     if ASSISTANT_ENABLED and not learning_distillation_loop.is_running():
-        learning_distillation_loop.start()
+        _pending.append(learning_distillation_loop)
     if AGREEMENT_REMINDER_ENABLED and not agreement_reminder_loop.is_running():
-        agreement_reminder_loop.start()
+        _pending.append(agreement_reminder_loop)
     if DEEPCLEAN_ENABLED and not deepclean_schedule_loop.is_running():
-        deepclean_schedule_loop.start()
+        _pending.append(deepclean_schedule_loop)
     if DEEPCLEAN_ENABLED and not deepclean_confirm_loop.is_running():
-        deepclean_confirm_loop.start()
+        _pending.append(deepclean_confirm_loop)
     if not offhours_ack_reset_loop.is_running():
-        offhours_ack_reset_loop.start()
+        _pending.append(offhours_ack_reset_loop)
     if not morning_escalation_reminder_loop.is_running():
-        morning_escalation_reminder_loop.start()
+        _pending.append(morning_escalation_reminder_loop)
     if WILT_ENABLED and not wilt_loop.is_running():
-        wilt_loop.start()
+        _pending.append(wilt_loop)
     if WILT_TEST:
         print("WILT_TEST=1 — posting WILT now (test run)")
         try:
@@ -67413,11 +67504,17 @@ async def on_ready():
     if ASSISTANT_ENABLED and not musaed_volume_loop.is_running():
         musaed_volume_loop.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
-        guest_summary_loop.start()
+        _pending.append(guest_summary_loop)
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
-        cleaning_feedback_loop.start()
+        _pending.append(cleaning_feedback_loop)
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
-        decor_warn_loop.start()          # late decoration / late cake — separate warnings
+        _pending.append(decor_warn_loop)          # late decoration / late cake — separate warnings
+    # Fire them off spread over time, in the background: on_ready must keep going
+    # (the web server starts a few lines above this) while the loops trickle up.
+    _pending = ([persist_loop] if persist_loop in _pending else []) + \
+               ([assistant_loop] if assistant_loop in _pending else []) + \
+               [lp for lp in _pending if lp not in (persist_loop, assistant_loop)]
+    asyncio.create_task(_staggered_start(_pending))
     try:
         await _decor_ensure_home()       # make #تنسيق-الحفلات visible without waiting for a guest
     except Exception as _dhe:

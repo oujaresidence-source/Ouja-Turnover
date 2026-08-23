@@ -19,10 +19,81 @@
   produce that dict. DO NOT modify this renderer to fit your data.
 ═══════════════════════════════════════════════════════════════════════════
 """
-import base64, pathlib
+import atexit, base64, pathlib, threading
+from concurrent.futures import ThreadPoolExecutor
 from playwright.sync_api import sync_playwright
 
 FONT_DIR = pathlib.Path(__file__).parent / "fonts"
+
+# ── PDF pipeline: ONE long-lived Chromium, reused across renders ────────────────
+# Cold-launching a browser per PDF cost 1-3s of startup and a 250-400MB memory
+# spike each time; a batch of owner statements could push the container into an
+# OOM restart, which wipes every warm cache. NOTHING about the visual output
+# changes here — same page, same wait, same pdf() arguments.
+#
+# Playwright's SYNC api is greenlet-bound to the thread that started it, and
+# render_report is called from asyncio.to_thread workers (a different thread each
+# time). So all browser work is pinned to one dedicated thread via a 1-worker
+# pool; _pw_lock then serialises renders on top of that.
+_pw_lock  = threading.Lock()
+_pw_state = {"pw": None, "browser": None}
+_pw_pool  = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ouja-pdf")
+
+
+def _pw_browser():
+    """The shared Chromium. ONLY call this from the _pw_pool thread."""
+    st = _pw_state
+    if st["browser"] is not None:
+        try:
+            if st["browser"].is_connected():
+                return st["browser"]
+        except Exception:
+            pass                       # browser died — fall through and relaunch
+    try:
+        if st["pw"] is not None:
+            st["pw"].stop()
+    except Exception:
+        pass
+    st["pw"] = sync_playwright().start()
+    st["browser"] = st["pw"].chromium.launch(args=["--disable-dev-shm-usage"])
+    return st["browser"]
+
+
+def _pw_print(html_tmp, pdf_path):
+    """Render one PDF on the shared browser. Closes the PAGE, never the browser."""
+    with _pw_lock:
+        pg = _pw_browser().new_page()
+        try:
+            pg.goto("file://" + str(html_tmp.resolve()))
+            pg.wait_for_timeout(1400)
+            pg.pdf(path=str(pdf_path), format="A4", print_background=True,
+                   margin={"top": "0", "bottom": "0", "left": "0", "right": "0"})
+        finally:
+            try:
+                pg.close()
+            except Exception:
+                pass
+
+
+def _pw_shutdown():
+    """Close the shared browser at interpreter exit so no Chromium is orphaned."""
+    def _close():
+        for key in ("browser", "pw"):
+            obj = _pw_state.get(key)
+            if obj is None:
+                continue
+            try:
+                (obj.close if key == "browser" else obj.stop)()
+            except Exception:
+                pass
+            _pw_state[key] = None
+    try:
+        _pw_pool.submit(_close).result(timeout=10)
+    except Exception:
+        pass
+
+
+atexit.register(_pw_shutdown)
 
 # The exact keys render_report() consumes. Missing key => KeyError => no PDF.
 REPORT_SCHEMA = [
@@ -1384,12 +1455,5 @@ def render_report(cfg: dict, out_path) -> pathlib.Path:
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     html_tmp = pdf_path.parent / "_report.html"
     html_tmp.write_text(HTML, encoding="utf-8")
-    with sync_playwright() as p:
-        b = p.chromium.launch()
-        pg = b.new_page()
-        pg.goto("file://" + str(html_tmp.resolve()))
-        pg.wait_for_timeout(1400)
-        pg.pdf(path=str(pdf_path), format="A4", print_background=True,
-               margin={"top": "0", "bottom": "0", "left": "0", "right": "0"})
-        b.close()
+    _pw_pool.submit(_pw_print, html_tmp, pdf_path).result()
     return pdf_path
