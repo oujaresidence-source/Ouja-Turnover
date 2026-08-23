@@ -2190,10 +2190,14 @@ def _format_guest_time(minutes):
 
 # Markers that pin a bare hour to the pre-noon half of the clock. "٣ الفجر" is
 # 3 AM beyond doubt; a bare "3" is not, and must never be assumed to be.
-_AM_MARKERS = ("am", "صباح", "الصبح", "الفجر", "فجر", "الفجرية")
+_AM_MARKERS = ("am", "صباح", "الصبح", "الفجر", "فجر", "الفجرية",
+               "منتصف الليل", "midnight")
 _PM_MARKERS = ("pm", "مساء", "ظهر", "الظهر", "العصر", "المغرب", "الليل", "بالليل")
-_TIME_MARKER_RE = (r"(am|pm|صباحاً|صباحا|صباح|الصبح|الفجر|فجر|ظهراً|ظهرا|الظهر|"
-                   r"ظهر|مساءً|مساء|العصر|المغرب|بالليل|الليل)")
+# Longest alternatives FIRST: «منتصف الليل» must win over «الليل», or 2 AM reads as 2 PM.
+_TIME_MARKER_RE = (r"(منتصف\s+الليل|midnight|am|pm|صباحاً|صباحا|صباح|الصبح|الفجر|فجر|"
+                   r"ظهراً|ظهرا|الظهر|ظهر|مساءً|مساء|العصر|المغرب|بالليل|الليل)")
+# «٢ بعد منتصف الليل» — a filler word may sit between the hour and its marker.
+_TIME_FILLER_RE = r"\s*(?:(?:بعد|قبل|في|من|the)\s*)?"
 
 
 def _early_checkin_request(text, official_minutes=None):
@@ -2218,8 +2222,9 @@ def _early_checkin_request(text, official_minutes=None):
     explicit = any(h in low for h in _EARLY_CHECKIN_HINTS)
     checkin_words = any(x in low for x in (
         "ادخل", "أدخل", "ندخل", "دخول", "تشيك ان", "تشيك إن", "تشيك-ان",
-        "وصول", "وصولي", "واصل", "واصله", "اوصل", "أوصل", "بوصل",
-        "check in", "check-in", "arrive", "arrival", "landing", "flight lands"))
+        "وصول", "وصولي", "واصل", "واصله", "اوصل", "أوصل", "بوصل", "نوصل",
+        "رحلتي", "رحلتنا", "تنزل", "ننزل", "طيارتي", "الطيارة", "نزول",
+        "check in", "check-in", "arriv", "landing", "lands", "land at", "flight"))
     requested = None
     marker = ""
     if "noon" in low or "الظهر" in low:
@@ -2227,12 +2232,16 @@ def _early_checkin_request(text, official_minutes=None):
         marker = "الظهر"
     else:
         match = re.search(
-            r"(?:الساعة|الساعه|at)\s*(\d{1,2})(?::(\d{2}))?\s*" + _TIME_MARKER_RE + r"?",
+            r"(?:الساعة|الساعه|at)\s*(\d{1,2})(?::(\d{2}))?" + _TIME_FILLER_RE
+            + _TIME_MARKER_RE + r"?",
             low,
         )
-        if not match:
-            # No "الساعة"/"at" — but a marker alone still pins the hour ("٣ الفجر").
-            match = re.search(r"(?<!\d)(\d{1,2})(?::(\d{2}))?\s*" + _TIME_MARKER_RE, low)
+        if not match or not match.group(3):
+            # No "الساعة"/"at", or none with a marker — a marker alone still pins
+            # the hour ("٣ الفجر", "٢ بعد منتصف الليل", "2:30 AM").
+            alt = re.search(r"(?<!\d)(\d{1,2})(?::(\d{2}))?" + _TIME_FILLER_RE
+                            + _TIME_MARKER_RE, low)
+            match = alt or match
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2) or 0)
@@ -2244,8 +2253,12 @@ def _early_checkin_request(text, official_minutes=None):
             if marker in _AM_MARKERS and hour == 12:
                 hour = 0
             requested = hour * 60 + minute
+    # A bare time carrying an explicit marker IS a request: it is exactly how a
+    # guest answers our own "what hour do you want?" question, and without this the
+    # ask-for-the-hour flow could never complete.
+    marked_time = bool(marker) and requested is not None
     if not explicit and not (
-            checkin_words and requested is not None
+            (checkin_words or marked_time) and requested is not None
             and requested < official):
         return None
     if requested is not None and requested >= official and not explicit:
@@ -11021,7 +11034,9 @@ def _early_pending_reply(record):
     # told another apartment's name as if it were their own.
     proposed = str(record.get("proposed_unit") or "").strip()
     own = str(record.get("original_unit") or "").strip()
-    swap = bool(proposed) and proposed != own
+    # No own unit means we cannot know whether `proposed` is a swap or the guest's
+    # own apartment. Degrade to naming NOTHING — never to naming a possibly-wrong one.
+    swap = bool(proposed) and bool(own) and proposed != own
     offhours = bool(record.get("offhours"))
     back = next_work_start().strftime("%H:%M")
     if is_ar:
