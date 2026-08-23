@@ -2012,7 +2012,85 @@ _EARLY_CHECKIN_HINTS = [
 ]
 
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
-_OFFICIAL_CHECKIN_MINUTES = 15 * 60
+
+# ---------------------------------------------------------------------------
+# MUSAED v3 — one source of truth for a unit's official times.
+# Guests were told two different official check-in times (4 PM 138 times, 3 PM
+# 69 times) because the number was hardcoded in several places. It is now read
+# from the LISTING and never guessed; the constants below are a LAST RESORT that
+# logs itself, so a listing missing the field can be found and fixed.
+# ---------------------------------------------------------------------------
+_CHECKIN_FALLBACK_MINUTES = 15 * 60
+_CHECKOUT_FALLBACK_MINUTES = 12 * 60
+_unit_times_cache = OrderedDict()
+_UNIT_TIMES_TTL = 21600          # 6 hours
+
+
+def _unit_times_row(listing_id):
+    """Cached raw listing record for time lookups. {} when unavailable."""
+    key = str(listing_id or "")
+    if not key:
+        return {}
+    hit = _unit_times_cache.get(key)
+    if hit and time.time() - hit[0] < _UNIT_TIMES_TTL:
+        return hit[1]
+    row = {}
+    try:
+        res = api_get(f"/listings/{listing_id}") or {}
+        row = res.get("result") or {}
+        if not isinstance(row, dict):
+            row = {}
+    except Exception as e:
+        print(f"unit times fetch error ({listing_id}):", e)
+        return (hit[1] if hit else {})
+    _bounded_cache_put(_unit_times_cache, key, (time.time(), row), 500)
+    return row
+
+
+def _resolve_unit_time(listing_id, fields, fallback_minutes, label):
+    row = _unit_times_row(listing_id)
+    for f in fields:
+        raw = row.get(f)
+        if raw in (None, "", 0) and raw != 0:
+            continue
+        hour = parse_hour(raw, None)
+        if hour is None:
+            continue
+        minute = 0
+        m = re.search(r":(\d{2})", str(raw))
+        if m:
+            minute = min(int(m.group(1)), 59)
+        return int(hour) % 24, minute, f
+    try:
+        log_event("ops", f"⚠️ الوحدة {listing_id} ما فيها {label} في Hostaway — "
+                         f"استُخدم الوقت الافتراضي")
+    except Exception:
+        pass
+    return fallback_minutes // 60, fallback_minutes % 60, "fallback"
+
+
+def unit_checkin_time(listing_id):
+    """(hour, minute, source). Reads the LISTING, never a hardcoded constant."""
+    return _resolve_unit_time(
+        listing_id, ("checkInTimeStart", "checkInTime", "defaultCheckInTime"),
+        _CHECKIN_FALLBACK_MINUTES, "وقت دخول")
+
+
+def unit_checkout_time(listing_id):
+    """(hour, minute, source)."""
+    return _resolve_unit_time(
+        listing_id, ("checkOutTime", "defaultCheckOutTime"),
+        _CHECKOUT_FALLBACK_MINUTES, "وقت خروج")
+
+
+def unit_checkin_minutes(listing_id):
+    h, m, _src = unit_checkin_time(listing_id)
+    return h * 60 + m
+
+
+def _fmt_hhmm(hour, minute):
+    return f"{int(hour):02d}:{int(minute):02d}"
+
 
 
 def _format_guest_time(minutes):
@@ -2026,48 +2104,85 @@ def _format_guest_time(minutes):
     return f"{shown}:{minute:02d} {suffix}"
 
 
-def _early_checkin_request(text):
+# Markers that pin a bare hour to the pre-noon half of the clock. "٣ الفجر" is
+# 3 AM beyond doubt; a bare "3" is not, and must never be assumed to be.
+_AM_MARKERS = ("am", "صباح", "الصبح", "الفجر", "فجر", "الفجرية")
+_PM_MARKERS = ("pm", "مساء", "ظهر", "الظهر", "العصر", "المغرب", "الليل", "بالليل")
+_TIME_MARKER_RE = (r"(am|pm|صباحاً|صباحا|صباح|الصبح|الفجر|فجر|ظهراً|ظهرا|الظهر|"
+                   r"ظهر|مساءً|مساء|العصر|المغرب|بالليل|الليل)")
+
+
+def _early_checkin_request(text, official_minutes=None):
     """Return extracted early-entry intent from ONE guest message, else None.
 
     Time-based wording matters because guests often say only "can I enter at
     12?" without the literal word "early". A stated time is early only when it
-    is before Ouja's official 3 PM check-in.
+    is before this unit's official check-in.
+
+    v3 adds two refusals to guess:
+      * 00:00–05:59 with an explicit dawn/AM marker is a LATE-NIGHT ARRIVAL, not
+        an early check-in. v2 read any time before check-in as "early" and told
+        guests that 3 AM entry looked possible.
+      * a bare small hour with NO marker ("check in is at 3") is ambiguous. v2
+        parsed a guest quoting our own 3 PM policy back at us as a 3 AM request.
+        Ambiguity now yields no time at all, never an invented one.
     """
+    official = (int(official_minutes) if official_minutes is not None
+                else _CHECKIN_FALLBACK_MINUTES)
     raw = (text or "").translate(_ARABIC_DIGITS)
     low = raw.lower()
     explicit = any(h in low for h in _EARLY_CHECKIN_HINTS)
     checkin_words = any(x in low for x in (
         "ادخل", "أدخل", "ندخل", "دخول", "تشيك ان", "تشيك إن", "تشيك-ان",
-        "check in", "check-in", "arrive", "arrival"))
+        "وصول", "وصولي", "واصل", "واصله", "اوصل", "أوصل", "بوصل",
+        "check in", "check-in", "arrive", "arrival", "landing", "flight lands"))
     requested = None
+    marker = ""
     if "noon" in low or "الظهر" in low:
         requested = 12 * 60
+        marker = "الظهر"
     else:
         match = re.search(
-            r"(?:الساعة|الساعه|at)\s*(\d{1,2})(?::(\d{2}))?\s*"
-            r"(am|pm|صباح|الصبح|ظهر|الظهر|مساء)?",
+            r"(?:الساعة|الساعه|at)\s*(\d{1,2})(?::(\d{2}))?\s*" + _TIME_MARKER_RE + r"?",
             low,
         )
+        if not match:
+            # No "الساعة"/"at" — but a marker alone still pins the hour ("٣ الفجر").
+            match = re.search(r"(?<!\d)(\d{1,2})(?::(\d{2}))?\s*" + _TIME_MARKER_RE, low)
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2) or 0)
             marker = match.group(3) or ""
             if not (0 <= hour <= 23 and 0 <= minute <= 59):
                 return None
-            if marker in ("pm", "مساء", "ظهر", "الظهر") and hour < 12:
+            if marker in _PM_MARKERS and hour < 12:
                 hour += 12
-            if marker in ("am", "صباح", "الصبح") and hour == 12:
+            if marker in _AM_MARKERS and hour == 12:
                 hour = 0
             requested = hour * 60 + minute
     if not explicit and not (
             checkin_words and requested is not None
-            and requested < _OFFICIAL_CHECKIN_MINUTES):
+            and requested < official):
         return None
-    if requested is not None and requested >= _OFFICIAL_CHECKIN_MINUTES and not explicit:
+    if requested is not None and requested >= official and not explicit:
         return None
+
+    if requested is not None and requested < 6 * 60:
+        if marker in _AM_MARKERS:
+            # A guest landing after midnight is not asking for the apartment at
+            # 3 AM — they are telling us when they arrive. Self-entry answers it.
+            return {"requested_minutes": requested,
+                    "requested_label": _format_guest_time(requested),
+                    "kind": "late_night_arrival"}
+        # Unmarked small hour: we do NOT know whether they mean 3 AM or 3 PM.
+        if not explicit:
+            return None            # let the drafter confirm the official time
+        requested = None           # explicit early intent, unusable time → ask
+
     return {
         "requested_minutes": requested,
         "requested_label": _format_guest_time(requested),
+        "kind": "early_checkin",
     }
 
 def _is_early_checkin_request(text):
@@ -8775,6 +8890,18 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                   else "Arrival-guide link for this unit: NOT AVAILABLE / do not share")
     dates_line = (f"\nتواريخ الحجز: {dates[0]} إلى {dates[1]}"
                   if dates and dates[0] else "")
+    # v3: this unit's REAL official times, injected as a hard fact. Guests were told
+    # two different official check-in times because the number lived in the prose.
+    times_line = ""
+    if listing_id:
+        try:
+            _ch, _cm, _csrc = unit_checkin_time(listing_id)
+            _oh, _om, _osrc = unit_checkout_time(listing_id)
+            times_line = (f"\nوقت الدخول الرسمي لهذه الوحدة: {_fmt_hhmm(_ch, _cm)} · "
+                          f"وقت الخروج: {_fmt_hhmm(_oh, _om)}"
+                          f"\n(من بيانات الوحدة — لا تخمّن ولا تذكر أي رقم غيره)")
+        except Exception as _te:
+            print("unit times line error:", _te)
     facts = _knowledge_text.strip()
     facts_block = (f"معلومات معتمدة عن عوجا (استخدمها كمصدر الحقيقة وصحّح أي تعارض):\n{facts}\n\n"
                    if facts else "")
@@ -9111,7 +9238,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     _budget_chars = int(os.environ.get("ASSISTANT_PROMPT_BUDGET", "40000"))
     _fixed_len = sum(len(x or "") for x in (unit_guard, profile_block, guest_name, unit,
                                             status_line, stay_line, guide_line, dates_line,
-                                            own_price_line, early_block, late_block, code_block)) + 600
+                                            times_line, own_price_line, early_block,
+                                            late_block, code_block)) + 600
     _trimmed = []
     if _fixed_len + len(facts_block) + len(catalog_block) + len(history_text) > _budget_chars:
         if catalog_block:
@@ -9133,7 +9261,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     if _trimmed:
         print(f"assistant: prompt budget ({_budget_chars}ch) trimmed -> {', '.join(_trimmed)}")
     user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}{stay_line}\n{guide_line}{dates_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+            f"{status_line}{stay_line}\n{guide_line}{dates_line}{times_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
@@ -10305,10 +10433,46 @@ def _reset_early_checkin_decision(message_id, actor):
         return True
 
 
+def _record_official_checkin(record):
+    """(label, is_fallback) for THIS unit — never a hardcoded 3 PM / 4 PM."""
+    lid = record.get("original_listing_id") or record.get("listing_id")
+    h, m, src_ = unit_checkin_time(lid)
+    return _fmt_hhmm(h, m), (src_ == "fallback")
+
+
+def _early_ask_for_time(record):
+    """We matched an early-entry phrase but no usable hour. ASK — never invent one.
+    v2 substituted the literal words 'الوقت المطلوب' and sent them to guests."""
+    if _has_arabic(record.get("guest_text") or ""):
+        return ("حياك الله 🤍\n"
+                "قبل ما أتحقق لك من الجدول، أحتاج أعرف الساعة اللي تبي تدخل فيها بالضبط — "
+                "قول لي الوقت وأرجع لك بجواب واضح.")
+    return ("Hi 🤍\n"
+            "Before I check the schedule for you, I need the exact hour you'd like to "
+            "enter — tell me the time and I'll come back with a clear answer.")
+
+
+def _early_late_night_reply(record):
+    """A guest landing after midnight is not asking for the apartment at 3 AM."""
+    label = record.get("requested_label") or ""
+    if _has_arabic(record.get("guest_text") or ""):
+        return ("أبشر 🤍\n"
+                f"وصولك الساعة {label} ما فيه أي إشكال — الدخول ذاتي بالكامل والكود يشتغل "
+                "أي ساعة، ما تحتاج أحد يستقبلك.\n"
+                "الكود يوصلك قبل موعد دخولك، وتروح على الباب مباشرة.")
+    return ("Not a problem at all 🤍\n"
+            f"Arriving at {label} is completely fine — entry is fully self-service and your "
+            "code works at any hour, so nobody needs to meet you.\n"
+            "Your code reaches you before check-in, and you go straight to the door.")
+
+
 def _early_guest_reply(record, decision, reason=""):
     """Privacy-safe approval or rejection message for the guest."""
     is_ar = _has_arabic(record.get("guest_text") or record.get("guest") or "")
-    when = record.get("requested_label") or ("الوقت المطلوب" if is_ar else "your requested time")
+    when = record.get("requested_label") or ""
+    official, _fb = _record_official_checkin(record)
+    if decision == "approve" and not when:
+        return None          # never substitute a placeholder for a time we don't have
     if decision == "approve":
         if is_ar:
             return (f"أبشر 🤍 وافق المدير على تسجيل دخولك المبكر الساعة {when}. "
@@ -10319,10 +10483,10 @@ def _early_guest_reply(record, decision, reason=""):
     if is_ar:
         why = reason or "ترتيب الوحدة ما يسمح بالدخول قبل الوقت الرسمي"
         return (f"نعتذر منك، ما قدرنا نعتمد تسجيل الدخول المبكر: {why}. "
-                "يبقى وقت تسجيل الدخول الرسمي الساعة 3 مساءً.")
+                f"يبقى وقت تسجيل الدخول الرسمي الساعة {official}.")
     why = reason or "the apartment schedule does not allow entry before the official time"
     return (f"Sorry, we could not approve early check-in because {why}. "
-            "The official check-in time remains 3:00 PM.")
+            f"The official check-in time remains {official}.")
 
 
 def _redact_early_private_names(record, text):
@@ -10340,23 +10504,40 @@ def _redact_early_private_names(record, text):
 def _early_pending_reply(record):
     """Tell the guest a verified opening is possible but still needs approval."""
     is_ar = _has_arabic(record.get("guest_text") or "")
-    when = record.get("requested_label") or ("الوقت المطلوب" if is_ar else "your requested time")
-    proposed = record.get("proposed_unit")
+    when = record.get("requested_label") or ""
+    if not when:
+        return None          # no invented time — the caller asks the guest instead
+    # A DIFFERENT unit may only be named as an explicit swap offer. Six guests were
+    # told another apartment's name as if it were their own.
+    proposed = str(record.get("proposed_unit") or "").strip()
+    own = str(record.get("original_unit") or "").strip()
+    swap = bool(proposed) and proposed != own
     offhours = bool(record.get("offhours"))
+    back = next_work_start().strftime("%H:%M")
     if is_ar:
-        unit = f" في {proposed}" if proposed else ""
-        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة 11:00 صباحاً. "
+        prefix = (f"نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة {back}. "
                   if offhours else "")
+        if swap:
+            return (
+                f"{prefix}وحدتك الحالية ما تسمح بالدخول المبكر. عندنا **وحدة بديلة** "
+                f"({proposed}) ليلتها فاضية وتسمح بدخول أبكر — إذا تبي، أرفع طلب التحويل "
+                "للفريق وأرجع لك."
+            )
         return (
-            f"{prefix}تحققت من الجدول، ويظهر أن تسجيل الدخول المبكر الساعة {when}{unit} "
+            f"{prefix}تحققت من الجدول، ويظهر أن تسجيل الدخول المبكر الساعة {when} "
             "ممكن مبدئياً. رفعت الطلب للمدير الآن، لكن ما نقدر نعتمده إلا بعد موافقته. "
             "بنرسل لك القرار هنا فور اعتماده."
         )
-    unit = f" at {proposed}" if proposed else ""
     prefix = ("Sorry, our operations team is currently outside working hours and returns at "
-              "11:00 AM. " if offhours else "")
+              f"{back}. " if offhours else "")
+    if swap:
+        return (
+            f"{prefix}Your current unit can't take an early check-in. We do have an "
+            f"**alternative unit** ({proposed}) that's free the night before — if you'd "
+            "like, I'll put the transfer request to the team and come back to you."
+        )
     return (
-        f"{prefix}I checked the schedule, and early check-in at {when}{unit} appears possible. "
+        f"{prefix}I checked the schedule, and early check-in at {when} appears possible. "
         "I have sent the request to the manager, but it still needs manager approval. "
         "We will send the decision here as soon as it is approved."
     )
@@ -10366,15 +10547,16 @@ def _early_unavailable_reply(record):
     """Direct, privacy-safe answer when all relevant calendars are verified unavailable."""
     is_ar = _has_arabic(record.get("guest_text") or "")
     offhours = bool(record.get("offhours"))
+    official, _fb = _record_official_checkin(record)
     if is_ar:
         prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً. " if offhours else "")
         return (f"{prefix}تحققت من الجدول والخيارات المتاحة، وللأسف تسجيل الدخول المبكر "
-                "غير ممكن لهذا الحجز. يبقى وقت تسجيل الدخول الرسمي الساعة 3 مساءً.")
+                f"غير ممكن لهذا الحجز. يبقى وقت تسجيل الدخول الرسمي الساعة {official}.")
     prefix = ("Sorry, our operations team is currently outside working hours. "
               if offhours else "")
     return (f"{prefix}I checked the schedule and the available alternatives. Unfortunately, "
             "early check-in is not possible for this booking. The official check-in time "
-            "remains 3:00 PM.")
+            f"remains {official}.")
 
 
 def _early_alternatives_reply(record):
@@ -10397,7 +10579,8 @@ def _early_alternatives_reply(record):
         lines.append(" · ".join(bits))
     options = "\n".join(lines)
     if is_ar:
-        prefix = ("نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة 11:00 صباحاً. "
+        prefix = (f"نعتذر، فريق العمليات خارج ساعات العمل حالياً ويرجع الساعة "
+                  f"{next_work_start().strftime('%H:%M')}. "
                   if record.get("offhours") else "")
         return (
             f"{prefix}نعتذر، جدول الحجز في شقتك الحالية ما يسمح بالدخول المبكر. "
@@ -10407,7 +10590,7 @@ def _early_alternatives_reply(record):
             "وتغيير الوحدة وتسجيل الدخول المبكر يحتاجان موافقة المدير قبل التأكيد."
         )
     prefix = ("Our operations team is currently outside working hours and returns at "
-              "11:00 AM. " if record.get("offhours") else "")
+              f"{next_work_start().strftime('%H:%M')}. " if record.get("offhours") else "")
     return (
         f"{prefix}Sorry, the booking schedule for your current apartment does not allow early check-in. "
         "I verified these alternatives; each is available for your stay and free the night before:\n"
@@ -10617,6 +10800,12 @@ class EarlyDecisionConfirmView(discord.ui.View):
                 content="⚠️ ما قدرت أسجل القرار. السبب مطلوب عند الرفض.", view=None)
             return
         reply = _early_guest_reply(row, self.decision, row.get("reason"))
+        if not reply:
+            _permanent_once_release(decision_claim)
+            await interaction.response.edit_message(
+                content="⚠️ ما فيه وقت محدد في طلب الضيف — اسأله عن الساعة بالضبط قبل "
+                        "الاعتماد. ما انرسل شيء.", view=None)
+            return
         await interaction.response.edit_message(content="⏳ جاري إرسال القرار للضيف…", view=None)
         try:
             result = await asyncio.to_thread(
@@ -10660,7 +10849,7 @@ class EarlyCustomRejectModal(discord.ui.Modal, title="سبب رفض الدخول
     async def on_submit(self, interaction: discord.Interaction):
         row = _early_checkin_decisions.get(self.message_id) or {}
         reason = _early_reject_reason(row, "custom", str(self.reason.value))
-        preview = _early_guest_reply(row, "reject", reason)
+        preview = _early_guest_reply(row, "reject", reason) or "—"
         await interaction.response.send_message(
             "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
@@ -10688,7 +10877,7 @@ class EarlyRejectReasonSelect(discord.ui.Select):
             return
         row = _early_checkin_decisions.get(self.message_id) or {}
         reason = _early_reject_reason(row, code)
-        preview = _early_guest_reply(row, "reject", reason)
+        preview = _early_guest_reply(row, "reject", reason) or "—"
         await interaction.response.send_message(
             "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
@@ -10719,7 +10908,7 @@ class EarlyCheckinDecisionView(discord.ui.View):
                 f"تم اتخاذ القرار مسبقاً بواسطة {row.get('decided_by') or 'أحد الفريق'}.",
                 ephemeral=True)
             return
-        preview = _early_guest_reply(row, "approve")
+        preview = _early_guest_reply(row, "approve") or "—"
         await interaction.response.send_message(
             "متأكد تبي تعتمد وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(interaction.message.id, "approve"),
@@ -12332,7 +12521,9 @@ async def _post_early_decision_card(channel, item, record):
     embed.add_field(name="🕐 الطلب", value=request_line[:1000], inline=False)
     embed.add_field(name="🔒 ملخص الحجوزات الداخلي", value=_early_internal_summary(record)[:1000],
                     inline=False)
-    embed.add_field(name="📤 عند الاعتماد", value=_early_guest_reply(record, "approve")[:1000],
+    embed.add_field(name="📤 عند الاعتماد",
+                    value=(_early_guest_reply(record, "approve")
+                           or "— (ما فيه وقت محدد؛ اسأل الضيف عن الساعة)")[:1000],
                     inline=False)
     embed.add_field(name="❌ عند الرفض", value="اختر سبباً جاهزاً أو اكتب سبباً؛ سيظهر للضيف بعد تأكيد ثانٍ.",
                     inline=False)
@@ -12346,7 +12537,7 @@ async def _post_early_decision_card(channel, item, record):
     record["channel_id"] = target.id
     _early_checkin_decisions[msg.id] = record
     await asyncio.to_thread(_persist_early_state)
-    pending = _early_pending_reply(record)
+    pending = _early_pending_reply(record) or _early_ask_for_time(record)
     try:
         result = await asyncio.to_thread(
             send_guest_message, record["conversation_id"], pending, record["comm_type"])
@@ -12392,15 +12583,38 @@ async def handle_early_checkin_item(item, channel):
                 await post_assistant_card(channel, item, result, confirmed=True)
             return True
 
-    request = _early_checkin_request(item.get("guest_text"))
+    request = _early_checkin_request(
+        item.get("guest_text"),
+        unit_checkin_minutes(item.get("listing_id")) if item.get("listing_id") else None)
     if not request:
         return False
+    # v3: a 00:00–05:59 arrival is a LATE-NIGHT ARRIVAL, not an early check-in.
+    # Self-entry already answers it perfectly, so it never touches the calendar
+    # workflow and never becomes "3 AM entry appears possible".
+    if MUSAED_V3 and request.get("kind") == "late_night_arrival":
+        rec = {"guest_text": item.get("guest_text") or "",
+               "requested_label": request.get("requested_label") or ""}
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], _early_late_night_reply(rec),
+            item.get("comm_type") or "email", item)
+        log_event("guest", f"وصول متأخر · {item.get('guest')} · "
+                           f"{request.get('requested_label')}")
+        return True
+    # An early-entry phrase with no usable hour: ASK. Never substitute a placeholder.
+    if MUSAED_V3 and request.get("requested_minutes") is None:
+        rec = {"guest_text": item.get("guest_text") or ""}
+        await asyncio.to_thread(
+            send_guest_message, item["conversation_id"], _early_ask_for_time(rec),
+            item.get("comm_type") or "email", item)
+        metric_bump("v3_early_time_asked")
+        return True
     existing = _pending_early_for_conversation(item.get("conversation_id"))
     if existing:
         reminder = dict(existing)
         reminder["offhours"] = bool(item.get("_offhours"))
         await asyncio.to_thread(
-            send_guest_message, item["conversation_id"], _early_pending_reply(reminder),
+            send_guest_message, item["conversation_id"],
+            _early_pending_reply(reminder) or _early_ask_for_time(reminder),
             item.get("comm_type") or "email", item)
         return True
     context = await asyncio.to_thread(
@@ -12476,13 +12690,14 @@ async def handle_apartment_search_item(item, channel):
     if missing:
         reply = _apartment_qualification_reply(requirements, missing, arabic=is_ar)
         if item.get("_offhours"):
-            prefix = ("نعتذر، فريق العمليات خارج ساعات العمل ويرجع الساعة 11:00 صباحاً، لكن "
+            _back = next_work_start().strftime("%H:%M")
+            prefix = (f"نعتذر، فريق العمليات خارج ساعات العمل ويرجع الساعة {_back}، لكن "
                       if is_ar else
-                      "Sorry, our operations team returns at 11:00 AM, but ")
+                      f"Sorry, our operations team returns at {_back}, but ")
             reply = prefix + reply
         await asyncio.to_thread(
             send_guest_message, item["conversation_id"], reply,
-            item.get("comm_type") or "email")
+            item.get("comm_type") or "email", item)
         return True
 
     matches, conclusive = await asyncio.to_thread(_scan_apartment_matches, requirements)

@@ -212,7 +212,10 @@ class TestEarlyDecision(unittest.TestCase):
         reply = bot._early_guest_reply(
             record, "reject", "جدول التنظيف ما يسمح بالدخول في هذا الوقت")
         self.assertIn("جدول التنظيف", reply)
-        self.assertIn("3", reply)
+        # v3: the official time is READ from the listing, not hardcoded. Assert the
+        # rule (this unit's real check-in time is quoted), never a literal digit.
+        official, _ = bot._record_official_checkin(record)
+        self.assertIn(official, reply)
 
     def test_custom_rejection_reason_redacts_neighbor_names(self):
         record = {
@@ -288,7 +291,8 @@ class TestEarlyDecision(unittest.TestCase):
         }
         reply = bot._early_unavailable_reply(record)
         self.assertIn("غير ممكن", reply)
-        self.assertIn("3", reply)
+        official, _ = bot._record_official_checkin(record)
+        self.assertIn(official, reply)
         self.assertNotIn("PRIVATE PREVIOUS", reply)
 
 
