@@ -518,6 +518,9 @@ _RISK_CLASS_TERMS = (
     "discount", "complaint", "compensat", "door code", "access code",
     "unsafe", "injur", "emergency", "fire", "leak", "police", "lawyer",
     "bad review", "ready", "smell", "automated reply", "a bot", "a robot",
+    # emergencies — a guest reporting these must reach the team immediately
+    "حريق", "دخان", "إصابة", "اصابة", "إسعاف", "اسعاف", "محبوس", "مقفول علي",
+    "fire", "smoke", "injured", "locked out", "emergency",
 )
 # Share of would-be auto-sends diverted to a human purely to harvest an edit.
 # This is the ONLY edit signal record_learning() can ever receive: edited_by_team
@@ -13296,7 +13299,10 @@ async def process_assistant_item(it, channel):
     # v3 debounce: guests type in bursts ("هلا" then the real question 15s later).
     # v2 answered the greeting and never saw the question — 43 bare-greeting
     # replies in 90 days, including one to "Is the unit ready?!".
-    if MUSAED_V3:
+    # The debounce waits for a guest's follow-up. An emergency must not wait: a
+    # fire, an injury or a lockout should reach the team card immediately, so the
+    # sleep is skipped whenever the risk pre-filter fires.
+    if MUSAED_V3 and not _is_risk_class(it.get("guest_text")):
         _debounce = int(os.environ.get("ASSISTANT_DEBOUNCE_SEC", "12"))
         await asyncio.sleep(_debounce)
         try:
