@@ -122,13 +122,17 @@ def _nights(observations):
 
 def forecast_unit(own=None, district=None, bedroom=None, quality_index=1.0,
                   own_all=None, pool_all=None, month_num=None, rung2=None,
-                  factors=None):
+                  factors=None, portfolio=None):
     """The fallback ladder (§3.1).
 
         1. our own history for this unit and month
-        2. the same (district, bedrooms) pool, scaled by THIS unit's quality
-        3. the same bedrooms across all districts, scaled the same way
-        4. nothing — and then we say nothing
+        2. the unit's own recent record (rung chosen by the corpus)
+        3. the same (district, bedrooms) pool, scaled by THIS unit's quality
+        4. the same bedrooms across all districts, scaled the same way
+        5. EVERY unit we have data for — the last resort, and the reason a unit
+           with no recorded bedroom count still gets an answer instead of a
+           blank. It is a weak number and says so.
+        6. nothing — and then we say nothing
 
     A pool average describes the pool. Multiplying by the unit's quality index is
     what makes it a statement about this flat rather than about its neighbours.
@@ -155,7 +159,8 @@ def forecast_unit(own=None, district=None, bedroom=None, quality_index=1.0,
                     "own_obs": own_nights, "pool_obs": cand.get("n", 0),
                     "quality_index": qi}
 
-    for rows, basis in ((district, "district_pool"), (bedroom, "bedroom_pool")):
+    for rows, basis in ((district, "district_pool"), (bedroom, "bedroom_pool"),
+                        (portfolio, "portfolio_pool")):
         pf = forecast(rows)
         if pf:
             return {"adr": pf["adr"] * qi, "occ": pf["occ"], "basis": basis,
@@ -509,7 +514,7 @@ def _confidence(basis, own_obs, unanswered_count):
 
 
 def _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar, ejar_row,
-              today, paired_obs, reason):
+              today, paired_obs, reason, own_all_rows=None):
     """No price, and the reason why. A blank with a stated cause beats a number
     nobody should act on."""
     return {
@@ -523,12 +528,23 @@ def _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar, ejar_row,
                  "beta_version": attrs.BETA_VERSION, "paired_obs": paired_obs},
         "is_estimate": True, "label_ar": "تقدير", "label_en": "Estimate",
         "warnings": [reason],
+        # WHY there is no price, in numbers. «ما عندنا حجوزات كافية» is true and
+        # useless; a brand-new unit with three bookings in one month deserves to
+        # be told that, and told what would change it.
+        "shortfall": {
+            "own_month_nights": fc.get("own_obs") or 0,
+            "months_of_record": len([o for o in (own_all_rows or [])
+                                     if not o.get("partial")]),
+            "months_needed": MIN_RECENT_OBS,
+            "min_month_nights": MIN_OWN_OBS,
+        },
     }
 
 
 def price_unit(unit_id, month, own=None, district=None, bedroom=None,
                attr_values=None, cost_set=None, ejar_row=None, paired_obs=0,
-               today=None, own_all=None, pool_all=None, rung2=None, factors=None):
+               today=None, own_all=None, pool_all=None, rung2=None, factors=None,
+               portfolio=None):
     """THE ANSWER, and the reason for it.
 
     One producer, two surfaces: page.py renders the waterfall from `components`
@@ -544,7 +560,7 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
     fc = forecast_unit(own=own, district=district, bedroom=bedroom,
                        quality_index=q["mult"], own_all=own_all, pool_all=pool_all,
                        month_num=int(str(month)[5:7]) if month else None,
-                       rung2=rung2, factors=factors)
+                       rung2=rung2, factors=factors, portfolio=portfolio)
 
     base = base_rate(district=district, bedroom=bedroom)
     if fc["basis"] in ("own_recent", "own_seasonal") and fc["adr"]:
@@ -567,7 +583,8 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
     # price in one direction only is what keeps that true.
     if not live:
         return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
-                         ejar_row, today, paired_obs, "insufficient_history")
+                         ejar_row, today, paired_obs, "insufficient_history",
+                         own_all)
 
     # FINAL = clamp(max(FLOOR, MODEL), FLOOR, CEILING).
     bound_by = max(live, key=lambda k: live[k])
@@ -579,7 +596,8 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
         # difference — a number halfway between "we lose money" and "no guest
         # would pay it" is simply a number nobody should act on.
         return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
-                         ejar_row, today, paired_obs, "floor_above_ceiling")
+                         ejar_row, today, paired_obs, "floor_above_ceiling",
+                         own_all)
 
     capped = False
     if ceil_p is not None and final_raw > ceil_p:
@@ -590,7 +608,8 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
     price = round_to_50(final_raw, floor=floor_v, ceiling=ceil_p)
     if price is None:
         return _no_price(unit_id, month, fc, q, fl, gates, attrs, _ejar,
-                         ejar_row, today, paired_obs, "band_too_narrow")
+                         ejar_row, today, paired_obs, "band_too_narrow",
+                         own_all)
 
     # The waterfall starts at the FLOOR's own components and is carried up to the
     # number printed at the top of the page — one step for what the unit's
@@ -642,7 +661,7 @@ def price_unit(unit_id, month, own=None, district=None, bedroom=None,
         # would pay night-by-night. That is a signal about the model, not about
         # the unit.
         warnings.append("model_above_ceiling")
-    if fc["basis"] in ("district_pool", "bedroom_pool"):
+    if fc["basis"] in ("district_pool", "bedroom_pool", "portfolio_pool"):
         warnings.append("priced_from_pool")
     elif fc["basis"] in ("own_recent", "own_seasonal"):
         warnings.append("priced_from_own_recent")

@@ -84,6 +84,7 @@ def diagnose(month, today=None, unit_meta=None, years=None):
             "occ_pool": (pool_f or {}).get("occ"),
             "own_all": (st.get("all_obs") or {}).get(lid) or [],
             "rung2": st.get("rung2"), "factors": st.get("factors"),
+            "portfolio": st.get("portfolio") or [],
         })
 
     rep = _diag.run(units, cost_set=st["cost_set"], today=st["today"])
@@ -217,9 +218,15 @@ def month_state(month, force=False, today=None):
     bt = engine.backtest_methods(all_obs, all_obs, _pool_of)
     factors = engine.seasonal_factors(all_obs)
 
+    # The last-resort pool: every unit that has data for this month, whatever its
+    # size or district. A unit whose bedroom count Hostaway never recorded had no
+    # pool at all and therefore no price — this is the difference between "we
+    # cannot compare it" and "we will not answer".
+    portfolio = [o for rows in unit_rows.values() for o in rows]
+
     st = {"at": _now_ts(), "month": month, "today": today.isoformat(),
           "unit_meta": unit_meta, "unit_rows": unit_rows, "all_obs": all_obs,
-          "dpool": dpool, "bpool": bpool,
+          "dpool": dpool, "bpool": bpool, "portfolio": portfolio,
           "backtest": bt, "rung2": bt.get("rung2"), "factors": factors,
           "funnel": funnel, "dropped_partial": dropped_partial,
           "n_reservations_read": len(merged),
@@ -323,7 +330,8 @@ def price_one(lid, month, force=False, today=None):
         ejar_row=db.ejar_latest(d, bedrooms=b) if d and b else None,
         paired_obs=db.paired_obs_count(), today=st["today"],
         own_all=(st.get("all_obs") or {}).get(lid) or [],
-        rung2=st.get("rung2"), factors=st.get("factors"))
+        rung2=st.get("rung2"), factors=st.get("factors"),
+        portfolio=st.get("portfolio") or [])
     p["name"] = meta.get("name")
     p["public_name"] = meta.get("public_name")
     p["district"] = d
@@ -408,6 +416,7 @@ def units_report(month, force=False, today=None):
             "warnings": p.get("warnings") or [],
             "no_price_reason": (p.get("warnings") or ["unknown"])[0]
                                if p.get("price") is None else None,
+            "shortfall": p.get("shortfall"),
             "is_estimate": p.get("is_estimate"),
             "has_saved_quote": bool(p.get("saved_quote")),
             "pooled_range": p.get("pooled_range"),

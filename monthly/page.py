@@ -248,12 +248,18 @@ function basisLabel(basis){
   if(basis === 'own_history') return 'من سجل هالشقة نفسها';
   if(basis === 'district_pool') return 'من متوسط الحي — مو من هالشقة';
   if(basis === 'bedroom_pool') return 'من متوسط الحجم — مو من هالشقة';
+  if(basis === 'own_recent') return 'من سجل هالشقة الحديث';
+  if(basis === 'own_seasonal') return 'من سجل هالشقة + موسمية الحي';
+  if(basis === 'portfolio_pool') return 'من متوسط كل الشقق — تقدير خشن';
   return 'ما فيه بيانات كافية';
 }
 function basisPill(basis){
   if(basis === 'own_history') return '<span class="pill">سجلها</span>';
   if(basis === 'district_pool') return '<span class="pill pool">متوسط الحي</span>';
   if(basis === 'bedroom_pool') return '<span class="pill pool">متوسط الحجم</span>';
+  if(basis === 'own_recent') return '<span class="pill">سجلها الحديث</span>';
+  if(basis === 'own_seasonal') return '<span class="pill">سجلها + الموسم</span>';
+  if(basis === 'portfolio_pool') return '<span class="pill pool">متوسط الكل</span>';
   return '<span class="pill none">بدون بيانات</span>';
 }
 function confChip(c){
@@ -268,9 +274,19 @@ function boundSentence(b){
   if(b === 'ceiling') return 'وقفناه عند السقف: لازم يكون أرخص من حجز 30 ليلة وحدة وحدة، وإلا ما فيه سبب يأخذ الضيف العرض الشهري.';
   return '';
 }
-function noPriceReason(w){
+function noPriceReason(w, sf){
+  if(w === 'insufficient_history'){
+    if(sf && sf.months_of_record !== undefined){
+      if(sf.months_of_record === 0){
+        return 'ما عندنا ولا حجز مسجّل لهالشقة';
+      }
+      return 'عندنا ' + sf.months_of_record + ' شهر فقط من سجل هالشقة — ' +
+             'نحتاج ' + sf.months_needed + ' شهور على الأقل، أو حجوزات في نفس ' +
+             'الشهر من سنة فاتت';
+    }
+    return 'ما عندنا حجوزات كافية لهالشقة بهذا الشهر';
+  }
   var m = {
-    insufficient_history: 'ما عندنا حجوزات كافية لهالشقة بهذا الشهر',
     floor_above_ceiling: 'تكلفتنا أعلى من اللي يدفعه الضيف — ما ينفع تأجير شهري هذا الشهر',
     band_too_narrow: 'الفرق بين أقل سعر وأعلى سعر أضيق من 50 ريال — ما فيه مجال'
   };
@@ -300,7 +316,8 @@ function viewList(){
   for(var i = 0; i < q.rows.length; i++){
     var r = q.rows[i];
     if(r.price === null || r.price === undefined) none.push(r);
-    else if(r.basis === 'own_history') own.push(r);
+    else if(r.basis === 'own_history' || r.basis === 'own_recent' ||
+            r.basis === 'own_seasonal') own.push(r);
     else pooled.push(r);
   }
   own.sort(function(a, b){ return (b.price || 0) - (a.price || 0); });
@@ -330,7 +347,7 @@ function section(title, subtitle, rows, kind){
     h += '<td class="muted">' + he(r.district || '—') + '</td>';
     if(kind === 'none'){
       h += '<td class="n"><span class="pill none">—</span></td>';
-      h += '<td class="muted">' + he(noPriceReason(r.no_price_reason)) + '</td>';
+      h += '<td class="muted">' + he(noPriceReason(r.no_price_reason, r.shortfall)) + '</td>';
     } else if(kind === 'pool' && r.pooled_range){
       h += '<td class="n">تقريباً ' + sar(r.pooled_range.low) + ' – ' +
            sar(r.pooled_range.high) + '</td>';
@@ -384,7 +401,13 @@ function viewUnit(){
   if(p.price === null || p.price === undefined){
     h += '<div class="price">—</div>';
     h += '<div class="bound"><b>ما فيه تقدير لهالشقة هذا الشهر.</b><br>' +
-         he(noPriceReason((p.warnings || [])[0])) + '</div>';
+         he(noPriceReason((p.warnings || [])[0], p.shortfall)) + '</div>';
+    if(p.shortfall && p.shortfall.months_of_record !== undefined){
+      h += '<div class="quality">سجل هالشقة عندنا: <b>' + p.shortfall.months_of_record +
+           '</b> شهر · ليالي هذا الشهر: <b>' + p.shortfall.own_month_nights + '</b>' +
+           '<br>يصير لها تقدير أول ما توصل ' + p.shortfall.months_needed +
+           ' شهور من الحجوزات، أو تجيها حجوزات في نفس الشهر من سنة سابقة.</div>';
+    }
   } else {
     h += '<div class="price">' + sar(p.price) + ' <small>ريال / شهر</small>' +
          '<span class="est">' + he(p.label_ar || 'تقدير') + '</span></div>';

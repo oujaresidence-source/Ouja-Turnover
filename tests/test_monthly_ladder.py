@@ -235,3 +235,61 @@ class LadderUsesTheWinnerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LastRungTest(unittest.TestCase):
+    """TWN 13B: three bookings, all in one month, no recorded bedroom count.
+    It had no comparable pool, so it got no price at all — the difference between
+    "we cannot compare it" and "we will not answer"."""
+
+    def test_a_unit_with_no_district_or_size_pool_still_gets_an_answer(self):
+        port = [{"adr": 700, "occ": 0.7, "months_old": 1, "nights": 25}]
+        fc = engine.forecast_unit(own=[], district=[], bedroom=[], portfolio=port)
+        self.assertEqual(fc["basis"], "portfolio_pool")
+
+    def test_the_portfolio_pool_is_the_LAST_resort_not_a_shortcut(self):
+        port = [{"adr": 700, "occ": 0.7, "months_old": 1, "nights": 25}]
+        dist = [{"adr": 900, "occ": 0.8, "months_old": 1, "nights": 25}]
+        fc = engine.forecast_unit(own=[], district=dist, bedroom=[], portfolio=port)
+        self.assertEqual(fc["basis"], "district_pool")
+
+    def test_it_is_still_labelled_as_a_pool_price(self):
+        port = [{"adr": 700, "occ": 0.7, "months_old": 1, "nights": 25}]
+        p = engine.price_unit(1, "2026-08", own=[], district=[], bedroom=[],
+                              attr_values={}, portfolio=port)
+        self.assertIn("priced_from_pool", p["warnings"])
+
+    def test_with_nothing_anywhere_there_is_still_no_price(self):
+        p = engine.price_unit(1, "2026-08", own=[], district=[], bedroom=[],
+                              attr_values={}, portfolio=[])
+        self.assertIsNone(p["price"])
+
+
+class ShortfallIsSpecificTest(unittest.TestCase):
+    """«ما عندنا حجوزات كافية» is true and useless. A brand-new unit with three
+    bookings in one month deserves to be told that, and told what changes it."""
+
+    def test_no_price_carries_the_numbers_behind_it(self):
+        one_month = [{"month": "2026-06", "month_num": 6, "adr": 800, "occ": 0.6,
+                      "nights": 12, "months_old": 2, "partial": False}]
+        p = engine.price_unit(1, "2026-08", own=[], district=[], bedroom=[],
+                              attr_values={}, own_all=one_month, portfolio=[])
+        self.assertIsNone(p["price"])
+        sf = p["shortfall"]
+        self.assertEqual(sf["months_of_record"], 1)
+        self.assertEqual(sf["months_needed"], engine.MIN_RECENT_OBS)
+
+    def test_a_unit_with_nothing_at_all_reports_zero_months(self):
+        p = engine.price_unit(1, "2026-08", own=[], district=[], bedroom=[],
+                              attr_values={}, own_all=[], portfolio=[])
+        self.assertEqual(p["shortfall"]["months_of_record"], 0)
+
+    def test_three_months_is_enough_to_stop_being_a_shortfall(self):
+        three = [{"month": "2026-0%d" % m, "month_num": m, "adr": 800, "occ": 0.7,
+                  "nights": 20, "months_old": 8 - m, "partial": False}
+                 for m in (4, 5, 6)]
+        p = engine.price_unit(1, "2026-08", own=[], district=[], bedroom=[],
+                              attr_values={}, own_all=three, rung2="recent",
+                              portfolio=[])
+        self.assertIsNotNone(p["price"])
+        self.assertEqual(p["basis"], "own_recent")

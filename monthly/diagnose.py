@@ -128,7 +128,7 @@ def run(units, cost_set=None, today=None):
             attr_values=u.get("attr_values") or {}, cost_set=c,
             ejar_row=u.get("ejar_row"), today=today,
             own_all=u.get("own_all") or [], rung2=u.get("rung2"),
-            factors=u.get("factors"))
+            factors=u.get("factors"), portfolio=u.get("portfolio") or [])
         results.append(p)
         d = p.get("data") or {}
         nightly = (p.get("floor_detail") or {}).get("nightly") or {}
