@@ -523,6 +523,9 @@ _RISK_CLASS_TERMS = (
 # This is the ONLY edit signal record_learning() can ever receive: edited_by_team
 # was False on all 2,402 rows because the team never saw a draft.
 ASSISTANT_REVIEW_SAMPLE_PCT = int(os.environ.get("ASSISTANT_REVIEW_SAMPLE_PCT", "15"))
+# Attribution for a promise Musaed made with nobody watching. The leaderboard
+# groups by promised_by, so these surface as their own row — which is the point.
+MUSAED_AUTO_PROMISER = "مساعد (تلقائي)"
 
 
 def _intent_is_auto_safe(intent, item=None):
@@ -8868,8 +8871,73 @@ def _guest_stay_state(checkin, checkout):
             f"الضيف **نازل حالياً** في الوحدة منذ {(today - a).days} ليلة (وصل {a.isoformat()}"
             + (f"، يغادر {d.isoformat()})." if d else ")."))
 
+# ---------------------------------------------------------------------------
+# MUSAED v3 — promise rate limit + open-promise awareness.
+# "الفريق بيتواصل معك" was 21.6% of everything Musaed said: 518 promises, 95 of
+# them never kept. The owner's rule was that Musaed must not commit to anything;
+# it committed anyway, and because AUTO-sends were excluded from the ledger those
+# commitments were invisible. Prevention AND tracking, not one or the other.
+# ---------------------------------------------------------------------------
+MUSAED_PROMISE_COOLDOWN_H = float(os.environ.get("MUSAED_PROMISE_COOLDOWN_H", "6"))
+_PROMISE_RECENT_FILE = "promise_recent.json"
+_promise_recent = None          # conversation_id -> epoch seconds of last promise
+_promise_recent_lock = threading.Lock()
+
+
+def _promise_recent_map():
+    global _promise_recent
+    if _promise_recent is None:
+        try:
+            _promise_recent = dict(_load_json(_PROMISE_RECENT_FILE, {}) or {})
+        except Exception:
+            _promise_recent = {}
+    return _promise_recent
+
+
+def _promise_open_recently(conversation_id):
+    """(True, minutes_ago, 'HH:MM') when this chat already has a fresh promise."""
+    cid = str(conversation_id or "")
+    if not cid:
+        return False, 0, ""
+    ts = _promise_recent_map().get(cid)
+    if not ts:
+        return False, 0, ""
+    age_min = (time.time() - float(ts)) / 60.0
+    if age_min >= MUSAED_PROMISE_COOLDOWN_H * 60:
+        return False, 0, ""
+    when = datetime.fromtimestamp(float(ts), TZ).strftime("%H:%M")
+    return True, int(age_min), when
+
+
+def _promise_mark(conversation_id):
+    cid = str(conversation_id or "")
+    if not cid:
+        return
+    with _promise_recent_lock:
+        m = _promise_recent_map()
+        m[cid] = time.time()
+        cutoff = time.time() - MUSAED_PROMISE_COOLDOWN_H * 3600 * 4
+        for k in [k for k, v in m.items() if float(v or 0) < cutoff]:
+            m.pop(k, None)
+        try:
+            _save_json(_PROMISE_RECENT_FILE, m)
+        except Exception as e:
+            print("promise_recent save error:", e)
+
+
+def _promise_state_line(conversation_id):
+    """The prompt block that stops Musaed repeating a promise it already made."""
+    has, mins, when = _promise_open_recently(conversation_id)
+    if not has:
+        return ""
+    return (f"\n⚠️ عندك وعد مفتوح لهذا الضيف من {when} (قبل {mins} دقيقة). "
+            f"ممنوع تكرر وعد التواصل.\n"
+            f"بدلاً منه: قل له إن طلبه مرفوع من {when} وإنك متابعه، واذكر المهلة.")
+
+
 def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False,
-                 dates=None, listing_id=None, reservation_id=None, profile_key=None):
+                 dates=None, listing_id=None, reservation_id=None, profile_key=None,
+                 conversation_id=None):
     """Call Claude to draft a reply. Returns parsed dict or None on failure.
     If profile_key is provided AND the profile has prior stays / summaries,
     the bot greets them as a returning guest and references past context."""
@@ -8892,6 +8960,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                   if dates and dates[0] else "")
     # v3: this unit's REAL official times, injected as a hard fact. Guests were told
     # two different official check-in times because the number lived in the prose.
+    promise_line = (_promise_state_line(conversation_id)
+                    if (MUSAED_V3 and conversation_id) else "")
     times_line = ""
     if listing_id:
         try:
@@ -9238,8 +9308,8 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     _budget_chars = int(os.environ.get("ASSISTANT_PROMPT_BUDGET", "40000"))
     _fixed_len = sum(len(x or "") for x in (unit_guard, profile_block, guest_name, unit,
                                             status_line, stay_line, guide_line, dates_line,
-                                            times_line, own_price_line, early_block,
-                                            late_block, code_block)) + 600
+                                            times_line, promise_line, own_price_line,
+                                            early_block, late_block, code_block)) + 600
     _trimmed = []
     if _fixed_len + len(facts_block) + len(catalog_block) + len(history_text) > _budget_chars:
         if catalog_block:
@@ -9261,7 +9331,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
     if _trimmed:
         print(f"assistant: prompt budget ({_budget_chars}ch) trimmed -> {', '.join(_trimmed)}")
     user = (f"{unit_guard}{facts_block}{catalog_block}{profile_block}Guest name: {guest_name}\nUnit: {unit}\n"
-            f"{status_line}{stay_line}\n{guide_line}{dates_line}{times_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
+            f"{status_line}{stay_line}\n{guide_line}{dates_line}{times_line}{promise_line}{own_price_line}{early_block}{late_block}{code_block}\n\n"
             f"Conversation so far (oldest first, last line is the guest's new message):\n"
             f"{history_text}\n\nDraft your reply as the JSON object.")
     # Always use the premium model for guest drafts — Haiku produces too many
@@ -12289,6 +12359,14 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             # learning: auto-sent at high confidence (still useful — confirms the
             # bot's wording on simple replies, helps reinforce the pattern)
             record_learning(item, reply, reply, via="auto", approver="(auto)")
+            # v3: an unattended promise is still a promise. v2 excluded auto-sends
+            # from the ledger, which is why 95 of 518 promises were never kept.
+            if MUSAED_V3 and _pk_enabled():
+                try:
+                    await asyncio.to_thread(
+                        _pk_record_send, item, reply, MUSAED_AUTO_PROMISER, "")
+                except Exception as _pe:
+                    print("promise auto-record error:", _pe)
             embed = discord.Embed(title=f"⚡ رد تلقائي · {g} · {item['unit']}", color=0x3BA55D)
             embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1000], inline=False)
             embed.add_field(name="✅ تم الرد تلقائياً (Stage 1)", value=reply[:1000], inline=False)
@@ -12813,7 +12891,8 @@ async def process_assistant_item(it, channel):
     result = await asyncio.to_thread(
         claude_draft, it["guest"], it["unit"], it["history"], guide, confirmed,
         (it.get("checkin"), it.get("checkout")), it.get("listing_id"),
-        it.get("reservation_id"), it.get("guest_profile_key"))
+        it.get("reservation_id"), it.get("guest_profile_key"),
+        it.get("conversation_id"))
     if not result:
         result = _assistant_failure_result("Anthropic unavailable or invalid response")
         try:
@@ -65502,11 +65581,26 @@ def _pk_record_send(item, text, approver_name, approver_id):
         return []
     out = []
     now = datetime.now(TZ).replace(tzinfo=None)
+    # v3: an unattended promise is still a promise. It is tagged so the leaderboard
+    # shows Musaed's own row, and rate-limited so one chat cannot collect a pile of
+    # identical "the team will contact you" commitments.
+    _is_auto = (approver_name or "") == MUSAED_AUTO_PROMISER
+    _cid = str((item or {}).get("conversation_id") or "")
+    if MUSAED_V3 and _is_auto and found:
+        _has, _mins, _when = _promise_open_recently(_cid)
+        if _has:
+            metric_bump("v3_promise_suppressed")
+            print(f"[promise] auto promise suppressed · conv {_cid} · "
+                  f"one already open since {_when}")
+            return []
     for p in found:
         try:
-            due = _pk.engine.due_from_hint(p.get("due_hint"), now)
+            _hint = p.get("due_hint")
+            if MUSAED_V3 and _is_auto and not (_hint or "").strip():
+                _hint = "45 minutes" if is_within_working_hours() else "tomorrow morning"
+            due = _pk.engine.due_from_hint(_hint, now)
             pid = _pk.db.upsert({
-                "source": "assistant",
+                "source": ("musaed_auto" if (MUSAED_V3 and _is_auto) else "assistant"),
                 "conversation_id": str((item or {}).get("conversation_id") or ""),
                 "listing_id": str((item or {}).get("listing_id") or "") or None,
                 "apartment": (item or {}).get("unit") or "",
@@ -65517,6 +65611,8 @@ def _pk_record_send(item, text, approver_name, approver_id):
                 "quote": (text or "")[:280],
                 "category": p["category"], "due_at": due})
             out.append(pid)
+            if MUSAED_V3 and _is_auto:
+                _promise_mark(_cid)
             log_event("assistant", f"🤝 وعد جديد ({p['category']}) · {(item or {}).get('unit') or ''} · {approver_name}")
         except Exception as e:
             print("promise record error:", e)
