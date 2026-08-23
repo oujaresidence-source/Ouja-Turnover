@@ -253,3 +253,42 @@ invent per-view colors.
 - Keep the bot **stable** — it runs the live business. Prefer additive, reversible changes.
 - After changes pass verification, **commit with a clear message and push** (this triggers
   the Railway redeploy). Tell the owner in plain language what changed and what to check.
+
+## «مساعد» v3 — the outbound firewall and the risk gate
+Musaed's language was already solved; its **governance** was not. Nearly every failure was a rule
+that existed only as prose in `ASSISTANT_RULES` with nothing in code enforcing it. v3 converts the
+rules that matter into controls. **A prompt is a preference; code is a control.**
+- **`outbound_firewall(body, item)` lives in `send_guest_message` (bot.py), above the dedup claim.**
+  That is the ONLY point both auto-send channels converge — `post_assistant_card` (the LLM path) and
+  `handle_early_checkin_item` (a DETERMINISTIC path that sends directly, with no confidence gate).
+  Putting a guard anywhere else guards half the traffic. Six rules: CODE_LEAK, READINESS_CLAIM,
+  PLACEHOLDER, LANG_MISMATCH, WRONG_UNIT block; DOUBLE_SIGN strips; dialect only WARNS.
+  It **fails CLOSED** — an exception blocks. Blocked drafts return `SEND_FIREWALL_BLOCKED` and drain
+  to Discord via `firewall_block_drain` as a red card + an approval card. Never a silent no-op.
+- **The readiness carve-out is load-bearing.** A readiness word blocks only when a unit referent
+  (`وحدتك/شقتك/your unit/…`) is in the SAME sentence, so a general turnover explanation still sends.
+  Do not "simplify" that to a plain word match — it would gag every honest explanation.
+- **Auto-send is gated on blast radius, not confidence:** `action == "auto"` is honoured, plus the
+  `AUTO_SAFE_INTENTS` ALLOW-list (a deny-list fails open on new intents) and `_is_risk_class()`,
+  which reads the RAW guest text and never trusts the model's own intent label. Off-hours no longer
+  forces auto-send — it now pings ops instead. 15% of would-be auto-sends divert to a human to
+  harvest an edit; that sample is the ONLY signal `record_learning` ever gets.
+- **Times are read per-listing** (`unit_checkin_time` / `unit_checkout_time`, 6h cache) and injected
+  into the draft prompt. `_OFFICIAL_CHECKIN_MINUTES` is deleted — do not reintroduce a hardcoded
+  check-in time; a test asserts it stays out of the source.
+- **00:00–05:59 with an AM/dawn marker is `late_night_arrival`, not an early check-in.** An unmarked
+  small hour ("check in is at 3") is AMBIGUOUS and yields no time at all. Never invent a time: a
+  missing hour makes Musaed ASK (the old `or "الوقت المطلوب"` fallback reached real guests).
+- **Auto-sent promises now enter the EXISTING `promises/` ledger** tagged `source="musaed_auto"`,
+  attributed to `MUSAED_AUTO_PROMISER`, rate-limited to one per conversation per 6h. This AMENDS the
+  old rule in `promises/__init__.py` at the owner's direction — Musaed promised anyway, and an
+  untracked promise is worse than a tracked one. `promises/` itself is unmodified; v3 only calls it.
+- **Inquiry pricing:** `_dates_from_text()` parses dates from what the guest TYPED, because `dates`
+  came from a reservation an inquiry does not have. Unparseable → `(None, None, "low")` and Musaed
+  asks. Never guess a date — a guessed date is a wrong price. Pre-booking privacy is UNCHANGED.
+- **Env (every default is correct — nothing to set in Railway):** `MUSAED_V3=1` (0 reverts every
+  behavioural change without a rollback), `ASSISTANT_REVIEW_SAMPLE_PCT=15`, `ASSISTANT_DEBOUNCE_SEC=12`,
+  `MUSAED_PROMISE_COOLDOWN_H=6`, `MUSAED_NIGHTLY_EVAL=1` (runs 03:20 — 03:00 is the business snapshot).
+- **Verify with:** `python3 -m unittest discover -s tests -p "test_*.py"` (2,811 tests) **and**
+  `python3 eval_musaed.py --selftest`. `bot`'s firewall and `eval_musaed`'s gates are pinned to the
+  same verdicts by `TestDetectorParity` — change one, change both.
