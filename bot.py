@@ -1098,6 +1098,39 @@ def stale_stamp(payload, built_ts):
         pass
     return out
 
+# ---- the web lane: a guest page must never queue behind a bot job ------------
+# asyncio.to_thread runs EVERYTHING on one shared default pool. Background work
+# (Hostaway scans, PDF renders, a thread parked in the throttle above) can hold
+# every worker in that pool for minutes, and each web handler that used
+# to_thread then queued behind them — never answering at all. That is exactly
+# what froze /guide/data.json, /api/stay/* and /api/monthly/* on 2026-08-23
+# while the pages themselves still served in 0.7s: the HTML arrived, the data
+# behind it never did, and every guest saw «جارٍ التحميل» forever.
+# Web handlers now run on their own pool, so bot work cannot reach them.
+# 16 workers vs the monthly search's own asyncio.Semaphore(8): even the
+# heaviest guest search leaves half the lane free for everyone else.
+WEB_POOL_WORKERS = int(os.environ.get("WEB_POOL_WORKERS", "16"))
+_web_pool = ThreadPoolExecutor(max_workers=WEB_POOL_WORKERS,
+                               thread_name_prefix="ouja-web")
+
+async def web_thread(fn, *args, **kwargs):
+    """asyncio.to_thread, but on the web pool. Use in REQUEST handlers only."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_web_pool, lambda: fn(*args, **kwargs))
+
+
+def _pool_snapshot(pool):
+    """Depth of a ThreadPoolExecutor without disturbing it. Private attributes,
+    so every read is guarded — a diagnostic must never be able to break a page."""
+    out = {"workers": None, "max_workers": None, "queued": None}
+    try:
+        out["max_workers"] = pool._max_workers
+        out["workers"] = len(pool._threads)
+        out["queued"] = pool._work_queue.qsize()
+    except Exception:
+        pass
+    return out
+
 def run_bounded(key, fn, budget_s=None):
     """Single-flighted fn with a deadline. Returns (True, value) when it finished
     in time, or (False, None) — in which case the work CONTINUES in the background
@@ -1122,6 +1155,41 @@ def run_bounded(key, fn, budget_s=None):
     if "e" in box:
         raise box["e"]
     return True, box.get("v")
+
+
+def thread_health():
+    """What is holding the machine right now. Read-only, cheap, no I/O.
+    Written after 2026-08-23, when the whole guest site went silent for hours
+    and there was no way to look inside a running container to see why."""
+    loop = None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    default = getattr(loop, "_default_executor", None) if loop else None
+    names = defaultdict(int)
+    for t in threading.enumerate():
+        names[(t.name or "?").rsplit("-", 1)[0]] += 1
+    with _ha_bucket_lock:
+        window = len(_ha_bucket_times)
+    return {
+        "threads_total": threading.active_count(),
+        "threads_by_name": dict(sorted(names.items(), key=lambda kv: -kv[1])[:12]),
+        "default_pool": _pool_snapshot(default) if default is not None else "unused",
+        "web_pool": _pool_snapshot(_web_pool),
+        "guide_pool": (_pool_snapshot(_guide.routes._pool)
+                       if _HAS_GUIDE and hasattr(_guide, "routes") else "n/a"),
+        "hostaway": {"in_10s_window": window, "cap": HOSTAWAY_MAX_PER_10S,
+                     **_ha_throttle_stats},
+    }
+
+
+async def _api_health_threads(request):
+    """GET /api/health/threads — token-gated, read-only. If a page ever hangs
+    again: a queued number that keeps climbing names the jammed pool."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    return _json({"ok": True, **thread_health()})
 
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
@@ -57136,7 +57204,7 @@ def _match_stats(days=30):
                            if funnel["start"] else 0.0)}
 
 async def _api_stay_match(request):
-    out = await asyncio.to_thread(_match_run, dict(request.query))
+    out = await web_thread(_match_run, dict(request.query))
     return _json({"ok": True, **out})
 
 async def _api_stay_match_stats(request):
@@ -57156,13 +57224,13 @@ async def _api_stay_config(request):
 
 async def _api_stay_search(request):
     q = request.query
-    out = await asyncio.to_thread(_gw_search, q.get("check_in"), q.get("check_out"),
+    out = await web_thread(_gw_search, q.get("check_in"), q.get("check_out"),
                                   q.get("guests"), q.get("type"), q.get("area"),
                                   q.get("neighborhood"), q.get("tags"))
     return _json({"ok": True, **out})
 
 async def _api_stay_featured(request):
-    out = await asyncio.to_thread(_gw_featured, 6)
+    out = await web_thread(_gw_featured, 6)
     return _json({"ok": True, **out})
 
 async def _api_stay_listing(request):
@@ -57172,7 +57240,7 @@ async def _api_stay_listing(request):
     pub = _gw_listing_public(snap, ov)
     ci, co = request.query.get("check_in"), request.query.get("check_out")
     if ci and co and _gw_valid_dates(ci, co):
-        avail = await asyncio.to_thread(unit_availability_price, snap.get("id"), ci, co)
+        avail = await web_thread(unit_availability_price, snap.get("id"), ci, co)
         if avail:
             pub["available"] = avail.get("available")
             pub["nights"] = avail.get("nights")
@@ -58839,8 +58907,9 @@ def _monthly_search_sync(move_in=None, months=None, beds=None, typ=None, area=No
 
 async def _monthly_search_async(move_in=None, months=None, beds=None, typ=None, area=None,
                                 neighborhood=None, tags=None, guests=None):
-    return await asyncio.to_thread(_monthly_search_sync, move_in, months, beds, typ, area,
-                                   neighborhood, tags, guests)
+    # web_thread on purpose: a guest search must never queue behind bot jobs (2026-08-23).
+    return await web_thread(_monthly_search_sync, move_in, months, beds, typ, area,
+                            neighborhood, tags, guests)
 
 def _monthly_rating_of(snap):
     """(rating, reviews_count) for a snap, (0.0, 0) when unknown."""
@@ -60083,7 +60152,7 @@ async def _api_monthly_config(request):
     return _json({"ok": True, **_monthly_cfg_public()})
 
 async def _api_monthly_featured(request):
-    out = await asyncio.to_thread(_monthly_featured, 6)
+    out = await web_thread(_monthly_featured, 6)
     return _json({"ok": True, **out})
 
 async def _api_monthly_search(request):
@@ -60102,14 +60171,14 @@ async def _api_monthly_listing(request):
     if not snap:
         return _json({"ok": False, "listing": None}, 404)
     mi, mo = request.query.get("move_in"), request.query.get("months")
-    card = await asyncio.to_thread(_monthly_card, snap, ov, mi, mo)
+    card = await web_thread(_monthly_card, snap, ov, mi, mo)
     return _json({"ok": True, "listing": card})
 
 async def _api_monthly_quote(request):
     snap, ov = _gw_find_by_slug_or_id(request.query.get("id", ""))
     if not snap:
         return _json({"ok": False, "quote": None}, 404)
-    q = await asyncio.to_thread(monthly_quote, snap.get("id"),
+    q = await web_thread(monthly_quote, snap.get("id"),
                                 request.query.get("move_in"), request.query.get("months"), snap)
     return _json({"ok": True, "quote": q})
 
@@ -61891,6 +61960,7 @@ async def start_web_server():
         app.router.add_get("/invest", _handle_invest)          # standalone investor ROI deck
         app.router.add_get("/api/invest/link", _api_invest_link)    # admin: copy the investor URL
         app.router.add_post("/api/invest/link", _api_invest_link)   # admin: regenerate (kills old links)
+        app.router.add_get("/api/health/threads", _api_health_threads)  # token-gated diagnostic
         app.router.add_get("/api/overview", _api_overview)
         app.router.add_get("/api/revenue", _api_revenue)
         app.router.add_get("/api/pricing", _api_pricing)

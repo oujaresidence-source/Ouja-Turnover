@@ -25,6 +25,7 @@ import os
 import re
 import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -91,8 +92,36 @@ async def page(request):
                              headers={"Cache-Control": "no-cache"})
 
 
+# The guide's OWN two threads. data.json used asyncio.to_thread — the pool every
+# background job shares — so when a Hostaway scan or a stuck PDF held every worker
+# there, this request queued behind them and the guest page spun forever
+# (2026-08-23). Nothing outside the guide can occupy these two.
+_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ouja-guide")
+_refreshing = threading.Event()
+
+
+def _refresh_cache():
+    try:
+        db.public_records_fresh()
+    except Exception as e:
+        print("guide data.json refresh error:", e)
+    finally:
+        _refreshing.clear()
+
+
 async def data_json(request):
-    recs = await asyncio.to_thread(db.public_records)
+    """Served from memory. Stale-while-revalidate: a warm cache answers instantly
+    and the rebuild happens behind the request, so a slow DB delays nobody."""
+    recs, stale = db.public_records_cached()
+    if recs is None:                                    # cold (first call after boot)
+        recs = await asyncio.get_running_loop().run_in_executor(
+            _pool, db.public_records_fresh)
+    elif stale and not _refreshing.is_set():
+        _refreshing.set()
+        try:
+            _pool.submit(_refresh_cache)                # not awaited on purpose
+        except Exception:                               # pool gone: keep serving,
+            _refreshing.clear()                         # and stay willing to retry
     return HOST.json_response(recs)
 
 

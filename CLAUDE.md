@@ -96,6 +96,16 @@ Behavior flags:
    produced a wrong owner statement: the 18,842-instead-of-48,114 bug, fixed 2026-06-10).
 5. **Editing this huge file is error-prone.** Make minimal, targeted edits. After ANY edit,
    re-view the surrounding code before the next edit (don't edit from stale memory).
+6. **Request handlers use `web_thread(...)`, NEVER `asyncio.to_thread(...)`.** `to_thread` runs
+   on the ONE default pool that every bot job shares (Hostaway scans, throttle sleeps, PDF renders).
+   When that pool is full a web handler queues behind it and never answers — the page HTML still
+   serves in 0.7s but the data behind it never arrives, and the guest sees «جارٍ التحميل» forever
+   (guide/h8-vlg on 2026-08-23, guide/b13-twn on 2026-09-05 because the fix sat unmerged).
+   The guide serves `data.json` from its own 2-thread pool + RAM cache (`guide/routes.py`).
+   `tests/test_web_lane.py` fails the build if any guest handler touches `to_thread`; add every
+   NEW guest-facing handler to its `GUEST_HANDLERS` list. `GET /api/health/threads` shows which
+   pool is jammed. Rule of thumb when a page hangs: compare a to_thread endpoint against a
+   loop-only one (e.g. `/team-calendar`) — if only the first hangs, it is this.
 
 ## Hostaway API notes (confirmed working)
 - Auth: `POST /v1/accessTokens` (client_credentials) → bearer token. Helpers `api_get` /

@@ -19,8 +19,8 @@
   produce that dict. DO NOT modify this renderer to fit your data.
 ═══════════════════════════════════════════════════════════════════════════
 """
-import atexit, base64, pathlib, threading
-from concurrent.futures import ThreadPoolExecutor
+import atexit, base64, os, pathlib, threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from playwright.sync_api import sync_playwright
 
 FONT_DIR = pathlib.Path(__file__).parent / "fonts"
@@ -38,6 +38,7 @@ FONT_DIR = pathlib.Path(__file__).parent / "fonts"
 _pw_lock  = threading.Lock()
 _pw_state = {"pw": None, "browser": None}
 _pw_pool  = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ouja-pdf")
+PDF_TIMEOUT_S = int(os.environ.get("PDF_TIMEOUT_S", "180"))
 
 
 def _pw_browser():
@@ -1455,5 +1456,16 @@ def render_report(cfg: dict, out_path) -> pathlib.Path:
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     html_tmp = pdf_path.parent / "_report.html"
     html_tmp.write_text(HTML, encoding="utf-8")
-    _pw_pool.submit(_pw_print, html_tmp, pdf_path).result()
+    # A bare .result() waits FOREVER. render_report is called from thread-pool
+    # workers, so one wedged Chromium used to park caller after caller until the
+    # pool had nothing left for anyone — the whole app goes quiet. A render that
+    # normally takes seconds gets three minutes, then the caller is released and
+    # the browser is dropped so the next attempt launches a clean one.
+    try:
+        _pw_pool.submit(_pw_print, html_tmp, pdf_path).result(timeout=PDF_TIMEOUT_S)
+    except FuturesTimeout:
+        _pw_state["browser"] = None
+        raise RuntimeError(
+            "PDF render timed out after %ss — the shared Chromium was dropped; "
+            "try again." % PDF_TIMEOUT_S)
     return pdf_path

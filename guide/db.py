@@ -6,6 +6,7 @@ import datetime
 import json
 import sqlite3
 import threading
+import time
 from contextlib import closing
 
 from brain import db as _bdb
@@ -83,6 +84,7 @@ def execute(sql, args=()):
     with closing(_bdb.connect()) as cx:
         cur = cx.execute(sql, args)
         cx.commit()
+        _bump_public_version()          # any guide write invalidates data.json
         return cur.lastrowid
 
 
@@ -160,9 +162,41 @@ def media_map(unit):
         return {}
 
 
+# ---- data.json cache --------------------------------------------------------
+# The guest guide page fetches /guide/data.json on EVERY open, and building it
+# used to cost 1 + N database connections (one per unit, ~68 of them) on the
+# shared thread pool. On 2026-08-23 that pool jammed and the page hung on
+# «جارٍ التحميل» for hours. These records change only when the owner edits the
+# guide, so we keep the last build in memory: a bump on every write and a TTL
+# floor, and the page is served from RAM without touching the DB at all.
+PUBLIC_TTL = 120.0                      # seconds before a quiet rebuild
+_pub_cache = {"recs": None, "ts": 0.0, "ver": -1}
+_pub_lock = threading.Lock()
+_pub_version = 0
+
+
+def _bump_public_version():
+    global _pub_version
+    with _pub_lock:
+        _pub_version += 1
+
+
+def public_version():
+    with _pub_lock:
+        return _pub_version
+
+
+def _faq_rows(status="published"):
+    """Every published entry ONCE, in the same (sort, id) order the per-unit
+    query returned — filtering this list per unit yields an identical result."""
+    return q("SELECT slug, section, title_ar, title_en, body_ar, body_en "
+             "FROM guide_entries WHERE status=? ORDER BY sort, id", (status,))
+
+
 def public_records(media_url_base="/guide/media"):
     """The data.json shape the live site renders — one flat record per active
     unit, pics swapped to our mirrored copy when we have one, plus faq[]."""
+    rows = [e for e in _faq_rows() if e.get("section") == "faq"]
     out = []
     for u in units(active_only=True):
         mm = media_map(u)
@@ -176,8 +210,38 @@ def public_records(media_url_base="/guide/media"):
         rec["wifi_name"] = u.get("wifi_name") or ""
         rec["wifi_pass"] = u.get("wifi_pass") or ""
         rec["notes"] = u.get("notes") or ""
+        slug = u["slug"]
         rec["faq"] = [{"title_ar": e.get("title_ar") or "", "title_en": e.get("title_en") or "",
                        "body_ar": e.get("body_ar") or "", "body_en": e.get("body_en") or ""}
-                      for e in entries_for(u["slug"]) if e.get("section") == "faq"]
+                      for e in rows
+                      if e.get("slug") == slug or not (e.get("slug") or "").strip()]
         out.append(rec)
     return out
+
+
+def public_records_fresh(media_url_base="/guide/media"):
+    """Rebuild from the DB, fill the cache, return the records. BLOCKING —
+    call it off the event loop."""
+    ver = public_version()
+    recs = public_records(media_url_base)
+    if media_url_base == "/guide/media":            # only the served shape is cached
+        with _pub_lock:
+            _pub_cache["recs"], _pub_cache["ts"], _pub_cache["ver"] = recs, time.time(), ver
+    return recs
+
+
+def public_records_cached():
+    """(records_or_None, stale) — a pure memory read. NEVER touches the DB, so
+    it cannot block, cannot queue, and cannot be starved by anything."""
+    with _pub_lock:
+        recs, ts, ver, cur = (_pub_cache["recs"], _pub_cache["ts"],
+                              _pub_cache["ver"], _pub_version)
+    if recs is None:
+        return None, True
+    return recs, (ver != cur or (time.time() - ts) > PUBLIC_TTL)
+
+
+def reset_public_cache():
+    """Tests (and the importer) start from a clean slate."""
+    with _pub_lock:
+        _pub_cache["recs"], _pub_cache["ts"], _pub_cache["ver"] = None, 0.0, -1

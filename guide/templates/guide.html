@@ -1251,8 +1251,11 @@ async function load() {
       }
     } else {
       // FILE MODE
-      const res = await fetch(DATA_URL + '?_=' + Date.now());
-      if (!res.ok) throw new Error('fetch');
+      /* A request with no deadline is why this page could spin forever: when the
+         server went quiet the guest sat on «جارٍ التحميل» with nothing to do.
+         12s, then a real message and a button. */
+      const res = await fetchWithTimeout(DATA_URL + '?_=' + Date.now(), 12000);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const rows = await res.json();
       listing = rows.find(r => (r.id || '').toLowerCase() === id);
       if (!listing) allIds = rows.slice(0, 12).map(r => r.id || '');
@@ -1272,8 +1275,29 @@ async function load() {
     render(listing);
     updateWaLinks(listing.id || id);
   } catch (e) {
-    c.innerHTML = '<div class="card error"><h2>تعذر تحميل البيانات</h2><p>Could not load data: ' + (e.message || e) + '</p></div>';
+    const slow = (e && e.name === 'AbortError');
+    c.innerHTML = '<div class="card error">'
+      + '<h2>' + (slow ? 'الخدمة بطيئة الحين' : 'تعذر تحميل البيانات') + '</h2>'
+      + '<p>' + (slow ? 'The service is slow right now. Please try again.'
+                      : 'Could not load data: ' + (e.message || e)) + '</p>'
+      + '<button id="guideRetry" class="btn btn-bronze btn-block" type="button">'
+      + '<span class="ar">إعادة المحاولة</span><span>Try again</span></button>'
+      + '<p style="font-size:13px;color:var(--muted);margin-top:14px">'
+      + 'أو تواصلوا معنا مباشرة · or message us directly</p></div>';
+    const btn = document.getElementById('guideRetry');
+    if (btn) btn.addEventListener('click', function () {
+      c.innerHTML = '<div class="loading">جارٍ التحميل... · Loading…</div>';
+      load();
+    });
   }
+}
+
+/* fetch() has no timeout of its own — AbortController gives it one. */
+function fetchWithTimeout(url, ms) {
+  if (typeof AbortController === 'undefined') return fetch(url);
+  const ac = new AbortController();
+  const timer = setTimeout(function () { ac.abort(); }, ms);
+  return fetch(url, {signal: ac.signal}).finally(function () { clearTimeout(timer); });
 }
 /* Set safe default WhatsApp hrefs immediately so links work even before listing loads */
 updateWaLinks(id);
