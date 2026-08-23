@@ -500,10 +500,25 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("مساعد", bot.ASSISTANT_RULES)
         self.assertNotIn('You are "فيصل"', bot.ASSISTANT_RULES)
 
-    def test_the_prompt_shrank_by_at_least_3000_characters(self):
+    def test_the_prompt_stays_below_its_original_length(self):
+        """v3.1 lowered the floor from -3,000 to -1,000 so ~2,000 characters could
+        go back into multi-part questions, stay-state and anti-loop. The prompt
+        must still be meaningfully shorter than the 19,373 it started at."""
         self.assertLessEqual(
-            len(bot.ASSISTANT_RULES), self.ORIGINAL_LEN - 3000,
+            len(bot.ASSISTANT_RULES), self.ORIGINAL_LEN - 1000,
             f"ASSISTANT_RULES is {len(bot.ASSISTANT_RULES)} chars")
+
+    def test_the_reclaimed_budget_went_to_the_three_weak_sections(self):
+        for section in ("ANSWER EVERY PART", "READ THE STAY-STATE FIRST",
+                        "NEVER LOOP — expanded"):
+            with self.subTest(section=section):
+                self.assertIn(section, bot.ASSISTANT_RULES)
+
+    def test_no_dialect_word_lists_came_back(self):
+        """The 12-token ban line is kept; the 2,871-character tables are not."""
+        for gone in ("إزيك", "بتاعك", "منيح", "كرمالك", "بزاف", "كيفاش", "هواية"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, bot.ASSISTANT_RULES)
 
     def test_the_language_lock_is_present(self):
         self.assertIn("LANGUAGE LOCK", bot.ASSISTANT_RULES)
