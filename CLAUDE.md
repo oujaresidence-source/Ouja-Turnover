@@ -286,9 +286,26 @@ rules that matter into controls. **A prompt is a preference; code is a control.*
 - **Inquiry pricing:** `_dates_from_text()` parses dates from what the guest TYPED, because `dates`
   came from a reservation an inquiry does not have. Unparseable → `(None, None, "low")` and Musaed
   asks. Never guess a date — a guessed date is a wrong price. Pre-booking privacy is UNCHANGED.
-- **Env (every default is correct — nothing to set in Railway):** `MUSAED_V3=1` (0 reverts every
-  behavioural change without a rollback), `ASSISTANT_REVIEW_SAMPLE_PCT=15`, `ASSISTANT_DEBOUNCE_SEC=12`,
-  `MUSAED_PROMISE_COOLDOWN_H=6`, `MUSAED_NIGHTLY_EVAL=1` (runs 03:20 — 03:00 is the business snapshot).
-- **Verify with:** `python3 -m unittest discover -s tests -p "test_*.py"` (2,811 tests) **and**
+- **TWO switches, not one (v3.1).** `MUSAED_V3_GATE=0` turns off only the review gate — v2 auto-send
+  behaviour returns, **the firewall keeps running**. `MUSAED_V3=0` turns off EVERYTHING including the
+  firewall. When someone says "too many cards", the answer is the GATE flag; `MUSAED_V3=0` is not a
+  volume control. Boot prints both switches, `ASSISTANT_AUTO`, and a plain sentence for the posture —
+  and that sentence must never claim the firewall is up when it is not.
+- **R6 matches standalone tokens, min length 4, longest-first**, skips names contained in the guest's
+  own unit, and requires a unit cue (شقة/وحدة/رقم/apartment/unit) before a bare-numeric name — «22»,
+  «F2», «4511» are real unit names AND real fragments of ordinary replies. Its catalogue is persisted
+  to STATE_DIR; on an API blip R6 runs on the last good copy (`fw_units_degraded`), never on nothing.
+- **The debounce is skipped for `_is_risk_class()`** — a fire or a lockout must not wait 12 seconds.
+- **The quality sample rides QUEUED high-confidence drafts, not the auto path** (the gate had narrowed
+  auto to greetings, so sampling it harvested «حياك الله» and taught nobody anything).
+  `v3_quality_sample_edited` counts only samples a human actually reshaped — zero means the loop is
+  still dead. **Never move the sample back onto the auto path.**
+- **Env (every default is correct — nothing to set in Railway):** `MUSAED_V3=1`, `MUSAED_V3_GATE=1`,
+  `ASSISTANT_REVIEW_SAMPLE_PCT=15`, `ASSISTANT_DEBOUNCE_SEC=12`, `MUSAED_PROMISE_COOLDOWN_H=6`,
+  `MUSAED_NIGHTLY_EVAL=1` (03:20 — 03:00 is the business snapshot), `MUSAED_EVAL_NIGHTLY_N=60`
+  + `MUSAED_EVAL_MIN_ROTATE=10` (weeknights run every `v3_*` case + a rotating slice; Saturday runs
+  all 163), `MUSAED_SURGE_CARDS=60`/`MUSAED_SURGE_HOURS=6`, `MUSAED_VOLUME_HOUR=23`.
+- **Verify with:** `python3 -m unittest discover -s tests -p "test_*.py"` (2,856 tests, ALL GREEN —
+  if you see failures, they are yours) **and**
   `python3 eval_musaed.py --selftest`. `bot`'s firewall and `eval_musaed`'s gates are pinned to the
   same verdicts by `TestDetectorParity` — change one, change both.
