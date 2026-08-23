@@ -6,6 +6,24 @@ from unittest import mock
 import bot
 
 
+def _frozen_now(year, month, day, hour=12):
+    """Freeze bot's clock. bot does `from datetime import datetime`, so the class
+    itself is patched — date() and timedelta() are untouched."""
+    real = bot.datetime
+
+    class _Frozen(real):
+        @classmethod
+        def now(cls, tz=None):
+            return real(year, month, day, hour, 0, tzinfo=tz or bot.TZ)
+
+        @classmethod
+        def today(cls):
+            return real(year, month, day, hour, 0)
+
+    return mock.patch.object(bot, "datetime", _Frozen)
+
+
+
 class TestApartmentQualification(unittest.TestCase):
     def test_search_intent_does_not_confuse_wifi_availability(self):
         self.assertTrue(bot._is_apartment_search("عندكم شقة غرفتين؟"))
@@ -69,11 +87,24 @@ class TestApartmentQualification(unittest.TestCase):
                          ("2026-08-10", "2026-08-13"))
 
     def test_shared_month_yearless_range_is_understood(self):
-        req = bot._apartment_requirements(
-            "Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
-            "أي حي، 700 لليلة، بدون متطلبات")
+        # A yearless «5 إلى 8 أغسطس» resolves against TODAY, and rolls to next year
+        # once that date has passed — correct behaviour that made this test expire
+        # on 2026-08-05. Freeze the clock so it asserts the RULE, not the calendar.
+        with _frozen_now(2026, 7, 1):
+            req = bot._apartment_requirements(
+                "Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
+                "أي حي، 700 لليلة، بدون متطلبات")
         self.assertEqual((req["checkin"], req["checkout"]),
                          ("2026-08-05", "2026-08-08"))
+
+    def test_a_yearless_date_already_past_rolls_to_next_year(self):
+        """The other half of the same rule — pinned so it cannot silently change."""
+        with _frozen_now(2026, 9, 1):
+            req = bot._apartment_requirements(
+                "Guest: أبحث عن سكن من 5 إلى 8 أغسطس، 4 ضيوف، غرفتين، "
+                "أي حي، 700 لليلة، بدون متطلبات")
+        self.assertEqual((req["checkin"], req["checkout"]),
+                         ("2027-08-05", "2027-08-08"))
 
     def test_explicit_no_preferences_fulfils_optional_questions(self):
         history = (

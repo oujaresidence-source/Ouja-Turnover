@@ -292,13 +292,28 @@ class RecoveryOwnerTest(LeaveTypeTest):
 
     def test_owner_of_the_problem_is_the_days_coverer(self):
         import bot
+        from unittest import mock as _mock
         E = self._ids()
         for i, a in enumerate(sdb.apartments()):
             sdb.execute("UPDATE schedule_apartments SET listing_id=? WHERE id=?",
                         (2000 + i, a["id"]))
         apt = sdb.q1("SELECT a.id id, a.listing_id lid, a.name name FROM schedule_apartments a "
                      "JOIN schedule_employees e ON a.owner_id=e.id WHERE e.name='مآثر' LIMIT 1")
+        # _recovery_unit_owner resolves "who covers this unit TODAY" from the real
+        # clock, while the rows below are written for a FIXED date. On any other
+        # day the answer is whoever happens to be covering — which is how this test
+        # expired. Freeze the clock to the date the fixtures describe.
         today = "2026-08-18"
+        _real_dt = bot.datetime
+
+        class _Frozen(_real_dt):
+            @classmethod
+            def now(cls, tz=None):
+                return _real_dt(2026, 8, 18, 12, 0, tzinfo=tz or bot.TZ)
+
+        freeze = _mock.patch.object(bot, "datetime", _Frozen)
+        freeze.start()
+        self.addCleanup(freeze.stop)
         self.assertEqual(bot._recovery_unit_owner(lid=apt["lid"]), "مآثر")
         sdb.execute("INSERT INTO schedule_absences(employee_id,start_date,end_date,type,"
                     "status,affects_coverage,created_at) VALUES(?,?,?,?,?,?,?)",
