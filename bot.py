@@ -528,6 +528,84 @@ ASSISTANT_REVIEW_SAMPLE_PCT = int(os.environ.get("ASSISTANT_REVIEW_SAMPLE_PCT", 
 MUSAED_AUTO_PROMISER = "مساعد (تلقائي)"
 
 
+# ---------------------------------------------------------------------------
+# MUSAED v3.1 — say out loud what is switched on.
+# The owner should never have to open Railway to know whether Musaed is
+# answering guests by itself. Two switches and one env var decide that, and
+# their COMBINATION is not obvious, so the posture is spelled out in words.
+# ---------------------------------------------------------------------------
+MUSAED_SURGE_CARDS = int(os.environ.get("MUSAED_SURGE_CARDS", "60"))
+MUSAED_SURGE_HOURS = float(os.environ.get("MUSAED_SURGE_HOURS", "6"))
+_card_times = deque(maxlen=1000)      # epoch seconds of every approval card posted
+_surge_last_alert = [0.0]
+
+
+def musaed_posture():
+    """(short_flags, plain_sentence_ar, plain_sentence_en) — the effective posture."""
+    flags = (f"MUSAED_V3={'ON' if MUSAED_V3 else 'OFF'} · "
+             f"MUSAED_V3_GATE={'ON' if MUSAED_V3_GATE else 'OFF'} · "
+             f"ASSISTANT_AUTO={'1' if ASSISTANT_AUTO else '0'}")
+    # Two independent facts: what auto-sends, and whether the content rules run.
+    # Never imply the firewall is up when MUSAED_V3=0 has taken it down.
+    if not ASSISTANT_AUTO:
+        ar = "لا شيء يُرسل تلقائياً — كل رد ينتظر موافقة بشرية (ASSISTANT_AUTO=0)."
+        en = ("NOTHING auto-sends — every reply waits for human approval "
+              "(ASSISTANT_AUTO=0).")
+    elif _v3_gate_on():
+        ar = ("الترحيب والشكر فقط تُرسل تلقائياً؛ أي رد فيه معلومة أو وقت أو سعر "
+              "أو التزام ينتظر موافقة بشرية.")
+        en = ("Only greetings and thanks auto-send; anything carrying a fact, a "
+              "time, a price or a commitment waits for a human.")
+    else:
+        ar = "⚠️ سلوك v2: أي رد بثقة عالية يُرسل تلقائياً، وخارج الدوام كذلك."
+        en = ("⚠️ v2 behaviour: any high-confidence reply auto-sends, off-hours "
+              "included.")
+    if MUSAED_V3:
+        ar += " الجدار الناري شغّال (أكواد، جاهزية، لغة، وحدة خاطئة)."
+        en += " The firewall IS running (codes, readiness, language, wrong unit)."
+    else:
+        ar += (" 🚨 الجدار الناري **مطفي** — أكواد الأبواب وادعاءات الجاهزية تقدر "
+               "توصل الضيوف. للحد من الإرسال التلقائي استخدم MUSAED_V3_GATE=0 بدلاً منه.")
+        en += (" 🚨 The firewall is OFF — door codes and readiness claims can reach "
+               "guests. To limit auto-send instead, use MUSAED_V3_GATE=0.")
+    return flags, ar, en
+
+
+def musaed_volume_today():
+    """(cards, auto_sent, fw_blocks, escalations) for today."""
+    try:
+        row = _day_row()
+    except Exception:
+        return (0, 0, 0, 0)
+    fw = sum(v for k, v in row.items()
+             if isinstance(v, int) and str(k).startswith("fw_block_"))
+    return (int(row.get("approval_cards", 0) or 0),
+            int(row.get("auto_sent", 0) or 0),
+            int(fw),
+            int(row.get("escalations_created", 0) or 0))
+
+
+def musaed_volume_line():
+    c, a, f, e = musaed_volume_today()
+    return (f"اليوم · بطاقات للمراجعة {c} · ردود تلقائية {a} · "
+            f"منعها الجدار {f} · تصعيدات {e}")
+
+
+def _note_approval_card():
+    """Record one queued card, and return a surge warning when the rate is unsafe."""
+    now = time.time()
+    _card_times.append(now)
+    metric_bump("approval_cards")
+    cutoff = now - MUSAED_SURGE_HOURS * 3600
+    recent = sum(1 for t in _card_times if t >= cutoff)
+    if recent < MUSAED_SURGE_CARDS:
+        return None
+    if now - _surge_last_alert[0] < MUSAED_SURGE_HOURS * 3600:
+        return None                      # already said it once this window
+    _surge_last_alert[0] = now
+    return recent
+
+
 def _intent_is_auto_safe(intent, item=None):
     i = (intent or "").strip().lower()
     if not i:
@@ -10505,6 +10583,17 @@ SEND_FIREWALL_BLOCKED = "firewall_blocked"  # a v3 firewall rule refused it — 
 # correct home for these checks.
 # ==========================================================================
 MUSAED_V3 = os.environ.get("MUSAED_V3", "1") in ("1", "true", "True", "yes")
+# The gate has its OWN switch. MUSAED_V3=0 used to take the firewall down with the
+# review gate, so the one lever reached for on a busy night — "we're drowning in
+# cards" — also switched the door-code block off. Autonomy and safety are now
+# separate controls: MUSAED_V3_GATE=0 restores v2 auto-send behaviour while every
+# content rule keeps running.
+MUSAED_V3_GATE = os.environ.get("MUSAED_V3_GATE", "1") in ("1", "true", "True", "yes")
+
+
+def _v3_gate_on():
+    """The review gate is active only when BOTH switches are on."""
+    return MUSAED_V3 and MUSAED_V3_GATE
 
 # Blocked drafts wait here for the async drain loop (send_guest_message is sync).
 _fw_blocked_queue = deque(maxlen=200)
@@ -12589,20 +12678,16 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     # discarded it entirely, which is how 83.8% of replies went out unreviewed.
     # Off-hours now NARROWS autonomy — it used to widen it, meaning the system
     # was most autonomous exactly when nobody could catch a mistake.
-    _v3_sample = (random.randint(1, 100) <= ASSISTANT_REVIEW_SAMPLE_PCT)
+    _gate = _v3_gate_on()
     can_auto = (
         not escalate
         and bool(reply)
-        and (action == "auto" if MUSAED_V3 else True)
+        and (action == "auto" if _gate else True)
         and conf >= ASSISTANT_AUTO_CONF
-        and (_intent_is_auto_safe(intent, item) if MUSAED_V3 else True)
-        and not (_is_risk_class(item.get("guest_text"), intent) if MUSAED_V3 else False)
-        and (ASSISTANT_AUTO if MUSAED_V3 else (ASSISTANT_AUTO or offhours))
-        and not (_v3_sample if MUSAED_V3 else False)
+        and (_intent_is_auto_safe(intent, item) if _gate else True)
+        and not (_is_risk_class(item.get("guest_text"), intent) if _gate else False)
+        and (ASSISTANT_AUTO if _gate else (ASSISTANT_AUTO or offhours))
     )
-    if MUSAED_V3 and _v3_sample and not escalate and bool(reply) and action == "auto":
-        metric_bump("v3_quality_sample")
-        item["_v3_sample"] = True
     if can_auto:
         if not _auto_send_claim(item.get("message_id"), item["conversation_id"]):
             print(f"[dedup] auto-send skipped (duplicate) · conv {item['conversation_id']} · "
@@ -12623,6 +12708,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                 raise RuntimeError("kill switch")   # → the except below falls through to approval
             # learning: auto-sent at high confidence (still useful — confirms the
             # bot's wording on simple replies, helps reinforce the pattern)
+            metric_bump("auto_sent")
             record_learning(item, reply, reply, via="auto", approver="(auto)")
             # v3: an unattended promise is still a promise. v2 excluded auto-sends
             # from the ledger, which is why 95 of 518 promises were never kept.
@@ -12678,6 +12764,38 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
                                  "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
+    # Surge guard: a flood of cards is how a safety control gets switched off in a
+    # hurry. Name the RIGHT lever before somebody reaches for the wrong one.
+    _surge = _note_approval_card()
+    if _surge:
+        try:
+            guild = channel.guild
+            esc = await ensure_channel(
+                guild, ESCALATION_CHANNEL, await get_assistant_category(guild))
+            if esc:
+                op_role = find_operation_role(guild)
+                mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+                s = discord.Embed(
+                    title="🌊 ضغط مراجعات عالي",
+                    description=(f"وصلتكم **{_surge}** بطاقة مراجعة خلال "
+                                 f"{MUSAED_SURGE_HOURS:.0f} ساعات."),
+                    color=0xF0A431)
+                s.add_field(
+                    name="✅ الحلول الصحيحة (اختر واحد)",
+                    value=("١) ارفع `ASSISTANT_AUTO_CONF` (مثلاً 0.90) — يقلل المسودات الضعيفة.\n"
+                           "٢) وسّع `AUTO_SAFE_INTENTS` — يخلي أنواع آمنة أكثر ترسل لحالها.\n"
+                           "٣) `MUSAED_V3_GATE=0` — يرجع سلوك v2 في الإرسال التلقائي، "
+                           "**والجدار الناري يظل شغال**."), inline=False)
+                s.add_field(
+                    name="⛔ لا تسوي هذا",
+                    value=("**لا تضبط `MUSAED_V3=0`.** هذا يطفي الجدار الناري معه — "
+                           "يعني أكواد الأبواب وادعاءات الجاهزية ترجع تنرسل للضيوف."),
+                    inline=False)
+                s.set_footer(text=musaed_posture()[0])
+                await esc.send(content=mention, embed=s)
+                metric_bump("v3_surge_alert")
+        except Exception as _se:
+            print("surge alert error:", _se)
     # v3: a risk-class message arriving off-hours must not wait in a quiet channel
     # until 11:00. It no longer auto-sends, so ops gets pinged the moment it lands.
     if MUSAED_V3 and offhours and _is_risk_class(item.get("guest_text"), intent):
@@ -64384,6 +64502,34 @@ async def on_guild_channel_delete(channel):
 # runs every night and says so out loud when quality moves backwards.
 # 03:20 deliberately — business_snapshot_loop already owns 03:00.
 # ---------------------------------------------------------------------------
+MUSAED_VOLUME_HOUR = int(os.environ.get("MUSAED_VOLUME_HOUR", "23"))
+
+
+@tasks.loop(time=dt_time(hour=MUSAED_VOLUME_HOUR, minute=30, tzinfo=TZ))
+async def musaed_volume_loop():
+    """One line a day: what Musaed actually did, and what is switched on.
+    So the posture is visible in Discord and never needs a Railway login."""
+    if not ASSISTANT_ENABLED:
+        return
+    try:
+        ch = await _assistant_channel()
+        if ch is None:
+            return
+        cards, auto, fw, esc = musaed_volume_today()
+        flags, ar, _en = musaed_posture()
+        emb = discord.Embed(title="📊 حصيلة اليوم · مساعد",
+                            color=(0xB3261E if not MUSAED_V3 else GOLD))
+        emb.add_field(name="بطاقات للمراجعة", value=str(cards), inline=True)
+        emb.add_field(name="ردود تلقائية", value=str(auto), inline=True)
+        emb.add_field(name="منعها الجدار", value=str(fw), inline=True)
+        emb.add_field(name="تصعيدات", value=str(esc), inline=True)
+        emb.add_field(name="الوضع الحالي", value=ar, inline=False)
+        emb.set_footer(text=flags)
+        await ch.send(embed=emb)
+    except Exception as e:
+        print("musaed volume post error:", e)
+
+
 MUSAED_NIGHTLY_EVAL = os.environ.get("MUSAED_NIGHTLY_EVAL", "1") in ("1", "true", "True", "yes")
 
 
@@ -66905,6 +67051,14 @@ async def on_ready():
     except Exception as e:
         print("ticket panels setup error:", e)
     print(f"Logged in as {bot.user}. Watching for checkouts every {POLL_MINUTES} min.")
+    try:
+        _flags, _ar, _en = musaed_posture()
+        print(f"MUSAED: {_flags}")
+        print(f"MUSAED posture: {_en}")
+        print(f"MUSAED posture (AR): {_ar}")
+        print(f"MUSAED volume: {musaed_volume_line()}")
+    except Exception as _pe:
+        print("posture print error:", _pe)
     print(f"Weekday tiers (Riyadh): {DISCOUNT_TIER1_PERCENT:.0f}% at {DISCOUNT_TIER1_HOUR:02d}:00, "
           f"{DISCOUNT_TIER2_PERCENT:.0f}% at {DISCOUNT_TIER2_HOUR:02d}:00, "
           f"{DISCOUNT_TIER3_PERCENT:.0f}% at {DISCOUNT_TIER3_HOUR:02d}:00 "
@@ -67065,6 +67219,8 @@ async def on_ready():
         firewall_block_drain.start()
     if ASSISTANT_ENABLED and not musaed_nightly_eval.is_running():
         musaed_nightly_eval.start()
+    if ASSISTANT_ENABLED and not musaed_volume_loop.is_running():
+        musaed_volume_loop.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
