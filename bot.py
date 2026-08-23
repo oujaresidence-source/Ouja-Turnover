@@ -10679,20 +10679,101 @@ def _fw_strip_signatures(text):
     return re.sub(r"\n{3,}", "\n\n", out).strip()
 
 
-_fw_units_cache = {"names": set(), "ts": 0}
+# R6's catalogue. Substring matching false-blocked real replies: unit names like
+# «22», «F2», «4511» and «101b» appear inside ordinary sentences — a price, a
+# duration, a floor. A control that blocks good messages gets switched off, so the
+# match is now standalone-token, min length 4, longest-first, and bare-numeric
+# names need a unit cue beside them before they count.
+_FW_UNITS_FILE = "fw_unit_names.json"
+_FW_UNIT_MIN_LEN = 4
+_fw_units_cache = {"names": [], "ts": 0, "degraded": False}
+# A name that is only digits/punctuation ("4101", "22", "12B"-less) collides with
+# prices, counts and clock times, so it must be introduced by one of these.
+_FW_UNIT_CUE = re.compile(
+    r"(شقة|شقه|الشقة|الشقه|وحدة|وحده|الوحدة|الوحده|رقم|apartment|apt|unit|studio)\s*$",
+    re.IGNORECASE)
+_FW_MOSTLY_DIGITS = re.compile(r"^[\W\d_]*\d[\W\d_]*$")
+
+
+def _fw_unit_token_re(name):
+    """Standalone-token matcher: not glued to a letter, digit or Arabic letter."""
+    return re.compile(rf"(?<![\w؀-ۿ]){re.escape(name)}(?![\w؀-ۿ])", re.IGNORECASE)
+
+
+def _fw_store_unit_names(names):
+    try:
+        _save_json(_FW_UNITS_FILE, {"names": sorted(names),
+                                    "ts": int(time.time())})
+    except Exception as e:
+        print("fw unit-name persist error:", e)
 
 
 def _fw_known_unit_names():
-    """Unit names we could accidentally name at a guest. 1h cache."""
+    """Unit names we could accidentally name at a guest, LONGEST FIRST.
+
+    Fails open to the PERSISTED copy, never to nothing: a transient Hostaway blip
+    must not silently disable R6 for an hour. The degraded state is logged and
+    counted so a permanent outage is visible instead of invisible.
+    """
     if _fw_units_cache["names"] and time.time() - _fw_units_cache["ts"] < 3600:
         return _fw_units_cache["names"]
+    names = set()
     try:
-        names = {str(v or "").strip() for v in (get_listings_map() or {}).values()}
-        names = {n for n in names if len(n) >= 3}
-        _fw_units_cache["names"], _fw_units_cache["ts"] = names, time.time()
-        return names
+        raw = get_listings_map() or {}
+        names = {str(v or "").strip() for v in raw.values()}
+    except Exception as e:
+        print("fw unit-name fetch error:", e)
+        names = set()
+    names = {n for n in names if len(n) >= _FW_UNIT_MIN_LEN}
+    if names:
+        ordered = sorted(names, key=len, reverse=True)
+        _fw_units_cache.update({"names": ordered, "ts": time.time(),
+                                "degraded": False})
+        _fw_store_unit_names(names)
+        return ordered
+    # --- degraded: the API gave us nothing. Fall back to the last good copy. ---
+    try:
+        stored = (_load_json(_FW_UNITS_FILE, {}) or {}).get("names") or []
     except Exception:
-        return _fw_units_cache["names"]
+        stored = []
+    stored = [str(n).strip() for n in stored if len(str(n).strip()) >= _FW_UNIT_MIN_LEN]
+    if not _fw_units_cache.get("degraded"):
+        _fw_units_cache["degraded"] = True
+        metric_bump("fw_units_degraded")
+        print(f"[FIREWALL] unit catalogue unavailable — R6 running on "
+              f"{len(stored)} persisted names")
+        try:
+            log_event("ops", f"⚠️ الجدار الناري: تعذّر تحميل أسماء الوحدات — "
+                             f"يعمل على نسخة محفوظة ({len(stored)} اسم)")
+        except Exception:
+            pass
+    ordered = sorted(set(stored), key=len, reverse=True)
+    # short ts so we retry soon, but keep serving the cached names meanwhile
+    _fw_units_cache.update({"names": ordered, "ts": time.time() - 3300})
+    return ordered
+
+
+def _fw_foreign_unit(text, own_unit):
+    """The name of a DIFFERENT unit mentioned in `text`, or None."""
+    own = str(own_unit or "").strip()
+    own_low = own.lower()
+    for name in _fw_known_unit_names():          # longest first
+        n = str(name).strip()
+        if not n or n.lower() == own_low:
+            continue
+        # «HUE 202» inside «Ouja | HUE 202» is the guest's OWN unit, not a foreign one.
+        if own_low and n.lower() in own_low:
+            continue
+        m = _fw_unit_token_re(n).search(text or "")
+        if not m:
+            continue
+        if _FW_MOSTLY_DIGITS.match(n):
+            # A bare number only counts as a unit when something says so.
+            before = (text or "")[max(0, m.start() - 24):m.start()]
+            if not _FW_UNIT_CUE.search(before):
+                continue
+        return n
+    return None
 
 
 def outbound_firewall(body, item=None):
@@ -10746,13 +10827,10 @@ def outbound_firewall(body, item=None):
 
         # --- R6 WRONG_UNIT -------------------------------------------------
         if item and item.get("unit"):
-            own = str(item.get("unit") or "").strip().lower()
             lowc = cleaned.lower()
             if not any(p in lowc for p in _FW_SWAP_PHRASES):
-                for name in _fw_known_unit_names():
-                    n = name.strip().lower()
-                    if n and n != own and n in lowc:
-                        return False, "WRONG_UNIT", text
+                if _fw_foreign_unit(cleaned, item.get("unit")):
+                    return False, "WRONG_UNIT", text
 
         # --- W1 DIALECT — WARN ONLY (1 leak in 2,402; never block) --------
         try:
