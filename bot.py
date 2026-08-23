@@ -9834,7 +9834,9 @@ def _pick_signature(arabic):
 
 def with_signature(text):
     """Append a (rotating) support signature, language-matched to the message."""
-    return f"{str(text).rstrip()}\n\n{_pick_signature(_has_arabic(text))}"
+    # v3: language by script MAJORITY, not "contains any Arabic". An English reply
+    # that merely names an Arabic unit (العارض A11) used to get an Arabic signature.
+    return f"{str(text).rstrip()}\n\n{_pick_signature(_fw_reply_language(text) == 'ar')}"
 
 # EMERGENCY KILL SWITCH (2026-06-20): set ASSISTANT_SEND_KILL=1 in Railway to hard-stop ALL
 # guest-facing sends instantly (the bot still drafts/escalates internally but sends nothing).
@@ -9976,9 +9978,194 @@ def _permanent_once_release(name):
 # reads as success means a guest silently never gets a reply):
 SEND_BLOCKED_KILL = "blocked_kill_switch"   # kill switch on — nothing was sent
 SEND_SUPPRESSED = "suppressed_duplicate"    # identical message already delivered — nothing sent
+SEND_FIREWALL_BLOCKED = "firewall_blocked"  # a v3 firewall rule refused it — queued for a human
 # success → the Hostaway api_post result (a dict); failure → the exception propagates.
 
-def send_guest_message(conversation_id, body, comm_type="email"):
+# ==========================================================================
+# MUSAED v3 — OUTBOUND FIREWALL
+# Every rule that has actually been violated in production is enforced HERE,
+# in code. Prompt rules are preferences; this is a control. send_guest_message
+# is the ONLY point both auto-send channels converge, so it is the only
+# correct home for these checks.
+# ==========================================================================
+MUSAED_V3 = os.environ.get("MUSAED_V3", "1") in ("1", "true", "True", "yes")
+
+# Blocked drafts wait here for the async drain loop (send_guest_message is sync).
+_fw_blocked_queue = deque(maxlen=200)
+
+_FW_PLACEHOLDERS = (
+    "الوقت المطلوب", "your requested time", "وقت غير محدد",
+    "None", "null", "undefined", "nan", "N/A", "{", "}", "%s", "TBD",
+)
+
+_FW_READY_RES = [re.compile(p, re.IGNORECASE) for p in [
+    r"(?<![؀-ۿ])(جاهزة|جاهز|جاهزه|نظيفة|نظيف|نظيفه|مرتبة|مرتب)(?![؀-ۿ])",
+    r"تم\s+التنظيف", r"خلص\s+التنظيف", r"تم\s+تجهيز", r"تحت\s+التنظيف",
+    r"قيد\s+التنظيف", r"يتم\s+تجهيز", r"ما\s+خلص(ت)?\s+التنظيف",
+    r"\b(ready|clean(ed)?|prepared|being cleaned|not ready|still being prepared)\b",
+]]
+
+# The referent that turns a general statement into a claim about THIS unit now.
+# Without one in the same sentence, a general turnover explanation is allowed.
+_FW_UNIT_REF = re.compile(
+    r"(وحدتك|شقتك|الوحدة|الشقة|الشقه|your unit|your apartment|the unit|the apartment)",
+    re.IGNORECASE)
+
+_FW_SIGN_RES = [re.compile(p, re.IGNORECASE) for p in [
+    r"مساعد\s*[-–·—]\s*(فريق\s*)?عوجا", r"مساعد\s+من\s+(فريق\s+)?عوجا",
+    r"أخوك\s+مساعد", r"فريق\s+عوجا\s*[-–·—]\s*مساعد", r"فريق\s+عوجا",
+    r"الدعم\s+الفني\s*[-–·—]\s*مساعد",
+    r"Musaid\s*[-–·—]\s*Ouja", r"Ouja\s+Team", r"Ouja\s+Residence\s+Team",
+]]
+
+_FW_SWAP_PHRASES = (
+    "وحدة بديلة", "وحدات بديلة", "خيار ثاني", "خيارات ثانية", "ننقلك", "نحولك",
+    "التحويل", "بديل", "alternative unit", "alternative", "move you to",
+    "switch you to", "another unit", "option number",
+)
+
+_FW_CODE_CTX = (
+    "كود", "الكود", "رمز", "الرمز", "شفرة", "الشفرة", "رقم الدخول",
+    "الرقم السري", "باسورد", "باسوورد", "كلمة السر", "كلمة المرور",
+    "code", "pin", "password", "passcode", "door code", "access code",
+    "lock code", "wifi", "wi-fi", "واي فاي", "الواي فاي",
+)
+
+_FW_AR2EN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+# Dialect tokens that are NOT Najdi. Warn only — 1 leak in 2,402 replies means
+# the prompt already solved this; a block here would be pure false-positive risk.
+_FW_DIALECT_TOKENS = ("شو", "بدك", "هلق", "هيك", "كتير", "دلوقتي", "عايز",
+                      "كده", "فين", "ازاي", "شكو", "ماكو")
+
+_FW_REASON_AR = {
+    "CODE_LEAK":         "محاولة إرسال كود دخول",
+    "READINESS_CLAIM":   "ادّعاء عن جاهزية الوحدة",
+    "PLACEHOLDER":       "متغيّر ناقص في النص",
+    "LANG_MISMATCH":     "لغة الرد غير لغة الضيف",
+    "WRONG_UNIT":        "ذكر وحدة غير وحدة الضيف",
+    "EMPTY":             "رسالة فارغة",
+    "EMPTY_AFTER_STRIP": "رسالة فارغة بعد إزالة التوقيع",
+    "FIREWALL_ERROR":    "خطأ في الفحص — تم المنع احتياطاً",
+}
+
+
+def _fw_norm_digits(s):
+    """Arabic-Indic digits -> ASCII, so ٤٨٠٢ is caught exactly like 4802."""
+    return (s or "").translate(_FW_AR2EN_DIGITS)
+
+
+def _fw_reply_language(text):
+    """'ar' | 'en' | '?' by script-character MAJORITY (not 'contains any')."""
+    t = text or ""
+    a = sum(1 for ch in t if "؀" <= ch <= "ۿ")
+    l = sum(1 for ch in t if "a" <= ch.lower() <= "z")
+    if not a and not l:
+        return "?"
+    return "ar" if a >= l else "en"
+
+
+def _fw_strip_signatures(text):
+    """Remove any sign-off the MODEL wrote. with_signature() appends exactly one
+    afterwards, so this kills the double sign-off without blocking the send."""
+    out = text or ""
+    for rx in _FW_SIGN_RES:
+        out = rx.sub("", out)
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
+_fw_units_cache = {"names": set(), "ts": 0}
+
+
+def _fw_known_unit_names():
+    """Unit names we could accidentally name at a guest. 1h cache."""
+    if _fw_units_cache["names"] and time.time() - _fw_units_cache["ts"] < 3600:
+        return _fw_units_cache["names"]
+    try:
+        names = {str(v or "").strip() for v in (get_listings_map() or {}).values()}
+        names = {n for n in names if len(n) >= 3}
+        _fw_units_cache["names"], _fw_units_cache["ts"] = names, time.time()
+        return names
+    except Exception:
+        return _fw_units_cache["names"]
+
+
+def outbound_firewall(body, item=None):
+    """(ok: bool, reason: str, cleaned: str)
+
+    ok=False -> DO NOT SEND. Queue a block card + an approval card.
+    ok=True  -> send `cleaned` (which may differ from `body`).
+    Fails CLOSED: any unexpected exception blocks the send.
+    """
+    if not MUSAED_V3:
+        return True, "", body
+    text = body or ""
+    if not text.strip():
+        return False, "EMPTY", text
+    try:
+        # --- R1 CODE_LEAK — zero exceptions ------------------------------
+        work = _fw_norm_digits(text)
+        low = work.lower()
+        if any(k in work or k in low for k in _FW_CODE_CTX):
+            scan = re.sub(r"[0-9\.,]{1,9}\s*(?:ريال|ر\.?\s?س|sar|﷼)", " ", work, flags=re.I)
+            scan = re.sub(r"\d{1,2}\s*[:：]\s*\d{2}", " ", scan)       # times
+            for m in re.findall(r"(?<!\d)(\d{3,8})(?!\d)", scan):
+                if len(m) == 4 and m[:2] in ("19", "20"):
+                    continue                                            # year-like
+                return False, "CODE_LEAK", text
+
+        # --- R2 READINESS_CLAIM — with the general-turnover carve-out -----
+        for sentence in re.split(r"[.!?\n۔،]+", text):
+            if not sentence.strip():
+                continue
+            if any(rx.search(sentence) for rx in _FW_READY_RES) \
+                    and _FW_UNIT_REF.search(sentence):
+                return False, "READINESS_CLAIM", text
+
+        # --- R3 PLACEHOLDER ----------------------------------------------
+        for ph in _FW_PLACEHOLDERS:
+            if ph in text:
+                return False, "PLACEHOLDER", text
+
+        # --- R4 LANG_MISMATCH — non-blocking under 8 chars ----------------
+        if item and len(text.strip()) >= 8:
+            g = (item.get("guest_text") or "").strip()
+            gl, rl = _fw_reply_language(g), _fw_reply_language(text)
+            if len(g) >= 8 and gl != "?" and rl != "?" and gl != rl:
+                return False, "LANG_MISMATCH", text
+
+        # --- R5 DOUBLE_SIGN — strip, do not block -------------------------
+        cleaned = _fw_strip_signatures(text)
+        if not cleaned.strip():
+            return False, "EMPTY_AFTER_STRIP", text
+
+        # --- R6 WRONG_UNIT -------------------------------------------------
+        if item and item.get("unit"):
+            own = str(item.get("unit") or "").strip().lower()
+            lowc = cleaned.lower()
+            if not any(p in lowc for p in _FW_SWAP_PHRASES):
+                for name in _fw_known_unit_names():
+                    n = name.strip().lower()
+                    if n and n != own and n in lowc:
+                        return False, "WRONG_UNIT", text
+
+        # --- W1 DIALECT — WARN ONLY (1 leak in 2,402; never block) --------
+        try:
+            for w in _FW_DIALECT_TOKENS:
+                if re.search(rf"(?<![؀-ۿ]){re.escape(w)}(?![؀-ۿ])", cleaned):
+                    metric_bump("fw_warn_dialect")
+                    print(f"[FIREWALL warn] dialect token '{w}' in outbound reply")
+                    break
+        except Exception:
+            pass
+
+        return True, "", cleaned
+    except Exception as e:
+        print("outbound_firewall error (failing closed):", e)
+        return False, "FIREWALL_ERROR", text
+
+
+def send_guest_message(conversation_id, body, comm_type="email", _fw_item=None):
     if ASSISTANT_SEND_KILL:
         print(f"[KILL] guest send BLOCKED (conv {conversation_id}): {str(body)[:80]}")
         try:
@@ -9986,6 +10173,23 @@ def send_guest_message(conversation_id, body, comm_type="email"):
         except Exception:
             pass
         return SEND_BLOCKED_KILL
+    ok, fw_reason, body = outbound_firewall(body, _fw_item)
+    if not ok:
+        metric_bump(f"fw_block_{fw_reason.lower()}")
+        print(f"[FIREWALL] {fw_reason} blocked (conv {conversation_id}): {str(body)[:120]}")
+        try:
+            log_event("assistant", f"🔒 الجدار الناري منع رسالة ({fw_reason}) · conv {conversation_id}")
+        except Exception:
+            pass
+        try:
+            _fw_blocked_queue.append({
+                "reason": fw_reason, "conversation_id": conversation_id,
+                "body": (body or "")[:1000], "item": _fw_item or {},
+                "ts": time.time(),
+            })
+        except Exception:
+            pass
+        return SEND_FIREWALL_BLOCKED
     # de-dup on the RAW body (before the randomized signature) so the same message can't go twice
     claim_key = f"send:{conversation_id}:{(body or '').strip()}"
     if not _once_claim(claim_key):
@@ -11723,7 +11927,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                        or (ASSISTANT_ACK_AR if is_ar else ASSISTANT_ACK_EN)
             try:
                 ack_result = await asyncio.to_thread(
-                    send_guest_message, cid, ack, item["comm_type"])
+                    send_guest_message, cid, ack, item["comm_type"], item)
                 if ack_result == SEND_BLOCKED_KILL:
                     _release_offhours_ack(cid, offhours_now)
                     embed.add_field(
@@ -11816,7 +12020,7 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             return
         try:
             r = await asyncio.to_thread(send_guest_message, item["conversation_id"], reply,
-                                        item["comm_type"])
+                                        item["comm_type"], item)
             if r == SEND_SUPPRESSED:
                 log_event("assistant", f"⏭️ رد تلقائي مكرّر — ما انرسل · {g} · {item['unit']}")
                 return
@@ -11862,6 +12066,63 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
                                  "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
+
+
+@tasks.loop(seconds=20)
+async def firewall_block_drain():
+    """Surface every firewall-blocked draft to the team.
+
+    send_guest_message is synchronous and called from worker threads, so it can
+    only queue. This loop turns each queued block into two Discord posts: a red
+    card explaining WHY it was refused, and a normal approval card so a human can
+    correct the wording and send it themselves. A blocked message must never be
+    a silent no-op — that is how a guest ends up waiting forever.
+    """
+    if not _fw_blocked_queue:
+        return
+    channel = None
+    try:
+        channel = await _assistant_channel()
+    except Exception as e:
+        print("firewall drain: channel error:", e)
+    if channel is None:
+        return
+    drained = 0
+    while _fw_blocked_queue and drained < 10:
+        row = _fw_blocked_queue.popleft()
+        drained += 1
+        try:
+            item = row.get("item") or {}
+            guest = item.get("guest") or "ضيف"
+            unit = item.get("unit") or "—"
+            draft = row.get("body") or "—"
+            reason = row.get("reason") or "—"
+            embed = discord.Embed(title=f"🔒 الجدار الناري منع رسالة · {guest} · {unit}",
+                                  color=0xD64545)
+            embed.add_field(name="📩 الضيف يقول",
+                            value=(item.get("guest_text") or "—")[:1000], inline=False)
+            embed.add_field(name="⛔ المسوّدة المحجوزة", value=draft[:1000], inline=False)
+            embed.add_field(name="🧯 السبب",
+                            value=_FW_REASON_AR.get(reason, reason), inline=False)
+            embed.set_footer(text=f"لم تُرسل للضيف · conv {row.get('conversation_id')}")
+            await channel.send(embed=embed)
+            # …then a normal approval card, so a human can fix the wording and send it.
+            if item.get("conversation_id"):
+                card = discord.Embed(title=f"💬 {guest} · {unit}", color=GOLD)
+                card.add_field(name="📩 الضيف يقول",
+                               value=(item.get("guest_text") or "—")[:1024], inline=False)
+                card.add_field(name="✍️ الرد المقترح (عدّله قبل الإرسال)",
+                               value=draft[:1024], inline=False)
+                card.set_footer(text=f"محجوز بالجدار الناري ({reason}) · عدّله ثم أرسله · "
+                                     f"#{item.get('conversation_id')}·"
+                                     f"{item.get('comm_type') or 'email'}")
+                sent = await channel.send(embed=card, view=ApproveView(item, draft))
+                _pending_replies[sent.id] = {
+                    "item": item, "draft": draft, "guide": None, "confirmed": False,
+                    "intent": f"محجوز: {reason}", "confidence": 0, "sentiment": "ok",
+                }
+        except Exception as e:
+            print("firewall drain post error:", e)
 
 
 def _persist_early_state():
@@ -12037,7 +12298,7 @@ async def handle_early_checkin_item(item, channel):
         reminder["offhours"] = bool(item.get("_offhours"))
         await asyncio.to_thread(
             send_guest_message, item["conversation_id"], _early_pending_reply(reminder),
-            item.get("comm_type") or "email")
+            item.get("comm_type") or "email", item)
         return True
     context = await asyncio.to_thread(
         _load_early_checkin_context, item.get("reservation_id"), item.get("listing_id"))
@@ -12062,12 +12323,12 @@ async def handle_early_checkin_item(item, channel):
         await asyncio.to_thread(_persist_early_state)
         await asyncio.to_thread(
             send_guest_message, item["conversation_id"], _early_alternatives_reply(offer),
-            item.get("comm_type") or "email")
+            item.get("comm_type") or "email", item)
         return True
     if context.get("alternatives_checked"):
         await asyncio.to_thread(
             send_guest_message, item["conversation_id"], _early_unavailable_reply(record),
-            item.get("comm_type") or "email")
+            item.get("comm_type") or "email", item)
         return True
     result = {
         "action": "escalate", "intent": "early_checkin",
@@ -66019,6 +66280,8 @@ async def on_ready():
             await post_wilt()
         except Exception as e:
             print("test WILT error:", e)
+    if not firewall_block_drain.is_running():
+        firewall_block_drain.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
