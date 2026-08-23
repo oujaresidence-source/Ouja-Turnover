@@ -486,6 +486,59 @@ CATALOG_CALENDAR_PRICES = os.environ.get("CATALOG_CALENDAR_PRICES", "1") in ("1"
 ASSISTANT_AUTO     = os.environ.get("ASSISTANT_AUTO", "0") in ("1", "true", "True", "yes")
 ASSISTANT_AUTO_CONF = float(os.environ.get("ASSISTANT_AUTO_CONF", "0.85"))  # Stage 1: auto-send at/above this confidence
 ESCALATE_BELOW     = float(os.environ.get("ESCALATE_BELOW", "0.55"))       # Stage 3: escalate below this confidence
+
+# ---------------------------------------------------------------------------
+# MUSAED v3 — the risk gate. Confidence is the model's estimate of its OWN
+# correctness; it says nothing about the cost of being wrong. v2 conflated the
+# two and auto-sent 83.8% of everything it drafted, including 46 replies on
+# escalate-class topics. Blast radius decides autonomy now.
+# ---------------------------------------------------------------------------
+# Intents where a wrong answer costs nothing. ONLY these may auto-send.
+# An ALLOW-list on purpose: a deny-list fails open on anything new.
+AUTO_SAFE_INTENTS = {
+    "ترحيب", "شكر", "تأكيد بسيط", "وداع", "مجاملة", "تحية",
+    "greeting", "thanks", "acknowledgement", "farewell",
+}
+# Never auto-send, at any confidence, in or out of hours.
+AUTO_NEVER_INTENTS = {
+    "جاهزية", "نظافة", "كود", "دخول", "تسجيل دخول", "شكوى", "استرجاع",
+    "إلغاء", "الغاء", "تعديل حجز", "خصم", "تسعير", "صيانة", "أمان",
+    "early_checkin", "apartment_search",
+}
+# Raw-text pre-filter, INDEPENDENT of the model's own intent label — because
+# the model mislabelling its own intent is exactly the failure we defend against.
+_RISK_CLASS_TERMS = (
+    "جاهز", "جاهزة", "نظيف", "نظافة", "وسخ", "متسخ", "رائحة", "ريحة",
+    "مكيف", "تكييف", "ما يشتغل", "مايشتغل", "خربان", "خربانة", "معطل",
+    "مشكلة", "شكوى", "أشتكي", "اشتكي", "استرجاع", "ارجاع", "إرجاع",
+    "الغاء", "إلغاء", "خصم", "تعويض", "الكود", "رمز الدخول", "كلمة السر",
+    "حرامي", "سرقة", "أمان", "خطر", "إصابة", "اصابة", "حريق", "تسريب",
+    "تقييم سيء", "بلاغ", "محامي", "شرطة", "رد آلي", "رد تلقائي", "روبوت",
+    "not clean", "dirty", "broken", "not working", "refund", "cancel",
+    "discount", "complaint", "compensat", "door code", "access code",
+    "unsafe", "injur", "emergency", "fire", "leak", "police", "lawyer",
+    "bad review", "ready", "smell", "automated reply", "a bot", "a robot",
+)
+# Share of would-be auto-sends diverted to a human purely to harvest an edit.
+# This is the ONLY edit signal record_learning() can ever receive: edited_by_team
+# was False on all 2,402 rows because the team never saw a draft.
+ASSISTANT_REVIEW_SAMPLE_PCT = int(os.environ.get("ASSISTANT_REVIEW_SAMPLE_PCT", "15"))
+
+
+def _intent_is_auto_safe(intent, item=None):
+    i = (intent or "").strip().lower()
+    if not i:
+        return False
+    if any(bad.lower() in i for bad in AUTO_NEVER_INTENTS):
+        return False
+    return any(ok.lower() == i or ok.lower() in i for ok in AUTO_SAFE_INTENTS)
+
+
+def _is_risk_class(guest_text, intent=""):
+    blob = f"{guest_text or ''} {intent or ''}".lower()
+    return any(t.lower() in blob for t in _RISK_CLASS_TERMS)
+
+
 # Signature appended to every guest-facing message.
 ASSISTANT_SIGNATURE_AR = os.environ.get("ASSISTANT_SIGNATURE_AR", "الدعم الفني - مساعد 🤍")
 ASSISTANT_SIGNATURE_EN = os.environ.get("ASSISTANT_SIGNATURE_EN", "Technical Support - Musaid 🤍")
@@ -12007,8 +12060,25 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
     # isn't around to approve, and the owner explicitly asked the bot to
     # "answer as much as possible" outside hours.
     offhours = bool(item.get("_offhours"))
-    can_auto = (not escalate and bool(reply) and conf >= ASSISTANT_AUTO_CONF and
-                (ASSISTANT_AUTO or offhours))
+    # MUSAED v3 — gate on BLAST RADIUS, not confidence.
+    # `action` is the model's own "a human should read this first" signal; v2
+    # discarded it entirely, which is how 83.8% of replies went out unreviewed.
+    # Off-hours now NARROWS autonomy — it used to widen it, meaning the system
+    # was most autonomous exactly when nobody could catch a mistake.
+    _v3_sample = (random.randint(1, 100) <= ASSISTANT_REVIEW_SAMPLE_PCT)
+    can_auto = (
+        not escalate
+        and bool(reply)
+        and (action == "auto" if MUSAED_V3 else True)
+        and conf >= ASSISTANT_AUTO_CONF
+        and (_intent_is_auto_safe(intent, item) if MUSAED_V3 else True)
+        and not (_is_risk_class(item.get("guest_text"), intent) if MUSAED_V3 else False)
+        and (ASSISTANT_AUTO if MUSAED_V3 else (ASSISTANT_AUTO or offhours))
+        and not (_v3_sample if MUSAED_V3 else False)
+    )
+    if MUSAED_V3 and _v3_sample and not escalate and bool(reply) and action == "auto":
+        metric_bump("v3_quality_sample")
+        item["_v3_sample"] = True
     if can_auto:
         if not _auto_send_claim(item.get("message_id"), item["conversation_id"]):
             print(f"[dedup] auto-send skipped (duplicate) · conv {item['conversation_id']} · "
@@ -12058,14 +12128,47 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             # fall through to the approval card if the send failed
 
     # ---- needs approval: draft + buttons ----
-    embed = discord.Embed(title=f"💬 {g} · {item['unit']}", color=GOLD)
+    # A diverted quality sample is labelled as one, so the reviewer knows the draft
+    # was good enough to send and that editing it is the point — that edit is the
+    # only training signal record_learning() ever gets.
+    _sampled = bool(item.get("_v3_sample"))
+    embed = discord.Embed(
+        title=(f"🎯 عيّنة جودة · {g} · {item['unit']}" if _sampled
+               else f"💬 {g} · {item['unit']}"), color=GOLD)
     embed.add_field(name="📩 الضيف يقول", value=(item["guest_text"] or "—")[:1024], inline=False)
     embed.add_field(name="✍️ الرد المقترح", value=(reply or "—")[:1024], inline=False)
-    embed.set_footer(text=f"النوع: {intent} · الثقة: {round(conf*100)}% · راجعه قبل الإرسال · "
-                          f"التوقيع يُضاف تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
+    _foot = (f"النوع: {intent} · الثقة: {round(conf*100)}% · راجعه قبل الإرسال · "
+             f"التوقيع يُضاف تلقائياً · #{item['conversation_id']}·{item['comm_type']}")
+    if _sampled:
+        _foot += (f" · عيّنة مراجعة عشوائية ({ASSISTANT_REVIEW_SAMPLE_PCT}%) — "
+                  f"عدّل لو فيه شي أفضل")
+    embed.set_footer(text=_foot)
     sent = await channel.send(embed=embed, view=ApproveView(item, reply))
     _pending_replies[sent.id] = {"item": item, "draft": reply, "guide": guide, "confirmed": confirmed,
                                  "intent": intent, "confidence": round(conf*100), "sentiment": sentiment}
+    # v3: a risk-class message arriving off-hours must not wait in a quiet channel
+    # until 11:00. It no longer auto-sends, so ops gets pinged the moment it lands.
+    if MUSAED_V3 and offhours and _is_risk_class(item.get("guest_text"), intent):
+        try:
+            guild = channel.guild
+            esc = await ensure_channel(
+                guild, ESCALATION_CHANNEL, await get_assistant_category(guild))
+            if esc:
+                op_role = find_operation_role(guild)
+                mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
+                alert = discord.Embed(
+                    title=f"🌙 رسالة حسّاسة خارج الدوام · {g} · {item['unit']}",
+                    color=0xF0A431)
+                alert.add_field(name="📩 الضيف يقول",
+                                value=(item["guest_text"] or "—")[:1000], inline=False)
+                alert.add_field(
+                    name="⏳ ما انرسل رد تلقائي",
+                    value="الموضوع من النوع الحسّاس — المسوّدة تنتظر مراجعتك في "
+                          f"#{ASSISTANT_CHANNEL}.", inline=False)
+                await esc.send(content=mention, embed=alert)
+                metric_bump("v3_offhours_risk_ping")
+        except Exception as _oe:
+            print("off-hours risk ping error:", _oe)
 
 
 @tasks.loop(seconds=20)
