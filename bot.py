@@ -64378,6 +64378,92 @@ async def on_guild_channel_delete(channel):
         print("on_guild_channel_delete error:", e)
 
 # ============================================================================
+# ---------------------------------------------------------------------------
+# MUSAED v3 — the nightly eval. Until now the quality harness ran only when
+# somebody clicked a button in Discord, which means it gated nothing. It now
+# runs every night and says so out loud when quality moves backwards.
+# 03:20 deliberately — business_snapshot_loop already owns 03:00.
+# ---------------------------------------------------------------------------
+MUSAED_NIGHTLY_EVAL = os.environ.get("MUSAED_NIGHTLY_EVAL", "1") in ("1", "true", "True", "yes")
+
+
+@tasks.loop(time=dt_time(hour=3, minute=20, tzinfo=TZ))
+async def musaed_nightly_eval():
+    """Run the golden set nightly and post the result. Never crashes the bot."""
+    if not (MUSAED_NIGHTLY_EVAL and ASSISTANT_ENABLED):
+        return
+    try:
+        import eval_musaed                      # lazy import (guardrail G4)
+    except Exception as e:
+        print("nightly eval: eval_musaed unavailable:", e)
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        if not eval_musaed.golden_exists():
+            try:
+                eval_musaed.seed_golden()
+            except Exception:
+                pass
+        if not eval_musaed.golden_exists():
+            print("nightly eval: no golden set — skipping")
+            return
+        summary, results, diff, html_path = await asyncio.to_thread(
+            eval_musaed.run_quality_check)
+    except Exception as e:
+        print("nightly eval run error:", e)
+        try:
+            log_event("eval", f"nightly eval error: {e}")
+        except Exception:
+            pass
+        return
+    try:
+        hf = summary.get("hard_fails", 0)
+        errs = summary.get("errors", 0)
+        inconclusive = errs >= max(1, summary.get("n", 1))
+        mean_delta = (diff.get("mean_delta") or 0) if diff.get("has_baseline") else 0
+        regressed = (not inconclusive) and (hf > 0 or mean_delta < 0)
+        cat = await get_assistant_category(guild)
+        ch = await ensure_channel(guild, EVAL_CHANNEL, cat)
+        if ch:
+            emb = discord.Embed(
+                title="🌙 فحص الجودة الليلي / Nightly quality check",
+                color=(0x9A6B00 if inconclusive else
+                       (0xB3261E if regressed else 0x1F7A4D)))
+            emb.add_field(name="متوسط الجودة / Mean",
+                          value=f"**{summary.get('mean_overall', 0):.0f}**/100", inline=True)
+            emb.add_field(name="نسبة النجاح / Pass",
+                          value=f"{summary.get('pass_rate', 0)*100:.0f}%", inline=True)
+            emb.add_field(name="حالات حرجة / Hard fails",
+                          value=str(hf), inline=True)
+            if diff.get("has_baseline"):
+                emb.add_field(name="مقارنة بالأساس / vs baseline",
+                              value=f"{mean_delta:+.1f}", inline=True)
+            names = [str(r.get("id")) for r in (diff.get("regressions") or [])][:10]
+            if names:
+                emb.add_field(name="تراجعت / Regressed",
+                              value="، ".join(names)[:1000], inline=False)
+            emb.set_footer(text=f"{summary.get('n', 0)} حالة · تلقائي 03:20")
+            await ch.send(embed=emb)
+        # A regression is not a log line — it is an alert.
+        if regressed:
+            esc = await ensure_channel(guild, ESCALATION_CHANNEL, cat)
+            if esc:
+                alert = discord.Embed(
+                    title="🔻 تراجع في جودة المساعد",
+                    description=(f"الفحص الليلي رصد تراجعاً: {hf} حالة حرجة · "
+                                 f"فرق المتوسط {mean_delta:+.1f}.\n"
+                                 f"شوف #{EVAL_CHANNEL} للتفاصيل."),
+                    color=0xB3261E)
+                await esc.send(embed=alert)
+            metric_bump("v3_eval_regression")
+        log_event("eval", f"nightly eval · mean {summary.get('mean_overall', 0):.0f} · "
+                          f"hard fails {hf}")
+    except Exception as e:
+        print("nightly eval post error:", e)
+
+
 # Musaed Quality Scoreboard — ADDITIVE Discord surface for eval_musaed.py.
 # Everything here is new and self-contained. eval_musaed is imported LAZILY inside
 # try/except so any error in it can never break on_ready, the dashboard, or the bot.
@@ -66977,6 +67063,8 @@ async def on_ready():
             print("test WILT error:", e)
     if not firewall_block_drain.is_running():
         firewall_block_drain.start()
+    if ASSISTANT_ENABLED and not musaed_nightly_eval.is_running():
+        musaed_nightly_eval.start()
     if ASSISTANT_ENABLED and not guest_summary_loop.is_running():
         guest_summary_loop.start()
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():

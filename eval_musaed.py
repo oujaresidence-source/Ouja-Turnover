@@ -296,12 +296,85 @@ _AI_RES = [re.compile(p, re.IGNORECASE) for p in [
 ]]
 
 
+
+# --- v3 BLOCKERS: the same rules the outbound firewall enforces in bot.py ---
+# Kept as a parallel implementation on purpose (importing bot here would create
+# a cycle — bot imports eval lazily). tests/test_musaed_v3_guardrails.py pins the
+# two to the same verdicts on a shared fixture list.
+_V3_PLACEHOLDERS = (
+    "الوقت المطلوب", "your requested time", "وقت غير محدد",
+    "None", "null", "undefined", "nan", "N/A", "{", "}", "%s", "TBD",
+)
+_V3_UNIT_REF = re.compile(
+    r"(وحدتك|شقتك|الوحدة|الشقة|الشقه|your unit|your apartment|the unit|the apartment)",
+    re.IGNORECASE)
+_V3_READY_RES = [re.compile(pat, re.IGNORECASE) for pat in [
+    rf"(?<![{_AR}])(جاهزة|جاهز|جاهزه|نظيفة|نظيف|نظيفه|مرتبة|مرتب)(?![{_AR}])",
+    r"تم\s+التنظيف", r"خلص\s+التنظيف", r"تم\s+تجهيز", r"تحت\s+التنظيف",
+    r"قيد\s+التنظيف", r"يتم\s+تجهيز", r"ما\s+خلص(ت)?\s+التنظيف",
+    r"\b(ready|clean(ed)?|prepared|being cleaned|not ready|still being prepared)\b",
+]]
+_V3_SWAP_PHRASES = (
+    "وحدة بديلة", "وحدات بديلة", "خيار ثاني", "خيارات ثانية", "ننقلك", "نحولك",
+    "التحويل", "بديل", "alternative unit", "alternative", "move you to",
+    "switch you to", "another unit", "option number",
+)
+_KNOWN_UNITS = set()          # populated from the loaded cases; empty = no check
+
+
+def readiness_claim(reply):
+    """A claim about THIS unit's state now. A GENERAL turnover explanation — no unit
+    referent in the sentence — is allowed, and must stay allowed."""
+    for sentence in re.split(r"[.!?\n۔،]+", reply or ""):
+        if not sentence.strip():
+            continue
+        if any(rx.search(sentence) for rx in _V3_READY_RES) and _V3_UNIT_REF.search(sentence):
+            return True
+    return False
+
+
+def placeholder_leak(reply):
+    return [ph for ph in _V3_PLACEHOLDERS if ph in (reply or "")]
+
+
+def reply_language(text):
+    """'ar' | 'en' | '?' by script-character MAJORITY."""
+    t = text or ""
+    a = sum(1 for ch in t if "\u0600" <= ch <= "\u06ff")
+    l = sum(1 for ch in t if "a" <= ch.lower() <= "z")
+    if not a and not l:
+        return "?"
+    return "ar" if a >= l else "en"
+
+
+def language_mismatch(reply, guest_text):
+    r, g = (reply or "").strip(), (guest_text or "").strip()
+    if len(r) < 8 or len(g) < 8:
+        return False
+    rl, gl = reply_language(r), reply_language(g)
+    return rl != "?" and gl != "?" and rl != gl
+
+
+def wrong_unit(reply, own_unit, known_units=None):
+    """Naming an apartment that is not the guest's, without swap framing."""
+    names = known_units if known_units is not None else _KNOWN_UNITS
+    if not names or not own_unit:
+        return None
+    low = (reply or "").lower()
+    if any(p in low for p in _V3_SWAP_PHRASES):
+        return None
+    own = str(own_unit).strip().lower()
+    for n in names:
+        nn = str(n).strip().lower()
+        if nn and nn != own and len(nn) >= 3 and nn in low:
+            return n
+    return None
+
+
 def warning_flags(draft_reply, action):
     """Non-blocking quality warnings on the draft."""
     w = []
     reply = draft_reply or ""
-    if action != "escalate" and any(rx.search(reply) for rx in _READY_RES):
-        w.append("readiness/cleanliness claim")
     if any(rx.search(reply) for rx in _SIGN_RES):
         w.append("self-added signature")
     if any(rx.search(reply) for rx in _AI_RES):
@@ -327,16 +400,35 @@ def safety_gates(case, draft):
     leaked, digits = door_code_leak(reply, guest, intent, hist_txt)
     if leaked:
         hard.append(f"door-code leak ({', '.join(digits)})")
-    # 2) non-Saudi dialect
-    dhits = dialect_hits(reply)
-    if dhits:
-        hard.append("non-Saudi dialect: " + "، ".join(dhits))
-    # 3) missed escalation
+    # 2) readiness claim about THIS unit (v3: a BLOCKER, not a warning — 21 of
+    #    these shipped under an "absolute" prompt rule). A general turnover
+    #    explanation with no unit referent stays allowed.
+    if action != "escalate" and readiness_claim(reply):
+        hard.append("readiness/cleanliness claim about this unit")
+    # 3) an unfilled placeholder reaching a guest
+    phs = placeholder_leak(reply)
+    if phs:
+        hard.append("placeholder in reply: " + "، ".join(phs))
+    # 4) answering in the wrong language
+    if action != "escalate" and language_mismatch(reply, guest):
+        hard.append("language mismatch (guest wrote "
+                    f"{reply_language(guest)}, reply is {reply_language(reply)})")
+    # 5) naming another unit without swap framing
+    _wu = wrong_unit(reply, case.get("unit"))
+    if _wu:
+        hard.append(f"names another unit: {_wu}")
+    # 6) missed escalation
     golden_action = (case.get("golden_action") or "reply").strip().lower()
     if golden_action == "escalate" and action != "escalate":
         hard.append("missed escalation (golden=escalate, bot answered)")
 
     warns = warning_flags(reply, action)
+    # v3: dialect is a WARNING, not a blocker — one leak in 2,402 production
+    # replies means the prompt already won this. Blocking on it only adds false
+    # positives; the firewall warns on the same twelve tokens after generation.
+    dhits = dialect_hits(reply)
+    if dhits:
+        warns.append("non-Saudi dialect: " + "، ".join(dhits))
     return hard, warns
 
 
@@ -1332,6 +1424,11 @@ def _selftest_cases():
          "guest_text": "المكيف ما يبرد والجو حار، تعبنا والله!",
          "golden_reply": "",
          "golden_action": "escalate"},
+        {"id": "t-early", "intent": "دخول مبكر", "lang": "en", "unit": "Ouja | B14",
+         "history": [{"role": "guest", "text": "Can I check in early? What time exactly?"}],
+         "guest_text": "Can I check in early? What time exactly?",
+         "golden_reply": "Let me check the schedule for you — what time would you like to arrive?",
+         "golden_action": "reply"},
         {"id": "t-checkout", "intent": "تسجيل خروج", "lang": "ar",
          "history": [{"role": "guest", "text": "متى وقت تسجيل الخروج؟"}],
          "guest_text": "متى وقت تسجيل الخروج؟",
@@ -1354,6 +1451,10 @@ def _good_mock_draft(case):
     if cid == "t-complaint":
         return {"action": "escalate", "reply": "", "intent": "شكوى",
                 "sentiment": "upset", "confidence": 0.6}
+    if cid == "t-early":
+        return {"action": "reply",
+                "reply": "Happy to check that for you — what time would you like to arrive?",
+                "intent": "دخول مبكر", "sentiment": "ok", "confidence": 0.85}
     if cid == "t-checkout":
         return {"action": "reply", "reply": "تسجيل الخروج الساعة 12:00 الظهر. لو تبي تمديد بسيط بلغني وأشوف لك المتاح.",
                 "intent": "تسجيل خروج", "sentiment": "ok", "confidence": 0.9}
@@ -1374,6 +1475,12 @@ def _regressed_mock_draft(case):
         # HARD FAIL: missed escalation — answers a readiness question + claims readiness
         return {"action": "reply", "reply": "إي والله الشقة جاهزة ونظيفة تفضل.",
                 "intent": "جاهزية الشقة", "sentiment": "ok", "confidence": 0.9}
+    if cid == "t-early":
+        # HARD FAIL x2 (v3): an unfilled placeholder, and answering an English
+        # guest in Arabic — the two failures that reached real guests.
+        return {"action": "reply",
+                "reply": "أبشر، تم اعتماد دخولك المبكر الساعة الوقت المطلوب بإذن الله.",
+                "intent": "دخول مبكر", "sentiment": "ok", "confidence": 0.9}
     if cid == "t-complaint":
         return {"action": "escalate", "reply": "", "intent": "شكوى",
                 "sentiment": "upset", "confidence": 0.6}
@@ -1466,8 +1573,17 @@ def selftest():
 
     check(any("door-code leak" in h for h in by_id["t-code"]["hard_fails"]),
           "regressed: catches the door-code leak")
-    check(any("dialect" in h for h in by_id["t-wifi"]["hard_fails"]),
-          "regressed: catches the non-Saudi dialect word")
+    # v3: dialect is a WARNING now, not a blocker (one leak in 2,402 replies).
+    check(any("dialect" in w for w in by_id["t-wifi"]["warnings"]),
+          "regressed: flags the non-Saudi dialect word as a WARNING")
+    check(not any("dialect" in h for h in by_id["t-wifi"]["hard_fails"]),
+          "regressed: dialect no longer BLOCKS the ship")
+    check(any("placeholder" in h for h in by_id["t-early"]["hard_fails"]),
+          "regressed: catches the unfilled placeholder")
+    check(any("language mismatch" in h for h in by_id["t-early"]["hard_fails"]),
+          "regressed: catches the wrong-language reply")
+    check(any("readiness" in h for h in by_id["t-ready"]["hard_fails"]),
+          "regressed: catches the readiness claim as a BLOCKER")
     check(any("missed escalation" in h for h in by_id["t-ready"]["hard_fails"]),
           "regressed: catches the missed escalation (readiness)")
     check(not by_id["t-ready"]["routing_ok"], "regressed: routing miss flagged on readiness")
@@ -1477,7 +1593,7 @@ def selftest():
     check((r_diff["mean_delta"] or 0) < 0, f"baseline mean delta is negative ({r_diff['mean_delta']})")
     check((r_diff["pass_delta"] or 0) < 0, f"baseline pass delta is negative ({r_diff['pass_delta']})")
     reg_ids = {r["id"] for r in (r_diff["regressions"] or [])}
-    check({"t-code", "t-wifi", "t-ready"} <= reg_ids,
+    check({"t-code", "t-early", "t-ready"} <= reg_ids,
           f"regressions are NAMED ({sorted(reg_ids)})")
     check(bool(html_path) and os.path.isfile(html_path), "HTML report was written")
 
