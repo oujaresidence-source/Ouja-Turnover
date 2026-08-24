@@ -161,7 +161,7 @@ class NeverTouchesTheNetwork(unittest.TestCase):
 
 
 class FetchShape(unittest.TestCase):
-    """_mcal_fetch_unit is the one place Hostaway's JSON becomes our rows."""
+    """_mcal_window is the one place Hostaway's JSON becomes our rows."""
 
     def setUp(self):
         self._orig = bot.api_get
@@ -175,7 +175,7 @@ class FetchShape(unittest.TestCase):
             {"date": "2026-09-02", "isAvailable": 0, "price": 700, "reservationId": 55},
             {"date": "2026-09-03", "isAvailable": 0, "price": 0},
         ]}
-        got = bot._mcal_fetch_unit(7, "2026-09-01", "2026-09-03")
+        got = bot._mcal_window(7, datetime.date(2026, 9, 1), datetime.date(2026, 9, 3))
         self.assertEqual(got["2026-09-01"], [1, 700.0, 0])
         self.assertEqual(got["2026-09-02"], [0, 700.0, 1])
         self.assertEqual(got["2026-09-03"], [0, None, 0], "price 0 is no price, not free")
@@ -184,12 +184,87 @@ class FetchShape(unittest.TestCase):
         def boom(*a, **k):
             raise RuntimeError("Hostaway down")
         bot.api_get = boom
-        self.assertIsNone(bot._mcal_fetch_unit(7, "2026-09-01", "2026-09-03"))
+        self.assertIsNone(bot._mcal_window(7, datetime.date(2026, 9, 1),
+                                           datetime.date(2026, 9, 3)))
 
     def test_empty_result_is_also_none(self):
         bot.api_get = lambda *a, **k: {"result": []}
-        self.assertIsNone(bot._mcal_fetch_unit(7, "2026-09-01", "2026-09-03"),
+        self.assertIsNone(bot._mcal_window(7, datetime.date(2026, 9, 1),
+                                           datetime.date(2026, 9, 3)),
                           "an empty calendar must not overwrite a good copy")
+
+
+class ChunkedFetch(unittest.TestCase):
+    """The store asked Hostaway for 210 days in one call and got nothing back, for
+    every unit, silently — the site stayed fast and quietly served estimates for
+    twenty minutes before anyone could tell. Nothing in this codebase had ever asked
+    for more than 60 days. So the horizon is stitched from 60-day windows."""
+
+    def setUp(self):
+        self._orig = bot.api_get
+        self.calls = []
+
+    def tearDown(self):
+        bot.api_get = self._orig
+
+    def _serve(self, max_span_days=60):
+        """A Hostaway that REFUSES windows wider than it supports — the behaviour the
+        first version assumed away."""
+        def fake(path, params=None):
+            p = params or {}
+            a = datetime.date.fromisoformat(p["startDate"])
+            b = datetime.date.fromisoformat(p["endDate"])
+            self.calls.append((a, b))
+            if (b - a).days + 1 > max_span_days:
+                raise RuntimeError("range too wide")
+            days, d = [], a
+            while d <= b:
+                days.append({"date": d.isoformat(), "isAvailable": 1, "price": 700})
+                d += datetime.timedelta(days=1)
+            return {"result": days}
+        bot.api_get = fake
+
+    def test_a_long_horizon_is_stitched_from_narrow_windows(self):
+        self._serve()
+        got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
+        self.assertEqual(len(self.calls), 4, "181 days needs four 60-day windows")
+        for a, b in self.calls:
+            self.assertLessEqual((b - a).days + 1, 60)
+        self.assertEqual(len(got), 181)
+        self.assertIn("2026-09-01", got)
+        self.assertIn("2027-02-28", got)
+
+    def test_windows_do_not_overlap_or_leave_gaps(self):
+        self._serve()
+        bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
+        for (_a1, b1), (a2, _b2) in zip(self.calls, self.calls[1:]):
+            self.assertEqual(a2 - b1, datetime.timedelta(days=1),
+                             "each window must start the day after the last one ended")
+
+    def test_a_partial_horizon_is_kept_not_thrown_away(self):
+        """Near dates keep exact prices even when a far window fails."""
+        calls = {"n": 0}
+        def flaky(path, params=None):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise RuntimeError("Hostaway down")
+            a = datetime.date.fromisoformat(params["startDate"])
+            b = datetime.date.fromisoformat(params["endDate"])
+            days, d = [], a
+            while d <= b:
+                days.append({"date": d.isoformat(), "isAvailable": 1, "price": 700})
+                d += datetime.timedelta(days=1)
+            return {"result": days}
+        bot.api_get = flaky
+        got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
+        self.assertEqual(len(got), 60, "the first window survives")
+
+    def test_total_failure_is_none_so_the_old_copy_survives(self):
+        def boom(*a, **k):
+            raise RuntimeError("down")
+        bot.api_get = boom
+        self.assertIsNone(bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1),
+                                               datetime.date(2027, 2, 28)))
 
 
 class RefreshKeepsLastGoodCopy(unittest.TestCase):

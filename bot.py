@@ -57231,23 +57231,30 @@ MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /el
 # A day that is not in the store is UNKNOWN — never treated as free, never treated
 # as priced. That is the same rule unit_availability_price already applies to a
 # truncated Hostaway response, and it is the only rule that cannot invent a price.
-MONTHLY_CAL_DAYS        = int(os.environ.get("MONTHLY_CAL_DAYS", "210"))
-MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "20"))
+# 60 days is the ONLY calendar window this codebase has ever proven against
+# Hostaway (compute_forward_calendar, get_forward_calendar, the pricing horizon —
+# all 60 or less). The first version of this store asked for 210 days in one call
+# and every unit came back empty, so the store never filled and the site quietly
+# served estimates. Ask for what is known to work and stitch the windows together.
+MONTHLY_CAL_CHUNK_DAYS  = int(os.environ.get("MONTHLY_CAL_CHUNK_DAYS", "60"))
+MONTHLY_CAL_DAYS        = int(os.environ.get("MONTHLY_CAL_DAYS", "180"))
+MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "30"))
 
 # {"units": {"<listing id>": {"<YYYY-MM-DD>": [available, price|null, has_reservation]}}}
 _mcal = _load_json("monthly_calendar.json", None) or {"units": {}, "synced_at": None,
                                                       "from": None, "to": None}
 _mcal_stats = {"ok": 0, "err": 0, "last_ms": 0, "runs": 0}
 
-def _mcal_fetch_unit(listing_id, start, end):
-    """One calendar pull for one unit -> {date: [available, price, has_reservation]}.
-    None on any error, which the caller reads as 'keep the last good copy'."""
+def _mcal_window(listing_id, start, end):
+    """ONE calendar call, one window -> {date: [available, price, has_reservation]}.
+    None on error or on an empty result, so a bad response can never be mistaken for
+    'this unit has no calendar'."""
     try:
         data = api_get("/listings/%s/calendar" % listing_id,
-                       params={"startDate": start, "endDate": end})
+                       params={"startDate": start.isoformat(), "endDate": end.isoformat()})
         days = data.get("result", []) or []
     except Exception as e:
-        print("monthly calendar fetch error (%s):" % listing_id, e)
+        print("monthly calendar fetch error (%s %s..%s):" % (listing_id, start, end), e)
         return None
     out = {}
     for d in days:
@@ -57258,6 +57265,25 @@ def _mcal_fetch_unit(listing_id, start, end):
         out[ds] = [1 if int(d.get("isAvailable", 0) or 0) == 1 else 0,
                    float(p) if isinstance(p, (int, float)) and p > 0 else None,
                    1 if (d.get("reservationId") or d.get("reservation_id")) else 0]
+    return out or None
+
+def _mcal_fetch_unit(listing_id, start, end):
+    """One unit's calendar across the whole horizon, stitched from proven-size windows.
+
+    PARTIAL IS STILL USEFUL, AND STILL HONEST. If a later window fails we keep the
+    earlier ones: _mcal_quote refuses any stay it cannot cover night-by-night, so a
+    short store produces estimates for far dates and exact prices for near ones —
+    which is strictly better than nothing. Returns None only if we got nothing at all.
+    """
+    out, span = {}, max(1, MONTHLY_CAL_CHUNK_DAYS)
+    cur = start
+    while cur <= end:                       # inclusive: a stay may end ON the horizon
+        stop = min(cur + timedelta(days=span - 1), end)
+        got = _mcal_window(listing_id, cur, stop)
+        if not got:
+            break
+        out.update(got)
+        cur = stop + timedelta(days=1)
     return out or None
 
 def _mcal_quote(listing_id, ci, co):
@@ -57314,8 +57340,8 @@ def _mcal_refresh_sync():
     on a schedule, and not by a customer staring at a spinner."""
     t0 = time.time()
     today = datetime.now(TZ).date()
-    start = today.isoformat()
-    end = (today + timedelta(days=MONTHLY_CAL_DAYS)).isoformat()
+    start = today
+    end = today + timedelta(days=MONTHLY_CAL_DAYS)
     old = _mcal.get("units") or {}
     units, ok, err = {}, 0, 0
     for s_, _ov in _monthly_visible_snaps():
@@ -57329,15 +57355,66 @@ def _mcal_refresh_sync():
         units[lid] = got
         ok += 1
     _mcal["units"] = units
-    _mcal["from"], _mcal["to"] = start, end
+    _mcal["from"], _mcal["to"] = start.isoformat(), end.isoformat()
+    _mcal["days"] = max((len(v) for v in units.values()), default=0)
     _mcal["synced_at"] = datetime.now(TZ).isoformat(timespec="seconds")
     _save_json("monthly_calendar.json", _mcal)
     _mcal_stats.update({"ok": ok, "err": err, "runs": _mcal_stats["runs"] + 1,
                         "last_ms": int((time.time() - t0) * 1000)})
+    print("monthly calendar: %s ok, %s failed, %s days deep, %sms"
+          % (ok, err, _mcal.get("days"), _mcal_stats["last_ms"]))
     return dict(_mcal_stats, units=len(units))
 
 def _mcal_ready():
     return bool((_mcal.get("units") or {}))
+
+# ---- THE ENGINE PRICE STORE: «التسعير الشهري» reaches the guest site -----------
+# The lab and the public site disagreed because they were two different formulas:
+# the site summed 30 nights of the nightly calendar and took a flat discount off it,
+# while the engine works from the unit's own realised history inside a floor and a
+# ceiling. Connecting them was tried on 2026-08-19 and reverted the same day, because
+# the connection ran the engine INSIDE the customer's page load.
+#
+# So the engine runs here instead, on a slow background loop, and the guest path gets
+# a finished number out of a dict. Same fix as the calendar store above, same reason.
+MONTHLY_ENGINE_REFRESH_MIN = int(os.environ.get("MONTHLY_ENGINE_REFRESH_MIN", "180"))
+_mengine = {"month": None, "units": {}, "at": None, "err": "", "coverage": None}
+
+def _mengine_refresh_sync():
+    """Precompute every unit's engine price for the current month, off the request path.
+
+    units_report(force=True) is the heavy call — years of reservation history, the
+    listings API, and ~4 brain.db reads per unit. That is exactly why it belongs on a
+    background thread on a 3-hour timer and not in front of a guest.
+    """
+    if not _HAS_MONTHLY:
+        return {"ok": False, "err": "lab disabled"}
+    month = datetime.now(TZ).date().strftime("%Y-%m")
+    try:
+        rep = _monthly.collect.units_report(month, force=True)
+    except Exception as e:
+        _mengine["err"] = str(e)[:200]
+        print("monthly engine refresh error:", e)
+        return {"ok": False, "err": _mengine["err"]}
+    if not rep:
+        return {"ok": False, "err": "month state unavailable"}
+    units = {}
+    for r in (rep.get("rows") or []):
+        if r.get("price"):
+            units[str(r.get("lid"))] = {"price": float(r["price"]), "basis": r.get("basis")}
+    _mengine.update({"month": month, "units": units, "err": "",
+                     "coverage": rep.get("pct_own_history"),
+                     "at": datetime.now(TZ).isoformat(timespec="seconds")})
+    return {"ok": True, "n": len(units), "month": month,
+            "coverage": rep.get("pct_own_history")}
+
+def monthly_engine_price(listing_id, month):
+    """The precomputed engine price for one unit — a dict lookup and nothing else.
+    None whenever the month is not the one we precomputed, which is what keeps a
+    stale number from being published against the wrong month."""
+    if not month or _mengine.get("month") != month:
+        return None
+    return (_mengine.get("units") or {}).get(str(listing_id))
 
 
 def _monthly_default_cfg():
@@ -57464,13 +57541,20 @@ def monthly_quote(listing_id, move_in, months, snap=None):
     if before is None:
         return None
     out = monthly_pricing(before, months, _monthly_cfg)
-    # ---- «التسعير الشهري» is DISCONNECTED from the guest price path (2026-08-19).
-    # It was hooked in here and the guest site went down. Whatever the mechanism —
-    # SQLite contention from the background warm-up, thread pressure, something
-    # else — the diagnosis is not worth one more minute of a customer-facing page
-    # being unreachable. The engine keeps running on /monthly-lab, where a slow
-    # page costs nothing. Re-connecting it needs a load test first, not another
-    # guess.
+    # ---- «التسعير الشهري» reaches the guest price here. RECONNECTED 2026-08-24.
+    # The 2026-08-19 version of this hook ran the engine inside the page load and
+    # took the site down. This one reads _mengine, a dict filled by a background
+    # loop, and engine_after returns None on any doubt — so the worst case is the
+    # discount price the site has always shown. The switch that decides whether it
+    # speaks at all is price_source, in the lab's Manage tab, no deploy required.
+    if _HAS_MONTHLY:
+        try:
+            _alt = _monthly.live.engine_after(listing_id, mi.strftime("%Y-%m"),
+                                              before, months, out)
+            if _alt:
+                out = _alt
+        except Exception as _ee:
+            print("monthly engine hook error:", _ee)
     out.update({"months": months, "nights": nights,
                 "move_in": mi.isoformat(), "move_out": mo.isoformat(),
                 "available": available, "estimated": estimated})
@@ -57686,7 +57770,9 @@ def _monthly_cfg_public():
                       "label_en": (c.get("promo") or {}).get("label_en") or ""},
             "addons": [{"key": a.get("key"), "ar": a.get("ar"), "en": a.get("en")}
                        for a in (c.get("addons") or [])],
-            "count": len(_monthly_visible_snaps())}
+            "count": len(_monthly_visible_snaps()),
+            "cal": {"units": len((_mcal.get("units") or {})),
+                    "to": _mcal.get("to"), "at": _mcal.get("synced_at")}}
 
 
 MONTHLY_HTML = r"""<!doctype html>
@@ -58260,7 +58346,25 @@ async def _api_monthly_admin(request):
                      "hidden": str(s.get("id")) in _monthly_hidden_set()}
                     for s in (_gw_cache.get("listings") or [])]
         listings.sort(key=lambda x: (x["name"] or ""))
-        return _json({"ok": True, "config": _monthly_cfg, "listings": listings})
+        # The two background stores the guest site now depends on. Without this there
+        # is no way to tell a warm site from one silently serving estimates — which is
+        # exactly the question that had to be answered by reading raw JSON once.
+        health = {
+            "calendar": {"units": len(_mcal.get("units") or {}),
+                         "synced_at": _mcal.get("synced_at"),
+                         "from": _mcal.get("from"), "to": _mcal.get("to"),
+                         "last_ms": _mcal_stats.get("last_ms"),
+                         "failed": _mcal_stats.get("err"),
+                         "runs": _mcal_stats.get("runs"),
+                         "days_deep": _mcal.get("days")},
+            "engine": {"units": len(_mengine.get("units") or {}),
+                       "month": _mengine.get("month"), "at": _mengine.get("at"),
+                       "coverage": _mengine.get("coverage"), "err": _mengine.get("err"),
+                       "price_source": (_monthly.settings.price_source()
+                                        if _HAS_MONTHLY else "discount")},
+        }
+        return _json({"ok": True, "config": _monthly_cfg, "listings": listings,
+                      "health": health})
     b = await _read_body(request)
     if isinstance(b.get("default_pct"), (int, float)):
         _monthly_cfg["default_pct"] = max(0.0, min(float(b["default_pct"]), 0.95))
@@ -59550,6 +59654,8 @@ async def start_web_server():
                     "saudi_events": SAUDI_EVENTS,
                     "pe_band": _pe_band,
                     "pe_build_dataset": _pe_build_dataset,
+                    # The finished number, never the computation — see host.engine_price.
+                    "engine_price": monthly_engine_price,
                 })
                 _monthly.bootstrap()
                 _monthly.register_routes(app)
@@ -60045,6 +60151,22 @@ async def monthly_calendar_loop():
               % (res["ok"], res["err"], res["last_ms"]))
     except Exception as e:
         print("monthly calendar loop error:", e)
+
+@tasks.loop(minutes=MONTHLY_ENGINE_REFRESH_MIN)
+async def monthly_engine_loop():
+    """Recompute the engine's prices in the background. Heavy and slow on purpose —
+    nobody is waiting on it, which is the entire design."""
+    if not (MONTHLY_ENABLED and _HAS_MONTHLY):
+        return
+    try:
+        res = await asyncio.to_thread(_mengine_refresh_sync)
+        if res.get("ok"):
+            print("monthly engine: %s units priced, own-history coverage %.0f%%"
+                  % (res["n"], 100.0 * (res.get("coverage") or 0)))
+        else:
+            print("monthly engine: not refreshed —", res.get("err"))
+    except Exception as e:
+        print("monthly engine loop error:", e)
 
 @tasks.loop(minutes=KNOWLEDGE_REFRESH_MIN)
 async def knowledge_loop():
@@ -67684,6 +67806,8 @@ async def on_ready():
         _pending.append(cleaning_feedback_loop)
     if MONTHLY_ENABLED and not monthly_calendar_loop.is_running():
         _pending.append(monthly_calendar_loop)    # warms /monthly so no guest waits on Hostaway
+    if MONTHLY_ENABLED and _HAS_MONTHLY and not monthly_engine_loop.is_running():
+        _pending.append(monthly_engine_loop)      # precomputes the lab price the site publishes
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
         _pending.append(decor_warn_loop)          # late decoration / late cake — separate warnings
     # Fire them off spread over time, in the background: on_ready must keep going
