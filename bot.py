@@ -57392,6 +57392,23 @@ MONTHLY_ENGINE_REFRESH_MIN = int(os.environ.get("MONTHLY_ENGINE_REFRESH_MIN", "1
 _mengine = {"month": None, "units": {}, "at": None, "err": "", "coverage": None,
             "tries": 0}
 
+def _mengine_publishable():
+    """How many priced units the CURRENT mode would actually let through. The gap
+    between this and the priced count is the whole answer to "the switch is on and
+    nothing changed"."""
+    if not _HAS_MONTHLY:
+        return 0
+    try:
+        mode = _monthly.settings.price_source()
+    except Exception:
+        return 0
+    if mode == "engine":
+        return len(_mengine.get("units") or {})
+    if mode != "engine_verified":
+        return 0
+    return sum(1 for v in (_mengine.get("units") or {}).values()
+               if (v or {}).get("basis") == "own_history")
+
 def _mengine_state():
     """What the engine store is actually doing, in one word. It sat empty for 22
     minutes after the switch was flipped and nothing said why — the refresh was
@@ -57435,11 +57452,14 @@ def _mengine_refresh_sync():
         return {"ok": False, "err": _mengine["err"]}
     if not rep:
         return {"ok": False, "err": "month state unavailable"}
-    units = {}
+    units, bases = {}, {}
     for r in (rep.get("rows") or []):
         if r.get("price"):
             units[str(r.get("lid"))] = {"price": float(r["price"]), "basis": r.get("basis")}
-    _mengine.update({"month": month, "units": units, "err": "",
+            b = str(r.get("basis") or "?")
+            bases[b] = bases.get(b, 0) + 1
+    _mengine["bases"] = bases
+    _mengine.update({"month": month, "units": units, "err": "", "bases": bases,
                      "coverage": rep.get("pct_own_history"),
                      "at": datetime.now(TZ).isoformat(timespec="seconds")})
     return {"ok": True, "n": len(units), "month": month,
@@ -57813,6 +57833,11 @@ def _monthly_cfg_public():
             "eng": {"units": len((_mengine.get("units") or {})),
                     "month": _mengine.get("month"), "at": _mengine.get("at"),
                     "state": _mengine_state(), "tries": _mengine.get("tries"),
+                    # Which kind of evidence each price rests on, as COUNTS only — no
+                    # price, no apartment. The switch was on, 73 units were priced and
+                    # not one reached a guest; without this the reason is a guess.
+                    "bases": _mengine.get("bases") or {},
+                    "publishable": _mengine_publishable(),
                     "src": (_monthly.settings.price_source() if _HAS_MONTHLY else "discount")}}
 
 
