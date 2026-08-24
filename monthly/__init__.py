@@ -96,6 +96,8 @@ def bootstrap():
     """
     try:
         db._ensure()
+        print("[monthly] price source:", settings.apply_owner_flip(),
+              "->", settings.price_source())
         return "created"
     except Exception as e:
         if "before brain.wire()" in str(e):

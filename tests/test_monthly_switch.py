@@ -138,6 +138,43 @@ class ShipsOnButOnlyWhereMeasuredTest(_Base):
         self.assertEqual(settings.price_source(), "discount")
 
 
+class OwnerFlipTest(_Base):
+    """The 2026-08-25 flip to engine_verified, asked for in the owner's own words.
+
+    A script writing a value into a settings file has no author and no reason, which
+    is exactly what set_price_source refuses from a human. So this records both — and
+    runs ONCE, because a flip that reasserts itself every boot is not a default, it is
+    an argument with the owner that the owner cannot win."""
+
+    def test_it_flips_the_switch_and_records_who_and_why(self):
+        self.assertEqual(settings.price_source(), "discount")
+        self.assertEqual(settings.apply_owner_flip(), "flipped")
+        self.assertEqual(settings.price_source(), "engine_verified")
+        cur = settings.load()
+        self.assertTrue(cur["price_source_reason"], "a flip with no reason is a mystery")
+        self.assertIn("owner", cur["price_source_actor"])
+        self.assertTrue(cur["price_source_at"])
+
+    def test_it_runs_once(self):
+        settings.apply_owner_flip()
+        self.assertEqual(settings.apply_owner_flip(), "already-applied")
+
+    def test_the_owner_changing_it_back_is_permanent(self):
+        """The whole point of the marker. If the owner looks at engine prices and
+        wants the discount back, one click must hold — through every later boot."""
+        settings.apply_owner_flip()
+        settings.set_price_source("discount", coverage=0.9, actor="faisal",
+                                  reason="رجعوها")
+        self.assertEqual(settings.apply_owner_flip(), "already-applied")
+        self.assertEqual(settings.price_source(), "discount",
+                         "boot must never overrule a human's choice")
+
+    def test_it_never_raises_even_if_state_is_unreadable(self):
+        host.HOST.load_json = lambda *_a, **_k: (_ for _ in ()).throw(IOError("gone"))
+        host.HOST.save_json = lambda *_a, **_k: (_ for _ in ()).throw(IOError("gone"))
+        self.assertEqual(settings.apply_owner_flip(), "error")
+
+
 class RefusalIsInCodeTest(_Base):
     def test_flipping_to_engine_below_the_threshold_is_refused(self):
         settings.set_price_source("discount", coverage=0.31)

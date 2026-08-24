@@ -57783,7 +57783,10 @@ def _monthly_cfg_public():
                        for a in (c.get("addons") or [])],
             "count": len(_monthly_visible_snaps()),
             "cal": {"units": len((_mcal.get("units") or {})),
-                    "to": _mcal.get("to"), "at": _mcal.get("synced_at")}}
+                    "to": _mcal.get("to"), "at": _mcal.get("synced_at")},
+            "eng": {"units": len((_mengine.get("units") or {})),
+                    "month": _mengine.get("month"), "at": _mengine.get("at"),
+                    "src": (_monthly.settings.price_source() if _HAS_MONTHLY else "discount")}}
 
 
 MONTHLY_HTML = r"""<!doctype html>

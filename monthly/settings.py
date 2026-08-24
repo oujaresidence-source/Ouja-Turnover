@@ -97,6 +97,46 @@ def save(cur):
     return cur
 
 
+# ---------------------------------------------------------------------------
+# THE OWNER'S FLIP, 2026-08-25. Asked for in these words: «ابيك تاخذ التسعير من
+# الـlab» — after being shown that the guest site was publishing the nightly rate
+# times 31 nights, and after being told twice what turning the engine on means.
+#
+# Done here rather than by hand on the screen for one reason: set_price_source()
+# refuses to move this switch without an actor and a reason, and a value typed
+# into a settings file by a script has neither. This runs ONCE, records both, and
+# then never touches the switch again — the marker below is what makes it once.
+# The owner changing it afterwards on the screen wins permanently, because their
+# value is saved and this has already marked itself done.
+OWNER_FLIP_MARK = "owner_flip_2026_08_25"
+OWNER_FLIP_TO = "engine_verified"
+OWNER_FLIP_REASON = ("طلب المالك ٢٥-٠٨-٢٠٢٦: خذ التسعير من «التسعير الشهري» بدل "
+                     "السعر اليومي × عدد الليالي.")
+
+
+def apply_owner_flip():
+    """Move the switch once, on the record. Returns what happened, never raises —
+    a boot path that can throw is a boot path that can take the bot down."""
+    try:
+        cur = load()
+        if cur.get(OWNER_FLIP_MARK):
+            return "already-applied"
+        if cur.get("price_source") == OWNER_FLIP_TO:
+            cur[OWNER_FLIP_MARK] = True
+            save(cur)
+            return "already-set"
+        cur["price_source"] = OWNER_FLIP_TO
+        cur["price_source_reason"] = OWNER_FLIP_REASON
+        cur["price_source_actor"] = "owner (via Claude)"
+        cur["price_source_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        cur[OWNER_FLIP_MARK] = True
+        save(cur)
+        return "flipped"
+    except Exception as e:                  # pragma: no cover
+        print("[monthly] owner flip skipped:", e)
+        return "error"
+
+
 def price_source():
     """What the LIVE guest site should use. Any doubt resolves to discount."""
     try:
