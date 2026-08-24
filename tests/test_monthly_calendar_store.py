@@ -330,8 +330,9 @@ class EnginePrecompute(unittest.TestCase):
     def setUp(self):
         self._cal, self._eng = bot._mcal, dict(bot._mengine)
         bot._mcal = store({7: month()})
-        bot._mengine.update({"month": None, "units": {}, "at": None, "err": "",
-                             "coverage": None, "tries": 0})
+        bot._mengine.clear()
+        bot._mengine.update({"months": {}, "at": None, "err": "",
+                             "coverage": None, "tries": 0, "bases": {}})
 
     def tearDown(self):
         bot._mcal = self._cal
@@ -354,14 +355,33 @@ class EnginePrecompute(unittest.TestCase):
         finally:
             collect.units_report = real
         self.assertTrue(res["ok"])
-        self.assertEqual(res["n"], 1, "a unit with no price is not stored")
         self.assertEqual(bot._mengine_state(), "ok")
-        month = bot.datetime.now(bot.TZ).date().strftime("%Y-%m")
-        self.assertEqual(bot.monthly_engine_price(7, month),
-                         {"price": 15000.0, "basis": "own_history"})
-        self.assertIsNone(bot.monthly_engine_price(8, month))
+        months = res["months"]
+        self.assertEqual(len(months), bot.MONTHLY_ENGINE_MONTHS,
+                         "the store must cover the months guests can actually pick")
+        for m in months:
+            self.assertEqual(bot.monthly_engine_price(7, m),
+                             {"price": 15000.0, "basis": "own_history"})
+            self.assertIsNone(bot.monthly_engine_price(8, m),
+                              "a unit with no price is not stored")
         self.assertIsNone(bot.monthly_engine_price(7, "1999-01"),
-                          "a price from another month must never be published")
+                          "a month we did not compute must never be published")
+
+    def test_a_future_move_in_gets_a_price_not_a_miss(self):
+        """The bug this replaced: the store held only today's month, every guest
+        picks a future one, so the lookup missed on every search and the engine
+        reached nobody while looking perfectly healthy."""
+        collect, real = self._stub_report({
+            "rows": [{"lid": 7, "price": 15000.0, "basis": "own_history"}],
+            "pct_own_history": 1.0})
+        try:
+            bot._mengine_refresh_sync()
+        finally:
+            collect.units_report = real
+        today = bot.datetime.now(bot.TZ).date()
+        nxt = bot._add_months(today, 1).strftime("%Y-%m")
+        self.assertIsNotNone(bot.monthly_engine_price(7, nxt),
+                             "next month is the commonest move-in there is")
 
     def test_a_failure_is_visible_not_just_logged(self):
         collect, real = self._stub_report(None)

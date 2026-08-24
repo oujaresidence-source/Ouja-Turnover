@@ -57389,8 +57389,25 @@ def _mcal_ready():
 # So the engine runs here instead, on a slow background loop, and the guest path gets
 # a finished number out of a dict. Same fix as the calendar store above, same reason.
 MONTHLY_ENGINE_REFRESH_MIN = int(os.environ.get("MONTHLY_ENGINE_REFRESH_MIN", "180"))
-_mengine = {"month": None, "units": {}, "at": None, "err": "", "coverage": None,
-            "tries": 0}
+# THE STORE HOLDS SEVERAL MONTHS, and the first version did not. It precomputed only
+# today's month, while every guest picks a move-in in a FUTURE month, so the lookup
+# missed on every single search and the engine reached nobody — the switch was on,
+# 73 units were priced, and 126 quotes in a row came out on the discount path. The
+# one case that worked was a move-in inside the current month, which is how it
+# was found. The engine's price is month-specific by design (month_state selects
+# same-month history for seasonality), so the answer is more months, not a looser
+# match: publishing August's number against November would be the stale price this
+# guard exists to prevent.
+MONTHLY_ENGINE_MONTHS = int(os.environ.get("MONTHLY_ENGINE_MONTHS", "4"))
+_mengine = {"months": {}, "at": None, "err": "", "coverage": None,
+            "tries": 0, "bases": {}}
+
+def _mengine_all_units():
+    """Every (month, unit) pair the store holds, flattened."""
+    out = []
+    for mu in (_mengine.get("months") or {}).values():
+        out.extend((mu or {}).values())
+    return out
 
 def _mengine_publishable():
     """How many priced units the CURRENT mode would actually let through. The gap
@@ -57402,12 +57419,12 @@ def _mengine_publishable():
         mode = _monthly.settings.price_source()
     except Exception:
         return 0
+    rows = _mengine_all_units()
     if mode == "engine":
-        return len(_mengine.get("units") or {})
+        return len(rows)
     if mode != "engine_verified":
         return 0
-    return sum(1 for v in (_mengine.get("units") or {}).values()
-               if (v or {}).get("basis") == "own_history")
+    return sum(1 for v in rows if (v or {}).get("basis") == "own_history")
 
 def _mengine_state():
     """What the engine store is actually doing, in one word. It sat empty for 22
@@ -57417,7 +57434,7 @@ def _mengine_state():
     and this one did it twice in one night."""
     if not (MONTHLY_ENABLED and _HAS_MONTHLY):
         return "off"
-    if _mengine.get("units"):
+    if _mengine.get("months"):
         return "ok"
     if not _mcal_ready():
         return "waiting"                    # deliberately yields to the guest calendar
@@ -57436,7 +57453,9 @@ def _mengine_refresh_sync():
     """
     if not _HAS_MONTHLY:
         return {"ok": False, "err": "lab disabled"}
-    month = datetime.now(TZ).date().strftime("%Y-%m")
+    today = datetime.now(TZ).date()
+    months = [_add_months(today, i).strftime("%Y-%m")
+              for i in range(max(1, MONTHLY_ENGINE_MONTHS))]
     _mengine["tries"] = (_mengine.get("tries") or 0) + 1
     try:
         # LOCAL IMPORT, and not `_monthly.collect`. monthly/__init__ imports
@@ -57445,33 +57464,58 @@ def _mengine_refresh_sync():
         # attribute at package level. Reaching for it raised AttributeError on every
         # single run, which the except below swallowed into a log line.
         from monthly import collect as _mcollect
-        rep = _mcollect.units_report(month, force=True)
     except Exception as e:
         _mengine["err"] = str(e)[:200]
-        print("monthly engine refresh error:", e)
+        print("monthly engine import error:", e)
         return {"ok": False, "err": _mengine["err"]}
-    if not rep:
-        return {"ok": False, "err": "month state unavailable"}
-    units, bases = {}, {}
-    for r in (rep.get("rows") or []):
-        if r.get("price"):
-            units[str(r.get("lid"))] = {"price": float(r["price"]), "basis": r.get("basis")}
-            b = str(r.get("basis") or "?")
-            bases[b] = bases.get(b, 0) + 1
-    _mengine["bases"] = bases
-    _mengine.update({"month": month, "units": units, "err": "", "bases": bases,
-                     "coverage": rep.get("pct_own_history"),
+    out, bases, cov, errs = {}, {}, None, []
+    for m in months:
+        try:
+            rep = _mcollect.units_report(m, force=True)
+        except Exception as e:
+            errs.append("%s: %s" % (m, str(e)[:80]))
+            print("monthly engine refresh error (%s):" % m, e)
+            continue
+        if not rep:
+            errs.append("%s: month state unavailable" % m)
+            continue
+        mu = {}
+        for r in (rep.get("rows") or []):
+            if r.get("price"):
+                mu[str(r.get("lid"))] = {"price": float(r["price"]),
+                                         "basis": r.get("basis")}
+                b = str(r.get("basis") or "?")
+                bases[b] = bases.get(b, 0) + 1
+        if mu:
+            out[m] = mu
+        if cov is None:
+            cov = rep.get("pct_own_history")
+    if not out:
+        # "it broke" and "it ran fine and priced nothing" are different problems with
+        # different fixes, so they must not collapse into the same word. err stays
+        # empty when nothing actually raised, which is what makes the state read
+        # "empty" rather than "failed".
+        _mengine["err"] = "; ".join(errs)[:200]
+        return {"ok": False, "err": _mengine["err"] or "no month produced a price"}
+    # A month that failed keeps whatever it had; only months we actually recomputed
+    # are replaced. Half a store beats an empty one, and beats a stale whole one.
+    kept = dict(_mengine.get("months") or {})
+    kept.update(out)
+    # Drop months that have fallen into the past — nobody can move in yesterday.
+    kept = {k: v for k, v in kept.items() if k >= months[0]}
+    _mengine.update({"months": kept, "err": "; ".join(errs)[:200], "bases": bases,
+                     "coverage": cov,
                      "at": datetime.now(TZ).isoformat(timespec="seconds")})
-    return {"ok": True, "n": len(units), "month": month,
-            "coverage": rep.get("pct_own_history")}
+    return {"ok": True, "n": sum(len(v) for v in kept.values()),
+            "months": sorted(kept), "coverage": cov}
 
 def monthly_engine_price(listing_id, month):
-    """The precomputed engine price for one unit — a dict lookup and nothing else.
-    None whenever the month is not the one we precomputed, which is what keeps a
+    """The precomputed engine price for one unit in one month — a dict lookup and
+    nothing else. None when we have not computed THAT month, which is what keeps a
     stale number from being published against the wrong month."""
-    if not month or _mengine.get("month") != month:
+    if not month:
         return None
-    return (_mengine.get("units") or {}).get(str(listing_id))
+    return ((_mengine.get("months") or {}).get(month) or {}).get(str(listing_id))
 
 
 def _monthly_default_cfg():
@@ -57830,8 +57874,9 @@ def _monthly_cfg_public():
             "count": len(_monthly_visible_snaps()),
             "cal": {"units": len((_mcal.get("units") or {})),
                     "to": _mcal.get("to"), "at": _mcal.get("synced_at")},
-            "eng": {"units": len((_mengine.get("units") or {})),
-                    "month": _mengine.get("month"), "at": _mengine.get("at"),
+            "eng": {"units": len(_mengine_all_units()),
+                    "months": sorted((_mengine.get("months") or {})),
+                    "at": _mengine.get("at"),
                     "state": _mengine_state(), "tries": _mengine.get("tries"),
                     # Which kind of evidence each price rests on, as COUNTS only — no
                     # price, no apartment. The switch was on, 73 units were priced and
@@ -58423,8 +58468,9 @@ async def _api_monthly_admin(request):
                          "failed": _mcal_stats.get("err"),
                          "runs": _mcal_stats.get("runs"),
                          "days_deep": _mcal.get("days")},
-            "engine": {"units": len(_mengine.get("units") or {}),
-                       "month": _mengine.get("month"), "at": _mengine.get("at"),
+            "engine": {"units": len(_mengine_all_units()),
+                       "months": sorted((_mengine.get("months") or {})),
+                       "at": _mengine.get("at"),
                        "coverage": _mengine.get("coverage"), "err": _mengine.get("err"),
                        "state": _mengine_state(), "tries": _mengine.get("tries"),
                        "price_source": (_monthly.settings.price_source()
@@ -60236,8 +60282,9 @@ async def monthly_engine_loop():
     try:
         res = await asyncio.to_thread(_mengine_refresh_sync)
         if res.get("ok"):
-            print("monthly engine: %s units priced, own-history coverage %.0f%%"
-                  % (res["n"], 100.0 * (res.get("coverage") or 0)))
+            print("monthly engine: %s prices over %s, own-history coverage %.0f%%"
+                  % (res["n"], ",".join(res.get("months") or []),
+                     100.0 * (res.get("coverage") or 0)))
         else:
             print("monthly engine: not refreshed —", res.get("err"))
     except Exception as e:
