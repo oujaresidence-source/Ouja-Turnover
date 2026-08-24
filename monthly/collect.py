@@ -426,8 +426,7 @@ def units_report(month, force=False, today=None):
             "model_is_measured": abs(((p.get("quality") or {}).get("mult") or 1.0) - 1.0) > 1e-9,
         })
     priced = [r for r in rows if r["price"] is not None]
-    own = [r for r in rows if r["basis"] in ("own_history", "own_recent",
-                                             "own_seasonal")]
+    own = [r for r in rows if r["basis"] in engine.OWN_BASES]
     return {
         "month": month, "rows": rows,
         "n": len(rows), "n_priced": len(priced),

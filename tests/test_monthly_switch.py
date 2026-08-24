@@ -361,11 +361,34 @@ class VerifiedOnlyModeTest(_Base):
 
     def test_a_pool_priced_unit_keeps_the_discount_path(self):
         settings.set_price_source("engine_verified", coverage=0.26)
-        for basis in ("district_pool", "bedroom_pool", "insufficient"):
+        for basis in ("district_pool", "bedroom_pool", "portfolio_pool",
+                      "insufficient"):
             with _Engine(basis=basis):
                 self.assertIsNone(
                     live.engine_after(1, "2026-10", 20000, 1, self._discount()),
                     "%s must never reach the guest site under engine_verified" % basis)
+
+    def test_the_units_own_history_publishes_whichever_months_it_came_from(self):
+        """own_recent and own_seasonal are the APARTMENT'S OWN record from its other
+        months. They were refused as if they were pool averages, which left 39 of 60
+        apartments on the old price after the owner turned the engine on — 3 of 20
+        rows moved and the rest looked untouched."""
+        settings.set_price_source("engine_verified", coverage=0.26)
+        for basis in ("own_history", "own_recent", "own_seasonal"):
+            with _Engine(basis=basis):
+                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
+            self.assertIsNotNone(out, "%s is the unit's own record, not an average"
+                                 % basis)
+            self.assertEqual(out["after"], 15000)
+
+    def test_the_publisher_and_the_coverage_report_cannot_drift_apart(self):
+        """Both now read engine.OWN_BASES. The bug was two hand-kept copies of one
+        list, in two files, quietly disagreeing about what "its own history" means."""
+        from monthly import engine
+        self.assertEqual(engine.OWN_BASES,
+                         ("own_history", "own_recent", "own_seasonal"))
+        import inspect
+        self.assertIn("engine.OWN_BASES", inspect.getsource(live.engine_after))
 
     def test_full_engine_mode_does_publish_pooled_units(self):
         """The difference between the two modes, stated as a test."""

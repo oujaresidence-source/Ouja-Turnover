@@ -413,6 +413,18 @@ def base_rate(district=None, bedroom=None):
 
 BOUND_BY_VALUES = ("floor", "model", "ceiling")
 
+# THE UNIT'S OWN EVIDENCE, as opposed to other units' averages. All three read the
+# apartment's own realised history — own_history from the same calendar month,
+# own_recent and own_seasonal from its other months when that month is thin.
+# Defined here, where the bases are produced, because two places used to keep their
+# own copy of this list and they disagreed: collect.units_report counted all three
+# when reporting coverage, while live.engine_after published only the first. The
+# result was 39 apartments the report called "priced from their own history" and the
+# publisher silently refused, so the owner turned the engine on and saw 3 of 20
+# prices move. The rule the refusal exists for is "never publish a POOL average as
+# one apartment's price" — and none of these three is a pool.
+OWN_BASES = ("own_history", "own_recent", "own_seasonal")
+
 
 def ceiling_price(adr, cost_set=None):
     """CEILING — 30 nights at our own nightly rate, less the commitment discount.

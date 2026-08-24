@@ -14,7 +14,7 @@ the guest site down is worse than no pricing engine — and this one is switched
 off by default anyway.
 """
 
-from . import host, settings
+from . import engine, host, settings
 
 # RECONNECTED 2026-08-24, on a different mechanism than the one that failed.
 #
@@ -58,11 +58,18 @@ def engine_after(listing_id, month, before_total, months, discount_result):
         if not est or est <= 0:
             return None
         # THE GUARANTEE OF "engine_verified", enforced here rather than promised:
-        # a unit priced from a district or bedroom pool keeps the discount path.
-        # This is what stops fifteen apartments showing the same number side by
-        # side on one page, which is what an average looks like when it is
-        # published as a price.
-        if mode == "engine_verified" and p.get("basis") != "own_history":
+        # a unit priced from a POOL — a district, bedroom or portfolio average —
+        # keeps the discount path. This is what stops fifteen apartments showing the
+        # same number side by side on one page, which is what an average looks like
+        # when it is published as a price.
+        #
+        # It used to read `!= "own_history"`, which was stricter than that sentence:
+        # own_recent and own_seasonal are the APARTMENT'S OWN history from its other
+        # months, not anybody's average, and no two apartments share them. The list
+        # now comes from engine.OWN_BASES, the one place it is defined, so the
+        # publisher and the coverage report can no longer mean different things by
+        # "its own history".
+        if mode == "engine_verified" and p.get("basis") not in engine.OWN_BASES:
             return None
 
         months = max(1, int(months or 1))
