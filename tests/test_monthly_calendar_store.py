@@ -315,3 +315,78 @@ class RefreshKeepsLastGoodCopy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnginePrecompute(unittest.TestCase):
+    """The engine store. It sat empty for 22 minutes after the owner flipped the
+    switch, because _mengine_refresh_sync reached for `monthly.collect` — an
+    attribute the package does not have, since routes.py imports collect lazily
+    inside its handlers. AttributeError, swallowed by a broad except, reported to a
+    log nobody was reading, retried every three hours forever.
+
+    So: one test that the refresh actually reaches units_report, and one that a
+    failure is VISIBLE rather than merely logged."""
+
+    def setUp(self):
+        self._cal, self._eng = bot._mcal, dict(bot._mengine)
+        bot._mcal = store({7: month()})
+        bot._mengine.update({"month": None, "units": {}, "at": None, "err": "",
+                             "coverage": None, "tries": 0})
+
+    def tearDown(self):
+        bot._mcal = self._cal
+        bot._mengine.clear()
+        bot._mengine.update(self._eng)
+
+    def _stub_report(self, rep):
+        import monthly.collect as collect
+        real = collect.units_report
+        collect.units_report = lambda m, force=False, today=None: rep
+        return collect, real
+
+    def test_a_refresh_fills_the_store_and_the_lookup_answers(self):
+        collect, real = self._stub_report({
+            "rows": [{"lid": 7, "price": 15000.0, "basis": "own_history"},
+                     {"lid": 8, "price": None, "basis": "insufficient"}],
+            "pct_own_history": 0.42})
+        try:
+            res = bot._mengine_refresh_sync()
+        finally:
+            collect.units_report = real
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["n"], 1, "a unit with no price is not stored")
+        self.assertEqual(bot._mengine_state(), "ok")
+        month = bot.datetime.now(bot.TZ).date().strftime("%Y-%m")
+        self.assertEqual(bot.monthly_engine_price(7, month),
+                         {"price": 15000.0, "basis": "own_history"})
+        self.assertIsNone(bot.monthly_engine_price(8, month))
+        self.assertIsNone(bot.monthly_engine_price(7, "1999-01"),
+                          "a price from another month must never be published")
+
+    def test_a_failure_is_visible_not_just_logged(self):
+        collect, real = self._stub_report(None)
+        def boom(*_a, **_k):
+            raise AttributeError("module 'monthly' has no attribute 'collect'")
+        collect.units_report = boom
+        try:
+            res = bot._mengine_refresh_sync()
+        finally:
+            collect.units_report = real
+        self.assertFalse(res["ok"])
+        self.assertEqual(bot._mengine_state(), "failed",
+                         "the exact silence that cost 22 minutes")
+        self.assertTrue(bot._mengine["err"])
+        self.assertEqual(bot._mengine["tries"], 1)
+
+    def test_a_run_that_prices_nothing_is_distinguishable_from_never_running(self):
+        self.assertEqual(bot._mengine_state(), "idle")
+        collect, real = self._stub_report({"rows": [], "pct_own_history": 0.0})
+        try:
+            bot._mengine_refresh_sync()
+        finally:
+            collect.units_report = real
+        self.assertEqual(bot._mengine_state(), "empty")
+
+    def test_a_cold_calendar_reads_as_waiting_not_broken(self):
+        bot._mcal = {"units": {}}
+        self.assertEqual(bot._mengine_state(), "waiting")

@@ -57389,7 +57389,26 @@ def _mcal_ready():
 # So the engine runs here instead, on a slow background loop, and the guest path gets
 # a finished number out of a dict. Same fix as the calendar store above, same reason.
 MONTHLY_ENGINE_REFRESH_MIN = int(os.environ.get("MONTHLY_ENGINE_REFRESH_MIN", "180"))
-_mengine = {"month": None, "units": {}, "at": None, "err": "", "coverage": None}
+_mengine = {"month": None, "units": {}, "at": None, "err": "", "coverage": None,
+            "tries": 0}
+
+def _mengine_state():
+    """What the engine store is actually doing, in one word. It sat empty for 22
+    minutes after the switch was flipped and nothing said why — the refresh was
+    raising AttributeError into a bare `except` and reporting the failure only to a
+    log nobody was reading. A store that cannot be asked its state fails silently,
+    and this one did it twice in one night."""
+    if not (MONTHLY_ENABLED and _HAS_MONTHLY):
+        return "off"
+    if _mengine.get("units"):
+        return "ok"
+    if not _mcal_ready():
+        return "waiting"                    # deliberately yields to the guest calendar
+    if _mengine.get("err"):
+        return "failed"
+    if _mengine.get("tries"):
+        return "empty"                      # ran, produced no priced unit
+    return "idle"                           # has not run yet
 
 def _mengine_refresh_sync():
     """Precompute every unit's engine price for the current month, off the request path.
@@ -57401,8 +57420,15 @@ def _mengine_refresh_sync():
     if not _HAS_MONTHLY:
         return {"ok": False, "err": "lab disabled"}
     month = datetime.now(TZ).date().strftime("%Y-%m")
+    _mengine["tries"] = (_mengine.get("tries") or 0) + 1
     try:
-        rep = _monthly.collect.units_report(month, force=True)
+        # LOCAL IMPORT, and not `_monthly.collect`. monthly/__init__ imports
+        # attrs/db/live/routes/seed/settings and NOT collect, and routes.py only
+        # imports it inside its handlers — so `monthly.collect` does not exist as an
+        # attribute at package level. Reaching for it raised AttributeError on every
+        # single run, which the except below swallowed into a log line.
+        from monthly import collect as _mcollect
+        rep = _mcollect.units_report(month, force=True)
     except Exception as e:
         _mengine["err"] = str(e)[:200]
         print("monthly engine refresh error:", e)
@@ -57786,6 +57812,7 @@ def _monthly_cfg_public():
                     "to": _mcal.get("to"), "at": _mcal.get("synced_at")},
             "eng": {"units": len((_mengine.get("units") or {})),
                     "month": _mengine.get("month"), "at": _mengine.get("at"),
+                    "state": _mengine_state(), "tries": _mengine.get("tries"),
                     "src": (_monthly.settings.price_source() if _HAS_MONTHLY else "discount")}}
 
 
@@ -58374,6 +58401,7 @@ async def _api_monthly_admin(request):
             "engine": {"units": len(_mengine.get("units") or {}),
                        "month": _mengine.get("month"), "at": _mengine.get("at"),
                        "coverage": _mengine.get("coverage"), "err": _mengine.get("err"),
+                       "state": _mengine_state(), "tries": _mengine.get("tries"),
                        "price_source": (_monthly.settings.price_source()
                                         if _HAS_MONTHLY else "discount")},
         }
