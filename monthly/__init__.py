@@ -76,7 +76,12 @@ are not re-decided later in a moment of enthusiasm.
 """
 
 from .host import HOST, wire  # noqa: F401
-from . import attrs, db, live, routes, seed, settings  # noqa: F401
+# `engine` is listed explicitly, not left to arrive as a side effect of live.py
+# importing it. `collect` is absent from this line and routes.py only imports it
+# inside its handlers, so `monthly.collect` does not exist at package level —
+# reaching for it cost an hour tonight. A name you depend on should be imported
+# where it can be seen.
+from . import attrs, db, engine, live, routes, seed, settings  # noqa: F401
 
 
 def bootstrap():

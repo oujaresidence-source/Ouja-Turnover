@@ -57424,7 +57424,15 @@ def _mengine_publishable():
         return len(rows)
     if mode != "engine_verified":
         return 0
-    return sum(1 for v in rows if (v or {}).get("basis") == "own_history")
+    # A THIRD copy of this list is how it drifted the first two times, so ask the
+    # module that defines it. This diagnostic kept reporting 21 publishable units
+    # for an hour after the publisher had been widened to 60 — a readout that lies
+    # about the thing it exists to measure is worse than no readout.
+    try:
+        own = _monthly.engine.OWN_BASES
+    except Exception:
+        return 0
+    return sum(1 for v in rows if (v or {}).get("basis") in own)
 
 def _mengine_state():
     """What the engine store is actually doing, in one word. It sat empty for 22
