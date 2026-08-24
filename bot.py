@@ -60158,6 +60158,14 @@ async def monthly_engine_loop():
     nobody is waiting on it, which is the entire design."""
     if not (MONTHLY_ENABLED and _HAS_MONTHLY):
         return
+    # THE GUEST-FACING STORE GOES FIRST. units_report pulls years of reservation
+    # history and paginates the listings API; run at boot it competes with the
+    # calendar warm-up for the same Hostaway throttle, and the calendar is what a
+    # customer is actually waiting on. The engine only matters once price_source is
+    # flipped, so it can wait a cycle.
+    if not _mcal_ready():
+        print("monthly engine: waiting — the guest calendar store is not warm yet")
+        return
     try:
         res = await asyncio.to_thread(_mengine_refresh_sync)
         if res.get("ok"):

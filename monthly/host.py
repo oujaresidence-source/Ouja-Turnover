@@ -34,6 +34,15 @@ class _Host:
     fetch_calendar_days = None         # (listing_id, start, end) -> [raw day]
     get_listings_map = None            # () -> {listing_id: name}
 
+    # --- the precomputed engine price, for the LIVE guest site -------------
+    # Deliberately a value, not a computation. live.engine_after used to call
+    # collect.price_one_cached() inside a customer's page load, which opens four
+    # brain.db connections per unit; on 2026-08-19 oujares.com/monthly stopped
+    # responding and the whole connection was reverted. bot.py now computes these
+    # on a background loop and hands the ANSWER over, so the guest path cannot
+    # open a database even by mistake.
+    engine_price = None         # (listing_id, month) -> {"price": float, "basis": str} | None
+
     # --- state files ------------------------------------------------------
     load_json = None            # (name, default) -> obj
     save_json = None            # (name, obj) -> None

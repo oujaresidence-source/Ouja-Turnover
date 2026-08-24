@@ -20,17 +20,39 @@ from brain import db as bdb                              # noqa: E402
 from monthly import db, host, live, settings             # noqa: E402
 
 
-class _Connected(object):
-    """The guest-site connection is OFF by default since the outage. Tests that
-    exercise the wiring turn it on for their own duration, so the disconnect
-    stays the thing you have to opt out of rather than the thing you forget."""
+class _Engine(object):
+    """Stub the PRECOMPUTED price the host hands over.
+
+    Reconnected 2026-08-24 on a different mechanism, so these tests changed with
+    it. The old ones stubbed collect.price_one and warmed collect._CACHE, because
+    the guest path used to compute inside the request — which is what took the
+    site down. There is nothing to warm now: bot.py precomputes on a background
+    loop and wires the answer in as HOST.engine_price. Tests that still poked at
+    collect would be testing a path the guest can no longer reach."""
+
+    def __init__(self, price=15000, basis="own_history"):
+        self.payload = None if price is None else {"price": price, "basis": basis}
 
     def __enter__(self):
-        self._prev = live.CONNECTED_TO_GUEST_SITE
-        live.CONNECTED_TO_GUEST_SITE = True
+        self._prev = host.HOST.engine_price
+        host.HOST.engine_price = lambda lid, month: self.payload
+        return self
 
     def __exit__(self, *_a):
-        live.CONNECTED_TO_GUEST_SITE = self._prev
+        host.HOST.engine_price = self._prev
+        return False
+
+
+class _NoEngine(object):
+    """No precomputed price at all — the loop has not run yet, or this unit has
+    no price. The guest must get the discount path and never a blank."""
+
+    def __enter__(self):
+        self._prev = host.HOST.engine_price
+        host.HOST.engine_price = lambda lid, month: None
+
+    def __exit__(self, *_a):
+        host.HOST.engine_price = self._prev
         return False
 
 
@@ -47,6 +69,7 @@ class _Base(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
         host.HOST.load_json = None
         host.HOST.save_json = None
+        host.HOST.engine_price = None
 
 
 class ShipsOnButOnlyWhereMeasuredTest(_Base):
@@ -62,40 +85,49 @@ class ShipsOnButOnlyWhereMeasuredTest(_Base):
         just no longer reaches a customer-facing page."""
         self.assertEqual(settings.price_source(), "discount")
 
-    def test_the_guest_site_hook_is_off(self):
-        self.assertFalse(live.CONNECTED_TO_GUEST_SITE)
+    def test_the_guest_site_hook_is_on(self):
+        """Reconnected 2026-08-24. What makes this safe is not the flag but the
+        next two tests: the path cannot compute and cannot open a database."""
+        self.assertTrue(live.CONNECTED_TO_GUEST_SITE)
 
-    def test_nothing_reaches_the_guest_path_while_it_is_disconnected(self):
+    def test_the_guest_path_no_longer_imports_collect_at_all(self):
+        """The regression that caused the outage, stated as a property of the file.
+        collect is the module that opens brain.db; live must not reach it. Comments
+        may name it — that is how the reason survives — so this reads the code."""
+        import ast
+        import inspect
+        tree = ast.parse(inspect.getsource(live))
+        used = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                used.update(a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                used.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                used.add(node.value.id)
+        self.assertNotIn("collect", used,
+                         "live.py must not reach collect — that is the outage path")
+        self.assertNotIn("db", used, "nor the database directly")
+
+    def test_without_a_wired_lookup_nothing_is_published(self):
+        """Not wired means not connected, silently — never a crash on a guest page."""
         settings.set_price_source("engine_verified", coverage=0.9)
-        import monthly.collect as collect
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
-        real = collect.price_one
-        collect.price_one = lambda lid, month, **k: {"price": 15000,
-                                                     "basis": "own_history"}
-        try:
-            self.assertIsNone(live.engine_after(
-                1, "2026-10", 20000, 1,
-                {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
-                 "ceiling": 0.3, "per_month_before": 20000,
-                 "per_month_after": 16000, "promo": False, "promo_label": ""}))
-        finally:
-            collect.price_one = real
-            collect._CACHE.clear()
+        host.HOST.engine_price = None
+        self.assertIsNone(live.engine_after(
+            1, "2026-10", 20000, 1,
+            {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
+             "ceiling": 0.3, "per_month_before": 20000,
+             "per_month_after": 16000, "promo": False, "promo_label": ""}))
 
     def test_the_shipped_mode_can_never_publish_a_pooled_number(self):
         """The property that makes shipping it on defensible."""
-        import monthly.collect as collect
-        real = collect.price_one
-        collect.price_one = lambda lid, month, **k: {"price": 15000,
-                                                     "basis": "district_pool"}
-        try:
+        settings.set_price_source("engine_verified", coverage=0.9)
+        with _Engine(price=15000, basis="district_pool"):
             self.assertIsNone(live.engine_after(
                 1, "2026-10", 20000, 1,
                 {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
                  "ceiling": 0.3, "per_month_before": 20000,
                  "per_month_after": 16000, "promo": False, "promo_label": ""}))
-        finally:
-            collect.price_one = real
 
     def test_an_unreadable_settings_file_falls_back_to_the_shipped_default(self):
         host.HOST.load_json = lambda *_a, **_k: (_ for _ in ()).throw(IOError("gone"))
@@ -174,20 +206,13 @@ class LiveContractTest(_Base):
                 "per_month_after": 16000, "promo": False, "promo_label": ""}
 
     def test_while_the_switch_is_off_the_engine_path_never_runs(self):
-        self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+        with _Engine():
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
 
     def test_the_engine_path_returns_the_same_nine_keys(self):
         settings.set_price_source("engine", coverage=0.9)
-        import monthly.collect as collect
-        real = collect.price_one
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
-        collect.price_one = lambda lid, month, **k: {"price": 15000}
-        try:
-            with _Connected():
-                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
-        finally:
-            collect.price_one = real
-            collect._CACHE.clear()
+        with _Engine(price=15000, basis=None):
+            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         self.assertIsNotNone(out)
         self.assertEqual(set(out), set(self.NINE))
         for k in ("before", "after", "saved", "per_month_before", "per_month_after"):
@@ -199,39 +224,26 @@ class LiveContractTest(_Base):
         """A monthly offer that costs more than booking the nights outright is
         not an offer, and the live site is where being wrong is public."""
         settings.set_price_source("engine", coverage=0.9)
-        import monthly.collect as collect
-        real = collect.price_one
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
-        collect.price_one = lambda lid, month, **k: {"price": 25000}
-        try:
+        with _Engine(price=25000):
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect.price_one = real
-            collect._CACHE.clear()
 
     def test_any_exception_falls_back_to_the_discount_path(self):
         settings.set_price_source("engine", coverage=0.9)
-        import monthly.collect as collect
-        real = collect.price_one
 
         def boom(*_a, **_k):
-            raise RuntimeError("hostaway down")
+            raise RuntimeError("anything at all")
 
-        collect.price_one = boom
+        prev = host.HOST.engine_price
+        host.HOST.engine_price = boom
         try:
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
         finally:
-            collect.price_one = real
+            host.HOST.engine_price = prev
 
     def test_no_engine_price_falls_back(self):
         settings.set_price_source("engine", coverage=0.9)
-        import monthly.collect as collect
-        real = collect.price_one
-        collect.price_one = lambda lid, month, **k: {"price": None}
-        try:
+        with _Engine(price=None):
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect.price_one = real
 
 
 class LicenceTest(_Base):
@@ -286,15 +298,6 @@ class VerifiedOnlyModeTest(_Base):
                 "ceiling": 0.3, "per_month_before": 20000,
                 "per_month_after": 16000, "promo": False, "promo_label": ""}
 
-    def _with_basis(self, basis, price=15000):
-        """Warms the cache as well as stubbing the price: the guest path is now
-        cache-only, so a stub without a warm month is correctly ignored."""
-        import monthly.collect as collect
-        real = collect.price_one
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
-        collect.price_one = lambda lid, month, **k: {"price": price, "basis": basis}
-        return real, collect
-
     def test_verified_needs_no_coverage_gate(self):
         """Its guarantee is in the code, not in a threshold — so at 26% coverage
         it is still allowed, because it cannot publish a pooled number."""
@@ -314,103 +317,75 @@ class VerifiedOnlyModeTest(_Base):
 
     def test_a_unit_with_its_own_history_gets_the_engine_price(self):
         settings.set_price_source("engine_verified", coverage=0.26)
-        real, collect = self._with_basis("own_history")
-        try:
-            with _Connected():
-                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
-        finally:
-            collect.price_one = real
-            collect._CACHE.clear()
+        with _Engine(basis="own_history"):
+            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         self.assertIsNotNone(out)
         self.assertEqual(out["after"], 15000)
 
     def test_a_pool_priced_unit_keeps_the_discount_path(self):
         settings.set_price_source("engine_verified", coverage=0.26)
         for basis in ("district_pool", "bedroom_pool", "insufficient"):
-            real, collect = self._with_basis(basis)
-            try:
+            with _Engine(basis=basis):
                 self.assertIsNone(
                     live.engine_after(1, "2026-10", 20000, 1, self._discount()),
                     "%s must never reach the guest site under engine_verified" % basis)
-            finally:
-                collect.price_one = real
 
     def test_full_engine_mode_does_publish_pooled_units(self):
         """The difference between the two modes, stated as a test."""
         settings.set_price_source("engine", coverage=0.9)
-        real, collect = self._with_basis("district_pool")
-        try:
-            with _Connected():
-                self.assertIsNotNone(
-                    live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect.price_one = real
+        with _Engine(basis="district_pool"):
+            self.assertIsNotNone(
+                live.engine_after(1, "2026-10", 20000, 1, self._discount()))
 
     def test_discount_mode_ignores_the_engine_entirely(self):
         settings.set_price_source("discount", coverage=0.9)
-        real, collect = self._with_basis("own_history")
-        try:
+        with _Engine(basis="own_history"):
             self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect.price_one = real
 
 
 class GuestPathNeverBlocksTest(_Base):
-    """A guest page must never wait on Hostaway. price_one pulls years of
-    reservation history and paginates the listings API; putting that in front of
-    a customer looking at apartments is how a pricing feature takes down a
-    storefront."""
+    """A guest page must never wait on Hostaway OR on brain.db.
+
+    The old version of this class warmed collect._CACHE and asserted the guest
+    path did not COMPUTE. That was the right worry and the wrong guarantee: a warm
+    cache still meant four SQLite connections per unit inside the page load, and
+    on 2026-08-19 that is what stopped the site responding. The guarantee is now
+    structural — the guest path reads a value someone else already computed — so
+    these tests assert that a missing or stale value degrades quietly instead."""
 
     def _discount(self):
         return {"before": 20000, "after": 16000, "saved": 4000, "pct": 0.2,
                 "ceiling": 0.3, "per_month_before": 20000,
                 "per_month_after": 16000, "promo": False, "promo_label": ""}
 
-    def test_a_cold_cache_falls_back_instead_of_computing(self):
-        import monthly.collect as collect
-        collect._CACHE.clear()
-        called = []
-        real = collect.month_state
-        collect.month_state = lambda *a, **k: called.append(1) or (_ for _ in ()).throw(
-            AssertionError("the guest path computed a month state"))
-        try:
-            settings.set_price_source("engine_verified", coverage=0.9)
-            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect.month_state = real
-        self.assertEqual(called, [])
-
-    def test_a_warm_cache_serves_the_price(self):
-        import monthly.collect as collect
+    def test_nothing_precomputed_yet_falls_back_to_the_discount(self):
+        """Right after a deploy the background loop has not run. The guest sees
+        the price the site has always shown, not a blank and not a wait."""
         settings.set_price_source("engine_verified", coverage=0.9)
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {1: {}}}
-        real = collect.price_one
-        collect.price_one = lambda lid, month, **k: {"price": 15000,
-                                                     "basis": "own_history"}
-        try:
-            with _Connected():
-                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
-        finally:
-            collect.price_one = real
-            collect._CACHE.clear()
+        with _NoEngine():
+            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+
+    def test_a_precomputed_price_is_served(self):
+        settings.set_price_source("engine_verified", coverage=0.9)
+        with _Engine(price=15000, basis="own_history"):
+            out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         self.assertIsNotNone(out)
         self.assertEqual(out["after"], 15000)
 
-    def test_an_expired_cache_is_treated_as_cold(self):
-        import monthly.collect as collect
+    def test_the_guest_path_never_opens_the_database(self):
+        """brain.db is replaced by a landmine for the duration. If any part of the
+        guest price path reaches SQLite, this fails instead of the storefront."""
+        import sqlite3
         settings.set_price_source("engine_verified", coverage=0.9)
-        collect._CACHE["2026-10"] = {"at": collect._now_ts() - collect._CACHE_TTL - 5,
-                                     "unit_meta": {1: {}}}
-        try:
-            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
-        finally:
-            collect._CACHE.clear()
+        real_connect = sqlite3.connect
 
-    def test_a_unit_absent_from_the_cached_month_falls_back(self):
-        import monthly.collect as collect
-        settings.set_price_source("engine_verified", coverage=0.9)
-        collect._CACHE["2026-10"] = {"at": collect._now_ts(), "unit_meta": {999: {}}}
+        def boom(*_a, **_k):
+            raise AssertionError("the guest price path opened brain.db")
+
+        sqlite3.connect = boom
         try:
-            self.assertIsNone(live.engine_after(1, "2026-10", 20000, 1, self._discount()))
+            with _Engine(price=15000, basis="own_history"):
+                out = live.engine_after(1, "2026-10", 20000, 1, self._discount())
         finally:
-            collect._CACHE.clear()
+            sqlite3.connect = real_connect
+        self.assertEqual(out["after"], 15000)

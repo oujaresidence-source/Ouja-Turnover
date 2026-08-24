@@ -14,11 +14,21 @@ the guest site down is worse than no pricing engine — and this one is switched
 off by default anyway.
 """
 
-from . import settings
+from . import host, settings
 
-# Flip to True ONLY after a load test on a page with many listings. It was True
-# for one deploy and oujares.com/monthly stopped responding.
-CONNECTED_TO_GUEST_SITE = False
+# RECONNECTED 2026-08-24, on a different mechanism than the one that failed.
+#
+# What broke on 2026-08-19 was not "the engine": it was WHERE the engine ran. This
+# function called collect.price_one_cached() while a customer waited, and that path
+# opens four short-lived brain.db connections per unit — roughly 160 on one search.
+# The revert asked for "a load test first, not another guess".
+#
+# The load is now zero, which is a stronger answer than a load test. bot.py computes
+# every unit's price on a background loop and wires the finished numbers in as
+# HOST.engine_price. Below is a dictionary lookup. There is no database call left on
+# this path to load-test, and collect is deliberately no longer imported here so one
+# cannot be reintroduced without noticing.
+CONNECTED_TO_GUEST_SITE = True
 
 
 def engine_after(listing_id, month, before_total, months, discount_result):
@@ -38,12 +48,10 @@ def engine_after(listing_id, month, before_total, months, discount_result):
         mode = settings.price_source()
         if mode not in ("engine", "engine_verified"):
             return None
-        from . import collect
-        # CACHE ONLY. The guest page must never wait on Hostaway: price_one
-        # would pull years of reservation history and paginate the listings API
-        # inside a customer's page load. If the month is not already warm, the
-        # guest gets the discount path and nothing is slower than it was before.
-        p = collect.price_one_cached(int(listing_id), month)
+        lookup = getattr(host.HOST, "engine_price", None)
+        if not callable(lookup):
+            return None                     # not wired = not connected, silently
+        p = lookup(listing_id, month)
         if not p:
             return None
         est = p.get("price")
