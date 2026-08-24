@@ -55777,11 +55777,51 @@ function viewListing(){
 # 9665XXXXXXXX). Unset = the button simply doesn't render — we never fake a contact.
 STAY_WHATSAPP = re.sub(r"\D", "", os.environ.get("STAY_WHATSAPP", "") or "")
 
+# ---- «إيقاف موقع الضيوف» — the /stay pause switch (owner request 2026-08-24) ----
+# STAY_PAUSED=1 makes every visitor-facing /stay page answer a real HTTP 404, stops
+# robots.txt advertising the site and empties the sitemap. Nothing is deleted, no
+# data is touched, no Hostaway call changes: flip it back to 0 in Railway and the
+# whole site returns on the next boot.
+#
+# DELIBERATELY NARROW. /elite and /monthly BORROW the /api/stay/* endpoints
+# (search, listing, event) — gating anything named "stay" would take two other live
+# sites down with it. Only the six HTML pages below are gated; the shared data
+# endpoints and /stay/hero-image (the dashboard previews it) stay up on purpose.
+# tests/test_stay_pause.py locks both halves.
+def _stay_paused():
+    """Read at request time, not import time — so a test (and any future in-app
+    toggle) can flip it without a restart."""
+    return os.environ.get("STAY_PAUSED", "0") in ("1", "true", "True", "yes")
+
+
+def _stay_gate():
+    """Front door for the guest site. Raises a genuine 404 while paused."""
+    if _stay_paused():
+        raise web.HTTPNotFound()
+
+
+OUJA_CONTACT_EMAIL = "oujaresidence@gmail.com"
+
+
+def _biz_links(base, wa):
+    """The three CTA links on the public /business page. Never returns a link to a
+    page we are not serving: while /stay is paused every route falls back to
+    WhatsApp, and to email when no WhatsApp number is configured."""
+    wa_url = ("https://wa.me/" + wa) if wa else ""
+    mail = "mailto:" + OUJA_CONTACT_EMAIL
+    if _stay_paused():
+        return {"book": wa_url or mail, "wa": wa_url or mail,
+                "email": OUJA_CONTACT_EMAIL}
+    stay = (base + "/stay") if base else "/stay"
+    return {"book": stay, "wa": wa_url or stay, "email": OUJA_CONTACT_EMAIL}
+
+
 async def _handle_robots(request):
     """robots.txt: public funnel pages crawlable, operational surfaces not."""
     base = str(request.url.origin())
+    # Paused (STAY_PAUSED=1): the pages answer 404, so stop inviting the crawler in.
     txt = ("User-agent: *\n"
-           "Allow: /stay\n"
+           + ("Disallow: /stay\n" if _stay_paused() else "Allow: /stay\n") +
            # Ouja Elite is a discreet members site — keep it out of search by default.
            # Flip this to "Allow: /elite\n" (and add it to the sitemap) to make it public.
            "Disallow: /elite\n"
@@ -55800,9 +55840,12 @@ async def _handle_robots(request):
 async def _handle_sitemap(request):
     """sitemap.xml of /stay + every active unit page (built from the live GW cache)."""
     base = str(request.url.origin())
-    urls = [f"{base}/stay", f"{base}/stay/search"]
+    if _stay_paused():
+        urls = []                     # paused: a valid but empty sitemap, no dead links
+    else:
+        urls = [f"{base}/stay", f"{base}/stay/search"]
     try:
-        for snap in _gw_visible_snaps():
+        for snap in ([] if _stay_paused() else _gw_visible_snaps()):
             ov = _gw_overrides.get(str(snap.get("id"))) if isinstance(_gw_overrides, dict) else None
             slug = _gw_slug(snap, ov or {})
             if slug:
@@ -55876,12 +55919,15 @@ def _stay_render(route="landing", listing=None, base=""):
 
 # ---- public guest routes (NO dashboard token) ----
 async def _handle_stay(request):
+    _stay_gate()
     return web.Response(text=_stay_render("landing", base=str(request.url.origin())), content_type="text/html")
 
 async def _handle_stay_search(request):
+    _stay_gate()
     return web.Response(text=_stay_render("search", base=str(request.url.origin())), content_type="text/html")
 
 async def _handle_stay_id(request):
+    _stay_gate()
     lid = request.match_info.get("lid", "")
     snap, ov = _gw_find_by_slug_or_id(lid)
     if snap:
@@ -55891,6 +55937,7 @@ async def _handle_stay_id(request):
     return web.Response(text=_stay_render("listing", base=str(request.url.origin())), content_type="text/html")
 
 async def _handle_stay_detail(request):
+    _stay_gate()
     token = request.match_info.get("slug", "")
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov) if snap else None
@@ -56070,6 +56117,7 @@ async def _api_stay_match_stats(request):
     return _json({"ok": True, **_match_stats(30)})
 
 async def _handle_stay_match(request):
+    _stay_gate()
     return web.Response(text=_stay_render("match", base=str(request.url.origin())),
                         content_type="text/html")
 
@@ -59078,11 +59126,11 @@ async def start_web_server():
                     "dash_auth": _dash_auth,
                     "hostaway_listings": _biz_listings,
                     "base_url": _base,
-                    "links": {
-                        "book": (_base + "/stay") if _base else "/stay",
-                        "wa": ("https://wa.me/" + _wa) if _wa else "/stay",
-                        "email": "oujaresidence@gmail.com",
-                    },
+                    # While /stay is paused it answers 404, so NO button on the
+                    # public B2B page may point at it. Note the WhatsApp button
+                    # already fell back to /stay when no number is configured —
+                    # that fallback becomes a dead link too, so it moves to email.
+                    "links": _biz_links(_base, _wa),
                 })
                 _business.register_routes(app)
                 print("[business] wired + routes registered (/business, /business/ar, /business/manage, /partners→301)")
