@@ -57216,6 +57216,130 @@ MONTHLY_ENABLED = os.environ.get("MONTHLY_ENABLED", "1") != "0"
 MONTHLY_WHATSAPP = re.sub(r"\D", "", os.environ.get("MONTHLY_WHATSAPP", "") or "") or STAY_WHATSAPP
 MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /elite WebP proxy machinery
 
+# ---- THE CALENDAR STORE: why a customer never waits on Hostaway again ----------
+# A dated search used to cost ONE Hostaway calendar call per apartment, inside the
+# customer's page load. 57 apartments against a shared 11-calls-per-10-seconds
+# throttle is ~52 seconds of floor, and it measured 69.7s live on 2026-08-24. The
+# 15-minute cache was keyed on the exact move-in date, so the next customer with a
+# different date paid it again.
+#
+# So the calls move OUT of the request. One background pass pulls every visible
+# unit's calendar for the next MONTHLY_CAL_DAYS days into this store; searches read
+# it. 57 calls per REFRESH instead of 57 per SEARCH, and any date answers instantly.
+#
+# The store is persisted, so a redeploy comes back warm instead of cold.
+# A day that is not in the store is UNKNOWN — never treated as free, never treated
+# as priced. That is the same rule unit_availability_price already applies to a
+# truncated Hostaway response, and it is the only rule that cannot invent a price.
+MONTHLY_CAL_DAYS        = int(os.environ.get("MONTHLY_CAL_DAYS", "210"))
+MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "20"))
+
+# {"units": {"<listing id>": {"<YYYY-MM-DD>": [available, price|null, has_reservation]}}}
+_mcal = _load_json("monthly_calendar.json", None) or {"units": {}, "synced_at": None,
+                                                      "from": None, "to": None}
+_mcal_stats = {"ok": 0, "err": 0, "last_ms": 0, "runs": 0}
+
+def _mcal_fetch_unit(listing_id, start, end):
+    """One calendar pull for one unit -> {date: [available, price, has_reservation]}.
+    None on any error, which the caller reads as 'keep the last good copy'."""
+    try:
+        data = api_get("/listings/%s/calendar" % listing_id,
+                       params={"startDate": start, "endDate": end})
+        days = data.get("result", []) or []
+    except Exception as e:
+        print("monthly calendar fetch error (%s):" % listing_id, e)
+        return None
+    out = {}
+    for d in days:
+        ds = str(d.get("date") or "")[:10]
+        if not ds:
+            continue
+        p = d.get("price")
+        out[ds] = [1 if int(d.get("isAvailable", 0) or 0) == 1 else 0,
+                   float(p) if isinstance(p, (int, float)) and p > 0 else None,
+                   1 if (d.get("reservationId") or d.get("reservation_id")) else 0]
+    return out or None
+
+def _mcal_quote(listing_id, ci, co):
+    """{available, nights, total, avg} for [ci, co) read from the store, NO network.
+    Returns None when the store does not cover every night of the window — the caller
+    must then fall back to an estimate and say so, never guess a total."""
+    u = (_mcal.get("units") or {}).get(str(listing_id))
+    if not u:
+        return None
+    nights = (co - ci).days
+    if nights < 1:
+        return None
+    available, prices = True, []
+    d = ci
+    for _ in range(nights):
+        row = u.get(d.isoformat())
+        if not row:
+            return None                     # a gap is UNKNOWN, not a shorter free stay
+        if not row[0]:
+            available = False
+        if row[1] is not None:
+            prices.append(row[1])
+        d += timedelta(days=1)
+    # total only when EVERY night carries a price — same rule as unit_availability_price
+    total = round(sum(prices)) if len(prices) == nights else None
+    return {"available": available, "nights": nights, "total": total,
+            "avg": round(total / nights) if total else None}
+
+def _mcal_booked(listing_id, start, end):
+    """(booked, blocked, days) from the store. A night counts as BOOKED only when it
+    carries a reservation, so Airbnb/manual blocks are not miscounted as demand."""
+    u = (_mcal.get("units") or {}).get(str(listing_id))
+    if not u:
+        return None
+    booked = blocked = days = 0
+    d = start
+    while d < end:
+        row = u.get(d.isoformat())
+        d += timedelta(days=1)
+        if not row:
+            continue
+        days += 1
+        if row[0]:
+            continue
+        if row[2]:
+            booked += 1
+        else:
+            blocked += 1
+    return (booked, blocked, days) if days else None
+
+def _mcal_refresh_sync():
+    """Pull every visible monthly unit's calendar once. Runs on ONE background thread,
+    on the shared Hostaway throttle — the whole point is that this cost is paid here,
+    on a schedule, and not by a customer staring at a spinner."""
+    t0 = time.time()
+    today = datetime.now(TZ).date()
+    start = today.isoformat()
+    end = (today + timedelta(days=MONTHLY_CAL_DAYS)).isoformat()
+    old = _mcal.get("units") or {}
+    units, ok, err = {}, 0, 0
+    for s_, _ov in _monthly_visible_snaps():
+        lid = str(s_.get("id"))
+        got = _mcal_fetch_unit(lid, start, end)
+        if got is None:
+            err += 1
+            if old.get(lid):
+                units[lid] = old[lid]       # a failed pull keeps the last good copy
+            continue
+        units[lid] = got
+        ok += 1
+    _mcal["units"] = units
+    _mcal["from"], _mcal["to"] = start, end
+    _mcal["synced_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+    _save_json("monthly_calendar.json", _mcal)
+    _mcal_stats.update({"ok": ok, "err": err, "runs": _mcal_stats["runs"] + 1,
+                        "last_ms": int((time.time() - t0) * 1000)})
+    return dict(_mcal_stats, units=len(units))
+
+def _mcal_ready():
+    return bool((_mcal.get("units") or {}))
+
+
 def _monthly_default_cfg():
     """Seed config. Owner-editable later via the admin endpoint / dashboard tab (v2)."""
     try:
@@ -57319,7 +57443,11 @@ def monthly_quote(listing_id, move_in, months, snap=None):
     if nights < 1:
         return None
     before, available, estimated = None, None, False
-    av = unit_availability_price(listing_id, mi.isoformat(), mo.isoformat())
+    # STORE ONLY. unit_availability_price used to be called right here, once per unit
+    # per search, and that is what made the page take over a minute. If the store has
+    # not covered this window yet the guest gets the price_base estimate below, which
+    # is labelled as an estimate — never a live call inside a customer's page load.
+    av = _mcal_quote(listing_id, mi, mo)
     if av and av.get("total"):
         before = av["total"]
         available = bool(av.get("available"))
@@ -57443,32 +57571,32 @@ def _monthly_sort_cards(rows):
                              0 if t[0].get("images") else 1, (t[0].get("name_ar") or "")))
     return [r[0] for r in rows]
 
-async def _monthly_search_async(move_in=None, months=None, beds=None, typ=None, area=None,
-                                neighborhood=None, tags=None, guests=None):
-    """Monthly results. The slow part — one Hostaway calendar pull per unit — now runs CONCURRENTLY
-    (semaphore-bounded) instead of serially, and unit_availability_price caches for ~15m, so the
-    search returns fast and repeat searches are instant. Browse mode (no dates) does zero network."""
-    snaps = await asyncio.to_thread(_monthly_filter, beds, typ, area, neighborhood, tags, guests)
+def _monthly_search_sync(move_in=None, months=None, beds=None, typ=None, area=None,
+                         neighborhood=None, tags=None, guests=None):
+    """Monthly results, with ZERO network calls. Every price and every availability flag comes
+    from the calendar store, so this is a few thousand dictionary lookups — it does not matter
+    how many apartments there are, and it does not matter which date the guest picked."""
+    snaps = _monthly_filter(beds, typ, area, neighborhood, tags, guests)
     if not (move_in and months):
         rows = [(_monthly_card(s, ov), ov) for s, ov in snaps]
         return {"browse": True, "avail_error": False, "results": _monthly_sort_cards(rows)}
-    sem = asyncio.Semaphore(8)
-    async def one(s, ov):
-        async with sem:
-            q = await asyncio.to_thread(monthly_quote, s.get("id"), move_in, months, s)
-        return (s, ov, q)
-    got = await asyncio.gather(*[one(s, ov) for s, ov in snaps])
     rows, avail_error = [], False
-    for s, ov, q in got:
+    for s, ov in snaps:
+        q = monthly_quote(s.get("id"), move_in, months, s)
         if not q:
             avail_error = True
             continue
         if q.get("available") is False:
             continue
-        card = _monthly_card(s, ov)          # cheap: quote already computed, no extra network
+        card = _monthly_card(s, ov)
         card["quote"] = q
         rows.append((card, ov))
     return {"browse": False, "avail_error": avail_error, "results": _monthly_sort_cards(rows)}
+
+async def _monthly_search_async(move_in=None, months=None, beds=None, typ=None, area=None,
+                                neighborhood=None, tags=None, guests=None):
+    return await asyncio.to_thread(_monthly_search_sync, move_in, months, beds, typ, area,
+                                   neighborhood, tags, guests)
 
 def _monthly_rating_of(snap):
     """(rating, reviews_count) for a snap, (0.0, 0) when unknown."""
@@ -57514,48 +57642,24 @@ def _monthly_featured(limit=6):
 # ---- underperformer "deals" engine: apartments with moderate occupancy that have room to fill ----
 _monthly_deals_cache = {"data": None, "ts": 0.0}
 
-def _monthly_booked_nights(listing_id, start, end):
-    """Reserved nights in [start,end) from the Hostaway calendar. A night counts as booked ONLY if
-    it carries a reservationId — so Airbnb/manual BLOCKS (unavailable, no reservation) are NOT
-    counted as bookings. Returns (booked, blocked, days) or None on error."""
-    try:
-        data = api_get("/listings/%s/calendar" % listing_id,
-                       params={"startDate": start, "endDate": end})
-        days = data.get("result", []) or []
-    except Exception:
-        return None
-    booked = blocked = 0
-    for d in days:
-        if int(d.get("isAvailable", 1) or 0) == 1:
-            continue
-        if d.get("reservationId") or d.get("reservation_id"):
-            booked += 1
-        else:
-            blocked += 1
-    return (booked, blocked, len(days))
-
-async def _monthly_deals_async(limit=6, ttl=10800):
+def _monthly_deals_sync(limit=6, ttl=10800):
     """Apartments with 5-15 reserved nights in the next ~30 days = underperforming but in demand:
     proven bookings, yet half-empty, so a monthly tenant is the best fill. Excludes dead/blocked
-    units (<5 reserved, which is where Airbnb-blocked + no-booking units land) and healthy units
-    (>15). Concurrent calendar pulls (semaphore-bounded) + 3h cache so it never slows the page."""
+    units (<5 reserved, where Airbnb-blocked + no-booking units land) and healthy ones (>15).
+    Reads the calendar store, so this no longer costs one Hostaway pull per unit."""
     c = _monthly_deals_cache
     if c["data"] is not None and (time.time() - c["ts"]) < ttl:
         return c["data"]
     today = datetime.now(TZ).date()
-    start, end = today.isoformat(), _add_months(today, 1).isoformat()
-    snaps = _monthly_visible_snaps()
-    sem = asyncio.Semaphore(8)
-    async def one(s, ov):
-        async with sem:
-            r = await asyncio.to_thread(_monthly_booked_nights, s.get("id"), start, end)
+    start, end = today, _add_months(today, 1)
+    rows = []
+    for s, ov in _monthly_visible_snaps():
+        r = _mcal_booked(s.get("id"), start, end)
         if not r:
-            return None
+            continue
         booked, _blocked, _days = r
         if 5 <= booked <= 15:
-            return (s, ov, booked)
-        return None
-    rows = [x for x in await asyncio.gather(*[one(s, ov) for s, ov in snaps]) if x]
+            rows.append((s, ov, booked))
     rows.sort(key=lambda t: (-_monthly_rating_of(t[0])[0], -_monthly_rating_of(t[0])[1]))
     out = []
     for s, ov, booked in rows[:limit]:
@@ -57564,8 +57668,14 @@ async def _monthly_deals_async(limit=6, ttl=10800):
         card["deal_booked"] = booked
         out.append(card)
     res = {"results": out}
-    c["data"], c["ts"] = res, time.time()
+    # Only cache a REAL answer. Caching an empty list produced by a cold store would
+    # hide the deals strip for three hours after every deploy.
+    if out or _mcal_ready():
+        c["data"], c["ts"] = res, time.time()
     return res
+
+async def _monthly_deals_async(limit=6, ttl=10800):
+    return await asyncio.to_thread(_monthly_deals_sync, limit, ttl)
 
 def _monthly_cfg_public():
     c = _monthly_cfg
@@ -59921,6 +60031,20 @@ async def escalation_reping_loop():
             esc["attempts"] += 1
         except Exception as e:
             print("reping error:", e)
+
+@tasks.loop(minutes=MONTHLY_CAL_REFRESH_MIN)
+async def monthly_calendar_loop():
+    """Refill the monthly calendar store. discord.py runs a loop's first iteration the moment
+    it starts, which here is exactly what we want: the store warms on boot rather than leaving
+    the first customer of the day on estimates."""
+    if not MONTHLY_ENABLED:
+        return
+    try:
+        res = await asyncio.to_thread(_mcal_refresh_sync)
+        print("monthly calendar: %s units warm, %s failed, %sms"
+              % (res["ok"], res["err"], res["last_ms"]))
+    except Exception as e:
+        print("monthly calendar loop error:", e)
 
 @tasks.loop(minutes=KNOWLEDGE_REFRESH_MIN)
 async def knowledge_loop():
@@ -67558,6 +67682,8 @@ async def on_ready():
         _pending.append(guest_summary_loop)
     if CLEAN_FEEDBACK_ENABLED and not cleaning_feedback_loop.is_running():
         _pending.append(cleaning_feedback_loop)
+    if MONTHLY_ENABLED and not monthly_calendar_loop.is_running():
+        _pending.append(monthly_calendar_loop)    # warms /monthly so no guest waits on Hostaway
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
         _pending.append(decor_warn_loop)          # late decoration / late cake — separate warnings
     # Fire them off spread over time, in the background: on_ready must keep going
