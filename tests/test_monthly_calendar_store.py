@@ -194,11 +194,13 @@ class FetchShape(unittest.TestCase):
                           "an empty calendar must not overwrite a good copy")
 
 
-class ChunkedFetch(unittest.TestCase):
-    """The store asked Hostaway for 210 days in one call and got nothing back, for
-    every unit, silently — the site stayed fast and quietly served estimates for
-    twenty minutes before anyone could tell. Nothing in this codebase had ever asked
-    for more than 60 days. So the horizon is stitched from 60-day windows."""
+class WideCallThenRepair(unittest.TestCase):
+    """One call for the whole horizon, then stitch anything it did not cover.
+
+    Hostaway does serve a 210-day range — measured live, 56 of 57 units, one pull
+    each. An empty store was once misread as a rejected range; it was congestion.
+    So the wide call is the normal path (57 calls a cycle, not 228) and the narrow
+    windows are the repair, for a day when a pull comes back short."""
 
     def setUp(self):
         self._orig = bot.api_get
@@ -224,30 +226,53 @@ class ChunkedFetch(unittest.TestCase):
             return {"result": days}
         bot.api_get = fake
 
-    def test_a_long_horizon_is_stitched_from_narrow_windows(self):
-        self._serve()
+    def test_a_wide_window_costs_exactly_one_call(self):
+        """The normal path, and the reason chunking-by-default was wrong."""
+        self._serve(max_span_days=400)
         got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
-        self.assertEqual(len(self.calls), 4, "181 days needs four 60-day windows")
-        for a, b in self.calls:
-            self.assertLessEqual((b - a).days + 1, 60)
+        self.assertEqual(len(self.calls), 1, "one call per unit when the range is served")
         self.assertEqual(len(got), 181)
+
+    def test_a_refused_wide_window_falls_back_to_narrow_ones(self):
+        self._serve(max_span_days=60)
+        got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
+        self.assertEqual(len(self.calls), 5, "one refused wide call, then four windows")
+        self.assertEqual(len(got), 181, "the full horizon still gets covered")
         self.assertIn("2026-09-01", got)
         self.assertIn("2027-02-28", got)
 
-    def test_windows_do_not_overlap_or_leave_gaps(self):
-        self._serve()
-        bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
-        for (_a1, b1), (a2, _b2) in zip(self.calls, self.calls[1:]):
-            self.assertEqual(a2 - b1, datetime.timedelta(days=1),
-                             "each window must start the day after the last one ended")
+    def test_a_short_answer_is_repaired_from_where_it_stopped(self):
+        """Hostaway answers, but only for part of what was asked. The rest is
+        stitched on from the day after the last one it gave — no gap, no overlap."""
+        state = {"n": 0}
+        def fake(path, params=None):
+            state["n"] += 1
+            a = datetime.date.fromisoformat(params["startDate"])
+            b = datetime.date.fromisoformat(params["endDate"])
+            if state["n"] == 1:
+                b = a + datetime.timedelta(days=29)      # only 30 days of 181
+            self.calls.append((a, b))
+            days, d = [], a
+            while d <= b:
+                days.append({"date": d.isoformat(), "isAvailable": 1, "price": 700})
+                d += datetime.timedelta(days=1)
+            return {"result": days}
+        bot.api_get = fake
+        got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
+        self.assertEqual(len(got), 181)
+        self.assertEqual(self.calls[1][0], datetime.date(2026, 10, 1),
+                         "repair starts the day after the last day actually returned")
 
     def test_a_partial_horizon_is_kept_not_thrown_away(self):
-        """Near dates keep exact prices even when a far window fails."""
+        """Near dates keep exact prices even when a later window fails."""
         calls = {"n": 0}
         def flaky(path, params=None):
             calls["n"] += 1
             if calls["n"] > 1:
                 raise RuntimeError("Hostaway down")
+            params = dict(params)
+            params["endDate"] = (datetime.date.fromisoformat(params["startDate"])
+                                 + datetime.timedelta(days=59)).isoformat()
             a = datetime.date.fromisoformat(params["startDate"])
             b = datetime.date.fromisoformat(params["endDate"])
             days, d = [], a
@@ -257,7 +282,7 @@ class ChunkedFetch(unittest.TestCase):
             return {"result": days}
         bot.api_get = flaky
         got = bot._mcal_fetch_unit(7, datetime.date(2026, 9, 1), datetime.date(2027, 2, 28))
-        self.assertEqual(len(got), 60, "the first window survives")
+        self.assertEqual(len(got), 60, "the days we did get survive")
 
     def test_total_failure_is_none_so_the_old_copy_survives(self):
         def boom(*a, **k):

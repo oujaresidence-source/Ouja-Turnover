@@ -57231,14 +57231,18 @@ MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /el
 # A day that is not in the store is UNKNOWN — never treated as free, never treated
 # as priced. That is the same rule unit_availability_price already applies to a
 # truncated Hostaway response, and it is the only rule that cannot invent a price.
-# 60 days is the ONLY calendar window this codebase has ever proven against
-# Hostaway (compute_forward_calendar, get_forward_calendar, the pricing horizon —
-# all 60 or less). The first version of this store asked for 210 days in one call
-# and every unit came back empty, so the store never filled and the site quietly
-# served estimates. Ask for what is known to work and stitch the windows together.
+# ONE call per unit for the whole horizon — Hostaway serves a 210-day calendar
+# range fine, measured on 2026-08-24 (56 of 57 units, one pull each). I briefly
+# "fixed" this into 60-day chunks after misreading an empty store as a rejected
+# range; it was not rejected, it was just queued behind 43 other loops on the
+# shared throttle at boot and took ~17 minutes to come through. Chunking would
+# have quadrupled the Hostaway load for a shorter horizon.
+# The chunk path stays as a FALLBACK, because "the wide window works" is an
+# observation about today's Hostaway, not a guarantee: if a pull comes back short,
+# the rest of the horizon is stitched from windows small enough to be safe.
 MONTHLY_CAL_CHUNK_DAYS  = int(os.environ.get("MONTHLY_CAL_CHUNK_DAYS", "60"))
-MONTHLY_CAL_DAYS        = int(os.environ.get("MONTHLY_CAL_DAYS", "180"))
-MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "30"))
+MONTHLY_CAL_DAYS        = int(os.environ.get("MONTHLY_CAL_DAYS", "210"))
+MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "20"))
 
 # {"units": {"<listing id>": {"<YYYY-MM-DD>": [available, price|null, has_reservation]}}}
 _mcal = _load_json("monthly_calendar.json", None) or {"units": {}, "synced_at": None,
@@ -57268,16 +57272,23 @@ def _mcal_window(listing_id, start, end):
     return out or None
 
 def _mcal_fetch_unit(listing_id, start, end):
-    """One unit's calendar across the whole horizon, stitched from proven-size windows.
+    """One unit's calendar for the whole horizon: one call, then repair if it fell short.
 
-    PARTIAL IS STILL USEFUL, AND STILL HONEST. If a later window fails we keep the
-    earlier ones: _mcal_quote refuses any stay it cannot cover night-by-night, so a
-    short store produces estimates for far dates and exact prices for near ones —
-    which is strictly better than nothing. Returns None only if we got nothing at all.
+    ONE CALL IS THE NORMAL PATH. Asking for the full range works and costs 57 calls a
+    cycle instead of 228.
+
+    PARTIAL IS STILL USEFUL, AND STILL HONEST. Whatever the reason a pull stops early,
+    the days we did get are kept: _mcal_quote refuses any stay it cannot cover night by
+    night, so a short store means exact prices for near dates and labelled estimates for
+    far ones — strictly better than nothing, and never a guessed total.
+    Returns None only when we got nothing at all, so the caller keeps the last good copy.
     """
-    out, span = {}, max(1, MONTHLY_CAL_CHUNK_DAYS)
-    cur = start
-    while cur <= end:                       # inclusive: a stay may end ON the horizon
+    out = _mcal_window(listing_id, start, end) or {}
+    span = max(1, MONTHLY_CAL_CHUNK_DAYS)
+    # Stitch whatever the wide call did not cover, in windows small enough to be safe.
+    cur = (max(datetime.strptime(d, "%Y-%m-%d").date() for d in out) + timedelta(days=1)
+           if out else start)
+    while cur <= end:
         stop = min(cur + timedelta(days=span - 1), end)
         got = _mcal_window(listing_id, cur, stop)
         if not got:
