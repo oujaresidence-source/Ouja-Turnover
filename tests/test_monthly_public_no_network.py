@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import inspect
 import os
 import tempfile
@@ -7,9 +8,27 @@ from unittest import mock
 
 from monthly_public.analytics import AnalyticsStore
 from monthly_public.leads import LeadStore
+from monthly_public.publication import validate_listing
 from monthly_public.routes import MonthlyPublicApp
 from monthly_public.snapshot import SnapshotStore
 from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
+
+
+def run(coroutine):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
+
+
+class FakeRequest:
+    def __init__(self, path="", method="GET", query=None):
+        self.path = path
+        self.method = method
+        self.query = query or {}
+        self.headers = {}
+        self.cookies = {}
 
 
 class RefreshSpySnapshot(SnapshotStore):
@@ -126,6 +145,104 @@ class MonthlyPublicNoNetworkTests(unittest.TestCase):
         self.assertIn("_gw_cache", body)
         self.assertIn("_mcal", body)
         self.assertIn("_monthly_public_engine_prices", body)
+
+
+class MonthlyPublicBotBoundaryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import bot
+        cls.bot = bot
+
+    def test_anonymous_middleware_allows_only_the_three_public_monthly_posts(self):
+        async def reached(request):
+            return request.path
+
+        public = ("/api/monthly/match", "/api/monthly/lead", "/api/monthly/event")
+        for path in public:
+            result = run(self.bot._role_enforce_mw(FakeRequest(path, "POST"), reached))
+            self.assertEqual(result, path)
+        self.assertTrue(set(public).issubset(self.bot._ROLE_EXEMPT_WRITES))
+        for private in ("/api/monthly/ops/response", "/api/monthly/ops/outcome", "/api/monthly/admin"):
+            self.assertNotIn(private, self.bot._ROLE_EXEMPT_WRITES)
+            response = run(self.bot._role_enforce_mw(FakeRequest(private, "POST"), reached))
+            self.assertEqual(response.status, 401)
+
+    def test_calendar_adapter_rejects_a_gap_inside_reported_coverage(self):
+        original = self.bot._mcal
+        self.bot._mcal = {
+            "units": {"1001": {
+                "2026-09-01": [1, 400, 0],
+                "2026-09-03": [1, 400, 0],
+            }},
+            "unit_synced_at": {"1001": "2026-08-25T09:40:00+03:00"},
+        }
+        try:
+            calendar = self.bot._monthly_public_calendar("1001")
+            self.assertIsNone(calendar)
+            publication = validate_listing(
+                valid_listing(calendar=calendar), valid_settings(), NOW
+            )
+            self.assertEqual(publication.availability_status, "pending")
+            self.assertFalse(publication.exact_match_eligible)
+        finally:
+            self.bot._mcal = original
+
+    def test_cold_rating_cache_is_warmed_locally_without_network(self):
+        saved = {
+            "gw_cache": self.bot._gw_cache,
+            "gw_overrides": self.bot._gw_overrides,
+            "gw_ratings_cache": self.bot._gw_ratings_cache,
+            "reviews": self.bot._reviews,
+            "has_monthly": self.bot._HAS_MONTHLY,
+            "mcal": self.bot._mcal,
+            "monthly_cfg": self.bot._monthly_cfg,
+        }
+        self.bot._gw_cache = {
+            "listings": [{
+                "id": 1001,
+                "name": "Ouja | Cached rating test",
+                "active": True,
+                "images": [],
+                "amenities": [],
+            }],
+            "synced_at": "2026-08-25T09:00:00+03:00",
+        }
+        self.bot._gw_overrides = {"1001": {}}
+        self.bot._gw_ratings_cache = {"t": 0.0, "map": {}}
+        self.bot._reviews = {
+            "r1": {"listing_id": 1001, "rating": 4.0},
+            "r2": {"listing_id": 1001, "rating": 4.5},
+            "r3": {"listing_id": 1001, "rating": 5.0},
+        }
+        self.bot._HAS_MONTHLY = False
+        self.bot._mcal = {"units": {}, "unit_synced_at": {}}
+        self.bot._monthly_cfg = {"hidden": []}
+        try:
+            with mock.patch.object(self.bot.requests, "get", side_effect=AssertionError("network reached")) as network:
+                source = self.bot._monthly_public_source_adapter()
+            network.assert_not_called()
+            self.assertEqual(source["listings"][0]["rating"], 4.5)
+            self.assertEqual(source["listings"][0]["reviews_count"], 3)
+        finally:
+            self.bot._gw_cache = saved["gw_cache"]
+            self.bot._gw_overrides = saved["gw_overrides"]
+            self.bot._gw_ratings_cache = saved["gw_ratings_cache"]
+            self.bot._reviews = saved["reviews"]
+            self.bot._HAS_MONTHLY = saved["has_monthly"]
+            self.bot._mcal = saved["mcal"]
+            self.bot._monthly_cfg = saved["monthly_cfg"]
+
+    def test_v2_monthly_image_handler_redirects_directly_without_server_fetch(self):
+        url = "https://images.example.test/home.jpg"
+        with mock.patch.object(self.bot.requests, "get", side_effect=AssertionError("network reached")) as network:
+            with self.assertRaises(self.bot.web.HTTPFound) as raised:
+                run(self.bot._handle_monthly_v2_img(FakeRequest(
+                    "/monthly/img", "GET", {"u": url, "w": "1200"}
+                )))
+        network.assert_not_called()
+        self.assertEqual(raised.exception.location, url)
+        source = inspect.getsource(self.bot.start_web_server)
+        self.assertIn("_handle_monthly_v2_img", source)
 
 
 if __name__ == "__main__":
