@@ -722,7 +722,12 @@ def build_whatsapp_handoff(
     recorded = None
     if analytics is not None:
         try:
-            analytics.record_lifecycle("lead_created", session_id, lead["reference"], now=current)
+            analytics.record_lead_creation(
+                session_id,
+                lead["reference"],
+                listing_id=listing_id,
+                now=current,
+            )
             recorded = True
         except Exception:
             recorded = False
@@ -806,7 +811,7 @@ def build_general_whatsapp_handoff(
     recorded = None
     if analytics is not None:
         try:
-            analytics.record_lifecycle("lead_created", session_id, lead["reference"], now=current)
+            analytics.record_lead_creation(session_id, lead["reference"], now=current)
             recorded = True
         except Exception:
             recorded = False

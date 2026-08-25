@@ -279,6 +279,14 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertIn("SAR 12,000", made["message"])
         self.assertTrue(made["url"].startswith("https://wa.me/966500000000?text="))
         self.assertEqual(self.leads.get(made["lead_reference"])["quote"]["stay_total_sar"], 12000)
+        linked = [
+            event for event in self.analytics.events()
+            if event["lead_reference"] == made["lead_reference"]
+        ]
+        self.assertEqual(
+            [event["event"] for event in linked],
+            ["whatsapp_click", "lead_created"],
+        )
         for field, value in (
             ("price", 1),
             ("message", "cheap please"),
@@ -413,6 +421,14 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertTrue(made["ok"])
         stored = self.leads.get(made["lead_reference"])
         self.assertEqual(stored["lead_kind"], "general_help")
+        linked = [
+            event for event in self.analytics.events()
+            if event["lead_reference"] == made["lead_reference"]
+        ]
+        self.assertEqual(
+            [event["event"] for event in linked],
+            ["whatsapp_click", "lead_created"],
+        )
         rejected = self.app.lead(
             {
                 "session_id": session,

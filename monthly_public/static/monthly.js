@@ -98,6 +98,7 @@
       whyRecommended: "لماذا رشحناها لك؟",
       tradeoff: "نقطة تستحق الانتباه",
       quoteIncludes: "يشمل {items}",
+      adjustedDates: "التواريخ المتاحة: {moveIn} إلى {moveOut}",
       viewHome: "اعرض تفاصيل البيت",
       noExact: "ما لقينا تطابقًا كاملًا للتفاصيل المحددة.",
       nearHelp: "هذي الخيارات تغيّر شرطًا واحدًا بشكل واضح، بدون افتراض توفر غير موثق.",
@@ -251,6 +252,7 @@
       whyRecommended: "Why we recommended it",
       tradeoff: "A useful trade-off",
       quoteIncludes: "Includes {items}",
+      adjustedDates: "Available dates: {moveIn} to {moveOut}",
       viewHome: "View home details",
       noExact: "No exact match was found for the selected details.",
       nearHelp: "These options clearly change one condition without assuming unverified availability.",
@@ -349,7 +351,7 @@
     config: null,
     matcher: null,
     request: null,
-    listingQuery: {},
+    listingRequest: {},
     recommendationContext: null,
     impressedListingIds: new Set(),
     results: null,
@@ -408,7 +410,7 @@
     return typeof value === "string" ? value.trim() : "";
   }
 
-  function generalHelpContactState(config, lang) {
+  function contactState(config, lang) {
     const language = lang === "en" ? "en" : "ar";
     const value = config && typeof config === "object" ? config : {};
     const blockers = Array.isArray(value.blockers) ? value.blockers : [];
@@ -425,6 +427,41 @@
     if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const parsed = new Date(value + "T00:00:00Z");
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }
+
+  function adjustedDateWindow(item) {
+    if (!item || item.changed_condition !== "dates") return null;
+    const moveIn = item.adjusted_move_in;
+    const moveOut = item.adjusted_move_out;
+    if (!validDate(moveIn) || !validDate(moveOut) || moveOut <= moveIn) return null;
+    return { move_in: moveIn, move_out: moveOut };
+  }
+
+  function canonicalListingRequest(request, item) {
+    const value = request && typeof request === "object" ? Object.assign({}, request) : {};
+    const adjusted = adjustedDateWindow(item);
+    if (adjusted) {
+      value.move_in = adjusted.move_in;
+      value.move_out = adjusted.move_out;
+      delete value.duration_months;
+    }
+    return value;
+  }
+
+  function recoverySessionToken(current, fresh, code) {
+    if (code !== "invalid_signature" || !validSessionToken(fresh) || fresh === current) return null;
+    return fresh;
+  }
+
+  async function retryOnceForInvalidSignature(operation, current, fresh, onRotate) {
+    try {
+      return await operation(current);
+    } catch (error) {
+      const replacement = recoverySessionToken(current, fresh, error && error.code);
+      if (!replacement) throw error;
+      if (typeof onRotate === "function") onRotate(replacement);
+      return operation(replacement);
+    }
   }
 
   function boundedInteger(value, minimum, maximum) {
@@ -655,6 +692,7 @@
       session_id: runtime.config && runtime.config.session_id,
       matcher: runtime.matcher,
       request: runtime.request,
+      listing_request: runtime.listingRequest,
       recommendation_context: runtime.recommendationContext
     };
     try {
@@ -713,17 +751,29 @@
     });
   }
 
+  function withSessionRetry(operation) {
+    const current = runtime.config && runtime.config.session_id;
+    const fresh = runtime.config && runtime.config.fresh_session_id;
+    return retryOnceForInvalidSignature(operation, current, fresh, function (replacement) {
+      runtime.config.session_id = replacement;
+      runtime.config.fresh_session_id = null;
+      persistState();
+    });
+  }
+
   function safeEventContext(context) {
     return Object.assign({ language: runtime.lang, device_class: deviceClass() }, context || {});
   }
 
   function track(event, context) {
     const sessionId = runtime.config && runtime.config.session_id;
-    if (!sessionId) return Promise.resolve(false);
-    return postJSON(ENDPOINTS.event, {
-      event: event,
-      session_id: sessionId,
-      context: safeEventContext(context)
+    if (!validSessionToken(sessionId)) return Promise.resolve(false);
+    return withSessionRetry(function (activeSessionId) {
+      return postJSON(ENDPOINTS.event, {
+        event: event,
+        session_id: activeSessionId,
+        context: safeEventContext(context)
+      });
     }).then(function () { return true; }).catch(function () { return false; });
   }
 
@@ -798,26 +848,32 @@
     const parsed = parseLocationSearch(window.location.search, runtime.page.route);
     if (runtime.page.route === "browse") {
       runtime.browseQuery = parsed;
-      runtime.listingQuery = {};
+      runtime.request = null;
+      runtime.matcher = initialMatcherState();
+      runtime.results = null;
+      runtime.recommendationContext = null;
+      runtime.listingRequest = {};
       return;
     }
     if (runtime.page.route === "listing") {
-      runtime.listingQuery = parsed;
       if (window.location.search || Object.keys(parsed).length) {
-        runtime.request = requestIsComplete(parsed) ? parsed : null;
+        runtime.listingRequest = parsed;
       } else {
         const identifier = String(runtime.page.listing_id || runtime.page.slug || "");
-        if (!runtime.recommendationContext || [runtime.recommendationContext.listing_id, runtime.recommendationContext.slug].indexOf(identifier) === -1) runtime.request = null;
+        if (!runtime.recommendationContext || [runtime.recommendationContext.listing_id, runtime.recommendationContext.slug].indexOf(identifier) === -1) runtime.listingRequest = {};
       }
       return;
     }
-    runtime.listingQuery = {};
+    runtime.listingRequest = {};
   }
 
   function navigate(page, path, entryRoute) {
     if (entryRoute === "browse") {
       runtime.request = null;
+      runtime.matcher = initialMatcherState();
+      runtime.results = null;
       runtime.recommendationContext = null;
+      runtime.listingRequest = {};
       persistState();
     }
     runtime.page = page;
@@ -857,9 +913,11 @@
   async function loadConfig() {
     const saved = sessionPayload();
     runtime.config = await getJSON(ENDPOINTS.config, { lang: runtime.lang });
-    runtime.config.session_id = chooseSessionToken(saved.session_id, runtime.config.session_id);
+    const issued = runtime.config.session_id;
+    runtime.config.fresh_session_id = issued;
+    runtime.config.session_id = chooseSessionToken(saved.session_id, issued);
     if (!runtime.matcher) runtime.matcher = initialMatcherState(saved.matcher);
-    if (!runtime.request && saved.request) runtime.request = saved.request;
+    if (!runtime.request && saved.request && runtime.page.route !== "browse") runtime.request = saved.request;
     if (!runtime.recommendationContext) runtime.recommendationContext = safeRecommendationContext(saved.recommendation_context || {}, saved.recommendation_context && saved.recommendation_context.lang);
     persistState();
     return runtime.config;
@@ -916,7 +974,7 @@
   }
 
   function responseProof() {
-    const message = responseWindowMessage(runtime.config, runtime.lang);
+    const message = contactState(runtime.config, runtime.lang).response_message;
     return message ? proofItem(message, "") : null;
   }
 
@@ -960,10 +1018,12 @@
   function openListing(event, item) {
     event.preventDefault();
     const page = { route: "listing", listing_id: String(item.id), slug: null };
-    runtime.recommendationContext = safeRecommendationContext(item, runtime.lang);
-    runtime.listingQuery = runtime.page.route === "browse" ? Object.assign({}, runtime.browseQuery) : {};
+    const guided = runtime.page.route !== "browse";
+    runtime.recommendationContext = guided ? safeRecommendationContext(item, runtime.lang) : null;
+    const sourceRequest = guided ? runtime.request : runtime.browseQuery;
+    runtime.listingRequest = canonicalListingRequest(sourceRequest, item);
     persistState();
-    navigate(page, listingPath(item) + queryString(runtime.listingQuery));
+    navigate(page, listingPath(item) + queryString(runtime.listingRequest));
   }
 
   function createCard(item, index) {
@@ -988,6 +1048,13 @@
     if (item.neighborhood) body.appendChild(element("p", "listing-location", item.neighborhood));
     body.appendChild(factsList(item));
     if (item.summary) body.appendChild(element("p", "listing-summary", item.summary));
+    const adjusted = adjustedDateWindow(item);
+    if (adjusted) {
+      body.appendChild(element("p", "availability adjusted-dates", copy("adjustedDates", {
+        moveIn: adjusted.move_in,
+        moveOut: adjusted.move_out
+      })));
+    }
     if (item.rating !== undefined && item.reviews_count) {
       body.appendChild(element("p", "rating-line", copy("rating", { rating: formatNumber(item.rating), count: formatNumber(item.reviews_count) })));
     }
@@ -1412,12 +1479,12 @@
       if (!result.pending_count && requestIsComplete(runtime.request)) {
         const help = stateMessage(copy("generalHelpTitle"), copy("generalHelpText"), "warning");
         const control = button(copy("generalHelpAction"), "button button-primary", function () { prepareGeneralHelp(control); });
-        const contactState = generalHelpContactState(runtime.config, runtime.lang);
-        control.disabled = contactState.disabled;
-        if (contactState.message) help.appendChild(element("p", "contact-blocked", contactState.message));
+        const currentContact = contactState(runtime.config, runtime.lang);
+        control.disabled = currentContact.disabled;
+        if (currentContact.message) help.appendChild(element("p", "contact-blocked", currentContact.message));
         help.appendChild(control);
-        if (contactState.response_message) {
-          const response = element("p", "contact-note", contactState.response_message);
+        if (currentContact.response_message) {
+          const response = element("p", "contact-note", currentContact.response_message);
           response.setAttribute("data-response-window", "");
           help.appendChild(response);
         }
@@ -1554,7 +1621,7 @@
   function listingQuery(identifier, bySlug) {
     const values = { lang: runtime.lang };
     if (bySlug) values.lookup = "slug";
-    const request = Object.keys(runtime.listingQuery || {}).length ? runtime.listingQuery : runtime.request;
+    const request = runtime.listingRequest;
     if (request) {
       ["move_in", "move_out", "duration_months", "residents", "purpose"].forEach(function (key) {
         if (request[key] !== undefined) values[key] = request[key];
@@ -1739,34 +1806,32 @@
     card.appendChild(terms);
     const preliminary = quote[runtime.lang === "ar" ? "preliminary_label_ar" : "preliminary_label_en"];
     if (preliminary) card.appendChild(element("p", "preliminary-note", preliminary));
-    const response = runtime.config && runtime.config.response_window;
-    const responseMessage = response && response[runtime.lang === "ar" ? "message_ar" : "message_en"];
-    if (requestIsComplete(runtime.request)) {
+    const currentContact = contactState(runtime.config, runtime.lang);
+    if (requestIsComplete(runtime.listingRequest)) {
       const contact = button(copy("contactWhatsApp"), "button button-primary contact-action", function () { prepareWhatsApp(contact, listing); });
-      const blocked = (runtime.config.blockers || []).some(function (item) { return item.field === "whatsapp_number"; });
-      if (blocked || !runtime.config.session_id) {
-        contact.disabled = true;
-        card.appendChild(element("p", "contact-blocked", copy("contactBlocked")));
-      }
+      contact.disabled = currentContact.disabled;
+      if (currentContact.message) card.appendChild(element("p", "contact-blocked", currentContact.message));
       card.appendChild(contact);
     } else {
       card.appendChild(element("p", "contact-blocked", copy("completeDetails")));
       card.appendChild(stayDetailsForm(listing));
     }
-    if (responseMessage) card.appendChild(element("p", "contact-note", responseMessage));
+    if (currentContact.response_message) card.appendChild(element("p", "contact-note", currentContact.response_message));
     return card;
   }
 
   function stayDetailsForm(listing) {
     const form = element("form", "date-form");
-    const saved = runtime.request || runtime.listingQuery || {};
+    const saved = runtime.listingRequest || {};
     const purpose = selectField("listing-purpose", copy("selectPurpose"), PURPOSE_KEYS.map(function (key) { return { value: key, label: copy(key) }; }), saved.purpose || "family");
     const residents = formField("listing-residents", copy("residentsLabel"), "number", saved.residents || 1);
     residents.input.min = "1";
     residents.input.max = "50";
     const sleeping = selectField("listing-sleeping", copy("selectSleeping"), SLEEPING.map(function (row) { return { value: row[0], label: copy(row[1]) }; }), saved.sleeping || "flexible");
     const moveIn = formField("listing-move-in", copy("moveIn"), "date", saved.move_in);
-    const duration = selectField("listing-duration", copy("duration"), [1, 2, 3, 4, 5, 6].map(function (count) { return { value: count, label: count === 1 ? copy("monthOne") : copy("monthsCount", { count: formatNumber(count) }) }; }), saved.duration_months || 1);
+    const usesMoveOut = validDate(saved.move_out) && validDate(saved.move_in) && saved.move_out > saved.move_in;
+    const moveOut = usesMoveOut ? formField("listing-move-out", copy("moveOut"), "date", saved.move_out) : null;
+    const duration = usesMoveOut ? null : selectField("listing-duration", copy("duration"), [1, 2, 3, 4, 5, 6].map(function (count) { return { value: count, label: count === 1 ? copy("monthOne") : copy("monthsCount", { count: formatNumber(count) }) }; }), saved.duration_months || 1);
     const flexibility = selectField("listing-flexibility", copy("selectFlexibility"), [
       { value: "fixed", label: copy("fixedDates") },
       { value: "plus_minus_7", label: copy("flexibleDates") }
@@ -1785,7 +1850,7 @@
     error.setAttribute("aria-live", "assertive");
     const submit = button(copy("getOfficialPrice"), "button button-primary");
     submit.type = "submit";
-    append(form, purpose.field, residents.field, sleeping.field, moveIn.field, duration.field, flexibility.field, placeField, error, submit);
+    append(form, purpose.field, residents.field, sleeping.field, moveIn.field, moveOut ? moveOut.field : duration.field, flexibility.field, placeField, error, submit);
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       const request = {
@@ -1793,9 +1858,10 @@
         residents: Number(residents.input.value),
         sleeping: sleeping.select.value,
         move_in: moveIn.input.value,
-        duration_months: Number(duration.select.value),
         flexibility: flexibility.select.value
       };
+      if (moveOut) request.move_out = moveOut.input.value;
+      else request.duration_months = Number(duration.select.value);
       if (request.purpose !== "family") {
         const selected = placeOptions.find(function (item) { return item.id === place.select.value; });
         if (selected) request.place = { kind: selected.kind, id: selected.id, label: runtime.lang === "ar" ? selected.label_ar : selected.label_en };
@@ -1805,10 +1871,9 @@
         announce(error.textContent, true);
         return;
       }
-      runtime.request = request;
-      runtime.listingQuery = {};
+      runtime.listingRequest = request;
       persistState();
-      window.history.replaceState(runtime.page, "", listingPath(listing) + queryString(request));
+      window.history.replaceState(runtime.page, "", listingPath(listing) + queryString(runtime.listingRequest));
       loadListing(listing.id, false);
     });
     return form;
@@ -1818,13 +1883,14 @@
     control.disabled = true;
     control.textContent = copy("preparingWhatsApp");
     announce(copy("preparingWhatsApp"));
-    track("whatsapp_click", { listing_id: String(listing.id) });
     try {
-      const handoff = await postJSON(ENDPOINTS.lead, {
-        session_id: runtime.config.session_id,
-        listing_id: String(listing.id),
-        request: runtime.request,
-        lang: runtime.lang
+      const handoff = await withSessionRetry(function (activeSessionId) {
+        return postJSON(ENDPOINTS.lead, {
+          session_id: activeSessionId,
+          listing_id: String(listing.id),
+          request: runtime.listingRequest,
+          lang: runtime.lang
+        });
       });
       const handoffUrl = safeWhatsAppUrl(handoff.url);
       if (!handoffUrl) throw new Error(copy("leadFailed"));
@@ -1841,13 +1907,14 @@
     control.disabled = true;
     control.textContent = copy("preparingWhatsApp");
     announce(copy("preparingWhatsApp"));
-    track("whatsapp_click", eventContextFromRequest(runtime.request || {}));
     try {
-      const handoff = await postJSON(ENDPOINTS.lead, {
-        session_id: runtime.config.session_id,
-        general_help: true,
-        request: runtime.request,
-        lang: runtime.lang
+      const handoff = await withSessionRetry(function (activeSessionId) {
+        return postJSON(ENDPOINTS.lead, {
+          session_id: activeSessionId,
+          general_help: true,
+          request: runtime.request,
+          lang: runtime.lang
+        });
       });
       const handoffUrl = safeWhatsAppUrl(handoff.url);
       if (!handoffUrl) throw new Error(copy("leadFailed"));
@@ -1882,11 +1949,10 @@
     wrap.appendChild(layout);
     wrap.appendChild(licenceDetails(listing));
     target.appendChild(wrap);
-    if (quote && requestIsComplete(runtime.request)) {
+    const currentContact = contactState(runtime.config, runtime.lang);
+    if (quote && requestIsComplete(runtime.listingRequest) && !currentContact.disabled) {
       const mobile = element("div", "sticky-mobile-action");
       const contact = button(copy("contactWhatsApp"), "button button-primary", function () { prepareWhatsApp(contact, listing); });
-      const blocked = (runtime.config.blockers || []).some(function (item) { return item.field === "whatsapp_number"; });
-      contact.disabled = blocked || !runtime.config.session_id;
       mobile.appendChild(contact);
       target.appendChild(mobile);
     }
@@ -1948,6 +2014,7 @@
     runtime.lang = saved.lang === "en" ? "en" : "ar";
     runtime.matcher = initialMatcherState(saved.matcher);
     runtime.request = saved.request || null;
+    runtime.listingRequest = saved.listing_request && typeof saved.listing_request === "object" ? saved.listing_request : {};
     runtime.recommendationContext = safeRecommendationContext(saved.recommendation_context || {}, saved.recommendation_context && saved.recommendation_context.lang);
     applyLocationSearch();
     document.documentElement.lang = runtime.lang;
@@ -1974,20 +2041,24 @@
   return {
     COPY: COPY,
     approvedIncluded: approvedIncluded,
+    adjustedDateWindow: adjustedDateWindow,
     answerStep: answerStep,
     boot: boot,
     buildMatchRequest: buildMatchRequest,
     buildSteps: buildSteps,
+    canonicalListingRequest: canonicalListingRequest,
     chooseSessionToken: chooseSessionToken,
+    contactState: contactState,
     focusQuestion: focusQuestion,
-    generalHelpContactState: generalHelpContactState,
     goBack: goBack,
     initialMatcherState: initialMatcherState,
     optionIsSelected: optionIsSelected,
     parseLocationSearch: parseLocationSearch,
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
+    recoverySessionToken: recoverySessionToken,
     responseWindowMessage: responseWindowMessage,
+    retryOnceForInvalidSignature: retryOnceForInvalidSignature,
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,

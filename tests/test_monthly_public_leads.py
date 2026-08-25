@@ -408,6 +408,44 @@ class LeadTests(unittest.TestCase):
         self.assertEqual(result["code"], "whatsapp_not_configured")
         self.assertEqual(self.store.count(), 0)
 
+    def test_listing_handoff_durably_records_click_and_lead_once(self):
+        analytics = AnalyticsStore(
+            Path(self.folder.name) / "handoff-analytics.sqlite3", clock=lambda: NOW
+        )
+        listing, request, quote = self.complete_handoff()
+
+        first = build_whatsapp_handoff(
+            self.store,
+            valid_settings(),
+            self.session,
+            listing,
+            request,
+            quote,
+            analytics=analytics,
+            now=NOW,
+        )
+        second = build_whatsapp_handoff(
+            self.store,
+            valid_settings(),
+            self.session,
+            listing,
+            request,
+            quote,
+            analytics=analytics,
+            now=NOW + dt.timedelta(minutes=2),
+        )
+
+        self.assertEqual(first["lead_reference"], second["lead_reference"])
+        events = [
+            event for event in analytics.events()
+            if event["lead_reference"] == first["lead_reference"]
+        ]
+        self.assertEqual(
+            [event["event"] for event in events],
+            ["whatsapp_click", "lead_created"],
+        )
+        self.assertEqual(events[0]["context"], {"listing_id": "1001"})
+
     def test_general_help_handoff_stores_no_listing_quote_message_or_pii(self):
         request = {
             "purpose": "family",
@@ -420,16 +458,28 @@ class LeadTests(unittest.TestCase):
             "notes": "private",
         }
 
+        analytics = AnalyticsStore(
+            Path(self.folder.name) / "general-analytics.sqlite3", clock=lambda: NOW
+        )
         result = build_general_whatsapp_handoff(
             self.store,
             valid_settings(),
             self.session,
             request,
-            analytics=AnalyticsStore(Path(self.folder.name) / "general-analytics.sqlite3", clock=lambda: NOW),
+            analytics=analytics,
             now=NOW,
+        )
+        retried = build_general_whatsapp_handoff(
+            self.store,
+            valid_settings(),
+            self.session,
+            request,
+            analytics=analytics,
+            now=NOW + dt.timedelta(minutes=2),
         )
 
         self.assertTrue(result["ok"])
+        self.assertEqual(result["lead_reference"], retried["lead_reference"])
         self.assertIn("لم يتم اختيار منزل", result["message"])
         self.assertIn("No home was selected", result["message"])
         self.assertIn("find and confirm an option", result["message"])
@@ -442,6 +492,15 @@ class LeadTests(unittest.TestCase):
         serialized = json.dumps(stored, ensure_ascii=False)
         for forbidden in (result["message"], "0500000000", "private"):
             self.assertNotIn(forbidden, serialized)
+        linked = [
+            event for event in analytics.events()
+            if event["lead_reference"] == result["lead_reference"]
+        ]
+        self.assertEqual(
+            [event["event"] for event in linked],
+            ["whatsapp_click", "lead_created"],
+        )
+        self.assertEqual(linked[0]["context"], {})
 
     def test_general_help_handoff_requires_whatsapp_and_complete_request(self):
         from monthly_public.settings import load_settings

@@ -345,22 +345,22 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             self.bot._mcal = saved["mcal"]
             self.bot._monthly_cfg = saved["monthly_cfg"]
 
-    def test_v2_monthly_image_handler_redirects_directly_without_server_fetch(self):
+    def test_v2_monthly_image_handler_is_closed_and_not_registered(self):
         url = "https://images.example.test/home.jpg"
         saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
         self.bot.MONTHLY_ENABLED = self.bot.MONTHLY_PUBLIC_V2 = True
         try:
             with mock.patch.object(self.bot.requests, "get", side_effect=AssertionError("network reached")) as network:
-                with self.assertRaises(self.bot.web.HTTPFound) as raised:
-                    run(self.bot._handle_monthly_v2_img(FakeRequest(
-                        "/monthly/img", "GET", {"u": url, "w": "1200"}
-                    )))
+                response = run(self.bot._handle_monthly_v2_img(FakeRequest(
+                    "/monthly/img", "GET", {"u": url, "w": "1200"}
+                )))
         finally:
             self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = saved
         network.assert_not_called()
-        self.assertEqual(raised.exception.location, url)
+        self.assertEqual(response.status, 404)
         source = inspect.getsource(self.bot.start_web_server)
-        self.assertIn("_handle_monthly_v2_img", source)
+        self.assertNotIn('app.router.add_get("/monthly/img", (_handle_monthly_v2_img', source)
+        self.assertIn('app.router.add_get("/monthly/img", _handle_elite_img)', source)
 
 
 if __name__ == "__main__":
