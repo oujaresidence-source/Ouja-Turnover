@@ -11,6 +11,9 @@ from monthly_public.contracts import (
 )
 
 
+ANON_SESSION = "anon_A1b2C3d4E5f6G7h8"
+
+
 def valid_match_request(**overrides):
     request = {
         "purpose": "work",
@@ -114,6 +117,37 @@ class MatchRequestContractTests(unittest.TestCase):
                 self.assertEqual(caught.exception.field, "move_out")
                 self.assertEqual(caught.exception.code, "out_of_range")
 
+    def test_year_9999_date_math_returns_a_contract_error(self):
+        request = valid_match_request(move_in="9999-12-01", move_out="9999-12-31")
+        request.pop("duration_months")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(request)
+
+        self.assertEqual(caught.exception.field, "move_out")
+        self.assertEqual(caught.exception.code, "unsupported_date")
+
+    def test_boolean_text_and_oversized_numeric_values_are_rejected(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(valid_match_request(residents=True))
+        self.assertEqual(caught.exception.field, "residents")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(valid_match_request(residents="9" * 1_000))
+        self.assertEqual(caught.exception.field, "residents")
+        self.assertEqual(caught.exception.code, "too_long")
+
+    def test_numeric_abuse_bounds_are_not_inventory_claims(self):
+        # These are request-size protections. Publication data remains the source
+        # of truth for each home's real capacity and bedroom count.
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(valid_match_request(residents=51))
+        self.assertEqual(caught.exception.code, "out_of_range")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_browse_query({"bedrooms": 21})
+        self.assertEqual(caught.exception.code, "out_of_range")
+
     def test_rejects_unknown_fields_that_can_change_business_behavior(self):
         with self.assertRaises(ContractError) as caught:
             parse_match_request(valid_match_request(budget_sar=8_000))
@@ -166,11 +200,22 @@ class OtherPublicContractTests(unittest.TestCase):
             parse_listing_request({"lang": "ar"})
         self.assertEqual(caught.exception.field, "listing_id")
 
+        with self.assertRaises(ContractError) as caught:
+            parse_listing_request({"listing_id": True})
+        self.assertEqual(caught.exception.field, "listing_id")
+        self.assertEqual(caught.exception.code, "invalid_type")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_listing_request(
+                {"listing_id": "536998", "session_id": "0500000000"}
+            )
+        self.assertEqual(caught.exception.field, "session_id")
+
     def test_event_keeps_only_minimal_anonymous_utm_free_context(self):
         parsed = parse_event(
             {
                 "event": "listing_view",
-                "session_id": "anon_12345678",
+                "session_id": ANON_SESSION,
                 "context": {
                     "language": "ar",
                     "device_class": "mobile",
@@ -196,16 +241,50 @@ class OtherPublicContractTests(unittest.TestCase):
 
     def test_event_rejects_unapproved_event_names(self):
         with self.assertRaises(ContractError) as caught:
-            parse_event({"event": "raw_message", "session_id": "anon_12345678"})
+            parse_event({"event": "raw_message", "session_id": ANON_SESSION})
         self.assertEqual(caught.exception.field, "event")
         self.assertEqual(caught.exception.code, "unsupported")
+
+    def test_public_event_rejects_server_and_staff_lifecycle_names(self):
+        for event in ("lead_created", "team_response", "booked", "lost"):
+            with self.subTest(event=event):
+                with self.assertRaises(ContractError) as caught:
+                    parse_event({"event": event, "session_id": ANON_SESSION})
+                self.assertEqual(caught.exception.field, "event")
+                self.assertEqual(caught.exception.code, "unsupported")
+
+    def test_public_event_rejects_a_client_supplied_lead_reference(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "whatsapp_click",
+                    "session_id": ANON_SESSION,
+                    "context": {"lead_reference": "OJM-20260825-ABC123"},
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.lead_reference")
+        self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_session_id_requires_a_high_entropy_anonymous_token(self):
+        self.assertEqual(
+            parse_event({"event": "landing_view", "session_id": ANON_SESSION})[
+                "session_id"
+            ],
+            ANON_SESSION,
+        )
+        for session_id in ("0500000000", "anon_0500000000", "anon_short"):
+            with self.subTest(session_id=session_id):
+                with self.assertRaises(ContractError) as caught:
+                    parse_event({"event": "landing_view", "session_id": session_id})
+                self.assertEqual(caught.exception.field, "session_id")
+                self.assertEqual(caught.exception.code, "invalid_format")
 
     def test_event_rejects_unknown_top_level_fields(self):
         with self.assertRaises(ContractError) as caught:
             parse_event(
                 {
                     "event": "landing_view",
-                    "session_id": "anon_12345678",
+                    "session_id": ANON_SESSION,
                     "customer_name": "Not allowed",
                 }
             )
@@ -215,14 +294,14 @@ class OtherPublicContractTests(unittest.TestCase):
         purpose = parse_event(
             {
                 "event": "matcher_answer",
-                "session_id": "anon_12345678",
+                "session_id": ANON_SESSION,
                 "context": {"question": "purpose", "answer": "work"},
             }
         )
         residents = parse_event(
             {
                 "event": "matcher_answer",
-                "session_id": "anon_12345678",
+                "session_id": ANON_SESSION,
                 "context": {"question": "residents", "answer": "4"},
             }
         )
@@ -237,7 +316,7 @@ class OtherPublicContractTests(unittest.TestCase):
                     parse_event(
                         {
                             "event": "matcher_answer",
-                            "session_id": "anon_12345678",
+                            "session_id": ANON_SESSION,
                             "context": {
                                 "question": question,
                                 "answer": "0500000000",
@@ -251,18 +330,100 @@ class OtherPublicContractTests(unittest.TestCase):
             parse_event(
                 {
                     "event": "matcher_answer",
-                    "session_id": "anon_12345678",
+                    "session_id": ANON_SESSION,
                     "context": {"question": "phone", "answer": "work"},
                 }
             )
         self.assertEqual(caught.exception.field, "context.question")
         self.assertEqual(caught.exception.code, "unsupported")
 
+    def test_matcher_answer_rejects_oversized_numeric_text(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "matcher_answer",
+                    "session_id": ANON_SESSION,
+                    "context": {
+                        "question": "residents",
+                        "answer": "9" * 1_000,
+                    },
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.answer")
+        self.assertEqual(caught.exception.code, "too_long")
+
+    def test_matcher_place_answer_requires_a_server_allowlist(self):
+        event = {
+            "event": "matcher_answer",
+            "session_id": ANON_SESSION,
+            "context": {"question": "place", "answer": "kafd"},
+        }
+        parsed = parse_event(event, allowed_place_ids={"kafd", "king_fahad_medical"})
+        self.assertEqual(parsed["context"]["answer"], "kafd")
+
+        for allowed in (None, {"kafd"}):
+            with self.subTest(allowed=allowed):
+                event["context"]["answer"] = "faisal_profile"
+                with self.assertRaises(ContractError) as caught:
+                    parse_event(event, allowed_place_ids=allowed)
+                self.assertEqual(caught.exception.field, "context.answer")
+                self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_context_place_id_cannot_bypass_the_server_allowlist(self):
+        event = {
+            "event": "results_view",
+            "session_id": ANON_SESSION,
+            "context": {"place_id": "faisal_profile"},
+        }
+        with self.assertRaises(ContractError) as caught:
+            parse_event(event, allowed_place_ids={"kafd"})
+        self.assertEqual(caught.exception.field, "context.place_id")
+        self.assertEqual(caught.exception.code, "not_allowed")
+
+    def test_duration_band_is_derived_and_contradictions_are_rejected(self):
+        base = {
+            "event": "results_view",
+            "session_id": ANON_SESSION,
+            "context": {"move_in": "2026-09-01", "move_out": "2026-11-15"},
+        }
+        parsed = parse_event(base)
+        self.assertEqual(parsed["context"]["duration_band"], "2_3_months")
+
+        base["context"]["duration_band"] = "4_6_months"
+        with self.assertRaises(ContractError) as caught:
+            parse_event(base)
+        self.assertEqual(caught.exception.field, "context.duration_band")
+        self.assertEqual(caught.exception.code, "mismatch")
+
+    def test_duration_band_without_validated_duration_is_rejected(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "results_view",
+                    "session_id": ANON_SESSION,
+                    "context": {"duration_band": "2_3_months"},
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.duration_band")
+        self.assertEqual(caught.exception.code, "unverified")
+
+    def test_event_rank_has_an_abuse_safety_bound(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "result_impression",
+                    "session_id": ANON_SESSION,
+                    "context": {"rank": 1_001},
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.rank")
+        self.assertEqual(caught.exception.code, "out_of_range")
+
     def test_event_retains_a_validated_move_out_date(self):
         parsed = parse_event(
             {
                 "event": "listing_view",
-                "session_id": "anon_12345678",
+                "session_id": ANON_SESSION,
                 "context": {
                     "move_in": "2026-09-01",
                     "move_out": "2026-11-01",
@@ -275,7 +436,7 @@ class OtherPublicContractTests(unittest.TestCase):
             parse_event(
                 {
                     "event": "listing_view",
-                    "session_id": "anon_12345678",
+                    "session_id": ANON_SESSION,
                     "context": {
                         "move_in": "2026-09-01",
                         "move_out": "2026-02-30",

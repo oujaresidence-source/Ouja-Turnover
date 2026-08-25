@@ -6,14 +6,18 @@ import datetime as dt
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-_WHATSAPP_RE = re.compile(r"^[1-9]\d{7,14}$")
+_WHATSAPP_RE = re.compile(r"^[1-9][0-9]{7,14}$")
 _ROUTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{1,79}$")
-_CLOCK_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_CLOCK_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+_SAR_CENT = Decimal("0.01")
+# Parsing safety ceiling, not a commercial deposit recommendation.
+MAX_DEPOSIT_SAR = Decimal("10000000")
 
 _DAY_INDEX = {
     "monday": 0,
@@ -44,6 +48,20 @@ _DAY_EN = (
 )
 
 
+def _deep_freeze(value: Any) -> Any:
+    """Copy nested containers into immutable equivalents."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {key: _deep_freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
+
+
 @dataclass(frozen=True)
 class SettingsIssue:
     field: str
@@ -71,6 +89,9 @@ class WorkingHours:
     timezone: str
     schedule: Mapping[int, Tuple[WorkInterval, ...]]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "schedule", _deep_freeze(self.schedule))
+
 
 @dataclass(frozen=True)
 class MonthlySettings:
@@ -79,6 +100,12 @@ class MonthlySettings:
     commercial_terms: Mapping[str, Any]
     long_stay_route: Optional[str]
     blockers: Tuple[SettingsIssue, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "commercial_terms", _deep_freeze(self.commercial_terms)
+        )
+        object.__setattr__(self, "blockers", tuple(self.blockers))
 
     @property
     def launch_ready(self) -> bool:
@@ -166,6 +193,23 @@ def _text(value: Any) -> Optional[str]:
     return value or None
 
 
+def _sar_amount(value: Any) -> Optional[Any]:
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        return None
+    try:
+        amount = Decimal(str(value))
+        if (
+            not amount.is_finite()
+            or amount < 0
+            or amount > MAX_DEPOSIT_SAR
+            or amount.quantize(_SAR_CENT) != amount
+        ):
+            return None
+    except (InvalidOperation, ValueError):
+        return None
+    return value
+
+
 def _commercial_terms(
     value: Any, blockers: list[SettingsIssue]
 ) -> Mapping[str, Any]:
@@ -226,13 +270,11 @@ def _commercial_terms(
             )
         )
     else:
-        amount = deposit.get("amount_sar")
+        amount = _sar_amount(deposit.get("amount_sar"))
         refund_ar = _text(deposit.get("refund_ar"))
         refund_en = _text(deposit.get("refund_en"))
         if (
-            isinstance(amount, bool)
-            or not isinstance(amount, (int, float))
-            or amount < 0
+            amount is None
             or refund_ar is None
             or refund_en is None
         ):

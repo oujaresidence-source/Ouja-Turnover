@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Collection, Dict, Mapping, Optional
 
 
 PURPOSES = ("work", "family", "treatment", "visit")
@@ -23,7 +23,7 @@ PLACE_KINDS = ("destination", "neighborhood")
 LANGUAGES = ("ar", "en")
 ENTRY_ROUTES = ("guided", "browse")
 DEVICE_CLASSES = ("mobile", "tablet", "desktop", "unknown")
-EVENT_NAMES = (
+PUBLIC_EVENT_NAMES = (
     "landing_view",
     "entry_route_choice",
     "matcher_start",
@@ -33,8 +33,12 @@ EVENT_NAMES = (
     "result_impression",
     "listing_view",
     "whatsapp_click",
+)
+TRUSTED_LIFECYCLE_EVENT_NAMES = (
     "lead_created",
     "team_response",
+    "booked",
+    "lost",
 )
 LOST_REASONS = (
     "price",
@@ -57,10 +61,21 @@ MATCHER_QUESTIONS = (
     "flexibility",
 )
 
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _PLACE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _LEAD_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
+_ANON_SESSION_RE = re.compile(
+    r"^anon_(?=[A-Za-z0-9_-]{16,123}$)(?=[A-Za-z0-9_-]*[A-Za-z])"
+    r"[A-Za-z0-9_-]+$"
+)
+
+# Abuse ceilings protect request parsing only. They do not describe Ouja's
+# inventory; capacity and bedroom facts always come from the published snapshot.
+MAX_PUBLIC_RESIDENTS = 50
+MAX_PUBLIC_BEDROOMS = 20
+MAX_PUBLIC_RESULT_RANK = 1_000
+MAX_INTEGER_DIGITS = 9
 
 
 class ContractError(ValueError):
@@ -130,12 +145,26 @@ def _required_text(
     max_length: int = 160,
     safe_id: bool = False,
 ) -> str:
-    if value is None or not isinstance(value, (str, int)):
+    if value is None:
         raise _error(field, "required", "هذا الحقل مطلوب.", "This field is required.")
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise _error(
+            field,
+            "invalid_type",
+            "قيمة الحقل من نوع غير صحيح.",
+            "This field has an invalid type.",
+        )
     text = str(value).strip()
     if not text:
         raise _error(field, "required", "هذا الحقل مطلوب.", "This field is required.")
-    if len(text) > max_length or (safe_id and not _SAFE_ID_RE.fullmatch(text)):
+    if len(text) > max_length:
+        raise _error(
+            field,
+            "too_long",
+            "قيمة الحقل أطول من الحد المسموح.",
+            "This field exceeds the allowed length.",
+        )
+    if safe_id and not _SAFE_ID_RE.fullmatch(text):
         raise _error(
             field,
             "invalid_format",
@@ -167,9 +196,25 @@ def _integer(
     if isinstance(value, bool):
         parsed = None
     elif isinstance(value, int):
+        if abs(value) > (10 ** MAX_INTEGER_DIGITS - 1):
+            raise _error(
+                field,
+                "too_long",
+                "الرقم أطول من الحد المسموح.",
+                "The number exceeds the allowed length.",
+            )
         parsed = value
-    elif isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
-        parsed = int(value.strip())
+    elif isinstance(value, str):
+        stripped = value.strip()
+        digits = stripped[1:] if stripped.startswith("-") else stripped
+        if len(digits) > MAX_INTEGER_DIGITS:
+            raise _error(
+                field,
+                "too_long",
+                "الرقم أطول من الحد المسموح.",
+                "The number exceeds the allowed length.",
+            )
+        parsed = int(stripped) if re.fullmatch(r"-?[0-9]+", stripped) else None
     else:
         parsed = None
     if parsed is None:
@@ -189,6 +234,18 @@ def _integer(
             "The value is outside the supported range.",
         )
     return parsed
+
+
+def _anonymous_session(value: Any, field: str = "session_id") -> str:
+    session_id = _required_text(value, field, max_length=128)
+    if not _ANON_SESSION_RE.fullmatch(session_id):
+        raise _error(
+            field,
+            "invalid_format",
+            "معرّف الجلسة المجهول غير صحيح.",
+            "The anonymous session identifier is invalid.",
+        )
+    return session_id
 
 
 def _date(value: Any, field: str) -> str:
@@ -246,8 +303,16 @@ def _calendar_span(
             "تاريخ الخروج يجب أن يكون بعد تاريخ الدخول.",
             "Move-out date must be after move-in date.",
         )
-    minimum = _add_calendar_months(start, 1)
-    maximum = _add_calendar_months(start, 6)
+    try:
+        minimum = _add_calendar_months(start, 1)
+        maximum = _add_calendar_months(start, 6)
+    except (OverflowError, ValueError):
+        raise _error(
+            field,
+            "unsupported_date",
+            "التاريخ خارج النطاق المدعوم.",
+            "The date is outside the supported range.",
+        )
     if end < minimum or end > maximum:
         raise _error(
             field,
@@ -255,15 +320,41 @@ def _calendar_span(
             "مدة الإقامة يجب أن تكون من شهر إلى ستة أشهر.",
             "The stay must be between one and six months.",
         )
-    exact_months = next(
-        (
-            months
-            for months in range(1, 7)
-            if _add_calendar_months(start, months) == end
-        ),
-        None,
-    )
+    try:
+        exact_months = next(
+            (
+                months
+                for months in range(1, 7)
+                if _add_calendar_months(start, months) == end
+            ),
+            None,
+        )
+    except (OverflowError, ValueError):
+        raise _error(
+            field,
+            "unsupported_date",
+            "التاريخ خارج النطاق المدعوم.",
+            "The date is outside the supported range.",
+        )
     return (end - start).days, exact_months
+
+
+def _duration_band_from_dates(move_in: str, move_out: str) -> str:
+    start = dt.date.fromisoformat(move_in)
+    end = dt.date.fromisoformat(move_out)
+    if end <= _add_calendar_months(start, 1):
+        return "1_month"
+    if end <= _add_calendar_months(start, 3):
+        return "2_3_months"
+    return "4_6_months"
+
+
+def _duration_band_from_months(months: int) -> str:
+    if months == 1:
+        return "1_month"
+    if months <= 3:
+        return "2_3_months"
+    return "4_6_months"
 
 
 def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any]:
@@ -333,7 +424,12 @@ def parse_match_request(value: Any) -> Dict[str, Any]:
     purpose = _choice(data.get("purpose"), "purpose", PURPOSES)
     result: Dict[str, Any] = {
         "purpose": purpose,
-        "residents": _integer(data.get("residents"), "residents", minimum=1),
+        "residents": _integer(
+            data.get("residents"),
+            "residents",
+            minimum=1,
+            maximum=MAX_PUBLIC_RESIDENTS,
+        ),
         "sleeping": _choice(data.get("sleeping"), "sleeping", SLEEPING_OPTIONS),
         "flexibility": _choice(
             data.get("flexibility"), "flexibility", FLEXIBILITY_OPTIONS
@@ -372,9 +468,19 @@ def parse_browse_query(value: Any) -> Dict[str, Any]:
     )
     result = _date_selection(data, required=False)
     if data.get("bedrooms") not in (None, ""):
-        result["bedrooms"] = _integer(data["bedrooms"], "bedrooms", minimum=0)
+        result["bedrooms"] = _integer(
+            data["bedrooms"],
+            "bedrooms",
+            minimum=0,
+            maximum=MAX_PUBLIC_BEDROOMS,
+        )
     if data.get("residents") not in (None, ""):
-        result["residents"] = _integer(data["residents"], "residents", minimum=1)
+        result["residents"] = _integer(
+            data["residents"],
+            "residents",
+            minimum=1,
+            maximum=MAX_PUBLIC_RESIDENTS,
+        )
     if data.get("neighborhood") not in (None, ""):
         result["neighborhood"] = _required_text(
             data["neighborhood"], "neighborhood", max_length=120
@@ -427,7 +533,12 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
         )
     result.update(_date_selection(data, required=False))
     if data.get("residents") not in (None, ""):
-        result["residents"] = _integer(data["residents"], "residents", minimum=1)
+        result["residents"] = _integer(
+            data["residents"],
+            "residents",
+            minimum=1,
+            maximum=MAX_PUBLIC_RESIDENTS,
+        )
     if data.get("purpose") not in (None, ""):
         result["purpose"] = _choice(data["purpose"], "purpose", PURPOSES)
     if data.get("place") is not None:
@@ -435,13 +546,37 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
     if data.get("lang") not in (None, ""):
         result["lang"] = _choice(data["lang"], "lang", LANGUAGES)
     if data.get("session_id") not in (None, ""):
-        result["session_id"] = _required_text(
-            data["session_id"], "session_id", max_length=128, safe_id=True
-        )
+        result["session_id"] = _anonymous_session(data["session_id"])
     return result
 
 
-def _event_context(value: Any) -> Dict[str, Any]:
+def _place_allowlist(values: Optional[Collection[str]]) -> frozenset[str]:
+    if values is None or isinstance(values, (str, bytes)):
+        return frozenset()
+    return frozenset(
+        value
+        for value in values
+        if isinstance(value, str) and _PLACE_ID_RE.fullmatch(value)
+    )
+
+
+def _allowlisted_place_id(
+    value: Any, field: str, allowed_place_ids: frozenset[str]
+) -> str:
+    place_id = _required_text(value, field, max_length=80)
+    if not _PLACE_ID_RE.fullmatch(place_id) or place_id not in allowed_place_ids:
+        raise _error(
+            field,
+            "not_allowed",
+            "المكان غير موجود ضمن الخيارات المعتمدة.",
+            "The place is not in the approved options.",
+        )
+    return place_id
+
+
+def _event_context(
+    value: Any, allowed_place_ids: frozenset[str]
+) -> Dict[str, Any]:
     if value in (None, ""):
         return {}
     data = _mapping(value, "context")
@@ -460,6 +595,8 @@ def _event_context(value: Any) -> Dict[str, Any]:
         )
     if data.get("move_in") not in (None, ""):
         safe["move_in"] = _date(data["move_in"], "context.move_in")
+    derived_band: Optional[str] = None
+    span_exact_months: Optional[int] = None
     if data.get("move_out") not in (None, ""):
         safe["move_out"] = _date(data["move_out"], "context.move_out")
         if "move_in" not in safe:
@@ -473,19 +610,57 @@ def _event_context(value: Any) -> Dict[str, Any]:
             safe["move_in"], safe["move_out"], "context.move_out"
         )
         safe["duration_days"] = duration_days
+        span_exact_months = exact_months
         if exact_months is not None:
             safe["duration_months"] = exact_months
+        derived_band = _duration_band_from_dates(safe["move_in"], safe["move_out"])
+    if data.get("duration_months") not in (None, ""):
+        supplied_months = _integer(
+            data["duration_months"],
+            "context.duration_months",
+            minimum=1,
+            maximum=6,
+        )
+        if (
+            data.get("move_out") not in (None, "")
+            and supplied_months != span_exact_months
+        ):
+            raise _error(
+                "context.duration_months",
+                "mismatch",
+                "مدة الأشهر لا تطابق التواريخ المحددة.",
+                "The month duration does not match the selected dates.",
+            )
+        safe["duration_months"] = supplied_months
+        if derived_band is None:
+            derived_band = _duration_band_from_months(supplied_months)
     if data.get("duration_band") not in (None, ""):
-        safe["duration_band"] = _choice(
+        supplied_band = _choice(
             data["duration_band"],
             "context.duration_band",
             ("1_month", "2_3_months", "4_6_months"),
         )
+        if derived_band is None:
+            raise _error(
+                "context.duration_band",
+                "unverified",
+                "لا يمكن حفظ نطاق المدة بدون مدة أو تواريخ متحققة.",
+                "A duration band requires validated dates or duration.",
+            )
+        if supplied_band != derived_band:
+            raise _error(
+                "context.duration_band",
+                "mismatch",
+                "نطاق المدة لا يطابق التواريخ المحددة.",
+                "The duration band does not match the selected dates.",
+            )
+    if derived_band is not None:
+        safe["duration_band"] = derived_band
     if data.get("purpose") not in (None, ""):
         safe["purpose"] = _choice(data["purpose"], "context.purpose", PURPOSES)
     if data.get("place_id") not in (None, ""):
-        safe["place_id"] = _required_text(
-            data["place_id"], "context.place_id", max_length=80, safe_id=True
+        safe["place_id"] = _allowlisted_place_id(
+            data["place_id"], "context.place_id", allowed_place_ids
         )
     if data.get("entry_route") not in (None, ""):
         safe["entry_route"] = _choice(
@@ -503,38 +678,36 @@ def _event_context(value: Any) -> Dict[str, Any]:
         elif question == "flexibility":
             parsed_answer = _choice(answer, "context.answer", FLEXIBILITY_OPTIONS)
         elif question == "residents":
-            parsed_answer = _integer(answer, "context.answer", minimum=1, maximum=20)
+            parsed_answer = _integer(
+                answer,
+                "context.answer",
+                minimum=1,
+                maximum=MAX_PUBLIC_RESIDENTS,
+            )
         elif question == "duration_months":
             parsed_answer = _integer(answer, "context.answer", minimum=1, maximum=6)
         elif question in ("move_in", "move_out"):
             parsed_answer = _date(answer, "context.answer")
         else:
-            parsed_answer = _required_text(
-                answer, "context.answer", max_length=80
+            parsed_answer = _allowlisted_place_id(
+                answer, "context.answer", allowed_place_ids
             )
-            if not _PLACE_ID_RE.fullmatch(parsed_answer):
-                raise _error(
-                    "context.answer",
-                    "invalid_format",
-                    "معرّف المكان غير صحيح.",
-                    "The place identifier is invalid.",
-                )
         safe["question"] = question
         safe["answer"] = parsed_answer
-    if data.get("lead_reference") not in (None, ""):
-        lead = _required_text(
-            data["lead_reference"], "context.lead_reference", max_length=64
-        ).upper()
-        if not _LEAD_RE.fullmatch(lead):
-            raise _error(
-                "context.lead_reference",
-                "invalid_format",
-                "مرجع الطلب غير صحيح.",
-                "The lead reference is invalid.",
-            )
-        safe["lead_reference"] = lead
+    if "lead_reference" in data:
+        raise _error(
+            "context.lead_reference",
+            "not_allowed",
+            "مرجع الطلب يُنشأ من الخادم ولا يقبله هذا المسار.",
+            "Lead references are server-created and cannot be accepted here.",
+        )
     if data.get("rank") not in (None, ""):
-        safe["rank"] = _integer(data["rank"], "context.rank", minimum=1)
+        safe["rank"] = _integer(
+            data["rank"],
+            "context.rank",
+            minimum=1,
+            maximum=MAX_PUBLIC_RESULT_RANK,
+        )
     if data.get("listing_ids") not in (None, ""):
         values = data["listing_ids"]
         if not isinstance(values, (list, tuple)) or len(values) > 100:
@@ -551,17 +724,19 @@ def _event_context(value: Any) -> Dict[str, Any]:
     return safe
 
 
-def parse_event(value: Any) -> Dict[str, Any]:
+def parse_event(
+    value: Any, *, allowed_place_ids: Optional[Collection[str]] = None
+) -> Dict[str, Any]:
     """Validate an anonymous funnel event and discard nonessential context."""
 
     data = _mapping(value)
     _reject_unknown(data, {"event", "session_id", "context"})
     return {
-        "event": _choice(data.get("event"), "event", EVENT_NAMES),
-        "session_id": _required_text(
-            data.get("session_id"), "session_id", max_length=128, safe_id=True
+        "event": _choice(data.get("event"), "event", PUBLIC_EVENT_NAMES),
+        "session_id": _anonymous_session(data.get("session_id")),
+        "context": _event_context(
+            data.get("context"), _place_allowlist(allowed_place_ids)
         ),
-        "context": _event_context(data.get("context")),
     }
 
 
