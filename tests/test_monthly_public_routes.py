@@ -1,5 +1,7 @@
 import datetime as dt
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
@@ -13,6 +15,8 @@ from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
 
 
 SECRET = b"monthly-public-test-secret-that-is-long-enough"
+ROOT = os.path.dirname(os.path.dirname(__file__))
+JS_PATH = os.path.join(ROOT, "monthly_public", "static", "monthly.js")
 PLACES = {
     "kafd": {
         "kind": "destination",
@@ -202,6 +206,59 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         missing = self.app.listing({"listing_id": "no-such-listing"})
         self.assertFalse(missing["ok"])
         self.assertEqual(missing["error"]["code"], "listing_not_found")
+
+    def test_flexible_duration_match_card_opens_a_monthly_rate_quote(self):
+        flexible = valid_listing()
+        flexible["calendar"]["blocked_dates"] = ["2026-09-01"]
+        snapshot = SnapshotStore()
+        self.assertTrue(snapshot.refresh(
+            {
+                "refresh_ok": True,
+                "catalog_complete": True,
+                "listings": [flexible],
+                "source_timestamps": {"calendar": "2026-08-25T09:40:00+03:00"},
+            },
+            valid_settings(),
+            NOW,
+        ).accepted)
+        app = MonthlyPublicApp(
+            snapshot_store=snapshot,
+            settings=valid_settings(),
+            lead_store=self.leads,
+            analytics_store=self.analytics,
+            approved_places=PLACES,
+            session_secret=SECRET,
+            clock=self.clock,
+        )
+        request = match_request(flexibility="plus_minus_7")
+        near = app.match(request, lang="en")["near_matches"][0]
+        script = (
+            "const ui=require(%s);const canonical=ui.canonicalListingRequest(%s,%s);"
+            "process.stdout.write(JSON.stringify(typeof ui.listingQuoteRequest==='function'"
+            "?{canonical:canonical,quote:ui.listingQuoteRequest(canonical)}:{missing:true}));"
+            % (json.dumps(JS_PATH), json.dumps(request), json.dumps(near))
+        )
+        browser_flow = json.loads(subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout)
+
+        self.assertNotIn("missing", browser_flow)
+        listing_request = browser_flow["canonical"]
+        self.assertEqual(listing_request["move_in"], near["adjusted_move_in"])
+        self.assertEqual(listing_request.get("duration_months"), 1)
+        self.assertNotIn("move_out", listing_request)
+        detail = app.listing({
+            "listing_id": near["id"],
+            "lang": "en",
+            **browser_flow["quote"],
+        })
+        self.assertEqual(detail["quote_status"], "available")
+        self.assertEqual(detail["quote"]["monthly_rate_sar"], 12000)
+        self.assertEqual(detail["quote"]["months"], 1)
 
     def test_stale_selected_month_is_an_honest_missing_price_state(self):
         result = self.app.quote(

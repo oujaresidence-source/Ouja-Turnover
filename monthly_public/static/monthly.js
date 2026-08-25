@@ -442,8 +442,12 @@
     const adjusted = adjustedDateWindow(item);
     if (adjusted) {
       value.move_in = adjusted.move_in;
-      value.move_out = adjusted.move_out;
-      delete value.duration_months;
+      if (validDate(value.move_out)) {
+        value.move_out = adjusted.move_out;
+        delete value.duration_months;
+      } else {
+        delete value.move_out;
+      }
     }
     return value;
   }
@@ -453,15 +457,22 @@
     return fresh;
   }
 
-  async function retryOnceForInvalidSignature(operation, current, fresh, onRotate) {
+  async function retrySessionOperation(operation, current, fresh, refresh, onRotate) {
     try {
       return await operation(current);
     } catch (error) {
-      const replacement = recoverySessionToken(current, fresh, error && error.code);
-      if (!replacement) throw error;
+      let replacement = recoverySessionToken(current, fresh, error && error.code);
+      if (!replacement && error && error.code === "invalid_signature" && typeof refresh === "function") {
+        replacement = await refresh();
+      }
+      if (!validSessionToken(replacement) || replacement === current) throw error;
       if (typeof onRotate === "function") onRotate(replacement);
       return operation(replacement);
     }
+  }
+
+  function retryOnceForInvalidSignature(operation, current, fresh, onRotate) {
+    return retrySessionOperation(operation, current, fresh, null, onRotate);
   }
 
   function boundedInteger(value, minimum, maximum) {
@@ -751,10 +762,18 @@
     });
   }
 
+  async function mintFreshSessionToken() {
+    const refreshed = await getJSON(ENDPOINTS.config, { lang: runtime.lang });
+    const issued = refreshed && refreshed.session_id;
+    if (!validSessionToken(issued)) return null;
+    runtime.config = refreshed;
+    return issued;
+  }
+
   function withSessionRetry(operation) {
     const current = runtime.config && runtime.config.session_id;
     const fresh = runtime.config && runtime.config.fresh_session_id;
-    return retryOnceForInvalidSignature(operation, current, fresh, function (replacement) {
+    return retrySessionOperation(operation, current, fresh, mintFreshSessionToken, function (replacement) {
       runtime.config.session_id = replacement;
       runtime.config.fresh_session_id = null;
       persistState();
@@ -1618,16 +1637,20 @@
     }
   }
 
-  function listingQuery(identifier, bySlug) {
-    const values = { lang: runtime.lang };
-    if (bySlug) values.lookup = "slug";
-    const request = runtime.listingRequest;
+  function listingQuoteRequest(request) {
+    const values = {};
     if (request) {
       ["move_in", "move_out", "duration_months", "residents", "purpose"].forEach(function (key) {
         if (request[key] !== undefined) values[key] = request[key];
       });
       if (request.place) values.place = request.place;
     }
+    return values;
+  }
+
+  function listingQuery(identifier, bySlug) {
+    const values = Object.assign({ lang: runtime.lang }, listingQuoteRequest(runtime.listingRequest));
+    if (bySlug) values.lookup = "slug";
     return "/api/monthly/listing/" + encodeURIComponent(identifier) + queryString(values);
   }
 
@@ -2052,12 +2075,14 @@
     focusQuestion: focusQuestion,
     goBack: goBack,
     initialMatcherState: initialMatcherState,
+    listingQuoteRequest: listingQuoteRequest,
     optionIsSelected: optionIsSelected,
     parseLocationSearch: parseLocationSearch,
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
     recoverySessionToken: recoverySessionToken,
     responseWindowMessage: responseWindowMessage,
+    retrySessionOperation: retrySessionOperation,
     retryOnceForInvalidSignature: retryOnceForInvalidSignature,
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
