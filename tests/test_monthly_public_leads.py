@@ -266,6 +266,7 @@ class LeadTests(unittest.TestCase):
             (complete_listing, complete_request, {**complete_quote, "payment_methods": []}),
             (complete_listing, complete_request, {key: value for key, value in complete_quote.items() if key != "preliminary_contract"}),
             (complete_listing, complete_request, {**complete_quote, "months": 3}),
+            (complete_listing, complete_request, {**complete_quote, "move_out": "2026-12-01"}),
         )
         for listing, request, quote in cases:
             with self.subTest(listing=listing, request=request, quote=quote):
@@ -281,6 +282,32 @@ class LeadTests(unittest.TestCase):
                         now=NOW,
                     )
         self.assertEqual(self.store.count(), 0)
+
+    def test_unsafe_listing_id_is_a_handoff_error_before_store_create(self):
+        listing, request, quote = self.complete_handoff()
+        listing = dict(listing)
+        listing["id"] = "bad/listing id"
+
+        with self.assertRaises(HandoffValidationError) as caught:
+            build_whatsapp_handoff(
+                self.store,
+                valid_settings(),
+                self.session,
+                listing,
+                request,
+                quote,
+                now=NOW,
+            )
+
+        self.assertEqual(caught.exception.code, "listing_incomplete")
+        self.assertEqual(self.store.count(), 0)
+        with self.assertRaises(ValueError):
+            self.store.create(
+                self.session,
+                "bad/listing id",
+                {"purpose": "family"},
+                {"monthly_rate_sar": 12000},
+            )
 
     def test_missing_whatsapp_blocks_without_creating_a_lead(self):
         from monthly_public.settings import load_settings
