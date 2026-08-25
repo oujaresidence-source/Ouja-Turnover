@@ -172,6 +172,21 @@ except Exception as _ml_err:            # pragma: no cover
     _monthly = None
     _HAS_MONTHLY = False
 
+# Public monthly request layer. Unlike the owner lab above, this package has no
+# Hostaway/provider capability; bot.py only hands it prepared cached snapshots.
+try:
+    from monthly_public.analytics import AnalyticsStore as _MonthlyAnalyticsStore
+    from monthly_public.leads import LeadStore as _MonthlyLeadStore
+    from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
+    from monthly_public.settings import load_settings as _monthly_public_load_settings
+    from monthly_public.snapshot import SnapshotStore as _MonthlySnapshotStore
+    _HAS_MONTHLY_PUBLIC = True
+except Exception as _mpub_err:          # pragma: no cover - optional staged rollout
+    print("[monthly-public] import failed (v2 routes disabled):", _mpub_err)
+    _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
+    _monthly_public_load_settings = _MonthlySnapshotStore = None
+    _HAS_MONTHLY_PUBLIC = False
+
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
 # humans only forgive. DRY-RUN by default (OPS_WARN_DRYRUN=1): computes everything, sends
 # nothing, issues nothing.
@@ -57212,6 +57227,9 @@ async def _handle_elite_geo(request):
 # apply the visible default discount = the "after" (always shown), and tease "up to 30%". The real
 # max discount is unlocked only by contacting the team on WhatsApp. WhatsApp-only conversion.
 MONTHLY_ENABLED = os.environ.get("MONTHLY_ENABLED", "1") != "0"
+# Staged locally until the v2 page renderer lands (Task 7). Setting 0 is the
+# explicit rollback to the untouched handlers below; it never changes live data.
+MONTHLY_PUBLIC_V2 = os.environ.get("MONTHLY_PUBLIC_V2", "0") == "1"
 # Own WhatsApp number for monthly leads; falls back to the shared STAY_WHATSAPP until set.
 MONTHLY_WHATSAPP = re.sub(r"\D", "", os.environ.get("MONTHLY_WHATSAPP", "") or "") or STAY_WHATSAPP
 MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /elite WebP proxy machinery
@@ -57246,7 +57264,10 @@ MONTHLY_CAL_REFRESH_MIN = int(os.environ.get("MONTHLY_CAL_REFRESH_MIN", "20"))
 
 # {"units": {"<listing id>": {"<YYYY-MM-DD>": [available, price|null, has_reservation]}}}
 _mcal = _load_json("monthly_calendar.json", None) or {"units": {}, "synced_at": None,
-                                                      "from": None, "to": None}
+                                                      "from": None, "to": None,
+                                                      "unit_synced_at": {}}
+if not isinstance(_mcal.get("unit_synced_at"), dict):
+    _mcal["unit_synced_at"] = {}
 _mcal_stats = {"ok": 0, "err": 0, "last_ms": 0, "runs": 0}
 
 def _mcal_window(listing_id, start, end):
@@ -57354,6 +57375,8 @@ def _mcal_refresh_sync():
     start = today
     end = today + timedelta(days=MONTHLY_CAL_DAYS)
     old = _mcal.get("units") or {}
+    old_success = _mcal.get("unit_synced_at") or {}
+    unit_success = {}
     units, ok, err = {}, 0, 0
     for s_, _ov in _monthly_visible_snaps():
         lid = str(s_.get("id"))
@@ -57362,10 +57385,14 @@ def _mcal_refresh_sync():
             err += 1
             if old.get(lid):
                 units[lid] = old[lid]       # a failed pull keeps the last good copy
+                if old_success.get(lid):
+                    unit_success[lid] = old_success[lid]
             continue
         units[lid] = got
+        unit_success[lid] = datetime.now(TZ).isoformat(timespec="seconds")
         ok += 1
     _mcal["units"] = units
+    _mcal["unit_synced_at"] = unit_success
     _mcal["from"], _mcal["to"] = start.isoformat(), end.isoformat()
     _mcal["days"] = max((len(v) for v in units.values()), default=0)
     _mcal["synced_at"] = datetime.now(TZ).isoformat(timespec="seconds")
@@ -57892,6 +57919,212 @@ def _monthly_cfg_public():
                     "bases": _mengine.get("bases") or {},
                     "publishable": _mengine_publishable(),
                     "src": (_monthly.settings.price_source() if _HAS_MONTHLY else "discount")}}
+
+
+# ---- Monthly public v2: cached-source adapter + isolated request service ----
+def _monthly_public_json_env(name):
+    raw = os.environ.get(name, "")
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+_monthly_public_terms_raw = _monthly_public_json_env("MONTHLY_COMMERCIAL_TERMS") or {}
+_monthly_public_places = _monthly_public_json_env("MONTHLY_APPROVED_PLACES") or {}
+_monthly_public_settings = (_monthly_public_load_settings({
+    "MONTHLY_WHATSAPP": (
+        os.environ.get("MONTHLY_WHATSAPP")
+        if os.environ.get("MONTHLY_WHATSAPP") not in (None, "")
+        else os.environ.get("STAY_WHATSAPP")
+    ),
+    "MONTHLY_WORKING_HOURS": os.environ.get("MONTHLY_WORKING_HOURS"),
+    "MONTHLY_COMMERCIAL_TERMS": os.environ.get("MONTHLY_COMMERCIAL_TERMS"),
+    "MONTHLY_LONG_STAY_ROUTE": os.environ.get("MONTHLY_LONG_STAY_ROUTE"),
+}) if _HAS_MONTHLY_PUBLIC else None)
+_monthly_public_session_secret = (
+    os.environ.get("MONTHLY_SESSION_SECRET", "").encode("utf-8") or None
+)
+_monthly_public_snapshot = None
+_monthly_public_app = None
+if _HAS_MONTHLY_PUBLIC:
+    try:
+        _monthly_public_snapshot = _MonthlySnapshotStore(
+            _state_path("monthly_public_snapshot.json")
+        )
+        _monthly_public_app = _MonthlyPublicApp(
+            snapshot_store=_monthly_public_snapshot,
+            settings=_monthly_public_settings,
+            lead_store=_MonthlyLeadStore(_state_path("monthly_public_leads.sqlite3")),
+            analytics_store=_MonthlyAnalyticsStore(
+                _state_path("monthly_public_analytics.sqlite3")
+            ),
+            approved_places=_monthly_public_places,
+            session_secret=_monthly_public_session_secret,
+            clock=lambda: datetime.now(TZ),
+        )
+    except Exception as _mpub_init_err:
+        print("[monthly-public] local stores unavailable:", _mpub_init_err)
+        _monthly_public_app = None
+
+
+def _monthly_public_listing_terms(listing_id):
+    """Only explicit JSON configuration may describe utilities or cleaning."""
+    configured = _monthly_public_terms_raw
+    per_listing = configured.get("listings") if isinstance(configured, dict) else None
+    if isinstance(per_listing, dict) and isinstance(per_listing.get(str(listing_id)), dict):
+        row = per_listing[str(listing_id)]
+    else:
+        row = configured
+    if not isinstance(row, dict):
+        return None
+    utilities, cleaning = row.get("utilities"), row.get("cleaning")
+    if not isinstance(utilities, dict) or not isinstance(cleaning, dict):
+        return None
+    return {"utilities": dict(utilities), "cleaning": dict(cleaning)}
+
+
+def _monthly_public_calendar(listing_id):
+    """Prepare coverage and blocked dates from cached rows, never from a live pull."""
+    lid = str(listing_id)
+    rows = (_mcal.get("units") or {}).get(lid)
+    succeeded_at = (_mcal.get("unit_synced_at") or {}).get(lid)
+    if not isinstance(rows, dict) or not rows or not succeeded_at:
+        return None
+    dates = sorted(day for day in rows if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(day)))
+    if not dates:
+        return None
+    try:
+        coverage_to = (datetime.strptime(dates[-1], "%Y-%m-%d").date()
+                       + timedelta(days=1)).isoformat()
+    except ValueError:
+        return None
+    blocked = []
+    for day in dates:
+        row = rows.get(day)
+        if isinstance(row, (list, tuple)) and row and not bool(row[0]):
+            blocked.append(day)
+    return {"synced_at": succeeded_at, "from": dates[0], "to": coverage_to,
+            "blocked_dates": blocked}
+
+
+def _monthly_public_engine_prices(listing_id):
+    """Publish only the approved engine_verified mode and its own-history bases."""
+    if not (_HAS_MONTHLY and _mengine.get("at")):
+        return {}
+    try:
+        if _monthly.settings.price_source() != "engine_verified":
+            return {}
+        approved_bases = set(_monthly.engine.OWN_BASES)
+    except Exception:
+        return {}
+    out = {}
+    for month, units in (_mengine.get("months") or {}).items():
+        row = (units or {}).get(str(listing_id))
+        if not isinstance(row, dict) or row.get("basis") not in approved_bases:
+            continue
+        price = row.get("price")
+        if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0:
+            out[str(month)] = {
+                "monthly_rate_sar": price,
+                "currency": "SAR",
+                "source": "engine_verified",
+                "verified_at": _mengine.get("at"),
+            }
+    return out
+
+
+def _monthly_public_source_adapter():
+    """Build validator input solely from already-cached/state-backed sources."""
+    if not isinstance(_gw_cache.get("listings"), list):
+        raise ValueError("guest listing cache is malformed")
+    licences = {}
+    if _HAS_MONTHLY:
+        for row in (_monthly.db.licence_all() or []):
+            licences[str(row.get("unit_id"))] = row
+    ratings = (_gw_ratings_cache.get("map") or {}) if isinstance(_gw_ratings_cache, dict) else {}
+    hidden = _monthly_hidden_set()
+    listings = []
+    for snap in (_gw_cache.get("listings") or []):
+        if not isinstance(snap, dict):
+            raise ValueError("guest listing cache contains a malformed row")
+        lid = str(snap.get("id") or "")
+        ov = (_gw_overrides.get(lid) or {}) if isinstance(_gw_overrides, dict) else {}
+        structured = ov.get("structured") if isinstance(ov.get("structured"), dict) else None
+        neighborhood = str(ov.get("neighborhood") or "")
+        neighborhood_names = _RIYADH_BY_KEY.get(neighborhood)
+        rating = ratings.get(int(lid)) if lid.isdigit() else None
+        licence = licences.get(lid)
+        configured_coordinates = ov.get("coordinates")
+        coordinates = None
+        if (isinstance(configured_coordinates, dict)
+                and configured_coordinates.get("verified") is True
+                and configured_coordinates.get("source")):
+            coordinates = dict(configured_coordinates)
+        facts = ov.get("facts") if isinstance(ov.get("facts"), dict) else {}
+        listings.append({
+            "id": snap.get("id"),
+            "active": bool(snap.get("active")) and ov.get("visible") is not False and lid not in hidden,
+            "slug": _gw_slug(snap, ov),
+            "name_ar": ov.get("title_ar"),
+            "name_en": ov.get("title_en"),
+            "short_ar": ov.get("short_ar"),
+            "short_en": ov.get("short_en"),
+            "structured": structured,
+            "content_verified": ov.get("content_verified") is True,
+            "neighborhood": neighborhood,
+            "neighborhood_ar": neighborhood_names[0] if neighborhood_names else None,
+            "neighborhood_en": neighborhood_names[1] if neighborhood_names else None,
+            "neighborhood_verified": bool(neighborhood_names),
+            "bedrooms": snap.get("bedrooms"),
+            "beds": snap.get("beds"),
+            "beds_count": snap.get("beds_count"),
+            "baths": snap.get("baths"),
+            "capacity": snap.get("capacity"),
+            "floor_area_sqm": ov.get("floor_area_sqm"),
+            "images": [row.get("url") for row in (snap.get("images") or [])
+                       if isinstance(row, dict) and row.get("url")],
+            "amenities": list(snap.get("amenities") or []),
+            "facts": {str(key): value for key, value in facts.items()
+                      if isinstance(key, str) and isinstance(value, bool)},
+            "rating": rating.get("rating") if isinstance(rating, dict) else None,
+            "reviews_count": rating.get("count") if isinstance(rating, dict) else None,
+            "rating_verified": isinstance(rating, dict),
+            "rating_source": "approved_public_reviews" if isinstance(rating, dict) else None,
+            "licence": dict(licence) if isinstance(licence, dict) else None,
+            "official_prices": _monthly_public_engine_prices(lid),
+            "calendar": _monthly_public_calendar(lid),
+            "commercial_terms": _monthly_public_listing_terms(lid),
+            "coordinates": coordinates,
+        })
+    return {
+        "refresh_ok": True,
+        "catalog_complete": True,
+        "listings": listings,
+        "source_timestamps": {
+            "listings": _gw_cache.get("synced_at"),
+            "calendar": _mcal.get("synced_at"),
+            "engine": _mengine.get("at"),
+        },
+    }
+
+
+def _monthly_public_refresh_snapshot():
+    """Background/boot boundary only; a failure retains SnapshotStore.current."""
+    if _monthly_public_snapshot is None or _monthly_public_settings is None:
+        return {"accepted": False, "error": "monthly public is not configured"}
+    try:
+        source = _monthly_public_source_adapter()
+        outcome = _monthly_public_snapshot.refresh(
+            source, _monthly_public_settings, datetime.now(TZ)
+        )
+        return {"accepted": outcome.accepted, "error": outcome.error}
+    except Exception as error:
+        _monthly_public_snapshot.last_error = str(error)
+        return {"accepted": False, "error": str(error)}
 
 
 MONTHLY_HTML = r"""<!doctype html>
@@ -58455,6 +58688,204 @@ async def _api_monthly_quote(request):
     q = await asyncio.to_thread(monthly_quote, snap.get("id"),
                                 request.query.get("move_in"), request.query.get("months"), snap)
     return _json({"ok": True, "quote": q})
+
+
+def _monthly_public_response(result):
+    if result.get("ok") is not False:
+        return _json(result)
+    code = ((result.get("error") or {}).get("code") or "")
+    if code in ("listing_not_found", "lead_not_found"):
+        status = 404
+    elif code in ("request_failed", "snapshot_missing"):
+        status = 503
+    else:
+        status = 400
+    return _json(result, status)
+
+
+def _monthly_public_unavailable():
+    return _json({
+        "ok": False,
+        "error": {
+            "code": "monthly_public_unavailable",
+            "message_ar": "خدمة السكن الشهري غير متاحة حاليًا.",
+            "message_en": "The monthly-stay service is currently unavailable.",
+        },
+    }, 503)
+
+
+def _monthly_v2_browse_query(request):
+    raw = dict(request.query)
+    out = {}
+    for key in ("move_in", "move_out", "duration_months", "bedrooms", "residents",
+                "neighborhood", "flexibility", "lang"):
+        if raw.get(key) not in (None, ""):
+            out[key] = raw[key]
+    # Temporary URL compatibility while Task 7 replaces the old page renderer.
+    if "duration_months" not in out and raw.get("months") not in (None, ""):
+        out["duration_months"] = raw["months"]
+    if "residents" not in out and raw.get("guests") not in (None, ""):
+        out["residents"] = raw["guests"]
+    if "bedrooms" not in out and raw.get("beds") not in (None, "", "all"):
+        out["bedrooms"] = 0 if raw["beds"] == "studio" else raw["beds"]
+    if raw.get("place"):
+        try:
+            place = json.loads(raw["place"])
+        except (TypeError, ValueError):
+            place = None
+        if isinstance(place, dict):
+            out["place"] = place
+    return out
+
+
+def _monthly_v2_listing_query(request, listing_id):
+    raw = dict(request.query)
+    out = {"listing_id": listing_id}
+    for key in ("move_in", "move_out", "duration_months", "residents", "purpose", "lang"):
+        if raw.get(key) not in (None, ""):
+            out[key] = raw[key]
+    if "duration_months" not in out and raw.get("months") not in (None, ""):
+        out["duration_months"] = raw["months"]
+    if raw.get("place"):
+        try:
+            place = json.loads(raw["place"])
+        except (TypeError, ValueError):
+            place = None
+        if isinstance(place, dict):
+            out["place"] = place
+    return out
+
+
+async def _api_monthly_v2_config(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.config, request.query.get("lang", "ar")
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_search(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.browse, _monthly_v2_browse_query(request)
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_featured(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.browse, {"lang": request.query.get("lang", "ar")}
+    )
+    if result.get("ok"):
+        result = {"ok": True, "results": list(result.get("results") or [])[:6],
+                  "auto": True}
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_deals(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    # V2 has no discount/deal claim until an official cached quote proves one.
+    return _json({"ok": True, "results": []})
+
+
+async def _api_monthly_v2_listing(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.listing,
+        _monthly_v2_listing_query(request, request.match_info.get("id", "")),
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_quote(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.quote,
+        _monthly_v2_listing_query(request, request.query.get("id", "")),
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_match(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    body = await _read_body(request)
+    lang = body.pop("lang", "ar") if isinstance(body, dict) else "ar"
+    result = await asyncio.to_thread(_monthly_public_app.match, body, lang)
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_lead(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    body = await _read_body(request)
+    result = await asyncio.to_thread(_monthly_public_app.lead, body)
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_event(request):
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    body = await _read_body(request)
+    result = await asyncio.to_thread(_monthly_public_app.event, body)
+    return _monthly_public_response(result)
+
+
+def _monthly_ops_gate(request):
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    if _req_role(request) not in ("admin", "ops"):
+        return _json({"error": "forbidden"}, 403)
+    return None
+
+
+async def _api_monthly_v2_ops_health(request):
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    return _json(await asyncio.to_thread(_monthly_public_app.ops.health))
+
+
+async def _api_monthly_v2_ops_funnel(request):
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    return _json(await asyncio.to_thread(_monthly_public_app.ops.funnel))
+
+
+async def _api_monthly_v2_ops_response(request):
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.ops.response, await _read_body(request)
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_ops_outcome(request):
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    result = await asyncio.to_thread(
+        _monthly_public_app.ops.outcome, await _read_body(request)
+    )
+    return _monthly_public_response(result)
 
 async def _api_monthly_admin(request):
     """Token-gated config control (dashboard Manage tab is v2; this is the API behind it)."""
@@ -59272,12 +59703,25 @@ async def start_web_server():
         app.router.add_get("/monthly/search", _handle_monthly_search)
         app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)
         app.router.add_get("/monthly/img", _handle_elite_img)        # reuse the proven WebP proxy
-        app.router.add_get("/api/monthly/config", _api_monthly_config)
-        app.router.add_get("/api/monthly/featured", _api_monthly_featured)
-        app.router.add_get("/api/monthly/deals", _api_monthly_deals)
-        app.router.add_get("/api/monthly/search", _api_monthly_search)
-        app.router.add_get("/api/monthly/listing/{id}", _api_monthly_listing)
-        app.router.add_get("/api/monthly/quote", _api_monthly_quote)
+        app.router.add_get("/api/monthly/config", (_api_monthly_v2_config
+                                                   if MONTHLY_PUBLIC_V2 else _api_monthly_config))
+        app.router.add_get("/api/monthly/featured", (_api_monthly_v2_featured
+                                                     if MONTHLY_PUBLIC_V2 else _api_monthly_featured))
+        app.router.add_get("/api/monthly/deals", (_api_monthly_v2_deals
+                                                  if MONTHLY_PUBLIC_V2 else _api_monthly_deals))
+        app.router.add_get("/api/monthly/search", (_api_monthly_v2_search
+                                                   if MONTHLY_PUBLIC_V2 else _api_monthly_search))
+        app.router.add_get("/api/monthly/listing/{id}", (_api_monthly_v2_listing
+                                                        if MONTHLY_PUBLIC_V2 else _api_monthly_listing))
+        app.router.add_get("/api/monthly/quote", (_api_monthly_v2_quote
+                                                  if MONTHLY_PUBLIC_V2 else _api_monthly_quote))
+        app.router.add_post("/api/monthly/match", _api_monthly_v2_match)
+        app.router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
+        app.router.add_post("/api/monthly/event", _api_monthly_v2_event)
+        app.router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
+        app.router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
+        app.router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
+        app.router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
         app.router.add_get("/api/monthly/admin", _api_monthly_admin)
         app.router.add_post("/api/monthly/admin", _api_monthly_admin)
         app.router.add_get("/monthly/{slug}", _handle_monthly_detail)
@@ -60270,6 +60714,8 @@ async def monthly_calendar_loop():
         res = await asyncio.to_thread(_mcal_refresh_sync)
         print("monthly calendar: %s units warm, %s failed, %sms"
               % (res["ok"], res["err"], res["last_ms"]))
+        if _HAS_MONTHLY_PUBLIC:
+            await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly calendar loop error:", e)
 
@@ -60295,6 +60741,8 @@ async def monthly_engine_loop():
                      100.0 * (res.get("coverage") or 0)))
         else:
             print("monthly engine: not refreshed —", res.get("err"))
+        if _HAS_MONTHLY_PUBLIC:
+            await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly engine loop error:", e)
 
