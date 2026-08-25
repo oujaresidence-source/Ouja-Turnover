@@ -191,7 +191,45 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(summary["conversion_rates"]["lead_to_booking"], 0.5)
         self.assertEqual(
             summary["discount_request_rate"],
-            {"status": "not_tracked", "count": 0, "rate": None},
+            {
+                "status": "not_tracked",
+                "count": 0,
+                "numerator": 0,
+                "denominator": 0,
+                "rate": None,
+            },
+        )
+        self.assertNotIn("discount", repr(summary["sessions"]).lower())
+
+    def test_discount_request_rate_uses_only_staff_classified_leads(self):
+        second_session = issue_anonymous_session(SECRET)
+        leads = LeadStore(Path(self.folder.name) / "leads.sqlite3", clock=lambda: NOW)
+        requested = leads.create(
+            self.session,
+            "1001",
+            {"purpose": "work"},
+            {"monthly_rate_sar": 12000},
+        )
+        not_requested = leads.create(
+            second_session,
+            "1002",
+            {"purpose": "family"},
+            {"monthly_rate_sar": 9000},
+        )
+        leads.mark_response(requested["reference"], discount_requested=True)
+        leads.mark_response(not_requested["reference"], discount_requested=False)
+
+        summary = funnel_summary(self.store, leads)
+
+        self.assertEqual(
+            summary["discount_request_rate"],
+            {
+                "status": "tracked",
+                "count": 1,
+                "numerator": 1,
+                "denominator": 2,
+                "rate": 0.5,
+            },
         )
         self.assertNotIn("discount", repr(summary["sessions"]).lower())
 

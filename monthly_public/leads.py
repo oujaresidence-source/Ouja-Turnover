@@ -243,12 +243,30 @@ class LeadStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     responded_at TEXT,
+                    discount_requested INTEGER CHECK (
+                        discount_requested IS NULL OR discount_requested IN (0, 1)
+                    ),
                     outcome TEXT CHECK (outcome IS NULL OR outcome IN ('booked', 'lost')),
                     outcome_at TEXT,
                     lost_reason TEXT
                 )
                 """
             )
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(monthly_public_leads)"
+                ).fetchall()
+            }
+            if "discount_requested" not in columns:
+                connection.execute(
+                    """
+                    ALTER TABLE monthly_public_leads
+                    ADD COLUMN discount_requested INTEGER CHECK (
+                        discount_requested IS NULL OR discount_requested IN (0, 1)
+                    )
+                    """
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_monthly_lead_dedupe ON monthly_public_leads(session_id, listing_id, request_key, created_at)"
             )
@@ -264,6 +282,11 @@ class LeadStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "responded_at": row["responded_at"],
+            "discount_requested": (
+                None
+                if row["discount_requested"] is None
+                else bool(row["discount_requested"])
+            ),
             "outcome": row["outcome"],
             "outcome_at": row["outcome_at"],
             "lost_reason": row["lost_reason"],
@@ -362,7 +385,15 @@ class LeadStore:
                 "error": str(error),
             }
 
-    def mark_response(self, reference: str, *, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
+    def mark_response(
+        self,
+        reference: str,
+        *,
+        discount_requested: Optional[bool] = None,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, Any]:
+        if discount_requested is not None and not isinstance(discount_requested, bool):
+            raise ValueError("discount_requested must be a boolean")
         current_time = _time(now if now is not None else self.clock())
         current = current_time.isoformat()
         reference = str(reference or "").strip().upper()
@@ -376,9 +407,31 @@ class LeadStore:
                 if current_time.astimezone(created.tzinfo) < created:
                     raise ValueError("team response cannot precede lead creation")
                 connection.execute(
-                    "UPDATE monthly_public_leads SET responded_at = ?, updated_at = ? WHERE reference = ? AND responded_at IS NULL",
-                    (current, current, reference),
+                    """
+                    UPDATE monthly_public_leads
+                    SET responded_at = ?, discount_requested = ?, updated_at = ?
+                    WHERE reference = ? AND responded_at IS NULL
+                    """,
+                    (
+                        current,
+                        None if discount_requested is None else int(discount_requested),
+                        current,
+                        reference,
+                    ),
                 )
+            elif discount_requested is not None:
+                stored = row["discount_requested"]
+                if stored is None:
+                    connection.execute(
+                        """
+                        UPDATE monthly_public_leads
+                        SET discount_requested = ?, updated_at = ?
+                        WHERE reference = ? AND discount_requested IS NULL
+                        """,
+                        (int(discount_requested), current, reference),
+                    )
+                elif bool(stored) is not discount_requested:
+                    raise ValueError("discount_requested is already final")
             row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (reference,)).fetchone()
         return self._row(row)
 

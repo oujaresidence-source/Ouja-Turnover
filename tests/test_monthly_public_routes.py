@@ -446,8 +446,14 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertIn("ready", health)
         funnel = self.app.ops.funnel()
         self.assertEqual(funnel["leads"]["created"], 1)
-        responded = self.app.ops.response({"lead_reference": made["lead_reference"]})
+        responded = self.app.ops.response(
+            {
+                "lead_reference": made["lead_reference"],
+                "discount_requested": True,
+            }
+        )
         self.assertTrue(responded["ok"])
+        self.assertIs(responded["lead"]["discount_requested"], True)
         outcome = self.app.ops.outcome(
             {"lead_reference": made["lead_reference"], "outcome": "lost", "lost_reason": "price"}
         )

@@ -249,10 +249,14 @@ def revalidate_clock_bound(
         (blockers if licence_issue.code == "licence_expired" else warnings).append(
             licence_issue
         )
-    calendar_issue = calendar_freshness_issue(
-        result.listing.get("calendar"), now,
-        calendar_stale_minutes=calendar_stale_minutes,
-    )
+    calendar = result.listing.get("calendar")
+    calendar_missing = any(item.code == "calendar_missing" for item in warnings)
+    calendar_issue = None
+    if calendar and not calendar_missing:
+        calendar_issue = calendar_freshness_issue(
+            calendar, now,
+            calendar_stale_minutes=calendar_stale_minutes,
+        )
     if calendar_issue is not None:
         warnings.append(calendar_issue)
     calendar_pending = calendar_issue is not None or any(

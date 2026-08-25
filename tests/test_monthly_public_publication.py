@@ -1,7 +1,12 @@
 import copy
+import datetime as dt
 import unittest
 
-from monthly_public.publication import title_bedroom_conflict, validate_listing
+from monthly_public.publication import (
+    revalidate_clock_bound,
+    title_bedroom_conflict,
+    validate_listing,
+)
 from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
 
 
@@ -196,6 +201,19 @@ class PublicationValidationTests(unittest.TestCase):
                 self.assertTrue(
                     {"calendar_missing", "calendar_stale"}.intersection(codes(result.warnings))
                 )
+
+    def test_request_time_revalidation_does_not_duplicate_missing_calendar(self):
+        result = validate_listing(
+            valid_listing(calendar=None), valid_settings(), NOW
+        )
+
+        refreshed = revalidate_clock_bound(
+            result, NOW + dt.timedelta(hours=2)
+        )
+
+        self.assertEqual(codes(refreshed.warnings).count("calendar_missing"), 1)
+        self.assertNotIn("calendar_stale", codes(refreshed.warnings))
+        self.assertEqual(refreshed.availability_status, "pending")
 
     def test_calendar_keeps_only_valid_blocked_dates_for_matching(self):
         calendar = valid_listing()["calendar"]
