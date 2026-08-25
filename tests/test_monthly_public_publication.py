@@ -197,6 +197,68 @@ class PublicationValidationTests(unittest.TestCase):
                     {"calendar_missing", "calendar_stale"}.intersection(codes(result.warnings))
                 )
 
+    def test_calendar_keeps_only_valid_blocked_dates_for_matching(self):
+        calendar = valid_listing()["calendar"]
+        calendar["blocked_dates"] = [
+            "2026-09-10",
+            "not-a-date",
+            "2026-09-10",
+            123,
+        ]
+
+        result = validate_listing(
+            valid_listing(calendar=calendar), valid_settings(), NOW
+        )
+
+        self.assertEqual(result.listing["calendar"]["blocked_dates"], ("2026-09-10",))
+        self.assertEqual(result.availability_status, "pending")
+        self.assertIn("calendar_invalid", codes(result.warnings))
+
+    def test_missing_or_malformed_blocked_dates_never_claim_availability(self):
+        for blocked_dates in (None, "2026-09-10", ["not-a-date"]):
+            with self.subTest(blocked_dates=blocked_dates):
+                calendar = valid_listing()["calendar"]
+                if blocked_dates is None:
+                    calendar.pop("blocked_dates")
+                else:
+                    calendar["blocked_dates"] = blocked_dates
+                result = validate_listing(
+                    valid_listing(calendar=calendar), valid_settings(), NOW
+                )
+                self.assertEqual(result.availability_status, "pending")
+                self.assertIn("calendar_invalid", codes(result.warnings))
+
+    def test_invalid_or_future_calendar_coverage_is_pending(self):
+        cases = (
+            {
+                "synced_at": "2026-08-25T10:06:00+03:00",
+                "from": "2026-08-25",
+                "to": "2027-03-23",
+            },
+            {
+                "synced_at": "2026-08-25T09:40:00+03:00",
+                "from": "not-a-date",
+                "to": "2027-03-23",
+            },
+            {
+                "synced_at": "2026-08-25T09:40:00+03:00",
+                "from": "2027-03-24",
+                "to": "2027-03-23",
+            },
+        )
+        for calendar in cases:
+            with self.subTest(calendar=calendar):
+                result = validate_listing(
+                    valid_listing(calendar=calendar), valid_settings(), NOW
+                )
+                self.assertEqual(result.availability_status, "pending")
+                self.assertFalse(result.exact_match_eligible)
+                self.assertTrue(
+                    {"calendar_future", "calendar_invalid"}.intersection(
+                        codes(result.warnings)
+                    )
+                )
+
     def test_missing_listing_specific_commercial_terms_blocks(self):
         result = validate_listing(
             valid_listing(commercial_terms={}), valid_settings(), NOW

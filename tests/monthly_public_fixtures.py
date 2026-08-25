@@ -119,6 +119,7 @@ def valid_listing(**overrides):
             "synced_at": "2026-08-25T09:40:00+03:00",
             "from": "2026-08-25",
             "to": "2027-03-23",
+            "blocked_dates": [],
         },
         "commercial_terms": {
             "utilities": {
@@ -142,4 +143,3 @@ def valid_listing(**overrides):
     }
     listing.update(copy.deepcopy(overrides))
     return listing
-
