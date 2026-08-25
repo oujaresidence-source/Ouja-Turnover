@@ -4,7 +4,13 @@ import unittest
 from zoneinfo import ZoneInfo
 
 
-from monthly_public.settings import load_settings, response_window
+from monthly_public.settings import (
+    MonthlySettings,
+    WorkInterval,
+    WorkingHours,
+    load_settings,
+    response_window,
+)
 
 
 def complete_config(**overrides):
@@ -47,7 +53,13 @@ class SettingsValidationTests(unittest.TestCase):
         self.assertEqual(settings.blockers, ())
 
     def test_whatsapp_requires_e164_like_digits(self):
-        for value in ("+966500000000", "05 0000 0000", "01234567", "1" * 16):
+        for value in (
+            "+966500000000",
+            "05 0000 0000",
+            "01234567",
+            "1" * 16,
+            "9٦٦٥٠٠٠٠٠٠٠٠",
+        ):
             with self.subTest(value=value):
                 settings = load_settings(complete_config(whatsapp_number=value))
                 self.assertIn("whatsapp_invalid", {item.code for item in settings.blockers})
@@ -94,6 +106,55 @@ class SettingsValidationTests(unittest.TestCase):
             with self.subTest(code=code):
                 settings = load_settings(complete_config(commercial_terms=terms))
                 self.assertIn(code, {item.code for item in settings.blockers})
+
+    def test_deposit_amount_must_be_finite_precise_and_safely_bounded(self):
+        for amount in (float("nan"), float("inf"), -1, 2_000.001, 10_000_000.01):
+            with self.subTest(amount=amount):
+                config = complete_config()
+                config["commercial_terms"]["deposit"]["amount_sar"] = amount
+                settings = load_settings(config)
+                self.assertIn(
+                    "deposit_invalid", {item.code for item in settings.blockers}
+                )
+
+        config = complete_config()
+        config["commercial_terms"]["deposit"]["amount_sar"] = 1_234.56
+        self.assertTrue(load_settings(config).launch_ready)
+
+    def test_factory_copies_mutable_nested_configuration(self):
+        config = complete_config()
+        settings = load_settings(config)
+
+        config["commercial_terms"]["deposit"]["amount_sar"] = 9_999
+        config["working_hours"]["schedule"]["sunday"].append(["20:00", "21:00"])
+
+        self.assertEqual(settings.commercial_terms["deposit"]["amount_sar"], 2_000)
+        self.assertEqual(len(settings.working_hours.schedule[6]), 1)
+
+    def test_direct_settings_construction_defensively_deep_freezes(self):
+        interval = WorkInterval(dt.time(9), dt.time(18))
+        schedule = {6: [interval]}
+        terms = {
+            "included": ["internet", "maintenance"],
+            "deposit": {"amount_sar": 2_000},
+        }
+        settings = MonthlySettings(
+            whatsapp_number="966500000000",
+            working_hours=WorkingHours("Asia/Riyadh", schedule),
+            commercial_terms=terms,
+            long_stay_route="monthly_contract_review",
+            blockers=[],
+        )
+
+        schedule[6].append(WorkInterval(dt.time(20), dt.time(21)))
+        terms["deposit"]["amount_sar"] = 9_999
+        self.assertEqual(len(settings.working_hours.schedule[6]), 1)
+        self.assertEqual(settings.commercial_terms["deposit"]["amount_sar"], 2_000)
+        self.assertIsInstance(settings.blockers, tuple)
+        with self.assertRaises(TypeError):
+            settings.commercial_terms["deposit"]["amount_sar"] = 3_000
+        with self.assertRaises(TypeError):
+            settings.working_hours.schedule[6] = ()
 
     def test_missing_long_stay_route_is_a_launch_blocker(self):
         config = complete_config()
