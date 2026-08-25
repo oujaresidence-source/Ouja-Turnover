@@ -3,15 +3,21 @@ import unittest
 
 from monthly_public.contracts import (
     ContractError,
+    issue_anonymous_session,
     parse_browse_query,
-    parse_event,
+    parse_event as parse_event_contract,
     parse_listing_request,
     parse_match_request,
     parse_outcome,
 )
 
 
-ANON_SESSION = "anon_A1b2C3d4E5f6G7h8"
+SESSION_SECRET = b"test-only-monthly-session-key-32b"
+ANON_SESSION = issue_anonymous_session(SESSION_SECRET)
+
+
+def parse_event(value, **kwargs):
+    return parse_event_contract(value, session_secret=SESSION_SECRET, **kwargs)
 
 
 def valid_match_request(**overrides):
@@ -127,6 +133,15 @@ class MatchRequestContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.field, "move_out")
         self.assertEqual(caught.exception.code, "unsupported_date")
 
+    def test_year_9999_month_duration_returns_a_contract_error(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(
+                valid_match_request(move_in="9999-12-01", duration_months=1)
+            )
+
+        self.assertEqual(caught.exception.field, "move_in")
+        self.assertEqual(caught.exception.code, "unsupported_date")
+
     def test_boolean_text_and_oversized_numeric_values_are_rejected(self):
         with self.assertRaises(ContractError) as caught:
             parse_match_request(valid_match_request(residents=True))
@@ -206,10 +221,9 @@ class OtherPublicContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "invalid_type")
 
         with self.assertRaises(ContractError) as caught:
-            parse_listing_request(
-                {"listing_id": "536998", "session_id": "0500000000"}
-            )
+            parse_listing_request({"listing_id": "536998", "session_id": ANON_SESSION})
         self.assertEqual(caught.exception.field, "session_id")
+        self.assertEqual(caught.exception.code, "unknown_field")
 
     def test_event_keeps_only_minimal_anonymous_utm_free_context(self):
         parsed = parse_event(
@@ -278,6 +292,34 @@ class OtherPublicContractTests(unittest.TestCase):
                     parse_event({"event": "landing_view", "session_id": session_id})
                 self.assertEqual(caught.exception.field, "session_id")
                 self.assertEqual(caught.exception.code, "invalid_format")
+
+    def test_session_id_must_be_issued_and_signed_by_the_server(self):
+        other = issue_anonymous_session(SESSION_SECRET)
+        self.assertNotEqual(other, ANON_SESSION)
+        self.assertTrue(other.startswith("anon_"))
+
+        fabricated = "anon_" + "A" * 32 + "." + "B" * 43
+        tampered = ANON_SESSION[:-1] + ("A" if ANON_SESSION[-1] != "A" else "B")
+        for session_id in (fabricated, tampered):
+            with self.subTest(session_id=session_id):
+                with self.assertRaises(ContractError) as caught:
+                    parse_event_contract(
+                        {"event": "landing_view", "session_id": session_id},
+                        session_secret=SESSION_SECRET,
+                    )
+                self.assertEqual(caught.exception.field, "session_id")
+                self.assertEqual(caught.exception.code, "invalid_signature")
+
+    def test_public_event_requires_the_server_session_secret(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event_contract(
+                {"event": "landing_view", "session_id": ANON_SESSION}
+            )
+        self.assertEqual(caught.exception.field, "session_id")
+        self.assertEqual(caught.exception.code, "server_configuration")
+
+        with self.assertRaises(ValueError):
+            issue_anonymous_session(b"weak")
 
     def test_event_rejects_unknown_top_level_fields(self):
         with self.assertRaises(ContractError) as caught:
