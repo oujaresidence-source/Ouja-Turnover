@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
 
+from .pricing import price_timestamp_is_fresh
 from .settings import MonthlySettings
 
 
@@ -232,7 +233,7 @@ def _has_content(structured: Mapping[str, Any], raw: Mapping[str, Any], lang: st
     return any(candidate and script.search(candidate) for candidate in candidates)
 
 
-def _verified_prices(raw: Any) -> Mapping[str, Any]:
+def _verified_prices(raw: Any, now: dt.datetime) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         return MappingProxyType({})
     prices = {}
@@ -241,7 +242,12 @@ def _verified_prices(raw: Any) -> Mapping[str, Any]:
             continue
         rate = _number(item.get("monthly_rate_sar"), minimum=0.01)
         source = _text(item.get("source"))
-        if rate is None or item.get("currency") != "SAR" or source not in _VERIFIED_PRICE_SOURCES:
+        if (
+            rate is None
+            or item.get("currency") != "SAR"
+            or source not in _VERIFIED_PRICE_SOURCES
+            or not price_timestamp_is_fresh(item.get("verified_at"), now)
+        ):
             continue
         prices[str(month)] = {
             "monthly_rate_sar": int(rate) if rate.is_integer() else rate,
@@ -250,6 +256,28 @@ def _verified_prices(raw: Any) -> Mapping[str, Any]:
             "verified_at": _text(item.get("verified_at")),
         }
     return _freeze(prices)
+
+
+def _verified_request_quotes(raw: Any) -> Mapping[str, Any]:
+    if not isinstance(raw, Mapping):
+        return MappingProxyType({})
+    quotes = {}
+    for key, item in raw.items():
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\|[0-9]{4}-[0-9]{2}-[0-9]{2}", str(key)) or not isinstance(item, Mapping):
+            continue
+        monthly = _number(item.get("monthly_rate_sar"), minimum=0.01)
+        total = _number(item.get("stay_total_sar"), minimum=0.01)
+        source = _text(item.get("source"))
+        if monthly is None or total is None or item.get("currency") != "SAR" or source not in _VERIFIED_PRICE_SOURCES:
+            continue
+        quotes[str(key)] = {
+            "monthly_rate_sar": int(monthly) if monthly.is_integer() else monthly,
+            "stay_total_sar": int(total) if total.is_integer() else total,
+            "currency": "SAR",
+            "source": source,
+            "verified_at": _text(item.get("verified_at")),
+        }
+    return _freeze(quotes)
 
 
 def _commercial_terms(raw: Any, settings: MonthlySettings) -> Optional[Mapping[str, Any]]:
@@ -371,7 +399,7 @@ def validate_listing(
                     warnings.append(_issue("licence_expiring", "licence.expires", "ترخيص الإعلان قريب الانتهاء.", "The advertising licence expires soon."))
                 clean_licence = {"number": _text(licence.get("licence_no")), "expires": expires_text}
 
-    prices = _verified_prices(source.get("official_prices"))
+    prices = _verified_prices(source.get("official_prices"), now)
     if not prices:
         blockers.append(_issue("price_missing", "official_prices", "السعر الشهري الرسمي مفقود.", "The official monthly price is missing."))
 
@@ -452,6 +480,7 @@ def validate_listing(
         "facts": {key: value for key, value in fact_values.items() if isinstance(key, str) and isinstance(value, bool)},
         "licence": clean_licence,
         "official_prices": prices,
+        "official_request_quotes": _verified_request_quotes(source.get("official_request_quotes")),
         "calendar": clean_calendar,
         "commercial_terms": terms or {},
         "coordinates": clean_coordinates,
