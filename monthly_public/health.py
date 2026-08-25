@@ -37,6 +37,7 @@ def build_health(
     settings: MonthlySettings,
     *,
     analytics: Any = None,
+    lead_store: Any = None,
     now: Any = None,
 ) -> Dict[str, Any]:
     """Build one evidence-based status payload; readiness means no red blockers."""
@@ -95,7 +96,22 @@ def build_health(
         red.append(_issue(blocker, source="settings"))
 
     if analytics is None:
-        analytics_health = {"healthy": True, "event_count": None, "error": None, "configured": False}
+        analytics_health = {
+            "healthy": False,
+            "write_probe": False,
+            "event_count": None,
+            "error": "analytics store is not configured",
+            "configured": False,
+        }
+        red.append(
+            {
+                "source": "analytics",
+                "code": "analytics_missing",
+                "field": "analytics",
+                "message_ar": "تخزين التحليلات غير مهيأ.",
+                "message_en": "Analytics storage is not configured.",
+            }
+        )
     else:
         try:
             analytics_health = dict(analytics.health())
@@ -106,7 +122,7 @@ def build_health(
                 "error": str(error),
             }
         analytics_health["configured"] = True
-        if not analytics_health.get("healthy"):
+        if not analytics_health.get("healthy") or not analytics_health.get("write_probe"):
             red.append(
                 {
                     "source": "analytics",
@@ -114,6 +130,45 @@ def build_health(
                     "field": "analytics",
                     "message_ar": "تخزين التحليلات غير سليم.",
                     "message_en": "Analytics storage is unhealthy.",
+                }
+            )
+
+    if lead_store is None:
+        lead_health = {
+            "healthy": False,
+            "write_probe": False,
+            "lead_count": None,
+            "error": "lead store is not configured",
+            "configured": False,
+        }
+        red.append(
+            {
+                "source": "leads",
+                "code": "lead_store_missing",
+                "field": "leads",
+                "message_ar": "تخزين الطلبات غير مهيأ.",
+                "message_en": "Lead storage is not configured.",
+            }
+        )
+    else:
+        try:
+            lead_health = dict(lead_store.health())
+        except Exception as error:
+            lead_health = {
+                "healthy": False,
+                "write_probe": False,
+                "lead_count": None,
+                "error": str(error),
+            }
+        lead_health["configured"] = True
+        if not lead_health.get("healthy") or not lead_health.get("write_probe"):
+            red.append(
+                {
+                    "source": "leads",
+                    "code": "lead_store_unhealthy",
+                    "field": "leads",
+                    "message_ar": "تخزين الطلبات غير قابل للكتابة.",
+                    "message_en": "Lead storage is not writable.",
                 }
             )
 
@@ -147,6 +202,7 @@ def build_health(
         "content_conflicts": content,
         "licence_expiry": licences,
         "analytics": analytics_health,
+        "leads": lead_health,
         "red_blockers": red,
     }
     report["ready"] = not red

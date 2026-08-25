@@ -23,11 +23,13 @@ from .contracts import (
     parse_outcome,
 )
 from .settings import MonthlySettings, response_window
+from .pricing import add_months
 
 
 DEDUPE_MINUTES = 30
 _SESSION_RE = re.compile(r"^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$")
 _REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
+_LISTING_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 
 
 class HandoffValidationError(ValueError):
@@ -212,14 +214,14 @@ class LeadStore:
         self.reference_factory = reference_factory or _reference
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(str(self.path), timeout=5)
+    def _connect(self, timeout: float = 5) -> sqlite3.Connection:
+        connection = sqlite3.connect(str(self.path), timeout=timeout)
         connection.row_factory = sqlite3.Row
         return connection
 
     @contextmanager
-    def _connection(self):
-        connection = self._connect()
+    def _connection(self, timeout: float = 5):
+        connection = self._connect(timeout)
         try:
             with connection:
                 yield connection
@@ -280,7 +282,7 @@ class LeadStore:
         if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
             raise ValueError("invalid anonymous session")
         listing = str(listing_id or "").strip()
-        if not listing or len(listing) > 80:
+        if not _LISTING_RE.fullmatch(listing):
             raise ValueError("invalid listing ID")
         safe_request = _approved_request(request, approved_places)
         safe_quote = _approved_quote(quote)
@@ -331,6 +333,34 @@ class LeadStore:
     def count(self) -> int:
         with self._connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM monthly_public_leads").fetchone()[0])
+
+    def health(self) -> Dict[str, Any]:
+        """Prove the lead store can write, then roll the probe back without a row."""
+
+        try:
+            with self._connection(timeout=0.05) as connection:
+                count = int(connection.execute("SELECT COUNT(*) FROM monthly_public_leads").fetchone()[0])
+                connection.execute("BEGIN IMMEDIATE")
+                reference = "OJM-HEALTH-%s" % secrets.token_hex(6).upper()
+                occurred = _time(self.clock()).isoformat()
+                connection.execute(
+                    "INSERT INTO monthly_public_leads(reference, session_id, listing_id, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', '{}', ?, ?)",
+                    (reference, "anon_health_probe", "health_probe", "health_probe", occurred, occurred),
+                )
+                connection.rollback()
+            return {
+                "healthy": True,
+                "write_probe": True,
+                "lead_count": count,
+                "error": None,
+            }
+        except Exception as error:
+            return {
+                "healthy": False,
+                "write_probe": False,
+                "lead_count": None,
+                "error": str(error),
+            }
 
     def mark_response(self, reference: str, *, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
         current_time = _time(now if now is not None else self.clock())
@@ -431,7 +461,10 @@ def _validate_handoff(
 ) -> None:
     if not isinstance(listing, Mapping):
         _handoff_error("listing_incomplete", "A complete published listing is required.")
-    for field in ("id", "name_ar", "name_en", "neighborhood_ar", "neighborhood_en"):
+    listing_id = listing.get("id")
+    if not isinstance(listing_id, str) or not _LISTING_RE.fullmatch(listing_id):
+        _handoff_error("listing_incomplete", "A safe listing ID of at most 80 characters is required.")
+    for field in ("name_ar", "name_en", "neighborhood_ar", "neighborhood_en"):
         try:
             _text(listing.get(field), "listing.%s" % field, 240)
         except ValueError:
@@ -461,6 +494,11 @@ def _validate_handoff(
     if "duration_months" in safe_request:
         if safe_quote.get("months") != safe_request["duration_months"]:
             _handoff_error("quote_mismatch", "The displayed quote must match the requested duration.")
+        canonical_move_out = add_months(
+            safe_request["move_in"], safe_request["duration_months"]
+        )
+        if canonical_move_out is None or safe_quote["move_out"] != canonical_move_out:
+            _handoff_error("quote_mismatch", "The displayed move-out date must match the canonical monthly duration.")
         expected_total = safe_quote["monthly_rate_sar"] * safe_quote["months"]
         if not math.isclose(float(safe_quote["stay_total_sar"]), float(expected_total)):
             _handoff_error("quote_mismatch", "The displayed total must match the monthly rate and duration.")

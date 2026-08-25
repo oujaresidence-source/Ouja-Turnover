@@ -1,9 +1,12 @@
 import tempfile
+import sqlite3
+import time
 import unittest
 from pathlib import Path
 
 from monthly_public.analytics import AnalyticsStore
 from monthly_public.health import build_health
+from monthly_public.leads import LeadStore
 from monthly_public.settings import load_settings
 from monthly_public.snapshot import build_generation
 from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
@@ -23,7 +26,16 @@ class HealthTests(unittest.TestCase):
         generation = build_generation(source([valid_listing(id=1001), valid_listing(id=1002, slug="ouja-1002")]), valid_settings(), NOW)
         with tempfile.TemporaryDirectory() as folder:
             analytics = AnalyticsStore(Path(folder) / "analytics.sqlite3", clock=lambda: NOW)
-            report = build_health(generation, valid_settings(), analytics=analytics, now=NOW)
+            leads = LeadStore(Path(folder) / "leads.sqlite3", clock=lambda: NOW)
+            report = build_health(
+                generation,
+                valid_settings(),
+                analytics=analytics,
+                lead_store=leads,
+                now=NOW,
+            )
+            analytics_rows = analytics.events()
+            lead_count = leads.count()
 
         self.assertEqual(report["refresh_time"], generation.generated_at)
         self.assertEqual(report["counts"], {"received": 2, "valid": 2, "blocked": 0, "published": 2})
@@ -32,6 +44,11 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(report["configuration"]["working_hours"])
         self.assertTrue(report["contract_4_6_months"]["ready"])
         self.assertTrue(report["analytics"]["healthy"])
+        self.assertTrue(report["leads"]["healthy"])
+        self.assertTrue(report["analytics"]["write_probe"])
+        self.assertTrue(report["leads"]["write_probe"])
+        self.assertEqual(analytics_rows, [])
+        self.assertEqual(lead_count, 0)
         self.assertEqual(report["red_blockers"], [])
         self.assertTrue(report["ready"])
         self.assertEqual(report["generation_id"], generation.generation_id)
@@ -73,10 +90,59 @@ class HealthTests(unittest.TestCase):
         listing = valid_listing()
         listing["licence"]["expires"] = "2026-09-01"
         generation = build_generation(source([listing]), valid_settings(), NOW)
-        report = build_health(generation, valid_settings(), now=NOW)
+        with tempfile.TemporaryDirectory() as folder:
+            report = build_health(
+                generation,
+                valid_settings(),
+                analytics=AnalyticsStore(Path(folder) / "analytics.sqlite3", clock=lambda: NOW),
+                lead_store=LeadStore(Path(folder) / "leads.sqlite3", clock=lambda: NOW),
+                now=NOW,
+            )
         self.assertIn("1001", report["licence_expiry"])
         self.assertEqual(report["licence_expiry"]["1001"][0]["code"], "licence_expiring")
         self.assertTrue(report["ready"])
+
+    def test_missing_conversion_stores_are_red_launch_blockers(self):
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        report = build_health(generation, valid_settings(), now=NOW)
+
+        self.assertFalse(report["ready"])
+        self.assertFalse(report["analytics"]["configured"])
+        self.assertFalse(report["leads"]["configured"])
+        codes = {item["code"] for item in report["red_blockers"]}
+        self.assertIn("analytics_missing", codes)
+        self.assertIn("lead_store_missing", codes)
+
+    def test_locked_conversion_store_fails_write_probe_quickly_without_rows(self):
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        with tempfile.TemporaryDirectory() as folder:
+            analytics = AnalyticsStore(Path(folder) / "analytics.sqlite3", clock=lambda: NOW)
+            leads = LeadStore(Path(folder) / "leads.sqlite3", clock=lambda: NOW)
+            for name, store, other in (
+                ("analytics", analytics, leads),
+                ("leads", leads, analytics),
+            ):
+                with self.subTest(name=name):
+                    locker = sqlite3.connect(str(store.path))
+                    locker.execute("BEGIN EXCLUSIVE")
+                    try:
+                        started = time.monotonic()
+                        report = build_health(
+                            generation,
+                            valid_settings(),
+                            analytics=analytics,
+                            lead_store=leads,
+                            now=NOW,
+                        )
+                        elapsed = time.monotonic() - started
+                    finally:
+                        locker.rollback()
+                        locker.close()
+                    self.assertFalse(report[name]["healthy"])
+                    self.assertFalse(report["ready"])
+                    self.assertLess(elapsed, 1.0)
+            self.assertEqual(analytics.events(), [])
+            self.assertEqual(leads.count(), 0)
 
     def test_all_content_issues_are_classified(self):
         listing = valid_listing(name_en="", amenities=["Wireless", "Unknown private amenity"])

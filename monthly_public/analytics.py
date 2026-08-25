@@ -206,9 +206,25 @@ class AnalyticsStore:
         try:
             with self._connection() as connection:
                 count = connection.execute("SELECT COUNT(*) FROM monthly_public_events").fetchone()[0]
-            return {"healthy": True, "event_count": int(count), "error": None}
-        except sqlite3.Error as error:
-            return {"healthy": False, "event_count": None, "error": str(error)}
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO monthly_public_events(event_name, session_id, context_json, occurred_at, trusted) VALUES (?, ?, '{}', ?, 0)",
+                    ("landing_view", "anon_health_probe", _as_datetime(self.clock()).isoformat()),
+                )
+                connection.rollback()
+            return {
+                "healthy": True,
+                "write_probe": True,
+                "event_count": int(count),
+                "error": None,
+            }
+        except Exception as error:
+            return {
+                "healthy": False,
+                "write_probe": False,
+                "event_count": None,
+                "error": str(error),
+            }
 
 
 # ``EventStore`` is the product-facing name; retain ``AnalyticsStore`` as the
