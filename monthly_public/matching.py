@@ -107,7 +107,9 @@ def _availability(result: Any, request: Mapping[str, Any]) -> str:
     return "available"
 
 
-def _space_gate(listing: Mapping[str, Any], request: Mapping[str, Any]) -> bool:
+def space_matches(listing: Mapping[str, Any], request: Mapping[str, Any]) -> bool:
+    """Apply the matcher's hard capacity and sleeping-configuration gates."""
+
     capacity = listing.get("capacity")
     bedrooms = listing.get("bedrooms")
     if not isinstance(capacity, int) or capacity < request["residents"]:
@@ -282,7 +284,7 @@ def _ranked_item(
     availability_status: str,
     adjusted_dates: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    if not _space_gate(result.listing, request):
+    if not space_matches(result.listing, request):
         return None
     quote = quote_for(result.listing, _pricing_request(request), now)
     if quote is None:
@@ -424,7 +426,7 @@ def rank(
     for result in generation.published:
         availability = _availability(result, parsed)
         quote = quote_for(result.listing, _pricing_request(parsed), now)
-        passes_request_gates = quote is not None and _space_gate(
+        passes_request_gates = quote is not None and space_matches(
             result.listing, parsed
         )
         if (

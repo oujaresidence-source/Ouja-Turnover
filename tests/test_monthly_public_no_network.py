@@ -158,14 +158,96 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             return request.path
 
         public = ("/api/monthly/match", "/api/monthly/lead", "/api/monthly/event")
-        for path in public:
-            result = run(self.bot._role_enforce_mw(FakeRequest(path, "POST"), reached))
-            self.assertEqual(result, path)
-        self.assertTrue(set(public).issubset(self.bot._ROLE_EXEMPT_WRITES))
-        for private in ("/api/monthly/ops/response", "/api/monthly/ops/outcome", "/api/monthly/admin"):
-            self.assertNotIn(private, self.bot._ROLE_EXEMPT_WRITES)
-            response = run(self.bot._role_enforce_mw(FakeRequest(private, "POST"), reached))
-            self.assertEqual(response.status, 401)
+        saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
+        try:
+            self.bot.MONTHLY_ENABLED = self.bot.MONTHLY_PUBLIC_V2 = True
+            for path in public:
+                result = run(self.bot._role_enforce_mw(FakeRequest(path, "POST"), reached))
+                self.assertEqual(result, path)
+            for private in ("/api/monthly/ops/response", "/api/monthly/ops/outcome", "/api/monthly/admin"):
+                response = run(self.bot._role_enforce_mw(FakeRequest(private, "POST"), reached))
+                self.assertEqual(response.status, 401)
+
+            for enabled, v2 in ((False, True), (True, False), (False, False)):
+                self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = enabled, v2
+                for path in public:
+                    response = run(self.bot._role_enforce_mw(
+                        FakeRequest(path, "POST"), reached
+                    ))
+                    self.assertEqual(response.status, 401)
+        finally:
+            self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = saved
+
+    def test_v2_only_routes_register_only_when_both_switches_are_on(self):
+        class Router:
+            def __init__(self):
+                self.routes = []
+
+            def add_get(self, path, handler):
+                self.routes.append(("GET", path, handler))
+
+            def add_post(self, path, handler):
+                self.routes.append(("POST", path, handler))
+
+        expected = {
+            ("POST", "/api/monthly/match"),
+            ("POST", "/api/monthly/lead"),
+            ("POST", "/api/monthly/event"),
+            ("GET", "/api/monthly/ops/health"),
+            ("GET", "/api/monthly/ops/funnel"),
+            ("POST", "/api/monthly/ops/response"),
+            ("POST", "/api/monthly/ops/outcome"),
+        }
+        saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
+        try:
+            for enabled, v2 in ((False, True), (True, False), (False, False)):
+                self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = enabled, v2
+                router = Router()
+                self.bot._register_monthly_v2_only_routes(router)
+                self.assertEqual(router.routes, [])
+            self.bot.MONTHLY_ENABLED = self.bot.MONTHLY_PUBLIC_V2 = True
+            router = Router()
+            self.bot._register_monthly_v2_only_routes(router)
+            self.assertEqual({(method, path) for method, path, _ in router.routes}, expected)
+        finally:
+            self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = saved
+
+    def test_every_v2_handler_refuses_calls_when_either_switch_is_off(self):
+        handlers = (
+            self.bot._handle_monthly_v2_img,
+            self.bot._api_monthly_v2_config,
+            self.bot._api_monthly_v2_search,
+            self.bot._api_monthly_v2_featured,
+            self.bot._api_monthly_v2_deals,
+            self.bot._api_monthly_v2_listing,
+            self.bot._api_monthly_v2_quote,
+            self.bot._api_monthly_v2_match,
+            self.bot._api_monthly_v2_lead,
+            self.bot._api_monthly_v2_event,
+            self.bot._api_monthly_v2_ops_health,
+            self.bot._api_monthly_v2_ops_funnel,
+            self.bot._api_monthly_v2_ops_response,
+            self.bot._api_monthly_v2_ops_outcome,
+        )
+        saved = (
+            self.bot.MONTHLY_ENABLED,
+            self.bot.MONTHLY_PUBLIC_V2,
+            self.bot._monthly_public_app,
+        )
+        self.bot._monthly_public_app = object()
+        try:
+            for enabled, v2 in ((False, True), (True, False)):
+                self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = enabled, v2
+                for handler in handlers:
+                    with self.subTest(enabled=enabled, v2=v2, handler=handler.__name__):
+                        response = run(handler(FakeRequest(
+                            "/api/monthly/test", "POST",
+                            {"u": "https://images.example.test/home.jpg"},
+                        )))
+                        self.assertEqual(response.status, 404)
+        finally:
+            (self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2,
+             self.bot._monthly_public_app) = saved
 
     def test_calendar_adapter_rejects_a_gap_inside_reported_coverage(self):
         original = self.bot._mcal
@@ -265,11 +347,16 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
 
     def test_v2_monthly_image_handler_redirects_directly_without_server_fetch(self):
         url = "https://images.example.test/home.jpg"
-        with mock.patch.object(self.bot.requests, "get", side_effect=AssertionError("network reached")) as network:
-            with self.assertRaises(self.bot.web.HTTPFound) as raised:
-                run(self.bot._handle_monthly_v2_img(FakeRequest(
-                    "/monthly/img", "GET", {"u": url, "w": "1200"}
-                )))
+        saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
+        self.bot.MONTHLY_ENABLED = self.bot.MONTHLY_PUBLIC_V2 = True
+        try:
+            with mock.patch.object(self.bot.requests, "get", side_effect=AssertionError("network reached")) as network:
+                with self.assertRaises(self.bot.web.HTTPFound) as raised:
+                    run(self.bot._handle_monthly_v2_img(FakeRequest(
+                        "/monthly/img", "GET", {"u": url, "w": "1200"}
+                    )))
+        finally:
+            self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2 = saved
         network.assert_not_called()
         self.assertEqual(raised.exception.location, url)
         source = inspect.getsource(self.bot.start_web_server)

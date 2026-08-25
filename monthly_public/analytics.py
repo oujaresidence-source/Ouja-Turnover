@@ -13,6 +13,7 @@ from typing import Any, Collection, Dict, Mapping, Optional
 from .contracts import (
     LOST_REASONS,
     PUBLIC_EVENT_NAMES,
+    PURPOSES,
     TRUSTED_LIFECYCLE_EVENT_NAMES,
     parse_event,
 )
@@ -232,6 +233,27 @@ class AnalyticsStore:
 EventStore = AnalyticsStore
 
 
+def _duration_band(value: Mapping[str, Any]) -> Optional[str]:
+    supplied = value.get("duration_band")
+    if supplied in ("1_month", "2_3_months", "4_6_months"):
+        return supplied
+    months = value.get("duration_months")
+    if isinstance(months, int) and not isinstance(months, bool) and 1 <= months <= 6:
+        if months == 1:
+            return "1_month"
+        return "2_3_months" if months <= 3 else "4_6_months"
+    days = value.get("duration_days")
+    if isinstance(days, int) and not isinstance(days, bool) and days > 0:
+        if days <= 31:
+            return "1_month"
+        return "2_3_months" if days <= 92 else "4_6_months"
+    return None
+
+
+def _conversion(numerator: int, denominator: int) -> Optional[float]:
+    return round(float(numerator) / denominator, 4) if denominator else None
+
+
 def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
     """Summarise anonymous stages and linked operational outcomes without PII."""
 
@@ -240,6 +262,7 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
     stages = {name: 0 for name in stage_names}
     stage_keys = {name: set() for name in stage_names}
     sessions: Dict[str, Dict[str, Any]] = {}
+    profiles: Dict[str, Dict[str, str]] = {}
     for event in events:
         name = event["event"]
         key = event["lead_reference"] or event["session_id"]
@@ -251,6 +274,20 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
         reference = event["lead_reference"]
         if reference and reference not in session["lead_references"]:
             session["lead_references"].append(reference)
+        context = event.get("context")
+        if isinstance(context, Mapping):
+            profile = profiles.setdefault(event["session_id"], {})
+            if context.get("purpose") in PURPOSES:
+                profile["purpose"] = context["purpose"]
+            if isinstance(context.get("place_id"), str) and context["place_id"]:
+                profile["place_id"] = context["place_id"]
+            band = _duration_band(context)
+            if band is not None:
+                profile["duration_band"] = band
+            if context.get("question") == "purpose" and context.get("answer") in PURPOSES:
+                profile["purpose"] = context["answer"]
+            if context.get("question") == "place" and isinstance(context.get("answer"), str):
+                profile["place_id"] = context["answer"]
     for name, keys in stage_keys.items():
         stages[name] = len(keys)
 
@@ -261,6 +298,17 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
         )
         if row["reference"] not in session["lead_references"]:
             session["lead_references"].append(row["reference"])
+        request = row.get("request")
+        if isinstance(request, Mapping):
+            profile = profiles.setdefault(row["session_id"], {})
+            if request.get("purpose") in PURPOSES:
+                profile["purpose"] = request["purpose"]
+            place = request.get("place")
+            if isinstance(place, Mapping) and isinstance(place.get("id"), str):
+                profile["place_id"] = place["id"]
+            band = _duration_band(request)
+            if band is not None:
+                profile["duration_band"] = band
     responded = [row for row in lead_rows if row["responded_at"]]
     response_minutes = []
     for row in responded:
@@ -271,12 +319,40 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
     for row in lead_rows:
         if row["outcome"] == "lost" and row["lost_reason"] in lost_reasons:
             lost_reasons[row["lost_reason"]] += 1
+    purpose_counts = {purpose: 0 for purpose in PURPOSES}
+    place_counts: Dict[str, int] = {}
+    duration_bands = {band: 0 for band in ("1_month", "2_3_months", "4_6_months")}
+    for profile in profiles.values():
+        purpose = profile.get("purpose")
+        if purpose in purpose_counts:
+            purpose_counts[purpose] += 1
+        place_id = profile.get("place_id")
+        if place_id:
+            place_counts[place_id] = place_counts.get(place_id, 0) + 1
+        band = profile.get("duration_band")
+        if band in duration_bands:
+            duration_bands[band] += 1
+    common_purposes = [
+        {"purpose": purpose, "count": count}
+        for purpose, count in sorted(
+            purpose_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+        if count
+    ]
+    requested_places = [
+        {"place_id": place_id, "count": count}
+        for place_id, count in sorted(
+            place_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+    ]
+    lead_sessions = {row["session_id"] for row in lead_rows}
+    booked = sum(row["outcome"] == "booked" for row in lead_rows)
     return {
         "stages": stages,
         "leads": {
             "created": len(lead_rows),
             "responded": len(responded),
-            "booked": sum(row["outcome"] == "booked" for row in lead_rows),
+            "booked": booked,
             "lost": sum(row["outcome"] == "lost" for row in lead_rows),
         },
         "response_time_minutes": {
@@ -284,5 +360,22 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
             "count": len(response_minutes),
         },
         "lost_reasons": lost_reasons,
+        "common_purposes": common_purposes,
+        "requested_places": requested_places,
+        "duration_bands": duration_bands,
+        "conversion_rates": {
+            "matcher_to_lead": _conversion(
+                len(lead_sessions.intersection(stage_keys["matcher_completion"])),
+                stages["matcher_completion"],
+            ),
+            "lead_to_response": _conversion(len(responded), len(lead_rows)),
+            "lead_to_booking": _conversion(booked, len(lead_rows)),
+            "response_to_booking": _conversion(booked, len(responded)),
+        },
+        "discount_request_rate": {
+            "status": "not_tracked",
+            "count": 0,
+            "rate": None,
+        },
         "sessions": sessions,
     }

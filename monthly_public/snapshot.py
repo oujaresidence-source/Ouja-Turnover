@@ -11,7 +11,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 
-from .publication import PublicationIssue, PublicationResult, validate_listing
+from .publication import (
+    PublicationIssue,
+    PublicationResult,
+    revalidate_clock_bound,
+    validate_listing,
+)
 from .settings import MonthlySettings
 
 
@@ -150,6 +155,57 @@ def build_generation(
         source_timestamps=_freeze(
             {str(key): str(value) for key, value in timestamps.items() if value}
         ),
+        results=results,
+        counts=_freeze(counts),
+        published_ids=published_ids,
+        blocked_ids=blocked_ids,
+        missing_calendar_ids=missing_calendar_ids,
+        stale_calendar_ids=stale_calendar_ids,
+        missing_price_ids=missing_price_ids,
+    )
+
+
+def revalidate_generation(
+    generation: SnapshotGeneration, now: Any
+) -> SnapshotGeneration:
+    """Return one request-time view with current calendar/licence decisions."""
+
+    if not isinstance(generation, SnapshotGeneration):
+        raise TypeError("generation must be a SnapshotGeneration")
+    results = tuple(revalidate_clock_bound(result, now) for result in generation.results)
+    published_ids = tuple(result.listing["id"] for result in results if result.publishable)
+    blocked_ids = tuple(result.listing["id"] for result in results if not result.publishable)
+    missing_calendar_ids = tuple(
+        result.listing["id"]
+        for result in results
+        if "calendar_missing" in _codes(result, "warnings")
+    )
+    stale_calendar_ids = tuple(
+        result.listing["id"]
+        for result in results
+        if {"calendar_stale", "calendar_future", "calendar_invalid"}.intersection(
+            _codes(result, "warnings")
+        )
+    )
+    missing_price_ids = tuple(
+        result.listing["id"]
+        for result in results
+        if "price_missing" in _codes(result, "blockers")
+    )
+    counts = {
+        "received": len(results),
+        "validated": len(results),
+        "blocked": len(blocked_ids),
+        "published": len(published_ids),
+        "calendar_covered": sum(
+            result.availability_status == "confirmed" for result in results
+        ),
+        "price_covered": len(results) - len(missing_price_ids),
+    }
+    return SnapshotGeneration(
+        generation_id=generation.generation_id,
+        generated_at=generation.generated_at,
+        source_timestamps=generation.source_timestamps,
         results=results,
         counts=_freeze(counts),
         published_ids=published_ids,

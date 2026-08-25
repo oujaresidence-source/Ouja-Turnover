@@ -7,7 +7,7 @@ import datetime as dt
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
@@ -174,6 +174,100 @@ def _parse_datetime(value: Any, timezone: dt.tzinfo) -> Optional[dt.datetime]:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone)
     return parsed
+
+
+def licence_timing_issue(licence: Any, now: dt.datetime) -> Optional[PublicationIssue]:
+    """Re-evaluate the clock-bound part of an already validated licence."""
+
+    if not isinstance(licence, Mapping):
+        return None
+    expires = _parse_date(licence.get("expires"))
+    if expires is None:
+        return None
+    if expires < now.date():
+        return _issue(
+            "licence_expired", "licence.expires",
+            "ترخيص الإعلان منتهي.", "The advertising licence has expired.",
+        )
+    if expires <= now.date() + dt.timedelta(days=LICENCE_EXPIRY_WARNING_DAYS):
+        return _issue(
+            "licence_expiring", "licence.expires",
+            "ترخيص الإعلان قريب الانتهاء.", "The advertising licence expires soon.",
+        )
+    return None
+
+
+def calendar_freshness_issue(
+    calendar: Any,
+    now: dt.datetime,
+    *,
+    calendar_stale_minutes: int = CALENDAR_STALE_MINUTES,
+) -> Optional[PublicationIssue]:
+    """Return the current clock-bound calendar issue without touching sources."""
+
+    if not isinstance(calendar, Mapping):
+        return None
+    synced = _parse_datetime(calendar.get("synced_at"), now.tzinfo or dt.timezone.utc)
+    if synced is None or now.astimezone(synced.tzinfo) - synced > dt.timedelta(
+        minutes=max(1, calendar_stale_minutes)
+    ):
+        return _issue(
+            "calendar_stale", "calendar.synced_at",
+            "التوفر قيد التأكيد لأن التقويم قديم.",
+            "Availability is pending because the calendar is stale.",
+        )
+    if synced - now.astimezone(synced.tzinfo) > dt.timedelta(
+        minutes=CALENDAR_FUTURE_SKEW_MINUTES
+    ):
+        return _issue(
+            "calendar_future", "calendar.synced_at",
+            "التوفر قيد التأكيد لأن وقت التقويم غير صحيح.",
+            "Availability is pending because the calendar timestamp is in the future.",
+        )
+    return None
+
+
+def revalidate_clock_bound(
+    result: PublicationResult,
+    now: dt.datetime,
+    *,
+    calendar_stale_minutes: int = CALENDAR_STALE_MINUTES,
+) -> PublicationResult:
+    """Recheck time-sensitive claims in one immutable publication result."""
+
+    if not isinstance(result, PublicationResult):
+        raise TypeError("result must be a PublicationResult")
+    licence_codes = {"licence_expired", "licence_expiring"}
+    calendar_codes = {"calendar_stale", "calendar_future"}
+    blockers = [item for item in result.blockers if item.code not in licence_codes]
+    warnings = [
+        item for item in result.warnings
+        if item.code not in licence_codes | calendar_codes
+    ]
+    licence_issue = licence_timing_issue(result.listing.get("licence"), now)
+    if licence_issue is not None:
+        (blockers if licence_issue.code == "licence_expired" else warnings).append(
+            licence_issue
+        )
+    calendar_issue = calendar_freshness_issue(
+        result.listing.get("calendar"), now,
+        calendar_stale_minutes=calendar_stale_minutes,
+    )
+    if calendar_issue is not None:
+        warnings.append(calendar_issue)
+    calendar_pending = calendar_issue is not None or any(
+        item.code in {"calendar_missing", "calendar_invalid"} for item in warnings
+    )
+    availability_status = "pending" if calendar_pending else "confirmed"
+    publishable = not blockers
+    return replace(
+        result,
+        blockers=tuple(blockers),
+        warnings=tuple(warnings),
+        availability_status=availability_status,
+        publishable=publishable,
+        exact_match_eligible=publishable and availability_status == "confirmed",
+    )
 
 
 def _structured(raw: Any) -> Mapping[str, Any]:
@@ -393,12 +487,12 @@ def validate_listing(
             if expires is None:
                 blockers.append(_issue("licence_expiry_invalid", "licence.expires", "تاريخ انتهاء الترخيص غير صحيح.", "The licence expiry date is invalid."))
             else:
-                today = now.date()
-                if expires < today:
-                    blockers.append(_issue("licence_expired", "licence.expires", "ترخيص الإعلان منتهي.", "The advertising licence has expired."))
-                elif expires <= today + dt.timedelta(days=LICENCE_EXPIRY_WARNING_DAYS):
-                    warnings.append(_issue("licence_expiring", "licence.expires", "ترخيص الإعلان قريب الانتهاء.", "The advertising licence expires soon."))
                 clean_licence = {"number": _text(licence.get("licence_no")), "expires": expires_text}
+                timing_issue = licence_timing_issue(clean_licence, now)
+                if timing_issue is not None:
+                    (blockers if timing_issue.code == "licence_expired" else warnings).append(
+                        timing_issue
+                    )
 
     prices = _verified_prices(source.get("official_prices"), now)
     if not prices:
@@ -415,15 +509,12 @@ def validate_listing(
         availability_status = "pending"
         warnings.append(_issue("calendar_missing", "calendar", "التوفر قيد التأكيد لغياب التقويم.", "Availability is pending because calendar data is missing."))
     else:
-        synced = _parse_datetime(calendar.get("synced_at"), now.tzinfo or dt.timezone.utc)
-        if synced is None or now.astimezone(synced.tzinfo) - synced > dt.timedelta(minutes=max(1, calendar_stale_minutes)):
+        freshness_issue = calendar_freshness_issue(
+            calendar, now, calendar_stale_minutes=calendar_stale_minutes
+        )
+        if freshness_issue is not None:
             availability_status = "pending"
-            warnings.append(_issue("calendar_stale", "calendar.synced_at", "التوفر قيد التأكيد لأن التقويم قديم.", "Availability is pending because the calendar is stale."))
-        elif synced - now.astimezone(synced.tzinfo) > dt.timedelta(
-            minutes=CALENDAR_FUTURE_SKEW_MINUTES
-        ):
-            availability_status = "pending"
-            warnings.append(_issue("calendar_future", "calendar.synced_at", "التوفر قيد التأكيد لأن وقت التقويم غير صحيح.", "Availability is pending because the calendar timestamp is in the future."))
+            warnings.append(freshness_issue)
         coverage_from = _parse_date(calendar.get("from"))
         coverage_to = _parse_date(calendar.get("to"))
         coverage_valid = (

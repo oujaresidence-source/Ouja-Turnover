@@ -107,6 +107,94 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(summary["lost_reasons"]["price"], 1)
         self.assertEqual(sum(summary["lost_reasons"].values()), 1)
 
+    def test_funnel_reports_demand_dimensions_and_conversion_rates_without_discount_pii(self):
+        second_session = issue_anonymous_session(SECRET)
+        places = {
+            "kafd": {
+                "kind": "destination",
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "King Abdullah Financial District",
+            }
+        }
+        for session, context in (
+            (
+                self.session,
+                {
+                    "purpose": "work",
+                    "place_id": "kafd",
+                    "move_in": "2026-09-01",
+                    "duration_months": 2,
+                    "discount_requested": True,
+                },
+            ),
+            (
+                second_session,
+                {
+                    "purpose": "family",
+                    "move_in": "2026-09-01",
+                    "duration_months": 1,
+                },
+            ),
+        ):
+            self.store.record(
+                {"event": "matcher_completion", "session_id": session, "context": context},
+                session_secret=SECRET,
+                allowed_place_ids=places,
+            )
+        leads = LeadStore(Path(self.folder.name) / "leads.sqlite3", clock=lambda: NOW)
+        work = leads.create(
+            self.session,
+            "1001",
+            {
+                "purpose": "work",
+                "place": {"kind": "destination", "id": "kafd"},
+                "move_in": "2026-09-01",
+                "duration_months": 2,
+                "residents": 2,
+            },
+            {"monthly_rate_sar": 12000},
+            approved_places=places,
+        )
+        leads.create(
+            second_session,
+            "1002",
+            {
+                "purpose": "family",
+                "move_in": "2026-09-01",
+                "duration_months": 1,
+                "residents": 3,
+            },
+            {"monthly_rate_sar": 9000},
+        )
+        leads.mark_response(work["reference"], now=NOW + dt.timedelta(minutes=10))
+        leads.set_outcome(
+            {"lead_reference": work["reference"], "outcome": "booked"},
+            now=NOW + dt.timedelta(minutes=11),
+        )
+
+        summary = funnel_summary(self.store, leads)
+
+        self.assertNotIn("discount_requested", self.store.events()[0]["context"])
+        self.assertEqual(
+            summary["common_purposes"],
+            [{"purpose": "family", "count": 1}, {"purpose": "work", "count": 1}],
+        )
+        self.assertEqual(
+            summary["requested_places"], [{"place_id": "kafd", "count": 1}]
+        )
+        self.assertEqual(
+            summary["duration_bands"],
+            {"1_month": 1, "2_3_months": 1, "4_6_months": 0},
+        )
+        self.assertEqual(summary["conversion_rates"]["matcher_to_lead"], 1.0)
+        self.assertEqual(summary["conversion_rates"]["lead_to_response"], 0.5)
+        self.assertEqual(summary["conversion_rates"]["lead_to_booking"], 0.5)
+        self.assertEqual(
+            summary["discount_request_rate"],
+            {"status": "not_tracked", "count": 0, "rate": None},
+        )
+        self.assertNotIn("discount", repr(summary["sessions"]).lower())
+
     def test_session_to_lead_link_survives_a_missing_lifecycle_event(self):
         self.store.record(
             {"event": "landing_view", "session_id": self.session},
