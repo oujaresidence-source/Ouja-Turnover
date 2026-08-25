@@ -99,6 +99,29 @@ class PublicationValidationTests(unittest.TestCase):
                 )
                 self.assertIn("price_missing", codes(result.blockers))
 
+    def test_stale_future_or_undated_price_is_not_publication_coverage(self):
+        for verified_at in (
+            "",
+            "2026-08-25T03:29:00+03:00",
+            "2026-08-25T10:06:00+03:00",
+        ):
+            with self.subTest(verified_at=verified_at):
+                result = validate_listing(
+                    valid_listing(
+                        official_prices={
+                            "2026-09": {
+                                "monthly_rate_sar": 12000,
+                                "currency": "SAR",
+                                "source": "engine_verified",
+                                "verified_at": verified_at,
+                            }
+                        }
+                    ),
+                    valid_settings(),
+                    NOW,
+                )
+                self.assertIn("price_missing", codes(result.blockers))
+
     def test_language_and_content_require_verified_bilingual_fields(self):
         cases = (
             ({"name_ar": "English title only"}, "arabic_title_missing"),
