@@ -184,6 +184,11 @@ try:
         PAGE_ROUTES as _MONTHLY_PUBLIC_PAGE_ROUTES,
         render_monthly_page as _render_monthly_public_page,
     )
+    from monthly_public.ops_page import (
+        CSS_PATH as _MONTHLY_OPS_CSS_PATH,
+        JS_PATH as _MONTHLY_OPS_JS_PATH,
+        render_monthly_ops_page as _render_monthly_ops_page,
+    )
     from monthly_public.legacy import render_legacy_monthly_page as _render_monthly_legacy_page
     from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
     from monthly_public.settings import load_settings as _monthly_public_load_settings
@@ -195,7 +200,9 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _monthly_public_load_settings = _MonthlySnapshotStore = None
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
+    _MONTHLY_OPS_CSS_PATH = _MONTHLY_OPS_JS_PATH = ""
     _render_monthly_public_page = None
+    _render_monthly_ops_page = None
     _render_monthly_legacy_page = None
     _HAS_MONTHLY_PUBLIC = False
 
@@ -31503,8 +31510,8 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
     +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'نفس وحدات عوجا — بدون Airbnb، والحجز عبر كونسيرج واتساب. مخفي عن جوجل افتراضيًا. يحتاج ضبط ELITE_WHATSAPP في Railway.':'Same Ouja units — no Airbnb, booking via WhatsApp concierge. Hidden from Google by default. Needs ELITE_WHATSAPP on Railway.')+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/elite" target="_blank">✦ '+(ar?'فتح موقع إيليت':'Open Elite')+'</a><a class="btn ghost sm" href="/elite/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyElite()">📋 '+(ar?'نسخ رابط /elite':'Copy /elite link')+'</button></div></div>';
   h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🗓️ '+(ar?'موقع عوجا بالشهر':'Ouja Monthly')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
-    +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'سكن شهري مفروش — يختار الضيف تاريخ الدخول والمدة، يشوف السعر قبل وبعد الخصم، ويكلّمنا واتساب. يحتاج ضبط MONTHLY_WHATSAPP في Railway.':'Furnished monthly stays — guest picks move-in + months, sees before/after price, books via WhatsApp. Needs MONTHLY_WHATSAPP on Railway.')+'</div>'
-    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/monthly" target="_blank">🗓️ '+(ar?'فتح موقع الشهري':'Open Monthly')+'</a><a class="btn ghost sm" href="/monthly/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="mCopyMonthly()">📋 '+(ar?'نسخ رابط /monthly':'Copy /monthly link')+'</button></div>'
+    +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'سكن شهري مفروش بسعر رسمي واضح، وتحقق مستقل من النشر والتوفر وتحويل واتساب.':'Furnished monthly stays with one official price, independent publication checks, availability health, and WhatsApp handoff.')+'</div>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/monthly" target="_blank">🗓️ '+(ar?'فتح موقع الشهري':'Open Monthly')+'</a><a class="btn ghost sm" href="/monthly/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="mOpenMonthlyOps()">'+(ar?'فتح جاهزية الشهري ونتائج الطلبات':'Open monthly readiness and lead outcomes')+'</button><button class="btn ghost sm" onclick="mCopyMonthly()">📋 '+(ar?'نسخ رابط /monthly':'Copy /monthly link')+'</button></div>'
     +'<div id="mAdmin" style="margin-top:12px"><div class="muted" style="font-size:11px">⏳</div></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
     +fbStatCard(ar?'إجمالي الوحدات':'Total listings',d.total||0,'var(--text)')
@@ -31517,21 +31524,13 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
     +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
   if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
   b.innerHTML=h; mAdminLoad(); }
-async function mAdminLoad(){ var ar=(L==='ar'); var el=document.getElementById('mAdmin'); if(!el) return; var d; try{ d=await api('/api/monthly/admin'); }catch(_){ d=null; } if(!d||!d.config){ el.innerHTML='<div class="muted" style="font-size:11px">⚠</div>'; return; } _gw.m=d; var c=d.config, p=c.promo||{};
-  var h='<div style="border-top:1px solid var(--border);padding-top:10px"><b style="font-size:12px">'+(ar?'إعدادات الخصم':'Discount settings')+'</b>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">'
-    +'<div><label class="muted" style="font-size:11px">'+(ar?'الخصم القياسي %':'Standard discount %')+'</label><input id="m_def" type="number" min="0" max="95" value="'+Math.round((c.default_pct||0)*100)+'" style="'+fbInp()+'"></div>'
-    +'<div><label class="muted" style="font-size:11px">'+(ar?'أقصى خصم (تلميح) %':'Max teaser %')+'</label><input id="m_ceil" type="number" min="0" max="95" value="'+Math.round((c.ceiling_pct||0)*100)+'" style="'+fbInp()+'"></div></div>'
-    +'<label class="muted" style="font-size:11px;display:block;margin-top:8px"><input type="checkbox" id="m_promo_on" '+(p.on?'checked':'')+'> '+(ar?'عرض موسمي مفعّل (يطلع شريط أعلى الموقع)':'Seasonal promo on (shows a ribbon)')+'</label>'
-    +'<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;margin-top:6px"><div><label class="muted" style="font-size:11px">'+(ar?'نسبة العرض %':'Promo %')+'</label><input id="m_promo_pct" type="number" min="0" max="95" value="'+Math.round((p.pct||0)*100)+'" style="'+fbInp()+'"></div><div><label class="muted" style="font-size:11px">'+(ar?'نص الشريط':'Ribbon label')+'</label><input id="m_promo_lab" value="'+esc(p.label_ar||'')+'" placeholder="'+(ar?'رمضان: خصم يصل ٣٠٪':'Ramadan: up to 30% off')+'" style="'+fbInp()+'"></div></div>'
-    +'<div style="margin-top:10px"><button class="btn primary sm" onclick="mAdminSave()">'+(ar?'حفظ إعدادات الشهري':'Save monthly settings')+'</button></div>'
-    +'<div style="margin-top:12px"><b style="font-size:12px">'+(ar?'إخفاء شقق من الشهري':'Hide apartments from Monthly')+'</b><div class="muted" style="font-size:10.5px;margin:3px 0 8px">'+(ar?'كل الشقق تظهر افتراضيًا. علّم اللي ما تبيها بالشهري.':'All show by default. Tick any to hide from Monthly.')+'</div><div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:9px;padding:6px">'+(d.listings||[]).map(function(x){ return '<label style="display:flex;gap:8px;align-items:center;font-size:11.5px;padding:4px 3px"><input type="checkbox" '+(x.hidden?'checked':'')+' onchange="mToggleHidden('+x.id+',this.checked)"><span>'+esc(x.name||('#'+x.id))+'</span></label>'; }).join('')+'</div></div></div>';
+async function mAdminLoad(){ var ar=(L==='ar'); var el=document.getElementById('mAdmin'); if(!el) return; var d; try{ d=await api('/api/monthly/admin'); }catch(_){ d=null; } if(!d||!d.config){ el.innerHTML='<div class="muted" style="font-size:11px">⚠</div>'; return; } _gw.m=d;
+  var h='<div style="border-top:1px solid var(--border);padding-top:10px"><b style="font-size:12px">'+(ar?'أهلية وحدات الشهري':'Monthly publication eligibility')+'</b>'
+    +'<div class="muted" style="font-size:10.5px;margin:3px 0 8px">'+(ar?'تُعرض الوحدة للعميل فقط بعد اجتياز فحوص الإعلان والمحتوى والسعر والتقويم. استخدم صفحة الجاهزية لمعرفة سبب أي حجب.':'A home reaches customers only after advertising, content, price, and calendar checks pass. Use the readiness page for every blocked reason.')+'</div>'
+    +'<div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:9px;padding:6px">'+(d.listings||[]).map(function(x){ return '<label style="display:flex;gap:8px;align-items:center;font-size:11.5px;padding:4px 3px"><input type="checkbox" '+(x.hidden?'checked':'')+' onchange="mToggleHidden('+x.id+',this.checked)"><span>'+esc(x.name||('#'+x.id))+'</span></label>'; }).join('')+'</div></div>';
   el.innerHTML=h; }
-async function mAdminSave(){ var ar=(L==='ar'); function v(id){ var e=document.getElementById(id); return e?e.value:''; }
-  var body={ default_pct:(parseFloat(v('m_def'))||0)/100, ceiling_pct:(parseFloat(v('m_ceil'))||0)/100,
-    promo:{ on:!!((document.getElementById('m_promo_on')||{}).checked), pct:(parseFloat(v('m_promo_pct'))||0)/100, label_ar:v('m_promo_lab'), label_en:'' } };
-  var r; try{ r=await post('/api/monthly/admin',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظت إعدادات الشهري ✓':'Saved ✓'); if(_gw.m)_gw.m.config=r.config; } else toast('⚠'); }
 async function mToggleHidden(id,hidden){ if(!_gw.m||!_gw.m.config){ return; } var arr=(_gw.m.config.hidden||[]).map(String); id=String(id); if(hidden){ if(arr.indexOf(id)<0)arr.push(id); } else { arr=arr.filter(function(x){return x!==id;}); } _gw.m.config.hidden=arr; try{ var r=await post('/api/monthly/admin',{hidden:arr}); if(r&&r.config)_gw.m.config=r.config; toast('✓'); }catch(_){ toast('⚠'); } }
+function mOpenMonthlyOps(){ var u='/monthly/ops', t=tok(); if(t)u+='?token='+encodeURIComponent(t); window.open(u,'_blank','noopener'); }
 function mCopyMonthly(){ var u=location.origin+'/monthly'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /monthly':'/monthly link copied'); }catch(e){ prompt('',u); } }
 async function gwListings(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/listings'); }catch(_){ d=null; } _gw.listings=(d&&d.listings)||[]; _gw.nbhds=(d&&d.neighborhoods)||[]; _gw.byId={}; _gw.listings.forEach(function(x){ _gw.byId[x.id]=x; });
   if(!_gw.listings.length){ b.innerHTML='<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه وحدات — اضغط «تحديث من Hostaway».':'No listings — press Sync.')+'<div style="margin-top:10px"><button class="btn primary sm" onclick="gwSync()">'+esc(t().gw_sync)+'</button></div></div>'; return; }
@@ -58975,6 +58974,55 @@ def _monthly_ops_gate(request):
     return None
 
 
+async def _handle_monthly_ops(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    denied = _monthly_ops_gate(request)
+    if denied is not None:
+        return denied
+    if _render_monthly_ops_page is None:
+        return _monthly_public_unavailable()
+    return web.Response(
+        text=_render_monthly_ops_page(),
+        content_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _handle_monthly_ops_css(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(os.path.dirname(__file__), "monthly_public", "static", "monthly_ops.css")
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="text/css",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+async def _handle_monthly_ops_js(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(os.path.dirname(__file__), "monthly_public", "static", "monthly_ops.js")
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="application/javascript",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 async def _api_monthly_v2_ops_health(request):
     blocked = _monthly_public_v2_gate()
     if blocked is not None:
@@ -59028,6 +59076,9 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/match", _api_monthly_v2_match)
     router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
     router.add_post("/api/monthly/event", _api_monthly_v2_event)
+    router.add_get("/monthly/ops", _handle_monthly_ops)
+    router.add_get(_MONTHLY_OPS_CSS_PATH, _handle_monthly_ops_css)
+    router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
     router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
     router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
     router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
