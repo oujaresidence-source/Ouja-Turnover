@@ -172,6 +172,12 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         ):
             self.assertIn(required, js)
 
+    def test_deep_link_opens_the_named_listing_and_survey_section(self):
+        js = JS_FILE.read_text("utf-8")
+        self.assertIn('params.get("id")', js)
+        self.assertIn('params.get("section")', js)
+        self.assertIn("STEPS.includes", js)
+
     def test_operations_page_links_to_listing_readiness_with_token_helper(self):
         from monthly_public.ops_page import render_monthly_ops_page
 

@@ -354,5 +354,15 @@
   }
 
   applyCopy(); bind();
-  loadRows().then(function () { document.documentElement.dataset.catalogReady = "complete"; }).catch(function (error) { document.documentElement.dataset.catalogReady = "error"; globalError(error); });
+  loadRows().then(function () {
+    document.documentElement.dataset.catalogReady = "complete";
+    const params = new URLSearchParams(window.location.search);
+    const listingId = params.get("id"), requestedSection = params.get("section");
+    if (listingId && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(listingId)) {
+      if (requestedSection && STEPS.includes(requestedSection)) state.step = requestedSection;
+      openListing(listingId).then(function () {
+        if (requestedSection && STEPS.includes(requestedSection)) { state.step = requestedSection; renderSurvey(); }
+      });
+    }
+  }).catch(function (error) { document.documentElement.dataset.catalogReady = "error"; globalError(error); });
 }());

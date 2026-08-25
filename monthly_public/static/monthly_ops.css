@@ -541,6 +541,13 @@ p {
   margin-block-end: 0;
   overflow-wrap: anywhere;
 }
+.issue-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--palm-900);
+  font-weight: 750;
+}
 
 .issue-id {
   direction: ltr;

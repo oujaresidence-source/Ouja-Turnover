@@ -58363,6 +58363,15 @@ if (_monthly_catalog_store is not None
         print("[monthly-catalog] service unavailable:", _mcat_service_err)
         _monthly_catalog_service = None
 
+if _monthly_public_app is not None:
+    if _monthly_catalog_service is not None:
+        _monthly_public_app.catalog_health_provider = _monthly_catalog_service.health
+    else:
+        _monthly_public_app.catalog_health_provider = lambda: {
+            "configured": False,
+            "write_probe": False,
+        }
+
 
 MONTHLY_HTML = r"""<!doctype html>
 <html lang="ar" dir="rtl">

@@ -27,11 +27,27 @@ _CALENDAR_READINESS_CODES = frozenset(
 )
 
 
+def _action_section(code: str) -> str:
+    if code in _CONTENT_CODES:
+        return "content"
+    if code in _LICENCE_CODES:
+        return "identity"
+    if code in _CALENDAR_READINESS_CODES or code.startswith(("price_", "rating_")):
+        return "sources"
+    if code in ("title_bedroom_conflict", "bedrooms_missing", "bathrooms_missing", "capacity_missing"):
+        return "space"
+    return "approval"
+
+
 def _issue(issue: Any, *, listing_id: Optional[str] = None, source: str = "publication") -> Dict[str, Any]:
     value = issue.as_dict()
     value["source"] = source
     if listing_id is not None:
         value["listing_id"] = listing_id
+        value["action_url"] = "/monthly/ops/listings?id=%s&section=%s" % (
+            listing_id,
+            _action_section(str(value.get("code") or "")),
+        )
     return value
 
 
@@ -41,6 +57,7 @@ def build_health(
     *,
     analytics: Any = None,
     lead_store: Any = None,
+    catalog: Any = None,
     now: Any = None,
 ) -> Dict[str, Any]:
     """Build one evidence-based status payload; readiness means no red blockers."""
@@ -104,6 +121,46 @@ def build_health(
 
     for blocker in settings.blockers:
         red.append(_issue(blocker, source="settings"))
+
+    catalog_health = {
+        "configured": False,
+        "approved_profiles": 0,
+        "drafts_waiting": 0,
+        "published_profiles": 0,
+        "profile_completion_average": 0,
+        "settings_source": None,
+        "settings_ready": False,
+        "active_destinations": 0,
+        "write_probe": False,
+        "journal_mode": None,
+    }
+    if isinstance(catalog, Mapping):
+        catalog_health["configured"] = catalog.get("configured", True) is True
+        for key in (
+            "approved_profiles",
+            "drafts_waiting",
+            "published_profiles",
+            "profile_completion_average",
+            "active_destinations",
+        ):
+            value = catalog.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                catalog_health[key] = value
+        catalog_health["settings_source"] = catalog.get("settings_source")
+        catalog_health["settings_ready"] = catalog.get("settings_ready") is True
+        catalog_health["write_probe"] = catalog.get("write_probe") is True
+        catalog_health["journal_mode"] = catalog.get("journal_mode")
+        if not catalog_health["configured"] or not catalog_health["write_probe"]:
+            red.append(
+                {
+                    "source": "catalog",
+                    "code": "catalog_store_unhealthy",
+                    "field": "catalog",
+                    "message_ar": "تخزين بيانات تجهيز الشقق غير سليم.",
+                    "message_en": "The listing-readiness store is unhealthy.",
+                    "action_url": "/monthly/ops/listings",
+                }
+            )
 
     if analytics is None:
         analytics_health = {
@@ -213,6 +270,7 @@ def build_health(
         "licence_expiry": licences,
         "analytics": analytics_health,
         "leads": lead_health,
+        "catalog": catalog_health,
         "red_blockers": red,
     }
     report["ready"] = not red

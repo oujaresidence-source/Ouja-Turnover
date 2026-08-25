@@ -156,11 +156,20 @@ class MonthlyOpsApp:
         try:
             current = self._public._now()
             settings, _places = self._public._configuration()
+            catalog = None
+            provider = getattr(self._public, "catalog_health_provider", None)
+            if callable(provider):
+                try:
+                    catalog = dict(provider())
+                    catalog.setdefault("configured", True)
+                except Exception:
+                    catalog = {"configured": True, "write_probe": False}
             return build_health(
                 self._public._generation(),
                 settings,
                 analytics=self._public.analytics_store,
                 lead_store=self._public.lead_store,
+                catalog=catalog,
                 now=current,
             )
         except Exception:
@@ -647,6 +656,7 @@ class MonthlyPublicApp:
         self.approved_places = self._prepare_places(approved_places)
         self.session_secret = session_secret
         self.clock = clock
+        self.catalog_health_provider = None
         self.ops = MonthlyOpsApp(self)
 
     @staticmethod

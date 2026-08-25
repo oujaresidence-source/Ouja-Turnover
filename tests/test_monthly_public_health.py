@@ -23,6 +23,49 @@ def source(listings):
 
 
 class HealthTests(unittest.TestCase):
+    def test_health_names_catalog_readiness_and_safe_action_links(self):
+        listing = valid_listing(content_verified=False)
+        generation = build_generation(source([listing]), valid_settings(), NOW)
+        catalog = {
+            "configured": True,
+            "approved_profiles": 12,
+            "drafts_waiting": 3,
+            "published_profiles": 9,
+            "profile_completion_average": 84.5,
+            "settings_source": "catalog_approved",
+            "settings_ready": True,
+            "active_destinations": 4,
+            "write_probe": True,
+            "journal_mode": "delete",
+        }
+
+        report = build_health(
+            generation, valid_settings(), catalog=catalog, now=NOW
+        )
+
+        self.assertEqual(report["catalog"]["approved_profiles"], 12)
+        self.assertEqual(report["catalog"]["drafts_waiting"], 3)
+        self.assertTrue(report["catalog"]["write_probe"])
+        issue = report["content_conflicts"]["1001"][0]
+        self.assertEqual(
+            issue["action_url"],
+            "/monthly/ops/listings?id=1001&section=content",
+        )
+
+    def test_unwritable_catalog_store_is_a_red_launch_blocker(self):
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        report = build_health(
+            generation,
+            valid_settings(),
+            catalog={"configured": True, "write_probe": False},
+            now=NOW,
+        )
+        self.assertIn(
+            "catalog_store_unhealthy",
+            {issue["code"] for issue in report["red_blockers"]},
+        )
+        self.assertFalse(report["ready"])
+
     def test_exact_counts_and_zero_red_blockers_are_ready(self):
         generation = build_generation(source([valid_listing(id=1001), valid_listing(id=1002, slug="ouja-1002")]), valid_settings(), NOW)
         with tempfile.TemporaryDirectory() as folder:

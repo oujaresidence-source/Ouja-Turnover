@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-ASSET_VERSION = "v20260825a"
+ASSET_VERSION = "v20260825b"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 

@@ -97,6 +97,9 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
             "information_reason", "alternative_listing_id", "lead_journey",
             "included", "utilities", "cleaning", "deposit", "payment_methods",
             "source_timestamps", "calendarRefresh", "engineRefresh",
+            "catalog", "approved_profiles", "drafts_waiting",
+            "active_destinations", "write_probe", "action_url",
+            "action.href = authPath(issue.action_url",
         )
         for name in required:
             with self.subTest(name=name):

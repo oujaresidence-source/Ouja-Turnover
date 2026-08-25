@@ -155,6 +155,11 @@
       contract_4_6_months: "مسار عقد 4–6 أشهر",
       analytics: "كتابة التحليلات",
       leads: "كتابة الطلبات",
+      catalogStore: "تخزين بيانات الشقق",
+      catalogApproved: "شقق معتمدة",
+      catalogDrafts: "مسودات تنتظر المراجعة",
+      catalogDestinations: "أماكن فعّالة",
+      reviewListing: "راجع بيانات الشقة",
       configured: "مهيأ",
       notConfigured: "غير مهيأ",
       healthy: "سليم وقابل للكتابة",
@@ -362,6 +367,11 @@
       contract_4_6_months: "4–6 month contract route",
       analytics: "Analytics writes",
       leads: "Lead-store writes",
+      catalogStore: "Apartment-data store",
+      catalogApproved: "Approved apartments",
+      catalogDrafts: "Drafts awaiting review",
+      catalogDestinations: "Active destinations",
+      reviewListing: "Review apartment data",
       configured: "Configured",
       notConfigured: "Not configured",
       healthy: "Healthy and writable",
@@ -639,6 +649,11 @@
     meta.append(node("span", "code-chip", String((issue && issue.code) || "unknown")));
     const message = issue && (state.lang === "ar" ? issue.message_ar : issue.message_en);
     row.append(meta, node("p", "issue-copy", message || text("unavailable")));
+    if (issue && /^\/monthly\/ops\/listings(?:\?id=[A-Za-z0-9_-]+&section=[a-z_]+)?$/.test(issue.action_url || "")) {
+      const action = node("a", "issue-action", text("reviewListing"));
+      action.href = authPath(issue.action_url, window.location.href);
+      row.append(action);
+    }
     return row;
   }
 
@@ -699,6 +714,11 @@
     const leads = data.leads || {};
     const leadsOk = leads.healthy === true && leads.write_probe === true;
     status(configuration, text("leads"), text(leadsOk ? "healthy" : "unhealthy"), leadsOk ? "ok" : "danger");
+    const catalog = data.catalog || {};
+    status(configuration, text("catalogStore"), text(catalog.write_probe ? "healthy" : "unhealthy"), catalog.write_probe ? "ok" : "danger");
+    status(configuration, text("catalogApproved"), number(catalog.approved_profiles || 0), "neutral");
+    status(configuration, text("catalogDrafts"), number(catalog.drafts_waiting || 0), catalog.drafts_waiting ? "warning" : "ok");
+    status(configuration, text("catalogDestinations"), number(catalog.active_destinations || 0), "neutral");
 
     const blockerList = document.getElementById("blockers-list");
     blockerList.replaceChildren();
