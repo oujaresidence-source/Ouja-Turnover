@@ -30,6 +30,14 @@ _SESSION_RE = re.compile(r"^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$")
 _REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 
 
+class HandoffValidationError(ValueError):
+    """A clear fail-closed error raised before an incomplete handoff is stored."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -78,7 +86,27 @@ def _number(value: Any, field: str, *, allow_zero: bool = False) -> Any:
     return value
 
 
-def _approved_request(value: Any) -> Dict[str, Any]:
+def _approved_place(value: Any, approved_places: Any) -> Dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ValueError("invalid place")
+    place_id = _text(value.get("id"), "place.id", 80)
+    if not isinstance(approved_places, Mapping) or place_id not in approved_places:
+        raise ValueError("place is not in the approved registry")
+    approved = approved_places[place_id]
+    if not isinstance(approved, Mapping):
+        raise ValueError("approved place registry entry is invalid")
+    kind = _choice(approved.get("kind"), PLACE_KINDS, "approved_places.kind")
+    if value.get("kind") != kind:
+        raise ValueError("place kind does not match the approved registry")
+    return {
+        "kind": kind,
+        "id": place_id,
+        "label_ar": _text(approved.get("label_ar"), "approved_places.label_ar", 120),
+        "label_en": _text(approved.get("label_en"), "approved_places.label_en", 120),
+    }
+
+
+def _approved_request(value: Any, approved_places: Any = None) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("request must be a mapping")
     safe: Dict[str, Any] = {}
@@ -101,14 +129,7 @@ def _approved_request(value: Any) -> Dict[str, Any]:
     if "duration_days" in value:
         safe["duration_days"] = _integer(value["duration_days"], 1, 366, "duration_days")
     if "place" in value:
-        place = value["place"]
-        if not isinstance(place, Mapping):
-            raise ValueError("invalid place")
-        safe["place"] = {
-            "kind": _choice(place.get("kind"), PLACE_KINDS, "place.kind"),
-            "id": _text(place.get("id"), "place.id", 80),
-            "label": _text(place.get("label"), "place.label", 120),
-        }
+        safe["place"] = _approved_place(value["place"], approved_places)
     return safe
 
 
@@ -246,13 +267,22 @@ class LeadStore:
             "lost_reason": row["lost_reason"],
         }
 
-    def create(self, session_id: str, listing_id: Any, request: Any, quote: Any, *, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
+    def create(
+        self,
+        session_id: str,
+        listing_id: Any,
+        request: Any,
+        quote: Any,
+        *,
+        approved_places: Any = None,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, Any]:
         if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
             raise ValueError("invalid anonymous session")
         listing = str(listing_id or "").strip()
         if not listing or len(listing) > 80:
             raise ValueError("invalid listing ID")
-        safe_request = _approved_request(request)
+        safe_request = _approved_request(request, approved_places)
         safe_quote = _approved_quote(quote)
         request_json = json.dumps(safe_request, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         quote_json = json.dumps(safe_quote, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -371,7 +401,7 @@ def _deposit_label(quote: Mapping[str, Any]) -> str:
     if not isinstance(deposit, Mapping):
         return "—"
     amount = deposit.get("amount_sar")
-    return "SAR %s — %s / %s" % (
+    return "SAR %s; %s / %s" % (
         _amount(amount) if amount is not None else "—",
         deposit.get("refund_ar") or "—",
         deposit.get("refund_en") or "—",
@@ -389,6 +419,75 @@ def _payment_labels(quote: Mapping[str, Any]) -> str:
     return ", ".join(value for value in labels if value) or "—"
 
 
+def _handoff_error(code: str, message: str) -> None:
+    raise HandoffValidationError(code, message)
+
+
+def _validate_handoff(
+    listing: Any,
+    request: Any,
+    quote: Any,
+    approved_places: Any,
+) -> None:
+    if not isinstance(listing, Mapping):
+        _handoff_error("listing_incomplete", "A complete published listing is required.")
+    for field in ("id", "name_ar", "name_en", "neighborhood_ar", "neighborhood_en"):
+        try:
+            _text(listing.get(field), "listing.%s" % field, 240)
+        except ValueError:
+            _handoff_error("listing_incomplete", "Listing ID, bilingual title, and bilingual neighborhood are required.")
+    try:
+        safe_request = _approved_request(request, approved_places)
+    except ValueError as error:
+        _handoff_error("request_invalid", str(error))
+    for field in ("purpose", "residents", "move_in"):
+        if field not in safe_request:
+            _handoff_error("request_incomplete", "Purpose, residents, and move-in date are required.")
+    if not any(field in safe_request for field in ("duration_months", "move_out")):
+        _handoff_error("request_incomplete", "A duration or move-out date is required.")
+    try:
+        safe_quote = _approved_quote(quote)
+    except ValueError as error:
+        _handoff_error("quote_invalid", str(error))
+    for field in ("monthly_rate_sar", "stay_total_sar", "move_in", "move_out"):
+        if field not in safe_quote:
+            _handoff_error("quote_incomplete", "The displayed monthly rate, total, and dates are required.")
+    if safe_quote.get("currency") != "SAR":
+        _handoff_error("quote_incomplete", "A complete SAR quote is required.")
+    if not any(field in safe_quote for field in ("months", "duration_days")):
+        _handoff_error("quote_incomplete", "The displayed quote duration is required.")
+    if safe_quote["move_in"] != safe_request["move_in"]:
+        _handoff_error("quote_mismatch", "The displayed quote must match the requested move-in date.")
+    if "duration_months" in safe_request:
+        if safe_quote.get("months") != safe_request["duration_months"]:
+            _handoff_error("quote_mismatch", "The displayed quote must match the requested duration.")
+        expected_total = safe_quote["monthly_rate_sar"] * safe_quote["months"]
+        if not math.isclose(float(safe_quote["stay_total_sar"]), float(expected_total)):
+            _handoff_error("quote_mismatch", "The displayed total must match the monthly rate and duration.")
+    elif safe_quote["move_out"] != safe_request.get("move_out"):
+        _handoff_error("quote_mismatch", "The displayed quote must match the requested move-out date.")
+    if "preliminary_contract" not in safe_quote or not all(
+        field in safe_quote for field in ("preliminary_label_ar", "preliminary_label_en")
+    ):
+        _handoff_error("terms_incomplete", "Complete contract-status terms are required.")
+    if not {"internet", "maintenance"}.issubset(set(safe_quote.get("included") or ())):
+        _handoff_error("terms_incomplete", "Internet and maintenance inclusion must be confirmed.")
+    utilities = safe_quote.get("utilities")
+    cleaning = safe_quote.get("cleaning")
+    deposit = safe_quote.get("deposit")
+    if not isinstance(utilities, Mapping) or not all(utilities.get(field) for field in ("mode", "label_ar", "label_en")):
+        _handoff_error("terms_incomplete", "Complete utility terms are required.")
+    if not isinstance(cleaning, Mapping) or not all(cleaning.get(field) for field in ("mode", "label_ar", "label_en")):
+        _handoff_error("terms_incomplete", "Complete cleaning terms are required.")
+    if cleaning["mode"] == "optional" and "amount_sar" not in cleaning:
+        _handoff_error("terms_incomplete", "Optional cleaning requires a displayed amount.")
+    if not isinstance(deposit, Mapping) or not all(field in deposit and deposit[field] not in (None, "") for field in ("amount_sar", "refund_ar", "refund_en")):
+        _handoff_error("terms_incomplete", "Complete deposit and refund terms are required.")
+    methods = safe_quote.get("payment_methods")
+    if not isinstance(methods, list) or not methods or any(not all(item.get(field) for field in ("ar", "en")) for item in methods):
+        _handoff_error("terms_incomplete", "At least one bilingual payment method is required.")
+
+
 def build_whatsapp_handoff(
     store: LeadStore,
     settings: MonthlySettings,
@@ -398,6 +497,7 @@ def build_whatsapp_handoff(
     quote: Mapping[str, Any],
     *,
     analytics: Any = None,
+    approved_places: Any = None,
     now: Optional[dt.datetime] = None,
 ) -> Dict[str, Any]:
     """Create an anonymous lead and a bilingual pre-filled WhatsApp URL."""
@@ -413,12 +513,24 @@ def build_whatsapp_handoff(
             "message_en": "WhatsApp handoff is blocked until Ouja's number is configured.",
             "response_window": window,
         }
+    _validate_handoff(listing, request, quote, approved_places)
     listing_id = str(listing.get("id") or "").strip()
-    lead = store.create(session_id, listing_id, request, quote, now=current)
+    lead = store.create(
+        session_id,
+        listing_id,
+        request,
+        quote,
+        approved_places=approved_places,
+        now=current,
+    )
     request = lead["request"]
     quote = lead["quote"]
     place = request.get("place") if isinstance(request.get("place"), Mapping) else {}
-    place_label = str(place.get("label") or listing.get("neighborhood_ar") or listing.get("neighborhood_en") or "—")
+    place_label = " / ".join(
+        str(place.get(field) or "").strip()
+        for field in ("label_ar", "label_en")
+        if place.get(field)
+    ) or "%s / %s" % (listing["neighborhood_ar"], listing["neighborhood_en"])
     neighborhood = " / ".join(
         value for value in (str(listing.get("neighborhood_ar") or "").strip(), str(listing.get("neighborhood_en") or "").strip()) if value
     ) or "—"
@@ -427,19 +539,23 @@ def build_whatsapp_handoff(
     duration_unit = "months / أشهر" if quote.get("months") or request.get("duration_months") else "days / أيام"
     move_in = quote.get("move_in") or request.get("move_in") or "—"
     move_out = quote.get("move_out") or request.get("move_out") or "—"
-    lines = (
+    lines = [
         "طلب سكن شهري جديد / New monthly-stay request",
         "الشقة / Listing: %s | %s | ID %s" % (listing.get("name_ar") or "—", listing.get("name_en") or "—", listing_id),
         "التواريخ / Dates: %s → %s (%s %s)" % (move_in, move_out, duration, duration_unit),
         "المقيمون / Residents: %s" % (request.get("residents") or "—"),
         "الغرض / Purpose: %s" % (request.get("purpose") or "—"),
-        "ترتيب النوم / Sleeping: %s" % (request.get("sleeping") or "—"),
-        "مرونة التواريخ / Date flexibility: %s" % (request.get("flexibility") or "—"),
+    ]
+    if request.get("sleeping"):
+        lines.append("ترتيب النوم / Sleeping: %s" % request["sleeping"])
+    if request.get("flexibility"):
+        lines.append("مرونة التواريخ / Date flexibility: %s" % request["flexibility"])
+    lines.extend([
         "الوجهة أو الحي المعتمد / Approved destination or neighborhood: %s | %s" % (place_label, neighborhood),
         "السعر الشهري المعروض / Displayed monthly price: SAR %s" % _amount(quote.get("monthly_rate_sar", "—")),
         "الإجمالي المعروض / Displayed total price: SAR %s" % _amount(quote.get("stay_total_sar", "—")),
         "المشمول / Included: %s" % included,
-        "المتغيرات / Variable items — utilities: %s; cleaning: %s" % (_term_labels(quote, "utilities"), _term_labels(quote, "cleaning")),
+        "المتغيرات / Variable items: utilities: %s; cleaning: %s" % (_term_labels(quote, "utilities"), _term_labels(quote, "cleaning")),
         "التأمين المعروض / Displayed deposit terms: %s" % _deposit_label(quote),
         "طرق الدفع المعروضة / Displayed payment methods: %s" % _payment_labels(quote),
         "نوع العقد / Contract status: %s" % (
@@ -450,7 +566,7 @@ def build_whatsapp_handoff(
         "مرجع الطلب / Lead reference: %s" % lead["reference"],
         "فضلاً أكدوا التوفر والإجمالي والتأمين وشروط العقد. / Please confirm availability, total, deposit, and contract terms.",
         "%s / %s" % (window["message_ar"], window["message_en"]),
-    )
+    ])
     message = "\n".join(lines)
     recorded = None
     if analytics is not None:

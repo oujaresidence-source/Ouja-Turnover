@@ -128,8 +128,16 @@ class AnalyticsStore:
         if not isinstance(session_id, str) or not session_id.startswith("anon_"):
             raise ValueError("invalid anonymous session")
         safe_context: Dict[str, Any] = {}
-        if isinstance(context, Mapping) and context.get("lost_reason") in LOST_REASONS:
+        if event == "lost":
+            if (
+                not isinstance(context, Mapping)
+                or set(context) != {"lost_reason"}
+                or context.get("lost_reason") not in LOST_REASONS
+            ):
+                raise ValueError("lost lifecycle event requires one controlled lost reason")
             safe_context["lost_reason"] = context["lost_reason"]
+        elif isinstance(context, Mapping) and "lost_reason" in context:
+            raise ValueError("lost reason is only valid for a lost lifecycle event")
         occurred = _as_datetime(now if now is not None else self.clock())
         payload = json.dumps(safe_context, sort_keys=True, separators=(",", ":"))
         with self._connection() as connection:

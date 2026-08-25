@@ -143,6 +143,39 @@ class AnalyticsStoreTests(unittest.TestCase):
                 "booked", self.session, reference, now=NOW + dt.timedelta(minutes=5)
             )
 
+    def test_lost_requires_controlled_reason_and_other_lifecycle_rejects_it(self):
+        reference = "OJM-20260825-ABC123"
+        with self.assertRaises(ValueError):
+            self.store.record_lifecycle(
+                "lead_created",
+                self.session,
+                reference,
+                context={"lost_reason": "price"},
+                now=NOW,
+            )
+        self.store.record_lifecycle("lead_created", self.session, reference, now=NOW)
+        with self.assertRaises(ValueError):
+            self.store.record_lifecycle(
+                "team_response",
+                self.session,
+                reference,
+                context={"lost_reason": "price"},
+                now=NOW + dt.timedelta(minutes=1),
+            )
+        self.store.record_lifecycle(
+            "team_response", self.session, reference, now=NOW + dt.timedelta(minutes=1)
+        )
+        for context in (None, {}, {"lost_reason": "free form"}):
+            with self.subTest(context=context):
+                with self.assertRaises(ValueError):
+                    self.store.record_lifecycle(
+                        "lost",
+                        self.session,
+                        reference,
+                        context=context,
+                        now=NOW + dt.timedelta(minutes=2),
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
