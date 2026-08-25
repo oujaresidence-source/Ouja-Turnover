@@ -64,7 +64,11 @@ def render_monthly_ops_page() -> str:
               <h2 id="inventory-title" data-copy="inventoryTitle">أهلية النشر والتغطية</h2>
               <p data-copy="inventoryDetail">الأرقام تحسب من المخزون المستلم نفسه، بدون مضاعفة أو تقدير.</p>
             </div>
-            <span id="last-refresh" class="time-note"></span>
+            <div id="source-refreshes" class="source-refreshes" aria-live="polite">
+              <span id="last-refresh" class="time-note"></span>
+              <span id="calendar-refresh" class="time-note"></span>
+              <span id="engine-refresh" class="time-note"></span>
+            </div>
           </div>
           <dl id="inventory-counts" class="metric-band"></dl>
           <div id="coverage-list" class="coverage-list"></div>

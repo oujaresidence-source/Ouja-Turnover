@@ -55,6 +55,7 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
         self.assertIn('id="lead-lookup"', html)
         self.assertIn('id="lead-detail"', html)
         self.assertIn('id="lead-journey"', html)
+        self.assertIn('id="source-refreshes"', html)
         self.assertIn('id="staff-action-form"', html)
         self.assertIn('id="prepared-alternative"', html)
         self.assertIn('id="copy-alternative"', html)
@@ -95,6 +96,7 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
             "confirm_request", "request_information", "prepare_alternative",
             "information_reason", "alternative_listing_id", "lead_journey",
             "included", "utilities", "cleaning", "deposit", "payment_methods",
+            "source_timestamps", "calendarRefresh", "engineRefresh",
         )
         for name in required:
             with self.subTest(name=name):
@@ -123,6 +125,8 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
         self.assertIn("@media (max-width: 540px)", css)
         self.assertIn("credentials: \"same-origin\"", js)
         self.assertIn("60000", js)
+        self.assertIn('requestData.place', js)
+        self.assertIn('item.place', js)
 
         checked = subprocess.run(
             ["node", "--check", str(JS_FILE)],
