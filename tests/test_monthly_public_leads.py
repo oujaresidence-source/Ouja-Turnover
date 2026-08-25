@@ -68,6 +68,29 @@ class LeadTests(unittest.TestCase):
         self.assertNotEqual(first["reference"], later["reference"])
         self.assertEqual(later_store.count(), 2)
 
+    def test_dedupe_never_merges_two_explicit_customer_journeys(self):
+        request = {"purpose": "work", "move_in": "2026-09-01", "duration_months": 2, "residents": 2}
+        quote = {"monthly_rate_sar": 12000, "stay_total_sar": 24000, "currency": "SAR"}
+
+        first = self.store.create(
+            self.session,
+            "1001",
+            request,
+            quote,
+            journey_id="journey_AAAAAAAAAAAAAAAAAAAAAA",
+        )
+        second = self.store.create(
+            self.session,
+            "1001",
+            request,
+            quote,
+            journey_id="journey_BBBBBBBBBBBBBBBBBBBBBB",
+        )
+
+        self.assertNotEqual(first["reference"], second["reference"])
+        self.assertEqual(first["journey_id"], "journey_AAAAAAAAAAAAAAAAAAAAAA")
+        self.assertEqual(second["journey_id"], "journey_BBBBBBBBBBBBBBBBBBBBBB")
+
     def test_team_response_records_only_an_explicit_discount_request_boolean(self):
         first = self.store.create(
             self.session,

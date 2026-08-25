@@ -21,7 +21,7 @@
   const PURPOSES = ["work", "family", "treatment", "visit"];
   const DURATION_BANDS = ["1_month", "2_3_months", "4_6_months"];
   const INFORMATION_REASONS = ["dates", "residents", "place", "contract_terms", "other"];
-  const ALTERNATIVE_REASONS = ["lower_price", "dates", "location", "space", "contract_terms"];
+  const ALTERNATIVE_REASONS = ["lower_price", "dates", "location", "space"];
   const STAFF_ACTIONS = ["confirm_request", "request_information", "prepare_alternative"];
   const REFERENCE = /^[A-Z0-9][A-Z0-9-]{5,63}$/;
 
@@ -116,7 +116,6 @@
       alternative_dates: "توفر التواريخ",
       alternative_location: "موقع أنسب",
       alternative_space: "مساحة أنسب",
-      alternative_contract_terms: "شروط العقد",
       chooseInformationReason: "اختر المعلومة المطلوبة",
       chooseAlternativeReason: "اختر سبب تجهيز البديل",
       invalidInformationReason: "اختر نوع المعلومة المطلوبة.",
@@ -323,7 +322,6 @@
       alternative_dates: "Date availability",
       alternative_location: "Better location",
       alternative_space: "Better space",
-      alternative_contract_terms: "Contract terms",
       chooseInformationReason: "Choose the information needed",
       chooseAlternativeReason: "Choose the alternative reason",
       invalidInformationReason: "Choose the information needed.",

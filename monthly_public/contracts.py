@@ -69,6 +69,7 @@ _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _PLACE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _LEAD_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
+_JOURNEY_RE = re.compile(r"^journey_[A-Za-z0-9_-]{22,64}$")
 _ANON_SESSION_RE = re.compile(
     r"^anon_([A-Za-z0-9_-]{32})\.([A-Za-z0-9_-]{43})$"
 )
@@ -645,6 +646,18 @@ def _event_context(
     # Unknown context is dropped rather than stored.  This intentionally removes
     # UTM values, names, phone numbers, message bodies, and arbitrary free text.
     safe: Dict[str, Any] = {}
+    if data.get("journey_id") not in (None, ""):
+        journey_id = _required_text(
+            data["journey_id"], "context.journey_id", max_length=72
+        )
+        if not _JOURNEY_RE.fullmatch(journey_id):
+            raise _error(
+                "context.journey_id",
+                "invalid_format",
+                "معرّف الرحلة غير صحيح.",
+                "The journey correlation ID is invalid.",
+            )
+        safe["journey_id"] = journey_id
     if data.get("language") not in (None, ""):
         safe["language"] = _choice(data["language"], "context.language", LANGUAGES)
     if data.get("device_class") not in (None, ""):

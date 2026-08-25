@@ -425,6 +425,12 @@ class MonthlyOpsApp:
                 quote = quote_for(result.listing, _pricing_request(request), current)
                 if quote is None:
                     return _error("alternative_price_missing", "السعر الرسمي للبديل غير متاح للتواريخ المحفوظة.", "The alternative's official price is unavailable for the saved dates.", field="alternative_listing_id")
+                original = None
+                original_listing_id = str(lead.get("listing_id") or "").strip()
+                if original_listing_id:
+                    original = self._public._find(
+                        {"listing_id": original_listing_id}, generation
+                    )
                 if reason == "lower_price":
                     original_rate = (lead.get("quote") or {}).get("monthly_rate_sar")
                     if (
@@ -438,13 +444,84 @@ class MonthlyOpsApp:
                             "The alternative's official rate is not lower than the saved lead rate.",
                             field="alternative_listing_id",
                         )
+                elif reason == "dates":
+                    if original is None or _availability(original, request) == "available":
+                        return _error(
+                            "alternative_dates_not_better",
+                            "لا توجد بيانات موثقة تثبت أن البديل أفضل في التوفر.",
+                            "Verified data does not show better date availability for this alternative.",
+                            field="alternative_listing_id",
+                        )
+                elif reason == "space":
+                    if original is None:
+                        better_space = False
+                    else:
+                        better_space = any(
+                            not isinstance(result.listing.get(field), bool)
+                            and not isinstance(original.listing.get(field), bool)
+                            and isinstance(result.listing.get(field), (int, float))
+                            and isinstance(original.listing.get(field), (int, float))
+                            and result.listing[field] > original.listing[field]
+                            for field in (
+                                "capacity",
+                                "bedrooms",
+                                "beds_count",
+                                "floor_area_sqm",
+                            )
+                        )
+                    if not better_space:
+                        return _error(
+                            "alternative_space_not_better",
+                            "لا توجد بيانات مساحة موثقة تثبت أن البديل أوسع.",
+                            "Verified space facts do not show that this alternative is larger.",
+                            field="alternative_listing_id",
+                        )
+                elif reason == "location":
+                    place = request.get("place")
+                    better_location = False
+                    if original is not None and isinstance(place, Mapping):
+                        if place.get("kind") == "neighborhood":
+                            better_location = (
+                                result.listing.get("neighborhood") == place.get("id")
+                                and original.listing.get("neighborhood") != place.get("id")
+                            )
+                        elif place.get("kind") == "destination":
+                            destination = self._public.approved_places.get(
+                                str(place.get("id") or "")
+                            )
+                            first_coordinates = original.listing.get("coordinates")
+                            second_coordinates = result.listing.get("coordinates")
+                            if (
+                                isinstance(destination, Mapping)
+                                and destination.get("verified") is True
+                                and destination.get("source")
+                                and isinstance(first_coordinates, Mapping)
+                                and first_coordinates.get("verified") is True
+                                and first_coordinates.get("source")
+                                and isinstance(second_coordinates, Mapping)
+                                and second_coordinates.get("verified") is True
+                                and second_coordinates.get("source")
+                            ):
+                                first_distance = _distance_km(first_coordinates, destination)
+                                second_distance = _distance_km(second_coordinates, destination)
+                                better_location = (
+                                    first_distance is not None
+                                    and second_distance is not None
+                                    and second_distance < first_distance
+                                )
+                    if not better_location:
+                        return _error(
+                            "alternative_location_not_better",
+                            "لا توجد بيانات موقع موثقة تثبت أن البديل أقرب.",
+                            "Verified location data does not show that this alternative is closer.",
+                            field="alternative_listing_id",
+                        )
                 prepared = self._prepared_alternative(reference, result, reason, quote)
                 values.update({
                     "alternative_listing_id": listing_id,
                     "quote": quote,
                 })
             stored = self._public.lead_store.add_action(reference, action, **values)
-            recorded = self._record_lifecycle("team_response", stored["lead"])
             response = {
                 "ok": True,
                 "action": {
@@ -455,7 +532,7 @@ class MonthlyOpsApp:
                     "created_at": stored["action"].get("created_at"),
                 },
                 "lead": self._safe_state(stored["lead"]),
-                "analytics_recorded": recorded,
+                "analytics_recorded": False,
             }
             if prepared is not None:
                 response["prepared_alternative"] = prepared
@@ -896,7 +973,7 @@ class MonthlyPublicApp:
                     "صيغة الطلب غير صحيحة.",
                     "The request format is invalid.",
                 )
-            unknown = sorted(set(value) - {"session_id", "listing_id", "general_help", "request", "lang"})
+            unknown = sorted(set(value) - {"session_id", "journey_id", "listing_id", "general_help", "request", "lang"})
             if unknown:
                 raise ContractError(
                     unknown[0],
@@ -905,11 +982,21 @@ class MonthlyPublicApp:
                     "The request contains an unsupported field.",
                 )
             language = _language(value.get("lang"))
-            session_id = parse_event(
-                {"event": "whatsapp_click", "session_id": value.get("session_id")},
+            session_event = parse_event(
+                {
+                    "event": "whatsapp_click",
+                    "session_id": value.get("session_id"),
+                    "context": (
+                        {"journey_id": value.get("journey_id")}
+                        if value.get("journey_id") not in (None, "")
+                        else {}
+                    ),
+                },
                 session_secret=self.session_secret,
                 allowed_place_ids=self._place_registry(generation),
-            )["session_id"]
+            )
+            session_id = session_event["session_id"]
+            journey_id = session_event["context"].get("journey_id")
             request = self._canonical_request(
                 parse_match_request(value.get("request")), generation
             )
@@ -956,6 +1043,7 @@ class MonthlyPublicApp:
                     request,
                     analytics=self.analytics_store,
                     approved_places=self._place_registry(generation),
+                    journey_id=journey_id,
                     now=current,
                 )
                 if handoff.get("ok") is False:
@@ -1014,6 +1102,7 @@ class MonthlyPublicApp:
                 quote,
                 analytics=self.analytics_store,
                 approved_places=self._place_registry(generation),
+                journey_id=journey_id,
                 now=current,
             )
             if handoff.get("ok") is False:

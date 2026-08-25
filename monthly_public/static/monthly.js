@@ -336,6 +336,7 @@
   ];
   const STORAGE_KEY = "ouja_monthly_anonymous_state_v2";
   const SESSION_TOKEN_RE = /^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/;
+  const JOURNEY_ID_RE = /^journey_[A-Za-z0-9_-]{22,64}$/;
   const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
   const ENDPOINTS = {
     config: "/api/monthly/config",
@@ -349,6 +350,7 @@
     lang: "ar",
     page: { route: "home", slug: null, listing_id: null },
     config: null,
+    journeyId: null,
     matcher: null,
     request: null,
     listingRequest: {},
@@ -677,6 +679,21 @@
     return "desktop";
   }
 
+  function createJourneyId() {
+    if (typeof crypto === "undefined" || typeof crypto.getRandomValues !== "function" || typeof btoa !== "function") return null;
+    const bytes = new Uint8Array(18);
+    crypto.getRandomValues(bytes);
+    let binary = "";
+    bytes.forEach(function (value) { binary += String.fromCharCode(value); });
+    return "journey_" + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function startJourney() {
+    const created = createJourneyId();
+    if (JOURNEY_ID_RE.test(created || "")) runtime.journeyId = created;
+    persistState();
+  }
+
   function sessionPayload() {
     try {
       return JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}");
@@ -690,6 +707,7 @@
     const state = {
       lang: runtime.lang,
       session_id: runtime.config && runtime.config.session_id,
+      journey_id: runtime.journeyId,
       matcher: runtime.matcher,
       request: runtime.request,
       listing_request: runtime.listingRequest,
@@ -770,7 +788,9 @@
   }
 
   function safeEventContext(context) {
-    return Object.assign({ language: runtime.lang, device_class: deviceClass() }, context || {});
+    const base = { language: runtime.lang, device_class: deviceClass() };
+    if (JOURNEY_ID_RE.test(runtime.journeyId || "")) base.journey_id = runtime.journeyId;
+    return Object.assign(base, context || {});
   }
 
   function track(event, context) {
@@ -886,7 +906,11 @@
     }
     runtime.page = page;
     window.history.pushState(page, "", path);
-    if (entryRoute) track("entry_route_choice", { entry_route: entryRoute });
+    if (entryRoute) {
+      startJourney();
+      track("entry_route_choice", { entry_route: entryRoute });
+      if (entryRoute === "guided") track("matcher_start", { entry_route: "guided" });
+    }
     loadRoute(true);
   }
 
@@ -948,7 +972,6 @@
       runtime.impressedListingIds = new Set();
       runtime.recommendationContext = null;
       persistState();
-      track("matcher_start", { entry_route: "guided" });
       navigate({ route: "match", slug: null, listing_id: null }, "/monthly/match", "guided");
     });
     guided.appendChild(svgIcon("arrow"));
@@ -1899,6 +1922,7 @@
       const handoff = await withSessionRetry(function (activeSessionId) {
         return postJSON(ENDPOINTS.lead, {
           session_id: activeSessionId,
+          journey_id: runtime.journeyId,
           listing_id: String(listing.id),
           request: runtime.listingRequest,
           lang: runtime.lang
@@ -1923,6 +1947,7 @@
       const handoff = await withSessionRetry(function (activeSessionId) {
         return postJSON(ENDPOINTS.lead, {
           session_id: activeSessionId,
+          journey_id: runtime.journeyId,
           general_help: true,
           request: runtime.request,
           lang: runtime.lang
@@ -2024,6 +2049,7 @@
     runtime.page = Object.assign(routeFromLocation(), parsePageState());
     const saved = sessionPayload();
     runtime.lang = saved.lang === "en" ? "en" : "ar";
+    runtime.journeyId = JOURNEY_ID_RE.test(saved.journey_id || "") ? saved.journey_id : createJourneyId();
     runtime.matcher = initialMatcherState(saved.matcher);
     runtime.request = saved.request || null;
     runtime.listingRequest = saved.listing_request && typeof saved.listing_request === "object" ? saved.listing_request : {};

@@ -295,6 +295,102 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(linked[0]["context"], {"listing_id": "1001"})
         self.assertEqual(linked[1]["context"], {})
 
+    def test_lead_journeys_use_explicit_correlation_when_tabs_interleave(self):
+        first_journey = "journey_AAAAAAAAAAAAAAAAAAAAAA"
+        second_journey = "journey_BBBBBBBBBBBBBBBBBBBBBB"
+        for journey_id, listing_id in (
+            (first_journey, "1001"),
+            (second_journey, "1002"),
+        ):
+            self.store.record(
+                {
+                    "event": "entry_route_choice",
+                    "session_id": self.session,
+                    "context": {"entry_route": "guided", "journey_id": journey_id},
+                },
+                session_secret=SECRET,
+                now=NOW,
+            )
+            self.store.record(
+                {
+                    "event": "listing_view",
+                    "session_id": self.session,
+                    "context": {"listing_id": listing_id, "journey_id": journey_id},
+                },
+                session_secret=SECRET,
+                now=NOW,
+            )
+
+        self.store.record_lead_creation(
+            self.session,
+            "OJM-20260825-FIRST",
+            listing_id="1001",
+            journey_id=first_journey,
+            now=NOW,
+        )
+        self.store.record_lead_creation(
+            self.session,
+            "OJM-20260825-SECOND",
+            listing_id="1002",
+            journey_id=second_journey,
+            now=NOW,
+        )
+
+        first = self.store.lead_journey(self.session, "OJM-20260825-FIRST")
+        second = self.store.lead_journey(self.session, "OJM-20260825-SECOND")
+        self.assertEqual(
+            [row.get("listing_id") for row in first if row["event"] == "listing_view"],
+            ["1001"],
+        )
+        self.assertEqual(
+            [row.get("listing_id") for row in second if row["event"] == "listing_view"],
+            ["1002"],
+        )
+        self.assertNotIn("journey_id", repr(first))
+        self.assertNotIn("journey_id", repr(second))
+
+    def test_two_leads_in_one_journey_keep_their_trusted_conversion_separate(self):
+        journey_id = "journey_AAAAAAAAAAAAAAAAAAAAAA"
+        first_reference = "OJM-20260825-FIRST"
+        second_reference = "OJM-20260825-SECOND"
+        self.store.record(
+            {
+                "event": "listing_view",
+                "session_id": self.session,
+                "context": {"listing_id": "1001", "journey_id": journey_id},
+            },
+            session_secret=SECRET,
+            now=NOW,
+        )
+        self.store.record_lead_creation(
+            self.session,
+            first_reference,
+            listing_id="1001",
+            journey_id=journey_id,
+            now=NOW,
+        )
+        self.store.record(
+            {
+                "event": "listing_view",
+                "session_id": self.session,
+                "context": {"listing_id": "1002", "journey_id": journey_id},
+            },
+            session_secret=SECRET,
+            now=NOW,
+        )
+        self.store.record_lead_creation(
+            self.session,
+            second_reference,
+            listing_id="1002",
+            journey_id=journey_id,
+            now=NOW,
+        )
+
+        second = self.store.lead_journey(self.session, second_reference)
+
+        clicks = [row.get("listing_id") for row in second if row["event"] == "whatsapp_click"]
+        self.assertEqual(clicks, ["1002"])
+
     def test_lost_requires_controlled_reason_and_other_lifecycle_rejects_it(self):
         reference = "OJM-20260825-ABC123"
         with self.assertRaises(ValueError):
