@@ -5,6 +5,7 @@
   const STEPS = ["identity", "space", "location", "content", "terms", "sources", "approval"];
   const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
   const PURPOSES = ["work", "family", "treatment", "visit"];
+  const PLACE_CATEGORIES = ["business_hubs", "hospitals", "family_retail", "riyadh_season", "events"];
   const DAY_LABELS = {
     ar: { monday: "الاثنين", tuesday: "الثلاثاء", wednesday: "الأربعاء", thursday: "الخميس", friday: "الجمعة", saturday: "السبت", sunday: "الأحد" },
     en: { monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday" }
@@ -104,6 +105,23 @@
     if (/^(short_|content_verified|structured\.)/.test(value)) return "content";
     if (/^commercial_terms\./.test(value)) return "terms";
     return null;
+  }
+
+  function summarizePlaces(rows) {
+    const categories = {}, allowed = new Set(PLACE_CATEGORIES);
+    Object.keys(rows && typeof rows === "object" ? rows : {}).forEach(function (key) {
+      const row = rows[key], approved = row && row.approved;
+      const category = approved && approved.category_id;
+      if (!row || row.active !== true || !approved || !allowed.has(category)) return;
+      categories[category] = (categories[category] || 0) + 1;
+    });
+    return { total: Object.values(categories).reduce(function (sum, count) { return sum + count; }, 0), categories: categories };
+  }
+
+  function formatDistance(value, lang) {
+    const distance = Number(value);
+    if (!Number.isFinite(distance) || distance < 0) return "";
+    return distance.toFixed(1) + (lang === "en" ? " km straight-line" : " كم بخط مستقيم");
   }
 
   function translatedDay(day, lang) {
@@ -325,7 +343,7 @@
     });
   }
 
-  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, profileReadiness, completionPercent, translatedBlocker, issueFieldLabel, fieldStep, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
+  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, profileReadiness, completionPercent, translatedBlocker, issueFieldLabel, fieldStep, summarizePlaces, formatDistance, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (typeof document === "undefined") return;
 
@@ -341,7 +359,8 @@
     priceMonths: "أشهر السعر الرسمي", calendar: "التقويم", rating: "التقييم الموثق", licence: "معلومات الإعلان", ready: "جاهز", missing: "ناقص", staff: "بيانات تحتاج إكمال", background: "عوائق المصدر الحي", none: "لا توجد عوائق حالياً.",
     saved: "حُفظت المسودة.", approval_published: "تم اعتماد الشقة ونشر النسخة الآمنة.", approval_blocked: "تم اعتماد الشقة، لكنها غير منشورة حتى تُحل عوائق المصدر.", approval_pending: "تم اعتماد الشقة، وتحديث الموقع بانتظار دورة التحديث التالية.", approval_failed: "تم اعتماد الشقة، لكن تحديث الموقع لم ينجح. النسخة السابقة ما زالت آمنة.", conflict: "حفظ شخص آخر نسخة أحدث. حمّلنا رقم النسخة الأحدث وأبقينا تعديلاتك في الحقول للمراجعة وإعادة الحفظ.", conflictCompare: "قارن التغييرات قبل إعادة الحفظ", serverVersion: "نسخة الفريق المحفوظة", yourVersion: "تعديلاتك الحالية", invalid: "راجع الحقل المحدد وأكمل البيانات المطلوبة.", unauthorized: "انتهت صلاحية الدخول. افتح الصفحة من لوحة عوجا مرة أخرى.", forbidden: "صلاحيتك لا تسمح بالتعديل.", service: "الخدمة غير متاحة مؤقتاً، والبيانات المعتمدة لم تتأثر.",
     whatsapp: "رقم واتساب بصيغة دولية", timezone: "المنطقة الزمنية", workingHours: "أوقات الرد", from: "من", to: "إلى", internetIncluded: "أؤكد أن الإنترنت مشمول", maintenanceIncluded: "أؤكد أن الصيانة مشمولة", deposit: "مبلغ التأمين (ر.س)", refund_ar: "شروط الاسترداد بالعربي", refund_en: "شروط الاسترداد بالإنجليزي", payment_ar: "طريقة الدفع بالعربي", payment_en: "طريقة الدفع بالإنجليزي", addPayment: "إضافة طريقة دفع", longRoute: "مسار مراجعة 4–6 أشهر", settingsSaved: "حُفظت مسودة الإعدادات.", settingsApproved: "تم اعتماد الإعدادات.",
-    place_id: "معرّف داخلي للمكان", place_ar: "اسم المكان بالعربي", place_en: "اسم المكان بالإنجليزي", purposes: "أغراض الإقامة", place_coordinates: "إحداثيات المكان أو رابط Google Maps", source_note: "دليل التحقق المختصر", activePlace: "فعّال للموقع", edit: "تعديل", placeSaved: "حُفظت مسودة المكان.", placeApproved: "تم اعتماد المكان.", noPlaces: "لا توجد أماكن معتمدة بعد.", work: "عمل أو انتقال", family: "عائلة", treatment: "علاج", visit: "زيارة", refreshOk: "تم طلب تحديث النسخة الآمنة."
+    place_id: "معرّف داخلي للمكان", place_ar: "اسم المكان بالعربي", place_en: "اسم المكان بالإنجليزي", purposes: "أغراض الإقامة", place_coordinates: "إحداثيات المكان أو رابط Google Maps", source_note: "دليل التحقق المختصر", activePlace: "فعّال للموقع", edit: "تعديل", placeSaved: "حُفظت مسودة المكان.", placeApproved: "تم اعتماد المكان.", noPlaces: "لا توجد أماكن معتمدة بعد.", work: "عمل أو انتقال", family: "عائلة", treatment: "علاج", visit: "زيارة", refreshOk: "تم طلب تحديث النسخة الآمنة.",
+    approvedDestinations: "مكان معتمد", business_hubs: "مراكز الأعمال", hospitals: "المستشفيات", family_retail: "وجهات العائلة والتسوق", riyadh_season: "موسم الرياض", events: "الفعاليات والمعارض", nearestPlaces: "أقرب 5 أماكن معتمدة", nearestDetail: "المسافة محسوبة بخط مستقيم بين نقطتين موثقتين، وليست وقت قيادة.", nearbyNoPin: "وثّق إحداثيات الشقة أولًا حتى نحسب أقرب الأماكن بدون تخمين.", nearbyEmpty: "لا توجد أماكن معتمدة يمكن حساب المسافة لها حاليًا.", straightLine: "بخط مستقيم", openMap: "فتح الخريطة", coordinateProof: "مصدر الإحداثيات", officialProof: "المصدر الرسمي", verifiedOn: "تم التحقق", reviewEvery: "المراجعة"
   };
   const EN = Object.assign({}, AR, {
     identity: "Identity and photos", space: "Space and facts", location: "Location", content: "Arabic and English content", terms: "Monthly terms", sources: "Source readiness", approval: "Review and approval",
@@ -351,7 +370,8 @@
     utilities: "Utilities", cleaning: "Cleaning", included: "Included", variable: "Variable", excluded: "Excluded", optional: "Optional", unavailable: "Unavailable", amount: "Amount in SAR", label_ar: "Arabic explanation", label_en: "English explanation", priceMonths: "Official-price months", calendar: "Calendar", rating: "Verified rating", licence: "Advertising information", ready: "Ready", missing: "Missing", staff: "Staff data to complete", background: "Live-source blockers", none: "No current blockers.",
     saved: "Draft saved.", approval_published: "The apartment was approved and the safe snapshot was published.", approval_blocked: "The apartment was approved but is not published until source blockers are resolved.", approval_pending: "The apartment was approved. Website refresh is waiting for the next refresh pass.", approval_failed: "The apartment was approved, but website refresh failed. The previous safe snapshot remains active.", conflict: "Someone saved a newer version. The latest revision is loaded and your edits remain in the fields for review and retry.", conflictCompare: "Compare changes before saving again", serverVersion: "Saved team version", yourVersion: "Your current edits", invalid: "Review the relevant field and complete the required data.", unauthorized: "Your access expired. Reopen this page from the Ouja dashboard.", forbidden: "Your role cannot make this change.", service: "The service is temporarily unavailable. Approved data was not changed.",
     whatsapp: "WhatsApp number in international format", timezone: "Timezone", workingHours: "Response hours", from: "From", to: "To", internetIncluded: "I confirm internet is included", maintenanceIncluded: "I confirm maintenance is included", deposit: "Deposit (SAR)", refund_ar: "Arabic refund terms", refund_en: "English refund terms", payment_ar: "Arabic payment method", payment_en: "English payment method", addPayment: "Add payment method", longRoute: "4–6 month review route", settingsSaved: "Settings draft saved.", settingsApproved: "Settings approved.",
-    place_id: "Internal place ID", place_ar: "Arabic place name", place_en: "English place name", purposes: "Stay purposes", place_coordinates: "Place coordinates or Google Maps URL", source_note: "Short verification evidence", activePlace: "Active on website", edit: "Edit", placeSaved: "Place draft saved.", placeApproved: "Place approved.", noPlaces: "No approved places yet.", work: "Work or relocation", family: "Family", treatment: "Treatment", visit: "Visit", refreshOk: "Safe snapshot refresh requested."
+    place_id: "Internal place ID", place_ar: "Arabic place name", place_en: "English place name", purposes: "Stay purposes", place_coordinates: "Place coordinates or Google Maps URL", source_note: "Short verification evidence", activePlace: "Active on website", edit: "Edit", placeSaved: "Place draft saved.", placeApproved: "Place approved.", noPlaces: "No approved places yet.", work: "Work or relocation", family: "Family", treatment: "Treatment", visit: "Visit", refreshOk: "Safe snapshot refresh requested.",
+    approvedDestinations: "approved destinations", business_hubs: "Business hubs", hospitals: "Hospitals", family_retail: "Family retail", riyadh_season: "Riyadh Season", events: "Events and exhibitions", nearestPlaces: "Nearest 5 approved places", nearestDetail: "Distance is straight-line between two verified pins, not driving time.", nearbyNoPin: "Verify the apartment pin first so nearby places can be calculated without guessing.", nearbyEmpty: "No approved destinations can be measured right now.", straightLine: "straight-line", openMap: "Open map", coordinateProof: "Coordinate source", officialProof: "Official source", verifiedOn: "Verified", reviewEvery: "Review cadence"
   });
   const COPY = {
     ar: { skipLink: "انتقل إلى المحتوى", productName: "بيانات الشقق", dashboard: "لوحة عوجا", contextLabel: "السكن الشهري", pageTitle: "جهّز كل شقة للنشر من مكان واحد", pageDetail: "راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.", refreshData: "تحديث البيانات", apartmentsTab: "الشقق", settingsTab: "الإعدادات المشتركة", placesTab: "الأماكن المعتمدة", loadFailed: "تعذر تحميل بيانات الشقق", loadFailedDetail: "حاول التحديث، ولن تتأثر البيانات المعتمدة الحالية.", globalTitle: "إعدادات تُكتب مرة واحدة", globalDetail: "رقم التواصل، أوقات الرد، التأمين، طرق الدفع، ومسار الإقامات من أربعة إلى ستة أشهر.", saveDraft: "حفظ المسودة", approveSettings: "اعتماد الإعدادات", portfolioTitle: "الشقق المستلمة", portfolioDetail: "صف واحد لكل شقة فعلية، مع الناقص والخطوة التالية.", searchLabel: "ابحث برقم الشقة أو الاسم", searchPlaceholder: "مثال: 101 أو الملقا", statusLabel: "الحالة", allStatuses: "كل الحالات", needsReview: "تحتاج مراجعة", readyApproval: "جاهزة للاعتماد", published: "منشورة", sourceBlocked: "محجوبة من مصدر حي", blockerLabel: "الناقص", allBlockers: "كل الأسباب", licence: "معلومات الإعلان", price: "السعر الرسمي", calendar: "التقويم", content: "المحتوى", backToApartments: "العودة للشقق", surveyTitle: "مراجعة الشقة", previewReadiness: "معاينة الجاهزية", approveAndRefresh: "اعتماد وتحديث الموقع", placesTitle: "الأماكن المهمة للعملاء", placesDetail: "أدخل المكان مرة واحدة، ولا يظهر القرب إلا بعد اعتماد إحداثيات الطرفين.", addPlace: "إضافة مكان", approvePlace: "اعتماد المكان" },
@@ -370,6 +390,14 @@
     if (options.checked !== undefined) result.checked = Boolean(options.checked);
     if (options.readOnly) result.readOnly = true;
     return result;
+  }
+  function safeExternalLink(url, label) {
+    if (typeof url !== "string" || !/^https:\/\//.test(url)) return null;
+    const link = node("a", { text: label });
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    return link;
   }
   function empty(root) { while (root && root.firstChild) root.removeChild(root.firstChild); }
   function add(root) { for (let index = 1; index < arguments.length; index += 1) if (arguments[index]) root.appendChild(arguments[index]); return root; }
@@ -493,7 +521,40 @@
   }
   function renderLocation(root) {
     const p = state.profile, part = section("location", state.lang === "ar" ? "لا نظهر وقت وصول أو قرب إلا بعد التحقق من إحداثيات الشقة والمكان." : "Travel time or proximity appears only after both pins are verified."), form = grid();
-    add(form, field(text("neighborhood"), "neighborhood", p.neighborhood), field(text("neighborhood_ar"), "neighborhood_ar", p.neighborhood_ar), field(text("neighborhood_en"), "neighborhood_en", p.neighborhood_en), check(text("neighborhood_verified"), "neighborhood_verified", p.neighborhood_verified === true), field(text("coordinates"), "coordinates", coordinate(p.coordinates), { full: true })); part.appendChild(form); root.appendChild(part);
+    add(form, field(text("neighborhood"), "neighborhood", p.neighborhood), field(text("neighborhood_ar"), "neighborhood_ar", p.neighborhood_ar), field(text("neighborhood_en"), "neighborhood_en", p.neighborhood_en), check(text("neighborhood_verified"), "neighborhood_verified", p.neighborhood_verified === true), field(text("coordinates"), "coordinates", coordinate(p.coordinates), { full: true })); part.appendChild(form); part.appendChild(renderNearestPlaces()); root.appendChild(part);
+  }
+  function renderNearestPlaces() {
+    const panel = node("section", { className: "nearest-places" });
+    add(panel, node("h4", { text: text("nearestPlaces") }), node("p", { className: "nearest-detail", text: text("nearestDetail") }));
+    const coordinates = state.profile && state.profile.coordinates;
+    if (!coordinates || typeof coordinates !== "object" || coordinates.verified !== true) {
+      panel.appendChild(node("p", { className: "nearest-empty", text: text("nearbyNoPin") }));
+      return panel;
+    }
+    const places = state.listing && Array.isArray(state.listing.nearest_places) ? state.listing.nearest_places : [];
+    if (!places.length) {
+      panel.appendChild(node("p", { className: "nearest-empty", text: text("nearbyEmpty") }));
+      return panel;
+    }
+    const list = node("div", { className: "nearest-place-list" });
+    places.slice(0, 5).forEach(function (place) {
+      const row = node("article", { className: "nearest-place-row" });
+      const identity = node("div", { className: "nearest-place-identity" });
+      add(
+        identity,
+        node("strong", { text: place[state.lang === "ar" ? "label_ar" : "label_en"] || place.id }),
+        node("span", { text: place[state.lang === "ar" ? "category_ar" : "category_en"] || text(place.category_id) })
+      );
+      const evidence = node("div", { className: "nearest-place-evidence" });
+      evidence.appendChild(node("strong", { className: "nearest-distance", text: formatDistance(place.distance_km, state.lang) }));
+      const cadence = place[state.lang === "ar" ? "review_interval_ar" : "review_interval_en"];
+      evidence.appendChild(node("span", { className: "place-meta", text: [place.verified_at ? text("verifiedOn") + " " + place.verified_at : "", cadence ? text("reviewEvery") + ": " + cadence : ""].filter(Boolean).join(" · ") }));
+      const links = node("div", { className: "nearest-place-links" });
+      add(links, safeExternalLink(place.map_url, text("openMap")), safeExternalLink(place.coordinate_source_url, text("coordinateProof")), safeExternalLink(place.official_source_url, text("officialProof")));
+      add(row, identity, evidence, links); list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
   }
   function renderContent(root) {
     const p = state.profile, part = section("content"), form = grid(); p.structured = p.structured || {}; p.structured.sections = Array.isArray(p.structured.sections) && p.structured.sections.length ? p.structured.sections : [{ title_ar: "", title_en: "", body_ar: "", body_en: "" }];
@@ -594,8 +655,24 @@
   }
 
   function renderPlaces() {
-    const root = id("places-list"), keys = Object.keys(state.places || {}).sort(); empty(root); if (!keys.length) { root.appendChild(node("p", { className: "empty-row", text: text("noPlaces") })); return; }
-    keys.forEach(function (key) { const row = state.places[key], value = row.approved || row.draft || {}, item = node("article", { className: "place-row" }), button = node("button", { type: "button", className: "button button-secondary", text: text("edit") }); button.addEventListener("click", function () { editPlace(key); }); add(item, node("strong", { text: value[state.lang === "ar" ? "label_ar" : "label_en"] || key }), node("p", { text: (value.purposes || []).map(text).join(" · ") }), node("span", { className: "status-chip " + (row.active && row.approved ? "ready" : "warning"), text: row.active && row.approved ? text("ready") : text("review") }), button); root.appendChild(item); });
+    const root = id("places-list"), keys = Object.keys(state.places || {}).sort(); renderPlacesSummary(); empty(root); if (!keys.length) { root.appendChild(node("p", { className: "empty-row", text: text("noPlaces") })); return; }
+    keys.forEach(function (key) {
+      const row = state.places[key], value = row.approved || row.draft || {}, item = node("article", { className: "place-row" }), main = node("div", { className: "place-row-main" }), actions = node("div", { className: "place-row-actions" }), button = node("button", { type: "button", className: "button button-secondary", text: text("edit") });
+      button.addEventListener("click", function () { editPlace(key); });
+      const category = value[state.lang === "ar" ? "category_ar" : "category_en"] || text(value.category_id);
+      const cadence = value[state.lang === "ar" ? "review_interval_ar" : "review_interval_en"];
+      add(main, node("strong", { text: value[state.lang === "ar" ? "label_ar" : "label_en"] || key }), node("p", { text: [category, (value.purposes || []).map(text).join(" · ")].filter(Boolean).join(" · ") }), node("span", { className: "place-meta", text: [value.verified_at ? text("verifiedOn") + " " + value.verified_at : "", cadence ? text("reviewEvery") + ": " + cadence : ""].filter(Boolean).join(" · ") }));
+      add(actions, node("span", { className: "status-chip " + (row.active && row.approved ? "ready" : "warning"), text: row.active && row.approved ? text("ready") : text("review") }), button);
+      add(item, main, actions); root.appendChild(item);
+    });
+  }
+  function renderPlacesSummary() {
+    const root = id("places-summary"), summary = summarizePlaces(state.places); empty(root);
+    root.appendChild(node("strong", { text: summary.total + " " + text("approvedDestinations") }));
+    PLACE_CATEGORIES.forEach(function (category) {
+      if (!summary.categories[category]) return;
+      root.appendChild(node("span", { className: "place-category-count", text: text(category) + ": " + summary.categories[category] }));
+    });
   }
   function editPlace(key) {
     const row = key ? state.places[key] : null, value = clone(row && (row.draft || row.approved) || {}), root = id("place-fields"), form = grid(); state.placeId = key || ""; state.placeRevision = row ? row.draft_revision : 0; empty(root);

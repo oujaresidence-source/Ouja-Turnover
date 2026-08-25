@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-ASSET_VERSION = "v20260825c"
+ASSET_VERSION = "v20260825d"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 
@@ -152,6 +152,7 @@ def render_monthly_catalog_page() -> str:
           </div>
           <button id="new-place" class="button button-secondary" type="button" data-copy="addPlace">إضافة مكان</button>
         </div>
+        <div id="places-summary" class="places-summary" aria-live="polite"></div>
         <div class="places-layout">
           <div id="places-list" class="places-list" aria-live="polite"></div>
           <form id="place-form" class="form-surface" autocomplete="off" novalidate hidden>

@@ -57,6 +57,8 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertIn('id="listing-table"', html)
         self.assertIn('id="survey"', html)
         self.assertIn('id="places"', html)
+        self.assertIn('id="places-summary"', html)
+        self.assertIn('id="places-summary" class="places-summary" aria-live="polite"', html)
         self.assertIn('aria-live="polite"', html)
         self.assertIn('aria-labelledby="portfolio-title"', html)
         self.assertIn('autocomplete="off"', html)
@@ -218,6 +220,57 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
             "{id:'202',source_title:'Ouja | Olaya',status:'source_blocked',staff_blockers:[],background_blockers:['price_missing']}"
             "],{search:'malqa',status:'needs_review',blocker:'licence'})")
         self.assertEqual([row["id"] for row in result], ["101"])
+
+    def test_javascript_summarizes_only_active_approved_non_university_places(self):
+        result = self._javascript_result(
+            "api.summarizePlaces({"
+            "biz:{active:true,approved:{category_id:'business_hubs'}},"
+            "hospital:{active:true,approved:{category_id:'hospitals'}},"
+            "inactive:{active:false,approved:{category_id:'events'}},"
+            "draft:{active:true,draft:{category_id:'events'}},"
+            "edu:{active:true,approved:{category_id:'universities'}}"
+            "})"
+        )
+
+        self.assertEqual(result, {
+            "total": 2,
+            "categories": {"business_hubs": 1, "hospitals": 1},
+        })
+
+    def test_nearest_place_ui_is_evidence_based_and_link_safe(self):
+        js = JS_FILE.read_text("utf-8")
+        css = CSS_FILE.read_text("utf-8")
+        for required in (
+            "nearest_places",
+            "distance_km",
+            "category_ar",
+            "category_en",
+            "verified_at",
+            "review_interval_ar",
+            "review_interval_en",
+            "map_url",
+            "coordinate_source_url",
+            "official_source_url",
+            'link.target = "_blank"',
+            'link.rel = "noopener noreferrer"',
+            "nearbyNoPin",
+            "nearbyEmpty",
+            "straightLine",
+        ):
+            self.assertIn(required, js)
+        for required in (
+            ".places-summary",
+            ".place-meta",
+            ".nearest-places",
+            ".nearest-place-row",
+            ".nearest-place-links",
+        ):
+            self.assertIn(required, css)
+
+        labels = self._javascript_result(
+            "[api.formatDistance(1.24,'ar'),api.formatDistance(1.24,'en')]"
+        )
+        self.assertEqual(labels, ["1.2 كم بخط مستقيم", "1.2 km straight-line"])
 
     def test_javascript_localizes_working_days_and_explains_prefill_sources(self):
         result = self._javascript_result(
