@@ -1,0 +1,25 @@
+{
+  "as_of": "2026-07-23",
+  "channel": "airbnb",
+  "window": { "start": "2024-07-23", "end": "2026-07-23" },
+  "listings": [
+    { "id": 1, "name": "Ouja | A", "created": "2024-08-01", "active": true,  "district": "Al Malqa", "bedrooms": 1, "property_type": "Apartment" },
+    { "id": 2, "name": "Ouja | B", "created": "2025-03-01", "active": true,  "district": "Al Nuzha", "bedrooms": 2, "property_type": "Apartment" },
+    { "id": 3, "name": "Ouja | C", "created": "2026-01-10", "active": false, "district": "Al Malqa", "bedrooms": 3, "property_type": "Apartment" }
+  ],
+  "reservations": [
+    { "id": 101, "guest_key": "ali",  "arrival": "2024-09-01", "departure": "2024-09-02", "listing_id": 1, "status": "modified", "channel": "airbnb" },
+    { "id": 102, "guest_key": "ali",  "arrival": "2024-12-10", "departure": "2024-12-12", "listing_id": 1, "status": "new",      "channel": "airbnb" },
+    { "id": 103, "guest_key": "sara", "arrival": "2025-04-05", "departure": "2025-04-06", "listing_id": 2, "status": "modified", "channel": "airbnb" },
+    { "id": 104, "guest_key": "omar", "arrival": "2025-07-20", "departure": "2025-07-23", "listing_id": 2, "status": "modified", "channel": "airbnb" },
+    { "id": 105, "guest_key": "omar", "arrival": "2026-02-01", "departure": "2026-02-02", "listing_id": 3, "status": "new",      "channel": "airbnb" },
+    { "id": 106, "guest_key": "lina", "arrival": "2026-05-01", "departure": "2026-05-02", "listing_id": 2, "status": "modified", "channel": "airbnb" }
+  ],
+  "reviews": [
+    { "id": 201, "listing_id": 1, "rating10": 10, "categories": { "communication": 10, "checkin": 10, "accuracy": 10, "location": 9,  "cleanliness": 10, "value": 9  }, "text": "Great stay.",   "date": "2024-09-03", "lang": "en", "channel": "airbnb", "public": true },
+    { "id": 202, "listing_id": 1, "rating10": 8,  "categories": { "communication": 8,  "checkin": 9,  "accuracy": 8,  "location": 8,  "cleanliness": 8,  "value": 7  }, "text": "Good.",         "date": "2024-12-13", "lang": "en", "channel": "airbnb", "public": true },
+    { "id": 203, "listing_id": 2, "rating10": 10, "categories": { "communication": 10, "checkin": 10, "accuracy": 9,  "location": 10, "cleanliness": 9,  "value": 10 }, "text": "ممتاز جدا.",    "date": "2025-04-07", "lang": "ar", "channel": "airbnb", "public": true },
+    { "id": 204, "listing_id": 2, "rating10": 10, "categories": { "communication": 10, "checkin": 10, "accuracy": 10, "location": 9,  "cleanliness": 10, "value": 10 }, "text": "رائع.",         "date": "2026-05-03", "lang": "ar", "channel": "airbnb", "public": true },
+    { "id": 205, "listing_id": 3, "rating10": 10, "categories": {},                                                                                                    "text": "",              "date": "2026-02-03", "lang": "ar", "channel": "airbnb", "public": false }
+  ]
+}

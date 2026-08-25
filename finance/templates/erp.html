@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>عوجا — المركز المالي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/erp/static/erp.css?v=__ERP_COMMIT__">
+</head>
+<body>
+<div id="app">
+  <div class="gside-bg" id="gsideBg" hidden></div>
+  <aside class="gside" id="gside" aria-label="التنقل الرئيسي">
+    <div class="gside-brand">
+      <div class="logo">ع</div>
+      <div><div class="name">عوجا</div><div class="sub">Operations</div></div>
+      <button class="gside-x" id="gsideClose" type="button" aria-label="إغلاق القائمة">✕</button>
+    </div>
+    <div class="gside-nav" id="gsideNav"></div>
+  </aside>
+  <div class="erp-main">
+  <header class="topbar">
+    <div class="brand">
+      <button class="burger" id="burger" type="button" aria-label="القائمة الرئيسية">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <span class="brand-mark">عوجا</span>
+      <span class="brand-title" id="appTitle">المركز المالي</span>
+    </div>
+    <div class="top-meta">
+      <div class="health" id="healthWrap" role="img">
+        <svg viewBox="0 0 36 36" width="30" height="30" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--surface-3)" stroke-width="4"></circle>
+          <circle id="healthArc" cx="18" cy="18" r="15.5" fill="none" stroke="var(--accent)" stroke-width="4"
+                  stroke-linecap="round" stroke-dasharray="0 97.4" transform="rotate(-90 18 18)"></circle>
+        </svg>
+        <span class="health-txt"><b id="healthPct">—</b><i id="healthLbl"></i></span>
+      </div>
+      <div class="chip" id="bankAge" hidden></div>
+      <button class="lang-btn" id="langBtn" type="button">EN</button>
+    </div>
+  </header>
+  <nav class="wsnav" id="wsnav" aria-label="workspaces"></nav>
+  <main id="view" tabindex="-1"></main>
+  <footer class="build-stamp" id="buildStamp">
+    <span class="bs-item">ERP <b>__ERP_VERSION__</b></span>
+    <span class="bs-sep">·</span>
+    <span class="bs-item">build <code>__ERP_COMMIT__</code></span>
+    <span class="bs-sep">·</span>
+    <span class="bs-item">__ERP_BUILT__</span>
+  </footer>
+  </div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<div id="xModal" class="drawer" hidden></div>
+<script>window.__ERP_BUILD__={version:'__ERP_VERSION__',commit:'__ERP_COMMIT__',built:'__ERP_BUILT__'};</script>
+<script src="/erp/static/erp.js?v=__ERP_COMMIT__"></script>
+</body>
+</html>

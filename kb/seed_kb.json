@@ -1,0 +1,2101 @@
+{
+  "meta": {
+    "source_file": "فيصل.xlsx",
+    "sheet": "معلومات",
+    "generated": "2026-08-03",
+    "unit_count": 56,
+    "owner_count": 35,
+    "investor_units": 48,
+    "ouja_units": 8
+  },
+  "owners": [
+    {
+      "owner_id": "OWN-001",
+      "name_ar": "ابو فهد عبدالحمن الخطيب",
+      "aliases": [
+        "ابو فهد عبدالحمن الخطيب"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "490890",
+        "477748",
+        "477749",
+        "477747",
+        "473467",
+        "472286",
+        "473607",
+        "473607"
+      ],
+      "unit_count": 8
+    },
+    {
+      "owner_id": "OWN-002",
+      "name_ar": "أبو نبيل",
+      "aliases": [
+        "أبو نبيل"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "576627"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-003",
+      "name_ar": "امجد الحديثي",
+      "aliases": [
+        "امجد الحديثي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "385091"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-004",
+      "name_ar": "بتول يوسف",
+      "aliases": [
+        "بتول يوسف"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "507451"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-005",
+      "name_ar": "تركي الضبعان",
+      "aliases": [
+        "تركي الضبعان"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "441858"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-006",
+      "name_ar": "ثامر ال جربوع",
+      "aliases": [
+        "ثامر ال جربوع"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "515929"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-007",
+      "name_ar": "حاصل الاسمري",
+      "aliases": [
+        "حاصل الاسمري"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "553753"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-008",
+      "name_ar": "ساره الجبر",
+      "aliases": [
+        "ساره الجبر"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "462594"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-009",
+      "name_ar": "سلطان الشنيفي",
+      "aliases": [
+        "سلطان الشنيفي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "569266"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-010",
+      "name_ar": "سلطان الفيصل",
+      "aliases": [
+        "سلطان الفيصل"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "537003"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-011",
+      "name_ar": "سمو الاميرة نوره",
+      "aliases": [
+        "سمو الاميرة نوره"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "479967",
+        "441826"
+      ],
+      "unit_count": 2
+    },
+    {
+      "owner_id": "OWN-012",
+      "name_ar": "عبدالرحمن الشايع",
+      "aliases": [
+        "عبدالرحمن الشايع"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "482978"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-013",
+      "name_ar": "عبدالرحمن القصير",
+      "aliases": [
+        "عبدالرحمن القصير"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "456602"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-014",
+      "name_ar": "عبدالعزيز السويلم",
+      "aliases": [
+        "عبدالعزيز السويلم"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "503713"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-015",
+      "name_ar": "عبدالعزيز الشاهين",
+      "aliases": [
+        "عبدالعزيز الشاهين"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "461328",
+        "469303"
+      ],
+      "unit_count": 2
+    },
+    {
+      "owner_id": "OWN-016",
+      "name_ar": "عبدالله الحربي",
+      "aliases": [
+        "عبدالله الحربي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "487708",
+        "523916",
+        "513034",
+        "522603"
+      ],
+      "unit_count": 4
+    },
+    {
+      "owner_id": "OWN-017",
+      "name_ar": "عبدالله العفيصان",
+      "aliases": [
+        "عبدالله العفيصان"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "477784",
+        "537007"
+      ],
+      "unit_count": 2
+    },
+    {
+      "owner_id": "OWN-018",
+      "name_ar": "عبدالله اليحيى",
+      "aliases": [
+        "عبدالله اليحيى"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "507450"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-019",
+      "name_ar": "عبدالمحسن الجعيد",
+      "aliases": [
+        "عبدالمحسن الجعيد"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "482287"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-020",
+      "name_ar": "عبدالمحسن العنزي",
+      "aliases": [
+        "عبدالمحسن العنزي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "457230"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-021",
+      "name_ar": "عبدالملك المغامس",
+      "aliases": [
+        "عبدالملك المغامس"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "485203"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-022",
+      "name_ar": "عبدالهادي العنزي",
+      "aliases": [
+        "عبدالهادي العنزي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "502536"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-023",
+      "name_ar": "عثمان الملحم",
+      "aliases": [
+        "عثمان الملحم"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "457287"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-024",
+      "name_ar": "عثمان الهلال",
+      "aliases": [
+        "عثمان الهلال"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "497191"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-025",
+      "name_ar": "عدنان المولد",
+      "aliases": [
+        "عدنان المولد"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "500595"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-026",
+      "name_ar": "عوجا",
+      "aliases": [
+        "عوجا"
+      ],
+      "is_ouja": true,
+      "unit_codes": [
+        "367751",
+        "367753",
+        "367745",
+        "367749",
+        "367747",
+        "367749",
+        "367750",
+        "367752"
+      ],
+      "unit_count": 8
+    },
+    {
+      "owner_id": "OWN-027",
+      "name_ar": "فاطمة العوين",
+      "aliases": [
+        "فاطمة العوين"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "535903"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-028",
+      "name_ar": "فواز الدلبحي",
+      "aliases": [
+        "فواز الدلبحي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "437215"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-029",
+      "name_ar": "فوزية",
+      "aliases": [
+        "فوزية"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "407535",
+        "415053"
+      ],
+      "unit_count": 2
+    },
+    {
+      "owner_id": "OWN-030",
+      "name_ar": "نجلاء الغشام",
+      "aliases": [
+        "نجلاء الغشام"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "526697"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-031",
+      "name_ar": "نواف الوهيبي",
+      "aliases": [
+        "نواف الوهيبي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "490891"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-032",
+      "name_ar": "نوره الحساوي",
+      "aliases": [
+        "نوره الحساوي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "535907"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-033",
+      "name_ar": "هلا الصيخان",
+      "aliases": [
+        "هلا الصيخان"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "483841"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-034",
+      "name_ar": "يزيد القثيمي",
+      "aliases": [
+        "يزيد القثيمي"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "552505"
+      ],
+      "unit_count": 1
+    },
+    {
+      "owner_id": "OWN-035",
+      "name_ar": "يوسف الزنيتان",
+      "aliases": [
+        "يوسف الزنيتان"
+      ],
+      "is_ouja": false,
+      "unit_codes": [
+        "500593"
+      ],
+      "unit_count": 1
+    }
+  ],
+  "units": [
+    {
+      "unit_id": "UNT-407535",
+      "unit_name": "FD1",
+      "listing_code": "407535",
+      "owner_id": "OWN-029",
+      "owner_ar": "فوزية",
+      "district": "حطين",
+      "district_en": "Hittin",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "407535",
+        "FD1",
+        "Hittin",
+        "fd1",
+        "حطين",
+        "فوزية",
+        "فوزيه"
+      ],
+      "source_row": 2,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-415053",
+      "unit_name": "C204",
+      "listing_code": "415053",
+      "owner_id": "OWN-029",
+      "owner_ar": "فوزية",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "415053",
+        "Al Malqa",
+        "C204",
+        "c204",
+        "الملقا",
+        "فوزية",
+        "فوزيه"
+      ],
+      "source_row": 3,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-462594",
+      "unit_name": "DYAR20",
+      "listing_code": "462594",
+      "owner_id": "OWN-008",
+      "owner_ar": "ساره الجبر",
+      "district": "القيروان",
+      "district_en": "Al Qirawan",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1115.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1115",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "462594",
+        "Al Qirawan",
+        "DYAR20",
+        "dyar20",
+        "القيروان",
+        "ساره الجبر"
+      ],
+      "source_row": 4,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-483841",
+      "unit_name": "A11",
+      "listing_code": "483841",
+      "owner_id": "OWN-033",
+      "owner_ar": "هلا الصيخان",
+      "district": "العارض",
+      "district_en": "Al Arid",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1050.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1050",
+      "payment_cycle": "biweekly_quarter_month",
+      "payment_label_ar": "ربع شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "483841",
+        "A11",
+        "Al Arid",
+        "a11",
+        "العارض",
+        "هلا الصيخان"
+      ],
+      "source_row": 5,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-477784",
+      "unit_name": "Calma 90",
+      "listing_code": "477784",
+      "owner_id": "OWN-017",
+      "owner_ar": "عبدالله العفيصان",
+      "district": "الشهداء",
+      "district_en": "Al Shuhada",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1100.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1100",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "477784",
+        "Al Shuhada",
+        "Calma 90",
+        "calma 90",
+        "calma90",
+        "الشهداء",
+        "عبدالله العفيصان"
+      ],
+      "source_row": 6,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-500595",
+      "unit_name": "Qurtuba-B20",
+      "listing_code": "500595",
+      "owner_id": "OWN-025",
+      "owner_ar": "عدنان المولد",
+      "district": "قرطبة",
+      "district_en": "Qurtubah",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1265.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1265",
+      "payment_cycle": "biweekly_quarter_month",
+      "payment_label_ar": "ربع شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "500595",
+        "Qurtuba-B20",
+        "Qurtubah",
+        "qurtuba-b20",
+        "qurtubab20",
+        "عدنان المولد",
+        "قرطبة",
+        "قرطبه"
+      ],
+      "source_row": 7,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-461328",
+      "unit_name": "C2 NFL",
+      "listing_code": "461328",
+      "owner_id": "OWN-015",
+      "owner_ar": "عبدالعزيز الشاهين",
+      "district": "النفل",
+      "district_en": "Al Nafl",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "461328",
+        "Al Nafl",
+        "C2 NFL",
+        "c2 nfl",
+        "c2nfl",
+        "النفل",
+        "عبدالعزيز الشاهين"
+      ],
+      "source_row": 8,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-469303",
+      "unit_name": "C118",
+      "listing_code": "469303",
+      "owner_id": "OWN-015",
+      "owner_ar": "عبدالعزيز الشاهين",
+      "district": "الربيع",
+      "district_en": "Al Rabie",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1250.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1250",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "469303",
+        "Al Rabie",
+        "C118",
+        "c118",
+        "الربيع",
+        "عبدالعزيز الشاهين"
+      ],
+      "source_row": 9,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-479967",
+      "unit_name": "F1",
+      "listing_code": "479967",
+      "owner_id": "OWN-011",
+      "owner_ar": "سمو الاميرة نوره",
+      "district": "العليا",
+      "district_en": "Al Olaya",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "479967",
+        "Al Olaya",
+        "F1",
+        "f1",
+        "العليا",
+        "سمو الاميرة نوره",
+        "سمو الاميره نوره"
+      ],
+      "source_row": 10,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-441826",
+      "unit_name": "F2",
+      "listing_code": "441826",
+      "owner_id": "OWN-011",
+      "owner_ar": "سمو الاميرة نوره",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "441826",
+        "F2",
+        "f2",
+        "سمو الاميرة نوره",
+        "سمو الاميره نوره"
+      ],
+      "source_row": 11,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-490890",
+      "unit_name": "101A",
+      "listing_code": "490890",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "101A",
+        "101a",
+        "490890",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 12,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-477748",
+      "unit_name": "101B",
+      "listing_code": "477748",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "101B",
+        "101b",
+        "477748",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 13,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-477749",
+      "unit_name": "201A",
+      "listing_code": "477749",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "201A",
+        "201a",
+        "477749",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 14,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-477747",
+      "unit_name": "201B",
+      "listing_code": "477747",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "201B",
+        "201b",
+        "477747",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 15,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-473467",
+      "unit_name": "102A",
+      "listing_code": "473467",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "102A",
+        "102a",
+        "473467",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 16,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-472286",
+      "unit_name": "102B",
+      "listing_code": "472286",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "102B",
+        "102b",
+        "472286",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 17,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-473607",
+      "unit_name": "202A",
+      "listing_code": "473607",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "202A",
+        "202a",
+        "473607",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 18,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-473607-B",
+      "unit_name": "202B",
+      "listing_code": "473607",
+      "owner_id": "OWN-001",
+      "owner_ar": "ابو فهد عبدالحمن الخطيب",
+      "district": "النزهة",
+      "district_en": "Al Nuzha",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "202B",
+        "202b",
+        "473607",
+        "Al Nuzha",
+        "ابو فهد عبدالحمن الخطيب",
+        "النزهة",
+        "النزهه"
+      ],
+      "source_row": 19,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-482287",
+      "unit_name": "B14",
+      "listing_code": "482287",
+      "owner_id": "OWN-019",
+      "owner_ar": "عبدالمحسن الجعيد",
+      "district": "حطين",
+      "district_en": "Hittin",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "482287",
+        "B14",
+        "Hittin",
+        "b14",
+        "حطين",
+        "عبدالمحسن الجعيد"
+      ],
+      "source_row": 20,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-385091",
+      "unit_name": "HUE 9",
+      "listing_code": "385091",
+      "owner_id": "OWN-003",
+      "owner_ar": "امجد الحديثي",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "385091",
+        "Al Malqa",
+        "HUE 9",
+        "hue 9",
+        "hue9",
+        "الملقا",
+        "الملقى",
+        "الملقي",
+        "امجد الحديثي"
+      ],
+      "source_row": 21,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-437215",
+      "unit_name": "HUE 103",
+      "listing_code": "437215",
+      "owner_id": "OWN-028",
+      "owner_ar": "فواز الدلبحي",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "437215",
+        "Al Malqa",
+        "HUE 103",
+        "hue 103",
+        "hue103",
+        "الملقا",
+        "الملقى",
+        "الملقي",
+        "فواز الدلبحي"
+      ],
+      "source_row": 22,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-456602",
+      "unit_name": "c08",
+      "listing_code": "456602",
+      "owner_id": "OWN-013",
+      "owner_ar": "عبدالرحمن القصير",
+      "district": "المروج",
+      "district_en": "Al Muruj",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": "ماراح نطلع له تقرير في مارس لانها 4 ايام بس",
+      "aliases": [
+        "456602",
+        "Al Muruj",
+        "c08",
+        "المروج",
+        "عبدالرحمن القصير"
+      ],
+      "source_row": 23,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-441858",
+      "unit_name": "11MLQ",
+      "listing_code": "441858",
+      "owner_id": "OWN-005",
+      "owner_ar": "تركي الضبعان",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "11MLQ",
+        "11mlq",
+        "441858",
+        "Al Malqa",
+        "المقى",
+        "المقي",
+        "الملقا",
+        "تركي الضبعان"
+      ],
+      "source_row": 24,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-457287",
+      "unit_name": "A5",
+      "listing_code": "457287",
+      "owner_id": "OWN-023",
+      "owner_ar": "عثمان الملحم",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "457287",
+        "A5",
+        "Al Malqa",
+        "a5",
+        "الملقا",
+        "الملقى",
+        "الملقي",
+        "عثمان الملحم"
+      ],
+      "source_row": 25,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-457230",
+      "unit_name": "1MLQ",
+      "listing_code": "457230",
+      "owner_id": "OWN-020",
+      "owner_ar": "عبدالمحسن العنزي",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "ouja",
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": "علينا",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "1MLQ",
+        "1mlq",
+        "457230",
+        "Al Malqa",
+        "الملقا",
+        "الملقى",
+        "الملقي",
+        "عبدالمحسن العنزي"
+      ],
+      "source_row": 26,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-490891",
+      "unit_name": "C2-العارض",
+      "listing_code": "490891",
+      "owner_id": "OWN-031",
+      "owner_ar": "نواف الوهيبي",
+      "district": "العارض",
+      "district_en": "Al Arid",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1250.0,
+      "cleaning_raw": "الاشتراك محمل كاملا  على المالك 1,250",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "490891",
+        "Al Arid",
+        "C2-العارض",
+        "c2-العارض",
+        "c2العارض",
+        "العارض",
+        "نواف الوهيبي"
+      ],
+      "source_row": 27,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-497191",
+      "unit_name": "Jood12",
+      "listing_code": "497191",
+      "owner_id": "OWN-024",
+      "owner_ar": "عثمان الهلال",
+      "district": "الصحافة",
+      "district_en": "Al Sahafa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "biweekly_quarter_month",
+      "payment_label_ar": "ربع شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "497191",
+        "Al Sahafa",
+        "Jood12",
+        "jood12",
+        "الصحافة",
+        "الصحافه",
+        "عثمان الهلال"
+      ],
+      "source_row": 28,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-487708",
+      "unit_name": "C3",
+      "listing_code": "487708",
+      "owner_id": "OWN-016",
+      "owner_ar": "عبدالله الحربي",
+      "district": "الغدير",
+      "district_en": "Al Ghadeer",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "quarterly",
+      "payment_label_ar": "ربع سنوي",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "487708",
+        "Al Ghadeer",
+        "C3",
+        "c3",
+        "الغدير",
+        "عبدالله الحربي"
+      ],
+      "source_row": 29,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-482978",
+      "unit_name": "HUE 202",
+      "listing_code": "482978",
+      "owner_id": "OWN-012",
+      "owner_ar": "عبدالرحمن الشايع",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1150.0,
+      "cleaning_raw": "الاشتراك محمل كاملا على المالك 1,150",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "482978",
+        "Al Malqa",
+        "HUE 202",
+        "hue 202",
+        "hue202",
+        "الملقا",
+        "عبدالرحمن الشايع"
+      ],
+      "source_row": 30,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-502536",
+      "unit_name": "E15",
+      "listing_code": "502536",
+      "owner_id": "OWN-022",
+      "owner_ar": "عبدالهادي العنزي",
+      "district": "عرقة",
+      "district_en": "Irqah",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "502536",
+        "E15",
+        "Irqah",
+        "e15",
+        "عبدالهادي العنزي",
+        "عرقة",
+        "عرقه"
+      ],
+      "source_row": 31,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-507451",
+      "unit_name": "القيروان - D7",
+      "listing_code": "507451",
+      "owner_id": "OWN-004",
+      "owner_ar": "بتول يوسف",
+      "district": "القيروان",
+      "district_en": "Al Qirawan",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1050.0,
+      "cleaning_raw": "الاشتراك محمل كاملا  على المالك 1,050",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "507451",
+        "Al Qirawan",
+        "القيروان",
+        "القيروان - D7",
+        "القيروان - d7",
+        "القيروانd7",
+        "بتول يوسف"
+      ],
+      "source_row": 32,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-500593",
+      "unit_name": "E5MLQ",
+      "listing_code": "500593",
+      "owner_id": "OWN-035",
+      "owner_ar": "يوسف الزنيتان",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "500593",
+        "Al Malqa",
+        "E5MLQ",
+        "e5mlq",
+        "الملقا",
+        "يوسف الزنيتان"
+      ],
+      "source_row": 33,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-485203",
+      "unit_name": "13 JOOD",
+      "listing_code": "485203",
+      "owner_id": "OWN-021",
+      "owner_ar": "عبدالملك المغامس",
+      "district": "الصحافة",
+      "district_en": "Al Sahafa",
+      "cleaning_policy": "owner",
+      "cleaning_monthly_sar": 1000.0,
+      "cleaning_raw": "الاشتراك محمل كاملا  على المالك 1000",
+      "payment_cycle": "monthly",
+      "payment_label_ar": "شهري",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "13 JOOD",
+        "13 jood",
+        "13jood",
+        "485203",
+        "Al Sahafa",
+        "الصحافة",
+        "الصحافه",
+        "عبدالملك المغامس"
+      ],
+      "source_row": 34,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-523916",
+      "unit_name": "B02",
+      "listing_code": "523916",
+      "owner_id": "OWN-016",
+      "owner_ar": "عبدالله الحربي",
+      "district": "الغدير",
+      "district_en": "Al Ghadeer",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "quarterly",
+      "payment_label_ar": "ربع سنوي",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "523916",
+        "Al Ghadeer",
+        "B02",
+        "b02",
+        "الغدير",
+        "الغديو",
+        "عبدالله الحربي"
+      ],
+      "source_row": 35,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-513034",
+      "unit_name": "B10",
+      "listing_code": "513034",
+      "owner_id": "OWN-016",
+      "owner_ar": "عبدالله الحربي",
+      "district": "الغدير",
+      "district_en": "Al Ghadeer",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "quarterly",
+      "payment_label_ar": "ربع سنوي",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "513034",
+        "Al Ghadeer",
+        "B10",
+        "b10",
+        "الغدير",
+        "عبدالله الحربي"
+      ],
+      "source_row": 36,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-522603",
+      "unit_name": "B03",
+      "listing_code": "522603",
+      "owner_id": "OWN-016",
+      "owner_ar": "عبدالله الحربي",
+      "district": "الغدير",
+      "district_en": "Al Ghadeer",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": "quarterly",
+      "payment_label_ar": "ربع سنوي",
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "522603",
+        "Al Ghadeer",
+        "B03",
+        "b03",
+        "الغدير",
+        "عبدالله الحربي"
+      ],
+      "source_row": 37,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-503713",
+      "unit_name": "A2",
+      "listing_code": "503713",
+      "owner_id": "OWN-014",
+      "owner_ar": "عبدالعزيز السويلم",
+      "district": "التعاون",
+      "district_en": "Al Taawun",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "503713",
+        "A2",
+        "Al Taawun",
+        "a2",
+        "التعاون",
+        "عبدالعزيز السويلم"
+      ],
+      "source_row": 38,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-507450",
+      "unit_name": "N06 - نصل",
+      "listing_code": "507450",
+      "owner_id": "OWN-018",
+      "owner_ar": "عبدالله اليحيى",
+      "district": "العقيق",
+      "district_en": "Al Aqiq",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "507450",
+        "Al Aqiq",
+        "N06 - نصل",
+        "n06 - نصل",
+        "n06نصل",
+        "العقيق",
+        "عبدالله اليحيى",
+        "عبدالله اليحيي"
+      ],
+      "source_row": 39,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-526697",
+      "unit_name": "103 NRJS",
+      "listing_code": "526697",
+      "owner_id": "OWN-030",
+      "owner_ar": "نجلاء الغشام",
+      "district": "النرجس",
+      "district_en": "Al Narjis",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "103 NRJS",
+        "103 nrjs",
+        "103nrjs",
+        "526697",
+        "Al Narjis",
+        "النرجس",
+        "نجلاء الغشام"
+      ],
+      "source_row": 40,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-535903",
+      "unit_name": "TWN 13B",
+      "listing_code": "535903",
+      "owner_id": "OWN-027",
+      "owner_ar": "فاطمة العوين",
+      "district": "التعاون",
+      "district_en": "Al Taawun",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "535903",
+        "Al Taawun",
+        "TWN 13B",
+        "twn 13b",
+        "twn13b",
+        "التعاون",
+        "فاطمة العوين",
+        "فاطمه العوين"
+      ],
+      "source_row": 41,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-535907",
+      "unit_name": "11B Royal",
+      "listing_code": "535907",
+      "owner_id": "OWN-032",
+      "owner_ar": "نوره الحساوي",
+      "district": "الصحافة",
+      "district_en": "Al Sahafa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "11B Royal",
+        "11b royal",
+        "11broyal",
+        "535907",
+        "Al Sahafa",
+        "الصحافة",
+        "الصحافه",
+        "نوره الحساوي"
+      ],
+      "source_row": 42,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-537003",
+      "unit_name": "2D - صاد",
+      "listing_code": "537003",
+      "owner_id": "OWN-010",
+      "owner_ar": "سلطان الفيصل",
+      "district": "حطين",
+      "district_en": "Hittin",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "2D - صاد",
+        "2d - صاد",
+        "2dصاد",
+        "537003",
+        "Hittin",
+        "حطين",
+        "سلطان الفيصل"
+      ],
+      "source_row": 43,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-537007",
+      "unit_name": "22 - هاجر",
+      "listing_code": "537007",
+      "owner_id": "OWN-017",
+      "owner_ar": "عبدالله العفيصان",
+      "district": "الشهداء",
+      "district_en": "Al Shuhada",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "22 - هاجر",
+        "22هاجر",
+        "537007",
+        "Al Shuhada",
+        "الشهداء",
+        "عبدالله العفيصان"
+      ],
+      "source_row": 44,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-552505",
+      "unit_name": "1A- قرطبه",
+      "listing_code": "552505",
+      "owner_id": "OWN-034",
+      "owner_ar": "يزيد القثيمي",
+      "district": "قرطبة",
+      "district_en": "Qurtubah",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "1A- قرطبه",
+        "1a- قرطبه",
+        "1aقرطبه",
+        "552505",
+        "Qurtubah",
+        "قرطبة",
+        "قرطبه",
+        "يزيد القثيمي"
+      ],
+      "source_row": 45,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-553753",
+      "unit_name": "4101",
+      "listing_code": "553753",
+      "owner_id": "OWN-007",
+      "owner_ar": "حاصل الاسمري",
+      "district": "الصحافة",
+      "district_en": "Al Sahafa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "4101",
+        "553753",
+        "Al Sahafa",
+        "الصحافة",
+        "الصحافه",
+        "حاصل الاسمري"
+      ],
+      "source_row": 46,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-569266",
+      "unit_name": "V6 - فيليج",
+      "listing_code": "569266",
+      "owner_id": "OWN-009",
+      "owner_ar": "سلطان الشنيفي",
+      "district": "الملقا",
+      "district_en": "Al Malqa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "569266",
+        "Al Malqa",
+        "V6 - فيليج",
+        "v6 - فيليج",
+        "v6فيليج",
+        "الملقا",
+        "سلطان الشنيفي"
+      ],
+      "source_row": 47,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-576627",
+      "unit_name": "101 -Narjs",
+      "listing_code": "576627",
+      "owner_id": "OWN-002",
+      "owner_ar": "أبو نبيل",
+      "district": "النرجس",
+      "district_en": "Al Narjis",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "101 -Narjs",
+        "101 -narjs",
+        "101narjs",
+        "576627",
+        "Al Narjis",
+        "أبو نبيل",
+        "ابو نبيل",
+        "النرجس",
+        "نرجس"
+      ],
+      "source_row": 48,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-515929",
+      "unit_name": "4511",
+      "listing_code": "515929",
+      "owner_id": "OWN-006",
+      "owner_ar": "ثامر ال جربوع",
+      "district": "الصحافة",
+      "district_en": "Al Sahafa",
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": false,
+      "note": null,
+      "aliases": [
+        "4511",
+        "515929",
+        "Al Sahafa",
+        "الصحافة",
+        "الصحافه",
+        "ثامر ال جربوع"
+      ],
+      "source_row": 49,
+      "data_complete": false,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367751",
+      "unit_name": "9BH",
+      "listing_code": "367751",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367751",
+        "9BH",
+        "9bh",
+        "عوجا"
+      ],
+      "source_row": 50,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367753",
+      "unit_name": "12B H",
+      "listing_code": "367753",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "12B H",
+        "12b h",
+        "12bh",
+        "367753",
+        "عوجا"
+      ],
+      "source_row": 51,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367745",
+      "unit_name": "6B H",
+      "listing_code": "367745",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367745",
+        "6B H",
+        "6b h",
+        "6bh",
+        "عوجا"
+      ],
+      "source_row": 52,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367749",
+      "unit_name": "6BMJ",
+      "listing_code": "367749",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367749",
+        "6BMJ",
+        "6bmj",
+        "عوجا"
+      ],
+      "source_row": 53,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367747",
+      "unit_name": "3BMJ",
+      "listing_code": "367747",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367747",
+        "3BMJ",
+        "3bmj",
+        "عوجا"
+      ],
+      "source_row": 54,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367749-B",
+      "unit_name": "MS113",
+      "listing_code": "367749",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367749",
+        "MS113",
+        "ms113",
+        "عوجا"
+      ],
+      "source_row": 55,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367750",
+      "unit_name": "MS5202",
+      "listing_code": "367750",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367750",
+        "MS5202",
+        "ms5202",
+        "عوجا"
+      ],
+      "source_row": 56,
+      "data_complete": true,
+      "last_reviewed": null
+    },
+    {
+      "unit_id": "UNT-367752",
+      "unit_name": "MS6 202",
+      "listing_code": "367752",
+      "owner_id": "OWN-026",
+      "owner_ar": "عوجا",
+      "district": null,
+      "district_en": null,
+      "cleaning_policy": null,
+      "cleaning_monthly_sar": null,
+      "cleaning_raw": null,
+      "payment_cycle": null,
+      "payment_label_ar": null,
+      "ouja_owned": true,
+      "note": null,
+      "aliases": [
+        "367752",
+        "MS6 202",
+        "ms6 202",
+        "ms6202",
+        "عوجا"
+      ],
+      "source_row": 57,
+      "data_complete": true,
+      "last_reviewed": null
+    }
+  ],
+  "faqs": [],
+  "data_quality": {
+    "issues": [
+      {
+        "severity": "high",
+        "type": "duplicate_listing_code",
+        "code": "473607",
+        "units": [
+          "202A (row 18)",
+          "202B (row 19)"
+        ],
+        "why": "Two units share one Hostaway listing ID — revenue/expenses can post to the wrong unit."
+      },
+      {
+        "severity": "high",
+        "type": "duplicate_listing_code",
+        "code": "367749",
+        "units": [
+          "6BMJ (row 53)",
+          "MS113 (row 55)"
+        ],
+        "why": "Two units share one Hostaway listing ID — revenue/expenses can post to the wrong unit."
+      },
+      {
+        "severity": "low",
+        "type": "district_variants",
+        "district": "الملقا",
+        "variants": [
+          "المقى",
+          "الملقا",
+          "الملقى"
+        ],
+        "why": "District spelled several ways — filters and grouping miss units."
+      },
+      {
+        "severity": "low",
+        "type": "district_variants",
+        "district": "الغدير",
+        "variants": [
+          "الغدير",
+          "الغديو"
+        ],
+        "why": "District spelled several ways — filters and grouping miss units."
+      },
+      {
+        "severity": "low",
+        "type": "district_variants",
+        "district": "النرجس",
+        "variants": [
+          "النرجس",
+          "نرجس"
+        ],
+        "why": "District spelled several ways — filters and grouping miss units."
+      }
+    ],
+    "missing": {
+      "cleaning_policy": [
+        "C2 NFL (عبدالعزيز الشاهين)",
+        "B14 (عبدالمحسن الجعيد)",
+        "Jood12 (عثمان الهلال)",
+        "C3 (عبدالله الحربي)",
+        "E15 (عبدالهادي العنزي)",
+        "E5MLQ (يوسف الزنيتان)",
+        "B02 (عبدالله الحربي)",
+        "B10 (عبدالله الحربي)",
+        "B03 (عبدالله الحربي)",
+        "A2 (عبدالعزيز السويلم)",
+        "N06 - نصل (عبدالله اليحيى)",
+        "103 NRJS (نجلاء الغشام)",
+        "TWN 13B (فاطمة العوين)",
+        "11B Royal (نوره الحساوي)",
+        "2D - صاد (سلطان الفيصل)",
+        "22 - هاجر (عبدالله العفيصان)",
+        "1A- قرطبه (يزيد القثيمي)",
+        "4101 (حاصل الاسمري)",
+        "V6 - فيليج (سلطان الشنيفي)",
+        "101 -Narjs (أبو نبيل)",
+        "4511 (ثامر ال جربوع)"
+      ],
+      "payment_cycle": [
+        "E5MLQ (يوسف الزنيتان)",
+        "A2 (عبدالعزيز السويلم)",
+        "N06 - نصل (عبدالله اليحيى)",
+        "103 NRJS (نجلاء الغشام)",
+        "TWN 13B (فاطمة العوين)",
+        "11B Royal (نوره الحساوي)",
+        "2D - صاد (سلطان الفيصل)",
+        "22 - هاجر (عبدالله العفيصان)",
+        "1A- قرطبه (يزيد القثيمي)",
+        "4101 (حاصل الاسمري)",
+        "V6 - فيليج (سلطان الشنيفي)",
+        "101 -Narjs (أبو نبيل)",
+        "4511 (ثامر ال جربوع)"
+      ],
+      "district": [
+        "F2 (سمو الاميرة نوره)"
+      ]
+    }
+  }
+}

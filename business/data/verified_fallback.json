@@ -1,0 +1,40 @@
+{
+  "_note": "VERIFIED numbers as of 2026-07-23 (Airbnb channel), superprompt §4. Used for layout and as the render fallback when no live metrics_snapshot.json exists. Do not round or 'improve'.",
+  "as_of": "2026-07-23",
+  "channel": "airbnb",
+  "window": { "start": "2024-07-23", "end": "2026-07-23" },
+  "reservations_total": 7311,
+  "guest_nights": 11307,
+  "unique_guests": 4800,
+  "returning_guests": 914,
+  "repeat_guest_share": 0.368,
+  "avg_los": 1.55,
+  "single_night_share": 0.73,
+  "reviews_published": 2633,
+  "rating_avg_5": 4.77,
+  "perfect_share": 0.876,
+  "review_rate": 0.36,
+  "category_avgs": {
+    "communication": 9.77,
+    "checkin": 9.74,
+    "accuracy": 9.66,
+    "location": 9.64,
+    "cleanliness": 9.57,
+    "value": 9.38
+  },
+  "review_lang_split": { "ar": 0.63, "en": 0.37 },
+  "reviews_by_quarter": [
+    { "q": "Q3'24", "count": 51,  "rating_avg_5": 4.77 },
+    { "q": "Q4'24", "count": 134, "rating_avg_5": 4.77 },
+    { "q": "Q1'25", "count": 182, "rating_avg_5": 4.77 },
+    { "q": "Q2'25", "count": 239, "rating_avg_5": 4.77 },
+    { "q": "Q3'25", "count": 368, "rating_avg_5": 4.77 },
+    { "q": "Q4'25", "count": 435, "rating_avg_5": 4.77 },
+    { "q": "Q1'26", "count": 548, "rating_avg_5": 4.77 },
+    { "q": "Q2'26", "count": 616, "rating_avg_5": 4.77 }
+  ],
+  "listings_active": 67,
+  "listings_by_year": { "2024": 11, "2025": 31, "2026": 67 },
+  "districts_covered": 5,
+  "unit_type_mix": {}
+}

@@ -1,0 +1,164 @@
+{
+  "_note": "Ouja Moments — تنسيق الحفلات. Prices are 'starting from' (تبدأ من); the supervisor sets final_price_sar per order. Edit this file freely; the bot reloads it on every use, no redeploy needed.",
+  "_source": "oujares.com/guide/{unit} — guide/templates/guide.html",
+  "currency": "SAR",
+
+  "packs": [
+    {
+      "id": "diamond",
+      "tier": "Premium",
+      "name_ar": "الباقة الماسية",
+      "name_en": "Diamond Package",
+      "price_from_sar": 1450,
+      "vendor_cost_sar": null,
+      "setup_minutes": 150,
+      "in_house_capable": true,
+      "third_party_capable": true,
+      "includes_cake": true,
+      "requires_unit_features": ["pool"],
+      "requires_guest_input": [
+        {"key": "phrases", "count": 8, "label_ar": "٨ عبارات معلقة"},
+        {"key": "occasion", "label_ar": "المناسبة"},
+        {"key": "cake_flavor", "label_ar": "نكهة الكيك"},
+        {"key": "cake_writing", "label_ar": "الكتابة على الكيك"}
+      ],
+      "checklist": [
+        {"item_ar": "٥٠ بالونة مع أكثر من ٥٠ وردة", "qty_balloons": 50, "qty_roses": 50},
+        {"item_ar": "تعليق أكثر من ٣٠ بالونة بالسقف مع ورد طبيعي", "qty_balloons": 30},
+        {"item_ar": "٨ عبارات معلقة بتصميم مناسب للمناسبة", "qty": 8},
+        {"item_ar": "تنسيق غرفة النوم والمدخل والحمام والمسبح"},
+        {"item_ar": "طاولة كيك بفازات ورد وشموع فاخرة"},
+        {"item_ar": "كيك فاخر مع عصير فوار كبير وكاسات"},
+        {"item_ar": "تنسيق طاولة الطعام والمسبح بشكل أنيق"}
+      ]
+    },
+
+    {
+      "id": "signature_silver",
+      "tier": "Most Popular",
+      "name_ar": "الباقة الفضية المميزة",
+      "name_en": "Signature Silver Package",
+      "price_from_sar": 998,
+      "vendor_cost_sar": null,
+      "setup_minutes": 120,
+      "in_house_capable": true,
+      "third_party_capable": true,
+      "includes_cake": true,
+      "requires_unit_features": ["jacuzzi"],
+      "requires_guest_input": [
+        {"key": "phrases", "count": 6, "label_ar": "٦ عبارات معلقة"},
+        {"key": "jacuzzi_text", "label_ar": "عبارة ترحيبية أو أسماء للجاكوزي"},
+        {"key": "occasion", "label_ar": "المناسبة"},
+        {"key": "cake_flavor", "label_ar": "نكهة الكيك"},
+        {"key": "cake_writing", "label_ar": "الكتابة على الكيك"}
+      ],
+      "checklist": [
+        {"item_ar": "٤٥ بالونة منها ١٠ بالونات هيليوم", "qty_balloons": 45, "qty_helium": 10},
+        {"item_ar": "٤٠ وردة معلقة وللكتابة على السرير", "qty_roses": 40},
+        {"item_ar": "٦ عبارات معلقة حسب اختياركم", "qty": 6},
+        {"item_ar": "تنسيق غرفة النوم والمدخل والحمام"},
+        {"item_ar": "تنسيق طاولة الكيك مع ٣ فازات ورد", "qty_vases": 3},
+        {"item_ar": "كيك فاخر مع عصير فوار وكاسات"},
+        {"item_ar": "تنسيق الجاكوزي بعبارة ترحيبية أو أسماء"}
+      ]
+    },
+
+    {
+      "id": "silver",
+      "tier": "Signature",
+      "name_ar": "الباقة الفضية",
+      "name_en": "Silver Package",
+      "price_from_sar": 799,
+      "vendor_cost_sar": null,
+      "setup_minutes": 100,
+      "in_house_capable": true,
+      "third_party_capable": true,
+      "includes_cake": true,
+      "requires_unit_features": ["jacuzzi_or_bathtub"],
+      "requires_guest_input": [
+        {"key": "phrases", "label_ar": "كروت وعبارات معلقة حسب المناسبة"},
+        {"key": "flower_choice", "label_ar": "تنسيق السرير بالورد حسب اختياركم"},
+        {"key": "occasion", "label_ar": "المناسبة"},
+        {"key": "cake_flavor", "label_ar": "نكهة الكيك"},
+        {"key": "cake_writing", "label_ar": "الكتابة على الكيك"}
+      ],
+      "checklist": [
+        {"item_ar": "٣٥ بالونة مع ٢٠ وردة", "qty_balloons": 35, "qty_roses": 20},
+        {"item_ar": "كروت وعبارات معلقة حسب المناسبة"},
+        {"item_ar": "تنسيق السرير بالورد حسب اختياركم"},
+        {"item_ar": "تنسيق المدخل بالشموع والبالون"},
+        {"item_ar": "تنسيق طاولة الكيك بالورد والشموع"},
+        {"item_ar": "كيك فاخر مع علاقة كيك مناسبة للحفل"},
+        {"item_ar": "تنسيق البانيو أو الجاكوزي وتعطير الغرفة"}
+      ]
+    },
+
+    {
+      "id": "table_styling",
+      "tier": "Specialty",
+      "name_ar": "تنسيق الطاولة",
+      "name_en": "Table Styling",
+      "price_from_sar": 670,
+      "vendor_cost_sar": null,
+      "setup_minutes": 60,
+      "in_house_capable": true,
+      "third_party_capable": true,
+      "includes_cake": true,
+      "requires_unit_features": [],
+      "requires_guest_input": [
+        {"key": "phrases", "count": 2, "label_ar": "عبارتين حسب اختياركم"},
+        {"key": "occasion", "label_ar": "المناسبة"},
+        {"key": "cake_flavor", "label_ar": "نكهة الكيك"},
+        {"key": "cake_writing", "label_ar": "الكتابة على الكيك"}
+      ],
+      "checklist": [
+        {"item_ar": "٣٠ بالونة منها ١٠ بالونات هيليوم", "qty_balloons": 30, "qty_helium": 10},
+        {"item_ar": "١٠ وردات", "qty_roses": 10},
+        {"item_ar": "كيك فاخر مع ملحقاته"},
+        {"item_ar": "قاعدة كيك مع قاعدتين للصحون"},
+        {"item_ar": "٤ شموع للطاولة", "qty_candles": 4},
+        {"item_ar": "عصير فوار كبير مع كاسات"},
+        {"item_ar": "عبارتين حسب اختياركم وتصميم مناسب للمناسبة", "qty": 2}
+      ]
+    },
+
+    {
+      "id": "bronze",
+      "tier": "Essential",
+      "name_ar": "الباقة البرونزية",
+      "name_en": "Bronze Package",
+      "price_from_sar": 598,
+      "vendor_cost_sar": null,
+      "setup_minutes": 60,
+      "in_house_capable": true,
+      "third_party_capable": true,
+      "includes_cake": false,
+      "requires_unit_features": [],
+      "requires_guest_input": [
+        {"key": "phrases", "count": 5, "label_ar": "٥ عبارات حسب المناسبة"},
+        {"key": "bed_letters", "label_ar": "الأحرف على السرير"},
+        {"key": "occasion", "label_ar": "المناسبة"}
+      ],
+      "checklist": [
+        {"item_ar": "٢٥ بالونة مع ٢٠ وردة", "qty_balloons": 25, "qty_roses": 20},
+        {"item_ar": "تنسيق السرير بالورد (أحرف فقط)"},
+        {"item_ar": "ربط المخدات بالشرائط والورد"},
+        {"item_ar": "٤ كومودينات مع شموع وورد", "qty": 4},
+        {"item_ar": "تنسيق مدخل بسيط بالشموع والبالون"},
+        {"item_ar": "تعليق ٥ عبارات حسب المناسبة", "qty": 5},
+        {"item_ar": "تعطير المخدات والغرفة"}
+      ]
+    }
+  ],
+
+  "unit_features": {
+    "_note": "Which units have a pool / jacuzzi / bathtub. A pack whose requires_unit_features is not satisfied must be BLOCKED at intake — selling Diamond for a unit with no pool is a broken promise the guest discovers on the night. Fill this in per unit.",
+    "_example": {"C2": ["jacuzzi"], "B14": ["pool", "jacuzzi"]}
+  },
+
+  "cake": {
+    "_note": "Every pack except Bronze includes a cake. Cake is perishable, comes from an external bakery, and needs its own earlier deadline.",
+    "lead_hours": 24,
+    "supplier": ""
+  }
+}

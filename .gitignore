@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.claude/
+.DS_Store
+.agents/
+/_*.py
+ouja-redesign-v3.html
+supabase_export_listings.csv

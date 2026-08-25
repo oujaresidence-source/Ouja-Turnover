@@ -1,0 +1,45 @@
+{
+  "_source": "rei.sakani.sa/indicatorejar — «المؤشر الإيجاري»",
+  "_captured": "2026-08-19",
+  "_index_last_updated": "يونيو 2026",
+  "_period": "2026-01/2026-08",
+  "_as_of": "2026-06-30",
+  "_entered_by": "owner",
+  "_obs_type": "transacted",
+  "_source_key": "sakani_rei",
+  "_note": "كل الأرقام قيم عقود سنوية بالريال. مفتاح شهري/ربع سنوي في الصفحة كان على «شهري» — قُرئ كدقة الفترة الزمنية للبيانات وليس تكرار الإيجار (51,213 لشقة في الملقا رقم سنوي بوضوح). مسجّل كـ«سنوي» مع بقاء الشك مكتوبًا للمراجعة. النطاق السعري «٣ نطاق الاسعار» لم يُلتقط بعد.",
+  "_note_en": "All figures are ANNUAL contract values in SAR. The page's شهري/ربع سنوي toggle was on شهري, read as the period GRANULARITY of the data and not the rent frequency (51,213 for a Malqa apartment is plainly annual). Stored as annual with the uncertainty kept on the row for re-checking, not silently assumed away. Price ranges not captured yet.",
+  "_bedroom_filters": "The index DOES break APARTMENTS out by bedroom count (الكل / غرفتين / ثلاث غرف / اربع غرف). Non-apartment types (استديو، دوبلاكس، فله، دور) have no bedroom filter and read identically whatever the filter — stored with bedrooms = null.",
+  "rows": [
+    {"district": "القيروان", "unit_type": "شقة",     "bedrooms": null, "filter": "الكل",      "annual_rent": 54396, "txn_count": 2207},
+    {"district": "القيروان", "unit_type": "استديو",  "bedrooms": null, "filter": "الكل",      "annual_rent": 50433, "txn_count": 155},
+    {"district": "القيروان", "unit_type": "دوبلاكس", "bedrooms": null, "filter": "الكل",      "annual_rent": 72015, "txn_count": 24},
+    {"district": "القيروان", "unit_type": "فله",     "bedrooms": null, "filter": "الكل",      "annual_rent": 154432, "txn_count": 198},
+    {"district": "القيروان", "unit_type": "دور",     "bedrooms": null, "filter": "الكل",      "annual_rent": 66874, "txn_count": 144},
+
+    {"district": "الملقا",   "unit_type": "شقة",     "bedrooms": null, "filter": "الكل",      "annual_rent": 51213, "txn_count": 8250},
+    {"district": "الملقا",   "unit_type": "استديو",  "bedrooms": null, "filter": "الكل",      "annual_rent": 32726, "txn_count": 556},
+    {"district": "الملقا",   "unit_type": "دوبلاكس", "bedrooms": null, "filter": "الكل",      "annual_rent": 72576, "txn_count": 142},
+    {"district": "الملقا",   "unit_type": "فله",     "bedrooms": null, "filter": "الكل",      "annual_rent": 179038, "txn_count": 231},
+    {"district": "الملقا",   "unit_type": "دور",     "bedrooms": null, "filter": "الكل",      "annual_rent": 67566, "txn_count": 306},
+    {"district": "الملقا",   "unit_type": "شقة",     "bedrooms": 3,    "filter": "ثلاث غرف",  "annual_rent": 54845, "txn_count": 1365},
+
+    {"district": "النزهة",   "unit_type": "شقة",     "bedrooms": null, "filter": "الكل",      "annual_rent": 35848, "txn_count": 1610},
+    {"district": "النزهة",   "unit_type": "استديو",  "bedrooms": null, "filter": "الكل",      "annual_rent": 20961, "txn_count": 62},
+    {"district": "النزهة",   "unit_type": "دوبلاكس", "bedrooms": null, "filter": "الكل",      "annual_rent": 75783, "txn_count": 7},
+    {"district": "النزهة",   "unit_type": "فله",     "bedrooms": null, "filter": "الكل",      "annual_rent": 106719, "txn_count": 106},
+    {"district": "النزهة",   "unit_type": "دور",     "bedrooms": null, "filter": "الكل",      "annual_rent": 62254, "txn_count": 111},
+
+    {"district": "النخيل",   "unit_type": "شقة",     "bedrooms": 3,    "filter": "ثلاث غرف",  "annual_rent": 54511, "txn_count": 314},
+    {"district": "النخيل",   "unit_type": "استديو",  "bedrooms": null, "filter": "ثلاث غرف",  "annual_rent": 42875, "txn_count": 19},
+    {"district": "النخيل",   "unit_type": "دوبلاكس", "bedrooms": null, "filter": "ثلاث غرف",  "annual_rent": 90138, "txn_count": 19},
+    {"district": "النخيل",   "unit_type": "فله",     "bedrooms": null, "filter": "ثلاث غرف",  "annual_rent": 174146, "txn_count": 94},
+    {"district": "النخيل",   "unit_type": "دور",     "bedrooms": null, "filter": "ثلاث غرف",  "annual_rent": 84659, "txn_count": 26},
+
+    {"district": "الصحافة",  "unit_type": "شقة",     "bedrooms": 4,    "filter": "اربع غرف",  "annual_rent": 47424, "txn_count": 236},
+    {"district": "الصحافة",  "unit_type": "استديو",  "bedrooms": null, "filter": "اربع غرف",  "annual_rent": 24407, "txn_count": 125},
+    {"district": "الصحافة",  "unit_type": "دوبلاكس", "bedrooms": null, "filter": "اربع غرف",  "annual_rent": 96053, "txn_count": 33},
+    {"district": "الصحافة",  "unit_type": "فله",     "bedrooms": null, "filter": "اربع غرف",  "annual_rent": 118342, "txn_count": 109},
+    {"district": "الصحافة",  "unit_type": "دور",     "bedrooms": null, "filter": "اربع غرف",  "annual_rent": 61017, "txn_count": 273}
+  ]
+}

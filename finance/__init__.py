@@ -1,0 +1,1321 @@
+# -*- coding: utf-8 -*-
+"""Ouja Finance ERP v2 — المركز المالي الجديد.
+
+The new finance system. Lives ENTIRELY in this package — never inside bot.py.
+bot.py mounts it with a ~6-line patch inside start_web_server():
+
+    import sys as _erp_sys, finance as _finance_erp
+    _finance_erp.mount(app, _erp_sys.modules[__name__])
+
+DESIGN CONTRACT (META-1 of the build prompt):
+- We NEVER `import bot`. bot.py runs as __main__; importing it by name would
+  execute the whole 45k-line monolith a SECOND time (second Discord client,
+  second web server). Instead bot.py hands us its live module object at mount
+  time and every reuse of existing functions/data goes through `api.B.<name>`.
+- Auth is the dashboard's own: B._dash_auth (login) + B._user_can (roles).
+- STATE_DIR data files are sacred: this package reuses bot.py's loaders and
+  stores; it does not invent parallel copies of existing data.
+
+Files:
+    __init__.py        routes + handlers (this file)
+    api.py             thin bridge to bot.py's functions/data + auth helpers
+    statements.py      financial statements + budget math (pure, testable)
+    templates/erp.html SPA shell (re-read per request — no stale-template pain)
+    static/erp.js      front-end
+    static/erp.css     styles (Ouja OS tokens copied from the dashboard)
+"""
+
+import os
+import json
+import time
+import asyncio
+import pathlib
+from datetime import datetime, timezone, timedelta
+
+from aiohttp import web
+
+from . import api
+from . import owners as OW
+from . import purchases as TP
+
+# Bumped on EVERY shipped slice — this string + commit + build time is the
+# owner's 5-second proof that a deploy actually reached production.
+ERP_VERSION = "2.7.12"  # تقرير الفترة المخصّصة يتبع الأساس المنشور للمالك
+
+_DIR = pathlib.Path(__file__).resolve().parent
+_BOOT = time.time()
+_KSA = timezone(timedelta(hours=3))
+
+
+def _detect_commit():
+    """Short git hash of the running build. Railway injects RAILWAY_GIT_COMMIT_SHA;
+    local dev falls back to reading .git directly (no subprocess)."""
+    for k in ("RAILWAY_GIT_COMMIT_SHA", "GIT_COMMIT", "SOURCE_VERSION", "COMMIT_SHA"):
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return v[:10]
+    try:
+        root = _DIR.parent
+        head = (root / ".git" / "HEAD").read_text("utf-8").strip()
+        if not head.startswith("ref:"):
+            return head[:10]
+        ref = head.split(None, 1)[1].strip()
+        ref_file = root / ".git" / ref
+        if ref_file.exists():
+            return ref_file.read_text("utf-8").strip()[:10]
+        packed = root / ".git" / "packed-refs"
+        if packed.exists():
+            for line in packed.read_text("utf-8").splitlines():
+                if line.endswith(ref):
+                    return line.split(" ", 1)[0][:10]
+    except Exception:
+        pass
+    return "unknown"
+
+
+_COMMIT = _detect_commit()
+_BUILT = datetime.fromtimestamp(_BOOT, _KSA).strftime("%Y-%m-%d %H:%M") + " KSA"
+
+
+def _state_storage_health():
+    """Unauthenticated, secrets-free read of the shared STATE_DIR (Railway volume) so a full or
+    detached volume is visible at a glance — a full volume silently breaks brain.db AND every
+    other state writer (auto_sent.json, caches, owner statements...)."""
+    d = os.environ.get("STATE_DIR", "/data")
+    info = {"state_dir": d, "exists": False, "writable": False, "free_mb": None, "err": ""}
+    try:
+        info["exists"] = os.path.isdir(d)
+        st = os.statvfs(d)
+        info["free_mb"] = round(st.f_bavail * st.f_frsize / 1e6, 1)
+        info["total_mb"] = round(st.f_blocks * st.f_frsize / 1e6, 1)
+    except Exception as e:
+        info["err"] = "%s: %s" % (type(e).__name__, e)
+    try:
+        import tempfile
+        fd, p = tempfile.mkstemp(prefix=".erp_probe.", dir=d)
+        os.write(fd, b"ok"); os.close(fd); os.remove(p)
+        info["writable"] = True
+    except Exception as e:
+        info["writable"] = False
+        if not info["err"]:
+            info["err"] = "%s: %s" % (type(e).__name__, e)
+    # Breakdown: which top-level entries under STATE_DIR are eating the space (du -s style).
+    # Names only (e.g. "cleaning_photos"), no file contents — so we can pinpoint the culprit
+    # of a full volume without guessing. Bounded + exception-safe.
+    try:
+        sizes = []
+        for name in os.listdir(d):
+            full = os.path.join(d, name)
+            total = 0
+            if os.path.isfile(full):
+                total = os.path.getsize(full)
+            else:
+                for root, _dirs, files in os.walk(full):
+                    for f in files:
+                        try:
+                            total += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+            sizes.append((name, total))
+        sizes.sort(key=lambda kv: kv[1], reverse=True)
+        info["top"] = [{"name": n, "mb": round(b / 1e6, 1)} for n, b in sizes[:10]]
+    except Exception as e:
+        info["top"] = "err: %s: %s" % (type(e).__name__, e)
+    return info
+
+
+def version_info():
+    return {
+        "ok": True,
+        "app": "ouja-finance-erp",
+        "version": ERP_VERSION,
+        "commit": _COMMIT,
+        "built": _BUILT,
+        "uptime_s": int(time.time() - _BOOT),
+        "storage": _state_storage_health(),
+    }
+
+
+# Branded "open it from the dashboard" gate — same idea as the invest 403 page.
+# NOTE: normal triple-quoted string — the embedded <script> must contain ZERO backslash
+# escapes (same trap class as DASHBOARD_HTML; Python would eat them before the browser).
+_GATE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>عوجا — المركز المالي</title>
+<style>body{margin:0;font-family:'Tajawal',-apple-system,system-ui,sans-serif;background:#F5F5F7;color:#1D1D1F;
+display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{background:#fff;border:1px solid #E8E8ED;border-radius:18px;padding:36px 40px;width:min(360px,calc(100vw - 48px));
+text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.06)}
+h1{font-size:19px;margin:0 0 6px}p{font-size:13.5px;color:#6E6E73;line-height:1.8;margin:0 0 18px}
+input{display:block;width:100%;box-sizing:border-box;min-height:46px;margin:0 0 10px;padding:0 14px;
+font:inherit;font-size:15px;border:1px solid #DEDEE3;border-radius:11px;background:#fff;color:inherit}
+input:focus{outline:2px solid #0A84FF;outline-offset:1px;border-color:#0A84FF}
+button{width:100%;min-height:46px;border:none;border-radius:11px;background:#0A84FF;color:#fff;
+font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+button:hover{background:#0060DF}button:disabled{opacity:.55;cursor:default}
+#err{display:none;font-size:13px;color:#C62828;background:#FDECEA;border-radius:9px;padding:9px 12px;margin:0 0 12px}</style></head>
+<body><div class="c"><h1>المركز المالي 🔒</h1>
+<p>سجّل دخولك بنفس حساب لوحة عوجا</p>
+<div id="err"></div>
+<form id="f" autocomplete="on">
+<input id="u" type="text" placeholder="اسم المستخدم" autocomplete="username" required>
+<input id="p" type="password" placeholder="كلمة المرور" autocomplete="current-password" required>
+<button id="b" type="submit">دخول</button>
+</form>
+<script>
+var f = document.getElementById('f'), b = document.getElementById('b'), err = document.getElementById('err');
+f.addEventListener('submit', function (ev) {
+  ev.preventDefault();
+  b.disabled = true; err.style.display = 'none';
+  fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: document.getElementById('u').value.trim(),
+                           password: document.getElementById('p').value }) })
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (x) {
+      if (x.j && x.j.ok) { location.reload(); return; }
+      err.textContent = x.s === 429 ? 'محاولات كثيرة — جرب بعد شوي' : 'اسم المستخدم أو كلمة المرور غير صحيحة';
+      err.style.display = 'block'; b.disabled = false;
+    })
+    .catch(function () {
+      err.textContent = 'تعذر الاتصال — جرب مرة ثانية';
+      err.style.display = 'block'; b.disabled = false;
+    });
+});
+</script></div></body></html>"""
+
+
+async def _h_version(request):
+    """Ungated build stamp — no business data, just proof of what's deployed.
+    The storage `top` breakdown lists STATE_DIR entry names, so that part is
+    login-only; anonymous callers still get free_mb/writable (the disk-full
+    diagnosis works even when logins are broken)."""
+    info = version_info()
+    if not api.authed(request):
+        st = info.get("storage")
+        if isinstance(st, dict):
+            st.pop("top", None)
+    return web.json_response(info)
+
+
+async def _h_erp(request):
+    if not api.authed(request):
+        return web.Response(text=_GATE_HTML, content_type="text/html", status=401)
+    try:
+        html = (_DIR / "templates" / "erp.html").read_text("utf-8")
+    except Exception as e:
+        return web.Response(text="erp.html missing: %r" % (e,), status=500)
+    html = (html.replace("__ERP_VERSION__", ERP_VERSION)
+                .replace("__ERP_COMMIT__", _COMMIT)
+                .replace("__ERP_BUILT__", _BUILT))
+    resp = web.Response(text=html, content_type="text/html")
+    qtok = ""
+    try:
+        qtok = request.query.get("token") or ""
+    except Exception:
+        pass
+    if qtok:
+        # Dashboard-cutover entry (/erp?token=...) plants the session cookie so
+        # direct oujares.com/erp#... links work from then on (HttpOnly, Lax).
+        resp.set_cookie("ouja_token", qtok, max_age=30 * 86400, httponly=True,
+                        secure=True, samesite="Lax", path="/")
+    return resp
+
+
+# ---------------- API handlers (auth enforced here — /erp/* is outside the
+# /api/* role middleware in bot.py, so nothing is implicit) ----------------
+
+async def _h_api_work_queue(request):
+    if not api.authed(request):
+        return api.jres({"error": "unauthorized"}, 401)
+    if not api.can_finance(request):
+        return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+    try:
+        return api.jres(await api.work_queue(request))
+    except Exception as e:
+        return api.jres({"error": "work_queue_failed", "detail": str(e)[:300]}, 500)
+
+
+async def _h_api_approve(request):
+    if not api.authed(request):
+        return api.jres({"error": "unauthorized"}, 401)
+    if not api.can_finance(request):
+        return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    try:
+        data, status = api.approve(request, body)
+        return api.jres(data, status)
+    except Exception as e:
+        return api.jres({"error": "approve_failed", "detail": str(e)[:300]}, 500)
+
+
+def _guarded(handler, write=False):
+    """Wrap a handler with the standard auth + role gate + error envelope.
+    write=True also watches the storage layer: an edit whose _save_json failed
+    would report ok:true and then evaporate on restart (M9) — surface it."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        if not api.can_finance(request):
+            return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+        try:
+            before = (getattr(api.B, "_save_failures", None) or {}).get("count", 0) if write else 0
+            resp = await handler(request)
+            if write:
+                sf = getattr(api.B, "_save_failures", None) or {}
+                if sf.get("count", 0) > before:
+                    return api.jres({
+                        "error": "storage_write_failed",
+                        "detail": str(sf.get("last", ""))[:200],
+                        "message_ar": "فشل حفظ التغيير على القرص — راح يضيع عند إعادة التشغيل. بلّغ فيصل (تحقق من مساحة /data).",
+                        "message_en": "Saving to disk failed — this change will be lost on restart. Tell Faisal (check /data space)."}, 500)
+            return resp
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+async def _h_api_bank(request):
+    return api.jres(api.bank_register(request.query))
+
+
+async def _h_api_bank_upload(request):
+    # Delegate to bot.py's importer (multipart `file` + `save` field, two-step
+    # preview→confirm, dup shield inside). It enforces _fb_can_finance itself too.
+    resp = await api.B._api_fb_bank_import(request)
+    try:
+        payload = json.loads(resp.body)
+    except Exception:
+        return resp
+    # After a confirmed save, auto-apply the stored rules to the new
+    # needs_review rows (idempotent — rules only fill unclassified txns).
+    if payload.get("ok") and payload.get("saved"):
+        applied = api.rules_apply_pending(api.actor(request))
+        payload["rules_applied"] = len(applied)
+        return api.jres(payload, resp.status)
+    return resp
+
+
+async def _h_api_bank_classify(request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    data, status = api.bank_classify(request, body if isinstance(body, dict) else {})
+    return api.jres(data, status)
+
+
+async def _h_api_accounts(request):
+    return api.jres(api.accounts_payload())
+
+
+_refresh_lock = {"busy": False}
+
+
+async def _h_api_accounts_refresh(request):
+    """Re-pull the chart/cost-centers/etc. from Daftra (idempotent import)."""
+    if _refresh_lock["busy"]:
+        return api.jres({"error": "busy", "message_ar": "فيه استيراد شغال الحين — انتظره يخلص.",
+                         "message_en": "An import is already running."}, 409)
+    _refresh_lock["busy"] = True
+    try:
+        res = await asyncio.to_thread(api.B._daftra_import_all, api.actor(request))
+        return api.jres({"ok": True, "result": {
+            "imported": res.get("imported"), "updated": res.get("updated"),
+            "failed": res.get("failed"),
+            "accounts": (res.get("per_object") or {}).get("accounts")},
+            "chart": api.accounts_payload()["counts"]})
+    finally:
+        _refresh_lock["busy"] = False
+
+
+async def _json_body(request):
+    try:
+        b = await request.json()
+        return b if isinstance(b, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _h_api_rules_list(request):
+    return api.jres(api.rules_list(request))
+
+
+async def _h_api_rule_create(request):
+    data, status = api.rule_create(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_toggle(request):
+    data, status = api.rule_toggle(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_delete(request):
+    data, status = api.rule_delete(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rule_undo(request):
+    data, status = api.rule_undo(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_rules_precision(request):
+    return api.jres(api.rules_precision())
+
+
+async def _h_api_match(request):
+    # candidate scoring scans stores and may touch the Hostaway reservation
+    # cache (cold cache = one HTTP pull) — keep it off the event loop.
+    data = await asyncio.to_thread(api.match_queue, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_match_accept(request):
+    data, status = api.match_accept(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_match_reject(request):
+    data, status = api.match_reject(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_match_daftra(request):
+    """Delegate to the existing dup machinery (suggestions / journal lines /
+    link / link_distributed / not_duplicate / ignore) so verification semantics
+    stay byte-identical — then append to the v2 decision log on writes."""
+    resp = await api.B._api_fb_daftra_dup(request)
+    if request.method == "POST" and resp.status == 200:
+        try:
+            body = await request.json()
+            payload = json.loads(resp.body)
+            if payload.get("ok") and body.get("action") in (
+                    "link", "link_distributed", "not_duplicate", "ignore"):
+                api.match_log_add(request, str(body.get("id") or ""), "daftra",
+                                  body.get("action"), {"daftra": body.get("daftra"),
+                                                       "reason": body.get("reason") or ""})
+        except Exception:
+            pass
+    return resp
+
+
+async def _h_api_match_promote(request):
+    """«ما له مقابل» — create the missing side as a canonical ledger entry
+    (becomes a DRAFT Daftra journal; posts only via migration). Delegates to
+    the existing promote action with its dup-shield guard intact."""
+    body = await _json_body(request)
+    if body.get("action") != "promote":
+        return api.jres({"error": "only_promote_allowed"}, 400)
+    resp = await api.B._api_fb_entry(request)
+    if resp.status == 200:
+        try:
+            payload = json.loads(resp.body)
+            if payload.get("ok"):
+                api.match_log_add(request, str(body.get("id") or ""), "ledger", "promote",
+                                  {"entry": (payload.get("entry") or {}).get("id")})
+        except Exception:
+            pass
+    return resp
+
+
+async def _h_api_match_log(request):
+    return api.jres({"ok": True, "log": api.match_log_recent()})
+
+
+async def _h_api_exp(request):
+    resp = await api.B._api_exp4_overview(request)
+    try:
+        payload = json.loads(resp.body)
+        if payload.get("ok"):
+            return api.jres(api.exp_attach_bank(payload), resp.status)
+    except Exception:
+        pass
+    return resp
+
+
+async def _h_api_exp_detail(request):
+    resp = await api.B._api_exp4_detail(request)
+    try:
+        payload = json.loads(resp.body)
+        if payload.get("ok"):
+            ex = api.B._expenses.get(str(request.query.get("id") or ""))
+            payload["bank_txn_id"] = (ex or {}).get("bank_txn_id") or ""
+            return api.jres(payload, resp.status)
+    except Exception:
+        pass
+    return resp
+
+
+def _exp_delegate(name):
+    async def h(request):
+        return await getattr(api.B, name)(request)
+    return h
+
+
+async def _h_api_custody(request):
+    return api.jres(api.custody_payload())
+
+
+async def _h_api_stmts(request):
+    data = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_stmts_account(request):
+    data = await asyncio.to_thread(api.stmts_account_lines, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_stmts_probe(request):
+    return api.jres(api.stmts_type_probe())
+
+
+async def _h_api_stmts_xlsx(request):
+    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    data = await asyncio.to_thread(api.stmts_xlsx, payload)
+    return web.Response(body=data,
+                        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=ouja-statements-" + payload["month"] + ".xlsx"})
+
+
+async def _h_api_stmts_pdf(request):
+    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    try:
+        data = await asyncio.to_thread(api.stmts_pdf, payload)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    return web.Response(body=data, content_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 "attachment; filename=ouja-statements-" + payload["month"] + ".pdf"})
+
+
+async def _h_api_close_get(request):
+    data = await asyncio.to_thread(api.close_get, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_close_do(request):
+    body = await _json_body(request)
+    data, status = await asyncio.to_thread(api.close_do, request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_migrate_preview(request):
+    data = await asyncio.to_thread(api.migrate_preview, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_migrate_run(request):
+    body = await _json_body(request)
+    data, status = await asyncio.to_thread(api.migrate_run, request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_budget_get(request):
+    data = await asyncio.to_thread(api.budget_get, dict(request.query))
+    return api.jres(data)
+
+
+async def _h_api_budget_set(request):
+    body = await _json_body(request)
+    data, status = api.budget_set(request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_owners(request):
+    return api.jres(api.owners_payload())
+
+
+async def _h_api_owners_diagnose(request):
+    """Slice 0b: line-by-line reconciliation of one owner-month (read-only)."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.diagnose, owner, mkey)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
+async def _h_api_owner_detail(request):
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    return api.jres(OW.owner_detail(owner))
+
+
+async def _h_api_owner_profile(request):
+    """v2.2 slice 3: the owner profile — header + chips + 12-month grid."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    data = await asyncio.to_thread(OW.owner_profile, owner)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
+async def _h_api_owner_save(request):
+    data, status = OW.owner_save(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_add(request):
+    data, status = OW.unit_add(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_remove(request):
+    data, status = OW.unit_remove(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_terms(request):
+    data, status = OW.unit_terms_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_unit_cleaning_month(request):
+    data, status = OW.unit_cleaning_month_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_owner_listings_search(request):
+    return api.jres(OW.listings_search(request.query.get("q") or ""))
+
+
+def _range_items(request):
+    """Shared parser for the custom-range owner report. Query → bot.py's verified engine
+    [{label, owner, kind, report}]. Returns (items, None) or (None, (error_code, status)).
+
+    Resolves the owner's units exactly like the (working) monthly statement, via
+    OW._owner_units — which matches the owner name with .strip() on both sides. bot.py's
+    _owner_lids matches WITHOUT strip, so reusing _finance_collect_items('owner', …)
+    silently returned ZERO units (→ all-zero report) for any owner whose registry name
+    carried stray whitespace. We build per-unit reports and aggregate the same way
+    _finance_collect_items does for owner mode."""
+    q = request.query
+    owner = (q.get("owner") or "").strip()
+    if not owner:
+        return None, ("missing_owner", 400)
+    start = api.B._parse_date(q.get("start") or "")
+    end = api.B._parse_date(q.get("end") or "")
+    if not start or not end:
+        return None, ("bad_dates", 400)
+    if end < start:
+        return None, ("end_before_start", 400)
+    apt = (q.get("apt") or "").strip() or None
+    # The custom-range report = the SUM of the monthly statements over the window,
+    # so manual expenses / edits / adjustments entered in the monthly editor all
+    # appear (was: raw build_owner_report, which only saw Hostaway-matched data).
+    report, err = OW.compute_owner_range(owner, start, end, apt)
+    if err:
+        return None, (err, 404 if err in ("no_units", "no_data") else 400)
+    label, kind = ((report.get("apartment") or apt), "apartment") if apt else (owner, "owner")
+    return [{"label": label, "owner": owner, "kind": kind, "report": report}], None
+
+
+async def _h_api_owners_range_report(request):
+    """On-screen numbers preview for an arbitrary date range (JSON, fast/mobile-safe)."""
+    items, err = await asyncio.to_thread(_range_items, request)
+    if err:
+        return api.jres({"error": err[0]}, err[1])
+    return api.jres({"ok": True, "items": [
+        {"label": it.get("label"), "owner": it.get("owner"),
+         "kind": it.get("kind"), "report": it.get("report")} for it in items]})
+
+
+async def _h_api_owners_range_report_pdf(request):
+    """The exact PDF for an arbitrary date range — inline preview, or attachment with ?dl=1.
+    Same loud PdfFontError guard as the statements PDF (owner never gets broken-Arabic PDFs)."""
+    items, err = await asyncio.to_thread(_range_items, request)
+    if err:
+        return api.jres({"error": err[0]}, err[1])
+    try:
+        data, _fn, ctype = await asyncio.to_thread(api.B._finance_pdf_payload, items)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    dispo = "attachment" if (request.query.get("dl") not in (None, "", "0")) else "inline"
+    ascii_fn = "ouja-range-statement." + ("zip" if ctype == "application/zip" else "pdf")
+    return web.Response(body=data, content_type=ctype,
+                        headers={"Content-Disposition": '%s; filename="%s"' % (dispo, ascii_fn)})
+
+
+_NOFEE_SETTINGS = {"direct_fee_pct": 0.0}
+
+
+def _nofee_asked(query):
+    """?nofee=1 → the «بدون خصم ٣٪» basis for READ paths (the screen, the zip).
+    Publishing has its own separate `basis` field in the POST body and never
+    consults this — so what you are previewing can't become what you ship."""
+    return _NOFEE_SETTINGS if str(query.get("nofee") or "") in ("1", "true", "yes") else None
+
+
+def _nofee_filename(owner, apartment, mkey, used):
+    """«المالك - الشقة - 2026-07.pdf» — the owner asked for all three on every file.
+    Arabic is kept (zip filenames are utf-8); only path-breaking characters go."""
+    raw = " - ".join(x for x in (str(owner or "").strip(),
+                                 str(apartment or "").strip(), mkey) if x)
+    safe = "".join("-" if c in '/\\:*?"<>|' else c for c in raw).strip() or "statement"
+    used[safe] = used.get(safe, 0) + 1
+    if used[safe] > 1:                      # two units sharing a display name
+        safe += "-%d" % used[safe]
+    return safe + ".pdf"
+
+
+def _nofee_pack(mkey, owner_filter=None):
+    """Build the «بدون خصم ٣٪» pack for one month: ONE PDF per apartment, computed
+    on the alternate basis through the SAME statement engine the real reports use
+    (so editor edits, manual expenses and contract windows are all still in).
+    Returns (zip_bytes, [built], [skipped]). Pure read — writes nothing, and it
+    deliberately bypasses _owner_month_report so the memoized real statements
+    can never be overwritten with these numbers."""
+    import io
+    import zipfile
+    B = api.B
+    start, end = B._month_bounds(mkey)
+    owners = []
+    for rec in api._registry_rows():
+        own = (rec.get("owner") or "").strip()
+        if own and own not in owners and (not owner_filter or own == owner_filter):
+            owners.append(own)
+    built, skipped, used = [], [], {}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for own in sorted(owners):
+            units, _listings = OW._owner_units(own)
+            for u in units:
+                apt = (u.get("apartment") or "").strip()
+                if u.get("lid") is None:
+                    skipped.append({"owner": own, "apartment": apt, "why": "no_listing"})
+                    continue
+                try:
+                    rep, err = OW.compute_owner_range(own, start, end, apt,
+                                                      settings=_NOFEE_SETTINGS)
+                    if err or rep is None:
+                        skipped.append({"owner": own, "apartment": apt, "why": err or "no_data"})
+                        continue
+                    rep["no_direct_fee"] = True          # the PDF banner reads this
+                    fn = _nofee_filename(own, apt, mkey, used)
+                    z.writestr(fn, B._pdf_statement_bytes(rep, apt))
+                    built.append(fn)
+                except B.PdfFontError:
+                    raise                            # font missing = stop, never ship broken Arabic
+                except Exception as e:
+                    # one bad unit must not cost the owner the other 52 files
+                    print("nofee pack error:", own, apt, e)
+                    skipped.append({"owner": own, "apartment": apt, "why": str(e)[:120]})
+    return buf.getvalue(), built, skipped
+
+
+async def _h_api_nofee_zip(request):
+    """«تقارير بدون خصم ٣٪» — one zip, one PDF per apartment, named
+    «المالك - الشقة - الشهر.pdf». READ-ONLY: nothing is stored or published."""
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    owner_filter = (request.query.get("owner") or "").strip() or None
+    try:
+        data, built, skipped = await asyncio.to_thread(_nofee_pack, mkey, owner_filter)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    except Exception as e:
+        print("nofee zip error:", e)
+        return api.jres({"error": "pack_failed", "message_ar": "تعذّر إنشاء الملف — جرّب بعد قليل.",
+                         "message_en": "Could not build the pack — try again shortly."}, 500)
+    if not built:
+        return api.jres({"error": "no_reports", "skipped": skipped[:20],
+                         "message_ar": "ما فيه تقارير لهذا الشهر.",
+                         "message_en": "No reports for that month."}, 404)
+    try:
+        api.B.log_event("finance", "تقارير بدون خصم ٣٪ — %s (%d ملف)" % (mkey, len(built)))
+    except Exception:
+        pass
+    return web.Response(body=data, content_type="application/zip",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="ouja-no-3pct-%s.zip"' % mkey,
+                                 "X-Ouja-Built": str(len(built)),
+                                 "X-Ouja-Skipped": str(len(skipped))})
+
+
+async def _h_api_stmt_get(request):
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.statement_payload, owner, mkey,
+                                   _nofee_asked(request.query))
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
+async def _h_api_stmt_edit(request):
+    data, status = await asyncio.to_thread(OW.statement_edit, request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_stmt_publish(request):
+    data, status = await asyncio.to_thread(OW.statement_publish, request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_stmt_diff(request):
+    owner = (request.query.get("owner") or "").strip()
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.statement_recompute_diff, owner, mkey)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
+async def _h_api_stmt_audit(request):
+    """«فحص الكشوف» — sweep every owner × month and report any statement whose own
+    numbers disagree (income split, net math, unit roll-up, a force-included
+    booking with no money, a deleted expense still counted, a stale published
+    copy). One call answers «هل فيه كشف ثاني فيه نفس المشكلة؟» for the whole book."""
+    months = [m.strip() for m in (request.query.get("months") or "").split(",") if m.strip()]
+    owner = (request.query.get("owner") or "").strip() or None
+    data = await asyncio.to_thread(OW.audit_all, months, owner)
+    return api.jres(data, 200)
+
+
+async def _h_api_stmt_tieout(request):
+    """v2.2 slice 2: تطابق الكشوف — per-unit subtotals vs aggregate vs PDF fixture."""
+    owner = (request.query.get("owner") or "").strip()
+    if not owner:
+        return api.jres({"error": "owner_required"}, 400)
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.statement_tieout, owner, mkey)
+    return api.jres(data, 200 if data.get("ok") else 404)
+
+
+async def _h_api_cycle(request):
+    mkey = api._month_key_or_prev(request.query.get("m"))
+    data = await asyncio.to_thread(OW.cycle_board, mkey)
+    return api.jres(data)
+
+
+async def _h_api_cycle_status(request):
+    data, status = OW.cycle_status_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_cycle_links(request):
+    data, status = OW.cycle_links(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_cycle_template(request):
+    body = await _json_body(request)
+    return api.jres({"ok": True, "wa_template": OW.wa_template_set(request, body.get("text"))})
+
+
+async def _h_api_owners_link(request):
+    # Delegate to the existing owner-link manager (finance-write gated inside;
+    # create/regenerate/revoke + full audit live there).
+    return await api.B._api_finance_owner_link(request)
+
+
+# ---------- /fin/receipt/{expense_id}?t=<owner_token> — the receipt PROXY ----------
+# PUBLIC route (owners hold no dashboard session). The owner token IS the auth;
+# scope = that owner's apartments only. Fetches the file through the existing
+# Google Drive service account so the guest's sharing settings never break it.
+# Missing receipt → an honest «بدون فاتورة مرفقة» page — never a dead link.
+
+_RECEIPT_NOTE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>عوجا — الفاتورة</title><style>body{margin:0;font-family:'IBM Plex Sans Arabic','Tajawal',system-ui,sans-serif;
+background:#F7F1E6;color:#2F241B;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{background:#FFFDF8;border:1px solid #E5D8C4;border-radius:14px;padding:36px 40px;max-width:400px;text-align:center}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#7A6A58;line-height:1.9;margin:0}</style></head>
+<body><div class="c"><h1>__T__</h1><p>__P__</p></div></body></html>"""
+
+
+def _receipt_note(title, sub, status=200):
+    return web.Response(text=_RECEIPT_NOTE_HTML.replace("__T__", title).replace("__P__", sub),
+                        content_type="text/html", status=status)
+
+
+async def _h_receipt_proxy(request):
+    B = api.B
+    token = (request.query.get("t") or "").strip()
+    eid = (request.match_info.get("expense_id") or "").strip()
+    try:
+        owner = B._owner_by_token(token) if token else None
+    except Exception:
+        owner = None
+    if not owner:
+        return _receipt_note("هالرابط محمي 🔒", "افتح الفاتورة من داخل كشف حسابك.", 403)
+    ex = B._expenses.get(eid) or next(
+        (e for e in B._expenses.values() if str(e.get("id")) == eid), None)
+    if not ex:
+        return _receipt_note("بدون فاتورة مرفقة", "ما لقينا هالمصروف في السجل.", 404)
+    apts, lids = api.owner_apartments(owner)
+    if not (((ex.get("apartment") or "").strip() in apts)
+            or (str(ex.get("listing_id") or "") in lids)):
+        return _receipt_note("هالرابط محمي 🔒", "الفاتورة تخص شقة خارج حسابك.", 403)
+    link = ex.get("receipt_link") or ""
+    import re as _re
+    m = _re.search(r"[-\w]{25,}", link)
+    if not m:
+        return _receipt_note("بدون فاتورة مرفقة", "هالمصروف انسجّل بدون فاتورة.")
+
+    file_id = m.group(0)
+
+    def _download():
+        svc = B._cleanproof_get_drive_service()
+        if not svc:
+            return None, None
+        import io as _io
+        from googleapiclient.http import MediaIoBaseDownload
+        meta = svc.files().get(fileId=file_id, fields="mimeType,name").execute()
+        buf = _io.BytesIO()
+        dn = MediaIoBaseDownload(buf, svc.files().get_media(fileId=file_id))
+        done = False
+        while not done:
+            _, done = dn.next_chunk()
+        return buf.getvalue(), (meta.get("mimeType") or "application/octet-stream")
+
+    try:
+        data, mime = await asyncio.to_thread(_download)
+    except Exception:
+        data, mime = None, None
+    if not data:
+        return _receipt_note("تعذّر جلب الفاتورة الحين", "حاول بعد دقيقة — أو كلمنا ونرسلها لك مباشرة.")
+    return web.Response(body=data, content_type=mime,
+                        headers={"Cache-Control": "private, max-age=600",
+                                 "X-Robots-Tag": "noindex"})
+
+
+async def _h_api_contracts(request):
+    return api.jres(api.contracts_list())
+
+
+async def _h_api_contract_link(request):
+    data, status = api.contract_link(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+async def _h_api_custody_map(request):
+    return api.jres(api.custody_map_data())
+
+
+async def _h_api_custody_map_set(request):
+    data, status = api.custody_map_set(request, await _json_body(request))
+    return api.jres(data, status)
+
+
+# ============================================================================
+#  مشتريات الفريق — Team Purchases + عهدة (float). Routes under /erp/api/tp/*.
+#  Access model (backend-enforced, NOT just UI):
+#    • view list / create / edit-own / delete-own  → any authed ERP user (_authed).
+#    • approve / reject / transfer / top-up / settle / edit config → Finance only (_guarded).
+#    • float balances + statement → authed but FILTERED by TP.visible_holder_ids
+#      (Finance sees all; a user sees only the holder linked to their name; nobody else).
+# ============================================================================
+
+import mimetypes as _mimetypes
+import uuid as _uuid
+
+_TP_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif"}
+_TP_RECEIPT_MAX_MB = 12
+
+
+def _authed(handler, write=False):
+    """Login-only gate (any active user) + the same storage-failure envelope as _guarded.
+    Used for the team-facing Team-Purchases routes so ops members — not just Finance — can log
+    their own purchases and holders can see their own float."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        try:
+            return await handler(request)
+        except TP.TPError as e:
+            return api.jres({"error": e.code, "detail": e.ar,
+                             "message_ar": e.ar, "message_en": e.en}, 400)
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+def _tp_finance(handler):
+    """Finance-only (admin/accountant) wrapper that also surfaces TPError bilingually."""
+    async def wrapped(request):
+        if not api.authed(request):
+            return api.jres({"error": "unauthorized"}, 401)
+        if not api.can_finance(request):
+            return api.jres({"error": "forbidden", "detail": "finance role required",
+                             "message_ar": "هذا الإجراء للمالية فقط.",
+                             "message_en": "This action is for Finance only."}, 403)
+        try:
+            return await handler(request)
+        except TP.TPError as e:
+            return api.jres({"error": e.code, "detail": e.ar,
+                             "message_ar": e.ar, "message_en": e.en}, 400)
+        except Exception as e:
+            return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+    return wrapped
+
+
+async def _tp_listings_map():
+    """listing_id(int) -> apartment name, via bot.py's cached map (never blocks the loop)."""
+    try:
+        mp = await api.B.get_listings_map_async()
+        return {int(k): v for k, v in (mp or {}).items()}
+    except Exception:
+        try:
+            return {int(k): v for k, v in (api.B.get_listings_map() or {}).items()}
+        except Exception:
+            return {}
+
+
+def _tp_apt_options(mp):
+    rows = [{"lid": lid, "name": name or str(lid)} for lid, name in mp.items()]
+    rows.sort(key=lambda r: str(r["name"]))
+    return rows
+
+
+def _tp_receipt_dir():
+    base = os.path.join(api.B.STATE_DIR, "team_purchases")
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+async def _tp_read_form(request):
+    """Parse the create/edit FormData: returns (fields:dict, saved_receipt_path or None).
+    An image part named `file` is streamed to STATE_DIR/team_purchases/<uuid>.<ext> (size-capped).
+    A browser's fetch(FormData) is always multipart; we still tolerate urlencoded/JSON bodies
+    (no image) so the endpoint never 500s on a fieldsonly post."""
+    ctype = (request.headers.get("Content-Type") or "").lower()
+    if "multipart/" not in ctype:
+        if "application/json" in ctype:
+            data = await _json_body(request)
+        else:
+            data = dict(await request.post())
+        return {k: ("" if v is None else str(v)).strip() for k, v in data.items()}, None
+    fields = {}
+    receipt_path = None
+    reader = await request.multipart()
+    async for part in reader:
+        if part.name == "file" and (part.filename or ""):
+            ext = os.path.splitext(part.filename)[1].lower()
+            if ext not in _TP_IMG_EXT:
+                raise TP.TPError("bad_image", "الفاتورة لازم تكون صورة (jpg/png/webp).",
+                                 "The receipt must be an image (jpg/png/webp).")
+            chunks = []
+            total = 0
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _TP_RECEIPT_MAX_MB * 1024 * 1024:
+                    raise TP.TPError("too_large", "حجم الصورة كبير — أقصى حد %d ميجا." % _TP_RECEIPT_MAX_MB,
+                                     "Image too large — max %d MB." % _TP_RECEIPT_MAX_MB)
+                chunks.append(chunk)
+            fname = _uuid.uuid4().hex + ext
+            path = os.path.join(_tp_receipt_dir(), fname)
+            with open(path, "wb") as f:
+                f.write(b"".join(chunks))
+            receipt_path = path
+        else:
+            fields[part.name] = (await part.text()).strip()
+    return fields, receipt_path
+
+
+def _tp_row_view(r, actor, is_finance, holders_by_id):
+    st = r.get("status")
+    lab = TP.STATUS_LABELS.get(st, {"ar": st, "en": st})
+    can_edit = False
+    if r.get("pay_source") == TP.PAY_TRANSFER:
+        can_edit = (st == TP.ST_PENDING) and (is_finance or (r.get("created_by") == actor))
+    elif r.get("pay_source") == TP.PAY_FLOAT and st == TP.ST_FLOAT:
+        can_edit = is_finance or (r.get("created_by") == actor)
+    return {
+        "id": r["id"], "purchase_date": r.get("purchase_date"), "item": r.get("item"),
+        "amount": r.get("amount"), "listing_id": r.get("listing_id"),
+        "apartment_name": r.get("apartment_name"), "submitted_by": r.get("submitted_by"),
+        "buyer": r.get("buyer"), "pay_source": r.get("pay_source"), "reason": r.get("reason"),
+        "status": st, "status_ar": lab["ar"], "status_en": lab["en"],
+        "reject_reason": r.get("reject_reason"),
+        "holder_id": r.get("holder_id"),
+        "holder_name": (holders_by_id.get(r.get("holder_id")) or {}).get("name") if r.get("holder_id") else None,
+        "has_receipt": bool(r.get("receipt_path")), "no_receipt_reason": r.get("no_receipt_reason"),
+        "created_by": r.get("created_by"), "can_edit": can_edit,
+    }
+
+
+async def _h_tp_list(request):
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    qs = request.query
+    filters = {k: qs.get(k) for k in
+               ("status", "pay_source", "submitted_by", "buyer", "holder_id", "listing_id",
+                "date_from", "date_to", "q") if qs.get(k)}
+    rows = TP.list_purchases(filters)
+    holders_by_id = {h["id"]: h for h in TP.holders()}
+    view_rows = [_tp_row_view(r, actor, is_finance, holders_by_id) for r in rows]
+
+    mp = await _tp_listings_map()
+    vis = TP.visible_holder_ids(actor, is_finance)
+    balances = [b for b in TP.all_balances() if b and b["holder_id"] in vis]
+
+    return api.jres({
+        "ok": True, "actor": actor, "is_finance": is_finance,
+        "rows": view_rows, "summary": TP.summary(filters),
+        "balances": balances,
+        "options": {
+            "apartments": _tp_apt_options(mp),
+            "submitters": TP.submitters(),
+            "buyers": TP.buyers(),
+            "holders": [{"id": h["id"], "name": h["name"]} for h in TP.holders()],
+            "statuses": TP.STATUS_LABELS,
+        },
+    })
+
+
+async def _h_tp_create(request):
+    fields, receipt_path = await _tp_read_form(request)
+    if receipt_path:
+        fields["receipt_path"] = receipt_path
+    mp = await _tp_listings_map()
+    row = TP.create_purchase(fields, actor=api.actor(request),
+                             apartment_resolver=lambda lid: mp.get(int(lid)))
+    return api.jres({"ok": True, "id": row["id"]})
+
+
+async def _h_tp_edit(request):
+    fields, receipt_path = await _tp_read_form(request)
+    pid = fields.pop("id", None)
+    if not pid:
+        return api.jres({"error": "no_id"}, 400)
+    if receipt_path:
+        fields["receipt_path"] = receipt_path
+    mp = await _tp_listings_map()
+    TP.edit_purchase(pid, fields, actor=api.actor(request), is_finance=api.can_finance(request),
+                     apartment_resolver=lambda lid: mp.get(int(lid)))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_delete(request):
+    body = await _json_body(request)
+    pid = body.get("id")
+    if not pid:
+        return api.jres({"error": "no_id"}, 400)
+    TP.delete_purchase(pid, actor=api.actor(request), is_finance=api.can_finance(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_approve(request):
+    body = await _json_body(request)
+    TP.approve(body.get("id"), by=api.actor(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_reject(request):
+    body = await _json_body(request)
+    TP.reject(body.get("id"), by=api.actor(request), reason=body.get("reason", ""))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_transfer(request):
+    body = await _json_body(request)
+    TP.mark_transferred(body.get("id"), by=api.actor(request))
+    return api.jres({"ok": True})
+
+
+async def _h_tp_holders(request):
+    """Float balance cards — backend-filtered by visibility."""
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    vis = TP.visible_holder_ids(actor, is_finance)
+    balances = [b for b in TP.all_balances() if b and b["holder_id"] in vis]
+    return api.jres({"ok": True, "is_finance": is_finance, "balances": balances})
+
+
+async def _h_tp_statement(request):
+    actor = api.actor(request)
+    is_finance = api.can_finance(request)
+    hid = request.query.get("holder_id")
+    if not hid:
+        return api.jres({"error": "no_holder"}, 400)
+    if not TP.can_see_holder(hid, actor, is_finance):
+        return api.jres({"error": "forbidden", "message_ar": "ما تقدر تشوف كشف هذي العهدة.",
+                         "message_en": "You can't view this float statement."}, 403)
+    st = TP.statement(hid)
+    if not st:
+        return api.jres({"error": "not_found"}, 404)
+    return api.jres({"ok": True, "statement": st})
+
+
+async def _h_tp_topup(request):
+    body = await _json_body(request)
+    bal = TP.topup(body.get("holder_id"), body.get("amount"), by=api.actor(request),
+                   note=body.get("note", ""))
+    return api.jres({"ok": True, "balance": bal})
+
+
+async def _h_tp_settle(request):
+    body = await _json_body(request)
+    bal = TP.settle(body.get("holder_id"), by=api.actor(request), note=body.get("note", ""))
+    return api.jres({"ok": True, "balance": bal})
+
+
+async def _h_tp_config(request):
+    """Editable name lists + holder settings — the single place they live. Finance only."""
+    return api.jres({
+        "ok": True,
+        "people": TP.people(active_only=False),
+        "holders": TP.holders(active_only=False),
+    })
+
+
+async def _h_tp_person_save(request):
+    body = await _json_body(request)
+    pid = TP.save_person(body.get("name"), can_submit=body.get("can_submit", 1),
+                         can_buy=body.get("can_buy", 0), person_id=body.get("id"),
+                         active=body.get("active", 1))
+    return api.jres({"ok": True, "id": pid})
+
+
+async def _h_tp_holder_save(request):
+    body = await _json_body(request)
+    hid = TP.save_holder(body.get("name"), start_balance=body.get("start_balance"),
+                         low_threshold=body.get("low_threshold"), user_key=body.get("user_key"),
+                         holder_id=body.get("id"), active=body.get("active", 1))
+    return api.jres({"ok": True, "id": hid})
+
+
+async def _h_tp_receipt(request):
+    """Stream a receipt image. Any logged-in ERP user may view it."""
+    pid = request.query.get("id")
+    if not pid:
+        return web.Response(status=400, text="no id")
+    r = TP.get_purchase(pid)
+    path = (r or {}).get("receipt_path")
+    if not r or not path or not os.path.exists(path):
+        return web.Response(status=404, text="no receipt")
+    ctype = _mimetypes.guess_type(path)[0] or "image/jpeg"
+    return web.FileResponse(path, headers={"Content-Type": ctype, "Cache-Control": "private, max-age=3600"})
+
+
+def mount(app, botmod):
+    """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
+    api.attach(botmod)
+    # v2.1: the owner portal/PDF/close-checks read the effective-dated statement
+    # through this hook (bot.py falls back to its legacy aggregate on any error).
+    # Published snapshot wins; live compute otherwise (slice 2).
+    botmod._owner_statement_hook = OW.statement_for_portal
+    # Expense deletes/edits saved before the per-unit mirror existed reach their
+    # apartment at BOOT, not on whoever happens to read a statement first — an
+    # apartment PDF requested before any statement view must not show a line the
+    # accountant deleted days ago (owner-reported 2026-08-03).
+    try:
+        OW.backfill_expense_mirrors()
+    except Exception as _e:
+        print("expense mirror backfill skipped:", _e)
+    app.router.add_get("/erp", _h_erp)
+    app.router.add_get("/erp/version", _h_version)
+    app.router.add_get("/erp/api/work-queue", _h_api_work_queue)
+    app.router.add_post("/erp/api/approve", _h_api_approve)
+    app.router.add_get("/erp/api/bank", _guarded(_h_api_bank))
+    app.router.add_post("/erp/api/bank/upload", _guarded(_h_api_bank_upload, write=True))
+    app.router.add_post("/erp/api/bank/classify", _guarded(_h_api_bank_classify, write=True))
+    app.router.add_get("/erp/api/accounts", _guarded(_h_api_accounts))
+    app.router.add_post("/erp/api/accounts/refresh", _guarded(_h_api_accounts_refresh, write=True))
+    app.router.add_get("/erp/api/rules", _guarded(_h_api_rules_list))
+    app.router.add_post("/erp/api/rules", _guarded(_h_api_rule_create, write=True))
+    app.router.add_post("/erp/api/rules/toggle", _guarded(_h_api_rule_toggle, write=True))
+    app.router.add_post("/erp/api/rules/delete", _guarded(_h_api_rule_delete, write=True))
+    app.router.add_post("/erp/api/rules/undo", _guarded(_h_api_rule_undo, write=True))
+    app.router.add_get("/erp/api/rules/precision", _guarded(_h_api_rules_precision))
+    app.router.add_get("/erp/api/contracts", _guarded(_h_api_contracts))
+    app.router.add_post("/erp/api/contracts/link", _guarded(_h_api_contract_link, write=True))
+    app.router.add_get("/erp/api/custody-map", _guarded(_h_api_custody_map))
+    app.router.add_post("/erp/api/custody-map", _guarded(_h_api_custody_map_set, write=True))
+    app.router.add_get("/erp/api/match", _guarded(_h_api_match))
+    app.router.add_post("/erp/api/match/accept", _guarded(_h_api_match_accept, write=True))
+    app.router.add_post("/erp/api/match/reject", _guarded(_h_api_match_reject, write=True))
+    app.router.add_get("/erp/api/match/daftra", _guarded(_h_api_match_daftra))
+    app.router.add_post("/erp/api/match/daftra", _guarded(_h_api_match_daftra, write=True))
+    app.router.add_post("/erp/api/match/promote", _guarded(_h_api_match_promote, write=True))
+    app.router.add_get("/erp/api/match/log", _guarded(_h_api_match_log))
+    app.router.add_get("/erp/api/exp", _guarded(_h_api_exp))
+    app.router.add_get("/erp/api/exp/detail", _guarded(_h_api_exp_detail))
+    app.router.add_post("/erp/api/exp/approve", _guarded(_exp_delegate("_api_exp4_approve"), write=True))
+    app.router.add_post("/erp/api/exp/reject", _guarded(_exp_delegate("_api_exp4_reject"), write=True))
+    app.router.add_post("/erp/api/exp/edit", _guarded(_exp_delegate("_api_exp4_edit"), write=True))
+    app.router.add_post("/erp/api/exp/export", _guarded(_exp_delegate("_api_exp4_export"), write=True))
+    app.router.add_post("/erp/api/exp/recheck", _guarded(_exp_delegate("_api_exp4_recheck"), write=True))
+    app.router.add_post("/erp/api/exp/reverify", _guarded(_exp_delegate("_api_exp4_reverify"), write=True))
+    app.router.add_get("/erp/api/exp/intake", _guarded(_exp_delegate("_api_exp4_intake_get")))
+    app.router.add_post("/erp/api/exp/intake", _guarded(_exp_delegate("_api_exp4_intake_set"), write=True))
+    app.router.add_post("/erp/api/exp/pull-preview", _guarded(_exp_delegate("_api_exp4_pull_preview"), write=True))
+    app.router.add_post("/erp/api/exp/pull", _guarded(_exp_delegate("_api_exp4_pull_run"), write=True))
+    app.router.add_post("/erp/api/exp/delete-all", _guarded(_exp_delegate("_api_exp4_delete_all"), write=True))
+    app.router.add_post("/erp/api/exp/bank-import", _guarded(_exp_delegate("_api_exp4_bank_import"), write=True))
+    app.router.add_post("/erp/api/exp/split-preview", _guarded(_exp_delegate("_api_exp4_split_preview"), write=True))
+    app.router.add_post("/erp/api/exp/split-apply", _guarded(_exp_delegate("_api_exp4_split_apply"), write=True))
+    app.router.add_get("/erp/api/daftra/introspect", _guarded(_exp_delegate("_api_daftra_introspect")))
+    app.router.add_post("/erp/api/daftra/write-test", _guarded(_exp_delegate("_api_daftra_write_test"), write=True))
+    app.router.add_get("/erp/api/custody", _guarded(_h_api_custody))
+    app.router.add_get("/erp/api/owners", _guarded(_h_api_owners))
+    app.router.add_get("/erp/api/owners/diagnose", _guarded(_h_api_owners_diagnose))
+    app.router.add_get("/erp/api/owners/detail", _guarded(_h_api_owner_detail))
+    app.router.add_get("/erp/api/owners/profile", _guarded(_h_api_owner_profile))
+    app.router.add_post("/erp/api/owners/save", _guarded(_h_api_owner_save, write=True))
+    app.router.add_post("/erp/api/owners/unit-add", _guarded(_h_api_unit_add, write=True))
+    app.router.add_post("/erp/api/owners/unit-remove", _guarded(_h_api_unit_remove, write=True))
+    app.router.add_post("/erp/api/owners/unit-terms", _guarded(_h_api_unit_terms, write=True))
+    app.router.add_post("/erp/api/owners/unit-cleaning-month", _guarded(_h_api_unit_cleaning_month, write=True))
+    app.router.add_get("/erp/api/owners/listings-search", _guarded(_h_api_owner_listings_search))
+    app.router.add_get("/erp/api/owners/statement", _guarded(_h_api_stmt_get))
+    app.router.add_post("/erp/api/owners/statement/edit", _guarded(_h_api_stmt_edit, write=True))
+    app.router.add_post("/erp/api/owners/statement/publish", _guarded(_h_api_stmt_publish, write=True))
+    app.router.add_get("/erp/api/owners/statement/diff", _guarded(_h_api_stmt_diff))
+    app.router.add_get("/erp/api/owners/statement/tieout", _guarded(_h_api_stmt_tieout))
+    app.router.add_get("/erp/api/owners/statement/audit", _guarded(_h_api_stmt_audit))
+    app.router.add_get("/erp/api/owners/cycle", _guarded(_h_api_cycle))
+    app.router.add_post("/erp/api/owners/cycle/status", _guarded(_h_api_cycle_status, write=True))
+    app.router.add_post("/erp/api/owners/cycle/links", _guarded(_h_api_cycle_links, write=True))
+    app.router.add_post("/erp/api/owners/cycle/template", _guarded(_h_api_cycle_template, write=True))
+    app.router.add_get("/erp/api/owners/link", _guarded(_h_api_owners_link))
+    app.router.add_post("/erp/api/owners/link", _guarded(_h_api_owners_link, write=True))
+    app.router.add_get("/erp/api/owners/range-report", _guarded(_h_api_owners_range_report))
+    app.router.add_get("/erp/api/owners/range-report.pdf", _guarded(_h_api_owners_range_report_pdf))
+    app.router.add_get("/erp/api/owners/no-direct-fee.zip", _guarded(_h_api_nofee_zip))
+    app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))
+    app.router.add_get("/erp/api/stmts/account", _guarded(_h_api_stmts_account))
+    app.router.add_get("/erp/api/stmts/type-probe", _guarded(_h_api_stmts_probe))
+    app.router.add_get("/erp/api/stmts/export.xlsx", _guarded(_h_api_stmts_xlsx))
+    app.router.add_get("/erp/api/stmts/export.pdf", _guarded(_h_api_stmts_pdf))
+    app.router.add_get("/erp/api/close", _guarded(_h_api_close_get))
+    app.router.add_post("/erp/api/close", _guarded(_h_api_close_do, write=True))
+    app.router.add_get("/erp/api/migrate", _guarded(_h_api_migrate_preview))
+    app.router.add_post("/erp/api/migrate", _guarded(_h_api_migrate_run, write=True))
+    app.router.add_get("/erp/api/budget", _guarded(_h_api_budget_get))
+    app.router.add_post("/erp/api/budget", _guarded(_h_api_budget_set, write=True))
+    # مشتريات الفريق — Team Purchases + عهدة (float)
+    app.router.add_get ("/erp/api/tp",            _authed(_h_tp_list))
+    app.router.add_post("/erp/api/tp/create",     _authed(_h_tp_create, write=True))
+    app.router.add_post("/erp/api/tp/edit",       _authed(_h_tp_edit, write=True))
+    app.router.add_post("/erp/api/tp/delete",     _authed(_h_tp_delete, write=True))
+    app.router.add_get ("/erp/api/tp/receipt",    _authed(_h_tp_receipt))
+    app.router.add_get ("/erp/api/tp/holders",    _authed(_h_tp_holders))
+    app.router.add_get ("/erp/api/tp/statement",  _authed(_h_tp_statement))
+    app.router.add_post("/erp/api/tp/approve",    _tp_finance(_h_tp_approve))
+    app.router.add_post("/erp/api/tp/reject",     _tp_finance(_h_tp_reject))
+    app.router.add_post("/erp/api/tp/transfer",   _tp_finance(_h_tp_transfer))
+    app.router.add_post("/erp/api/tp/topup",      _tp_finance(_h_tp_topup))
+    app.router.add_post("/erp/api/tp/settle",     _tp_finance(_h_tp_settle))
+    app.router.add_get ("/erp/api/tp/config",     _tp_finance(_h_tp_config))
+    app.router.add_post("/erp/api/tp/person-save", _tp_finance(_h_tp_person_save))
+    app.router.add_post("/erp/api/tp/holder-save", _tp_finance(_h_tp_holder_save))
+    app.router.add_get("/fin/receipt/{expense_id}", _h_receipt_proxy)   # owner-token scoped (public route)
+    app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
+    return True

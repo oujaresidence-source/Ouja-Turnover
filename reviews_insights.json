@@ -1,0 +1,1556 @@
+{
+ "generated": "2026-05-28",
+ "source": "reviews_20260528.csv",
+ "overall": {
+  "count": 3187,
+  "avg": 9.55,
+  "cats": {
+   "accuracy": 9.68,
+   "checkin": 9.75,
+   "cleanliness": 9.65,
+   "communication": 9.8,
+   "location": 9.63,
+   "value": 9.39,
+   "respect_house_rules": 9.83
+  }
+ },
+ "issues": [
+  {
+   "tag": "نظافة",
+   "n": 44
+  },
+  {
+   "tag": "رائحة",
+   "n": 39
+  },
+  {
+   "tag": "مواقف",
+   "n": 26
+  },
+  {
+   "tag": "إزعاج",
+   "n": 25
+  },
+  {
+   "tag": "صيانة",
+   "n": 19
+  },
+  {
+   "tag": "تكييف",
+   "n": 17
+  },
+  {
+   "tag": "الدخول/الكود",
+   "n": 17
+  },
+  {
+   "tag": "واي فاي",
+   "n": 14
+  },
+  {
+   "tag": "ماء/سخان",
+   "n": 9
+  }
+ ],
+ "issues_all": [
+  {
+   "tag": "نظافة",
+   "n": 142
+  },
+  {
+   "tag": "رائحة",
+   "n": 96
+  },
+  {
+   "tag": "الدخول/الكود",
+   "n": 67
+  },
+  {
+   "tag": "مواقف",
+   "n": 59
+  },
+  {
+   "tag": "إزعاج",
+   "n": 41
+  },
+  {
+   "tag": "واي فاي",
+   "n": 24
+  },
+  {
+   "tag": "تكييف",
+   "n": 24
+  },
+  {
+   "tag": "صيانة",
+   "n": 20
+  },
+  {
+   "tag": "ماء/سخان",
+   "n": 10
+  }
+ ],
+ "apartments": {
+  "MS (113)": {
+   "listing_id": "367749",
+   "count": 212,
+   "avg": 9.52,
+   "cats": {
+    "accuracy": 9.57,
+    "checkin": 9.83,
+    "cleanliness": 9.7,
+    "communication": 9.84,
+    "location": 9.52,
+    "value": 9.28,
+    "respect_house_rules": 10.0
+   },
+   "low": 19,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 7
+    },
+    {
+     "tag": "إزعاج",
+     "n": 3
+    },
+    {
+     "tag": "نظافة",
+     "n": 3
+    },
+    {
+     "tag": "صيانة",
+     "n": 3
+    },
+    {
+     "tag": "تكييف",
+     "n": 2
+    }
+   ]
+  },
+  "MS5 (202)": {
+   "listing_id": "367750",
+   "count": 131,
+   "avg": 9.55,
+   "cats": {
+    "accuracy": 9.63,
+    "checkin": 9.76,
+    "cleanliness": 9.73,
+    "communication": 9.91,
+    "location": 9.01,
+    "value": 9.39,
+    "respect_house_rules": 10.0
+   },
+   "low": 17,
+   "issues": [
+    {
+     "tag": "مواقف",
+     "n": 7
+    },
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "MS6": {
+   "listing_id": "367752",
+   "count": 93,
+   "avg": 9.57,
+   "cats": {
+    "accuracy": 9.88,
+    "checkin": 9.95,
+    "cleanliness": 9.59,
+    "communication": 9.83,
+    "location": 8.96,
+    "value": 9.57,
+    "respect_house_rules": 10.0
+   },
+   "low": 11,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 5
+    },
+    {
+     "tag": "مواقف",
+     "n": 4
+    },
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "6B HTN": {
+   "listing_id": "367745",
+   "count": 161,
+   "avg": 9.6,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 9.84,
+    "cleanliness": 9.54,
+    "communication": 9.83,
+    "location": 9.77,
+    "value": 9.55,
+    "respect_house_rules": 9.76
+   },
+   "low": 11,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "رائحة",
+     "n": 2
+    },
+    {
+     "tag": "صيانة",
+     "n": 2
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    }
+   ]
+  },
+  "9B HTN": {
+   "listing_id": "367751",
+   "count": 174,
+   "avg": 9.69,
+   "cats": {
+    "accuracy": 9.69,
+    "checkin": 9.76,
+    "cleanliness": 9.86,
+    "communication": 9.83,
+    "location": 9.81,
+    "value": 9.53,
+    "respect_house_rules": 10.0
+   },
+   "low": 12,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    },
+    {
+     "tag": "واي فاي",
+     "n": 1
+    }
+   ]
+  },
+  "101 QUR": {
+   "listing_id": "367753",
+   "count": 68,
+   "avg": 9.74,
+   "cats": {
+    "accuracy": 9.74,
+    "checkin": 9.79,
+    "cleanliness": 9.68,
+    "communication": 9.85,
+    "location": 9.83,
+    "value": 9.57,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    }
+   ]
+  },
+  "3BMJ": {
+   "listing_id": "367747",
+   "count": 128,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.57,
+    "checkin": 9.71,
+    "cleanliness": 9.67,
+    "communication": 9.89,
+    "location": 9.48,
+    "value": 9.32,
+    "respect_house_rules": 10.0
+   },
+   "low": 17,
+   "issues": [
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    }
+   ]
+  },
+  "6BMJ": {
+   "listing_id": "367748",
+   "count": 133,
+   "avg": 9.42,
+   "cats": {
+    "accuracy": 9.6,
+    "checkin": 9.77,
+    "cleanliness": 9.4,
+    "communication": 9.8,
+    "location": 9.21,
+    "value": 9.06,
+    "respect_house_rules": 9.86
+   },
+   "low": 15,
+   "issues": [
+    {
+     "tag": "تكييف",
+     "n": 2
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    },
+    {
+     "tag": "ماء/سخان",
+     "n": 1
+    }
+   ]
+  },
+  "15C HTN": {
+   "listing_id": "367746",
+   "count": 105,
+   "avg": 9.64,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 9.82,
+    "cleanliness": 9.75,
+    "communication": 9.83,
+    "location": 9.74,
+    "value": 9.69,
+    "respect_house_rules": 10.0
+   },
+   "low": 9,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 4
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "واي فاي",
+     "n": 1
+    }
+   ]
+  },
+  "12B HTN": {
+   "listing_id": "367754",
+   "count": 138,
+   "avg": 9.35,
+   "cats": {
+    "accuracy": 9.49,
+    "checkin": 9.79,
+    "cleanliness": 9.62,
+    "communication": 9.81,
+    "location": 9.64,
+    "value": 9.26,
+    "respect_house_rules": 10.0
+   },
+   "low": 15,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 3
+    },
+    {
+     "tag": "صيانة",
+     "n": 2
+    },
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "واي فاي",
+     "n": 1
+    }
+   ]
+  },
+  "H8 VLG": {
+   "listing_id": "383921",
+   "count": 175,
+   "avg": 9.63,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 9.69,
+    "cleanliness": 9.7,
+    "communication": 9.85,
+    "location": 9.51,
+    "value": 9.33,
+    "respect_house_rules": 10.0
+   },
+   "low": 9,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 2
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "HUE 9": {
+   "listing_id": "385091",
+   "count": 66,
+   "avg": 9.52,
+   "cats": {
+    "accuracy": 9.74,
+    "checkin": 9.89,
+    "cleanliness": 9.64,
+    "communication": 9.91,
+    "location": 9.63,
+    "value": 9.22,
+    "respect_house_rules": 10.0
+   },
+   "low": 9,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 3
+    },
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "إزعاج",
+     "n": 2
+    },
+    {
+     "tag": "ماء/سخان",
+     "n": 1
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    }
+   ]
+  },
+  "العارض - ابو ماجد": {
+   "listing_id": "392854",
+   "count": 89,
+   "avg": 9.44,
+   "cats": {
+    "accuracy": 9.94,
+    "checkin": 9.5,
+    "cleanliness": 9.75,
+    "communication": 9.84,
+    "location": 9.17,
+    "value": 9.5,
+    "respect_house_rules": 9.92
+   },
+   "low": 5,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    }
+   ]
+  },
+  "RFL3902": {
+   "listing_id": "396256",
+   "count": 96,
+   "avg": 9.43,
+   "cats": {
+    "accuracy": 9.56,
+    "checkin": 9.48,
+    "cleanliness": 9.35,
+    "communication": 9.46,
+    "location": 9.7,
+    "value": 9.41,
+    "respect_house_rules": 8.4
+   },
+   "low": 11,
+   "issues": [
+    {
+     "tag": "صيانة",
+     "n": 1
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    },
+    {
+     "tag": "نظافة",
+     "n": 1
+    }
+   ]
+  },
+  "FD1": {
+   "listing_id": "407535",
+   "count": 72,
+   "avg": 9.44,
+   "cats": {
+    "accuracy": 9.38,
+    "checkin": 9.51,
+    "cleanliness": 9.25,
+    "communication": 9.72,
+    "location": 9.8,
+    "value": 9.11,
+    "respect_house_rules": 10.0
+   },
+   "low": 10,
+   "issues": [
+    {
+     "tag": "رائحة",
+     "n": 4
+    },
+    {
+     "tag": "نظافة",
+     "n": 4
+    },
+    {
+     "tag": "واي فاي",
+     "n": 3
+    }
+   ]
+  },
+  "D104": {
+   "listing_id": "412448",
+   "count": 82,
+   "avg": 9.3,
+   "cats": {
+    "accuracy": 9.64,
+    "checkin": 9.55,
+    "cleanliness": 9.39,
+    "communication": 9.71,
+    "location": 9.7,
+    "value": 9.48,
+    "respect_house_rules": 9.12
+   },
+   "low": 11,
+   "issues": [
+    {
+     "tag": "مواقف",
+     "n": 3
+    },
+    {
+     "tag": "إزعاج",
+     "n": 2
+    },
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    }
+   ]
+  },
+  "C204": {
+   "listing_id": "415053",
+   "count": 33,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.57,
+    "checkin": 9.93,
+    "cleanliness": 9.45,
+    "communication": 9.82,
+    "location": 9.86,
+    "value": 9.36,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    }
+   ]
+  },
+  "Spacious Mid-Century Apt • Self Entry - ابو ماجد": {
+   "listing_id": "417977",
+   "count": 98,
+   "avg": 9.92,
+   "cats": {
+    "accuracy": 9.92,
+    "checkin": 9.81,
+    "cleanliness": 9.94,
+    "communication": 9.96,
+    "location": 9.62,
+    "value": 9.77,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": [
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    }
+   ]
+  },
+  "Modern 1BR, 75\" 4K TV, SelfEntry-ابو ماجد": {
+   "listing_id": "417990",
+   "count": 90,
+   "avg": 9.68,
+   "cats": {
+    "accuracy": 9.73,
+    "checkin": 9.86,
+    "cleanliness": 9.89,
+    "communication": 9.8,
+    "location": 9.73,
+    "value": 9.59,
+    "respect_house_rules": 10.0
+   },
+   "low": 5,
+   "issues": [
+    {
+     "tag": "ماء/سخان",
+     "n": 3
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    }
+   ]
+  },
+  "GD1": {
+   "listing_id": "422713",
+   "count": 49,
+   "avg": 9.32,
+   "cats": {
+    "accuracy": 9.41,
+    "checkin": 9.46,
+    "cleanliness": 9.63,
+    "communication": 9.63,
+    "location": 9.8,
+    "value": 9.17,
+    "respect_house_rules": 10.0
+   },
+   "low": 7,
+   "issues": [
+    {
+     "tag": "واي فاي",
+     "n": 2
+    },
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 2
+    },
+    {
+     "tag": "رائحة",
+     "n": 2
+    },
+    {
+     "tag": "ماء/سخان",
+     "n": 2
+    }
+   ]
+  },
+  "A15": {
+   "listing_id": "427410",
+   "count": 47,
+   "avg": 8.85,
+   "cats": {
+    "accuracy": 9.2,
+    "checkin": 9.7,
+    "cleanliness": 9.36,
+    "communication": 9.83,
+    "location": 9.65,
+    "value": 8.55,
+    "respect_house_rules": 10.0
+   },
+   "low": 13,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 2
+    },
+    {
+     "tag": "مواقف",
+     "n": 2
+    },
+    {
+     "tag": "رائحة",
+     "n": 2
+    },
+    {
+     "tag": "إزعاج",
+     "n": 2
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    }
+   ]
+  },
+  "Huge 2BR Penthouse with Pool": {
+   "listing_id": "431434",
+   "count": 39,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.5,
+    "checkin": 9.88,
+    "cleanliness": 9.44,
+    "communication": 9.74,
+    "location": 9.75,
+    "value": 9.25,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    }
+   ]
+  },
+  "HUE 103": {
+   "listing_id": "437215",
+   "count": 54,
+   "avg": 9.32,
+   "cats": {
+    "accuracy": 9.84,
+    "checkin": 9.63,
+    "cleanliness": 9.59,
+    "communication": 9.81,
+    "location": 9.89,
+    "value": 9.21,
+    "respect_house_rules": 10.0
+   },
+   "low": 8,
+   "issues": [
+    {
+     "tag": "واي فاي",
+     "n": 3
+    },
+    {
+     "tag": "تكييف",
+     "n": 2
+    },
+    {
+     "tag": "إزعاج",
+     "n": 2
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    }
+   ]
+  },
+  "F2": {
+   "listing_id": "441826",
+   "count": 86,
+   "avg": 9.88,
+   "cats": {
+    "accuracy": 9.91,
+    "checkin": 9.97,
+    "cleanliness": 9.91,
+    "communication": 10.0,
+    "location": 9.91,
+    "value": 9.34,
+    "respect_house_rules": 10.0
+   },
+   "low": 4,
+   "issues": []
+  },
+  "11 MLQ": {
+   "listing_id": "441858",
+   "count": 33,
+   "avg": 9.52,
+   "cats": {
+    "accuracy": 9.52,
+    "checkin": 9.38,
+    "cleanliness": 9.15,
+    "communication": 9.39,
+    "location": 9.66,
+    "value": 9.52,
+    "respect_house_rules": 8.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    },
+    {
+     "tag": "ماء/سخان",
+     "n": 1
+    }
+   ]
+  },
+  "C08 MJ": {
+   "listing_id": "456602",
+   "count": 59,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.61,
+    "checkin": 9.28,
+    "cleanliness": 9.49,
+    "communication": 9.39,
+    "location": 9.78,
+    "value": 9.0,
+    "respect_house_rules": 9.3
+   },
+   "low": 6,
+   "issues": [
+    {
+     "tag": "الدخول/الكود",
+     "n": 3
+    },
+    {
+     "tag": "واي فاي",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    }
+   ]
+  },
+  "A5 MLQ": {
+   "listing_id": "457287",
+   "count": 42,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.64,
+    "checkin": 9.79,
+    "cleanliness": 9.67,
+    "communication": 9.76,
+    "location": 9.57,
+    "value": 9.14,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    }
+   ]
+  },
+  "1 MLQ": {
+   "listing_id": "457230",
+   "count": 54,
+   "avg": 9.65,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 9.82,
+    "cleanliness": 9.81,
+    "communication": 9.85,
+    "location": 9.88,
+    "value": 9.41,
+    "respect_house_rules": 9.9
+   },
+   "low": 4,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    }
+   ]
+  },
+  "C2 NFL": {
+   "listing_id": "461328",
+   "count": 48,
+   "avg": 9.89,
+   "cats": {
+    "accuracy": 9.95,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 9.78,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": []
+  },
+  "DYAR20": {
+   "listing_id": "462594",
+   "count": 47,
+   "avg": 9.66,
+   "cats": {
+    "accuracy": 9.94,
+    "checkin": 9.66,
+    "cleanliness": 9.74,
+    "communication": 9.87,
+    "location": 9.83,
+    "value": 9.66,
+    "respect_house_rules": 10.0
+   },
+   "low": 4,
+   "issues": [
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "ماء/سخان",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    }
+   ]
+  },
+  "C118": {
+   "listing_id": "469303",
+   "count": 30,
+   "avg": 9.09,
+   "cats": {
+    "accuracy": 9.27,
+    "checkin": 9.91,
+    "cleanliness": 9.27,
+    "communication": 9.73,
+    "location": 9.91,
+    "value": 9.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 6,
+   "issues": [
+    {
+     "tag": "الدخول/الكود",
+     "n": 2
+    },
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    },
+    {
+     "tag": "واي فاي",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    }
+   ]
+  },
+  "F1": {
+   "listing_id": "479967",
+   "count": 12,
+   "avg": 9.75,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 9.5,
+    "cleanliness": 9.67,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": []
+  },
+  "102B": {
+   "listing_id": "472286",
+   "count": 28,
+   "avg": 9.6,
+   "cats": {
+    "accuracy": 9.8,
+    "checkin": 9.8,
+    "cleanliness": 9.93,
+    "communication": 9.57,
+    "location": 9.9,
+    "value": 9.3,
+    "respect_house_rules": 9.25
+   },
+   "low": 2,
+   "issues": [
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "102A": {
+   "listing_id": "473467",
+   "count": 45,
+   "avg": 9.94,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.96,
+    "communication": 9.82,
+    "location": 10.0,
+    "value": 9.82,
+    "respect_house_rules": 9.45
+   },
+   "low": 1,
+   "issues": []
+  },
+  "202A": {
+   "listing_id": "473607",
+   "count": 47,
+   "avg": 9.38,
+   "cats": {
+    "accuracy": 9.88,
+    "checkin": 9.81,
+    "cleanliness": 9.96,
+    "communication": 9.96,
+    "location": 9.75,
+    "value": 9.31,
+    "respect_house_rules": 10.0
+   },
+   "low": 5,
+   "issues": [
+    {
+     "tag": "إزعاج",
+     "n": 3
+    },
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "الدخول/الكود",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    }
+   ]
+  },
+  "202B": {
+   "listing_id": "473608",
+   "count": 21,
+   "avg": 9.88,
+   "cats": {
+    "accuracy": 9.76,
+    "checkin": 9.76,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 9.88,
+    "value": 9.76,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": []
+  },
+  "الياسمين 8": {
+   "listing_id": "476054",
+   "count": 23,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.62,
+    "checkin": 9.5,
+    "cleanliness": 8.96,
+    "communication": 9.13,
+    "location": 9.88,
+    "value": 9.62,
+    "respect_house_rules": 7.71
+   },
+   "low": 2,
+   "issues": []
+  },
+  "101b": {
+   "listing_id": "477748",
+   "count": 30,
+   "avg": 9.91,
+   "cats": {
+    "accuracy": 9.91,
+    "checkin": 9.73,
+    "cleanliness": 10.0,
+    "communication": 9.67,
+    "location": 9.91,
+    "value": 9.73,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": []
+  },
+  "Calma 90": {
+   "listing_id": "477784",
+   "count": 13,
+   "avg": 8.8,
+   "cats": {
+    "accuracy": 8.8,
+    "checkin": 8.4,
+    "cleanliness": 9.08,
+    "communication": 9.38,
+    "location": 9.6,
+    "value": 9.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "201a": {
+   "listing_id": "477749",
+   "count": 14,
+   "avg": 9.33,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.86,
+    "communication": 9.86,
+    "location": 9.78,
+    "value": 9.11,
+    "respect_house_rules": 10.0
+   },
+   "low": 2,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    }
+   ]
+  },
+  "201B": {
+   "listing_id": "477747",
+   "count": 36,
+   "avg": 9.71,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 9.93,
+    "cleanliness": 9.78,
+    "communication": 9.78,
+    "location": 9.93,
+    "value": 9.5,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": [
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "رائحة",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "HUE 202": {
+   "listing_id": "482978",
+   "count": 23,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 9.88,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "العارض A11": {
+   "listing_id": "483841",
+   "count": 18,
+   "avg": 9.38,
+   "cats": {
+    "accuracy": 9.85,
+    "checkin": 10.0,
+    "cleanliness": 9.11,
+    "communication": 9.44,
+    "location": 9.69,
+    "value": 9.69,
+    "respect_house_rules": 8.4
+   },
+   "low": 2,
+   "issues": [
+    {
+     "tag": "نظافة",
+     "n": 1
+    },
+    {
+     "tag": "تكييف",
+     "n": 1
+    },
+    {
+     "tag": "صيانة",
+     "n": 1
+    }
+   ]
+  },
+  "13 JOOD": {
+   "listing_id": "485203",
+   "count": 16,
+   "avg": 9.14,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.5,
+    "communication": 10.0,
+    "location": 9.86,
+    "value": 8.57,
+    "respect_house_rules": 10.0
+   },
+   "low": 3,
+   "issues": []
+  },
+  "B14": {
+   "listing_id": "482287",
+   "count": 5,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "شقة 7 - الماجديه": {
+   "listing_id": "487707",
+   "count": 13,
+   "avg": 9.64,
+   "cats": {
+    "accuracy": 9.64,
+    "checkin": 10.0,
+    "cleanliness": 9.85,
+    "communication": 9.85,
+    "location": 9.82,
+    "value": 9.45,
+    "respect_house_rules": 10.0
+   },
+   "low": 2,
+   "issues": []
+  },
+  "C2 - العارض": {
+   "listing_id": "490891",
+   "count": 23,
+   "avg": 8.53,
+   "cats": {
+    "accuracy": 9.07,
+    "checkin": 9.2,
+    "cleanliness": 8.52,
+    "communication": 8.7,
+    "location": 8.4,
+    "value": 8.27,
+    "respect_house_rules": 8.0
+   },
+   "low": 3,
+   "issues": [
+    {
+     "tag": "تكييف",
+     "n": 1
+    }
+   ]
+  },
+  "C3": {
+   "listing_id": "487708",
+   "count": 17,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.88,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 9.87,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "101a": {
+   "listing_id": "490890",
+   "count": 11,
+   "avg": 9.4,
+   "cats": {
+    "accuracy": 9.8,
+    "checkin": 9.8,
+    "cleanliness": 9.82,
+    "communication": 9.82,
+    "location": 9.6,
+    "value": 9.4,
+    "respect_house_rules": 10.0
+   },
+   "low": 2,
+   "issues": [
+    {
+     "tag": "صيانة",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "Jood12": {
+   "listing_id": "497191",
+   "count": 9,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.78,
+    "communication": 9.78,
+    "location": 9.25,
+    "value": 9.75,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "Rose 10": {
+   "listing_id": "490892",
+   "count": 9,
+   "avg": 9.5,
+   "cats": {
+    "accuracy": 9.5,
+    "checkin": 9.5,
+    "cleanliness": 10.0,
+    "communication": 9.78,
+    "location": 10.0,
+    "value": 9.25,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": [
+    {
+     "tag": "مواقف",
+     "n": 1
+    },
+    {
+     "tag": "إزعاج",
+     "n": 1
+    }
+   ]
+  },
+  "Qurtuba-B20": {
+   "listing_id": "500595",
+   "count": 7,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "E15 عرقه": {
+   "listing_id": "502536",
+   "count": 8,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 9.71,
+    "checkin": 10.0,
+    "cleanliness": 9.75,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "E5MLQ": {
+   "listing_id": "500593",
+   "count": 7,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 9.14,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 9.33,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "A2 - التعاون": {
+   "listing_id": "503713",
+   "count": 6,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 8.67,
+    "communication": 8.67,
+    "location": 10.0,
+    "value": 9.5,
+    "respect_house_rules": 6.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "N06- نصل": {
+   "listing_id": "507450",
+   "count": 8,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0,
+    "respect_house_rules": 10.0
+   },
+   "low": 0,
+   "issues": []
+  },
+  "القيروان-D7": {
+   "listing_id": "507451",
+   "count": 5,
+   "avg": 8.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 9.6,
+    "location": 9.5,
+    "value": 9.5,
+    "respect_house_rules": 10.0
+   },
+   "low": 1,
+   "issues": []
+  },
+  "A12- النرجس": {
+   "listing_id": "497190",
+   "count": 1,
+   "avg": 10.0,
+   "cats": {
+    "accuracy": 10.0,
+    "checkin": 10.0,
+    "cleanliness": 10.0,
+    "communication": 10.0,
+    "location": 10.0,
+    "value": 10.0
+   },
+   "low": 0,
+   "issues": []
+  }
+ }
+}
