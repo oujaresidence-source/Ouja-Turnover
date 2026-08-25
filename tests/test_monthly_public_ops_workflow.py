@@ -330,6 +330,31 @@ class OpsLeadWorkflowTests(unittest.TestCase):
         self.assertEqual(removed["listing_id"], "1001")
         self.assertIsNone(removed["title"])
 
+    def test_deactivated_destination_keeps_historical_lead_labels(self):
+        self.app.replace_configuration(valid_settings(), {})
+
+        detail = self.app.ops.lead(
+            {"lead_reference": self.lead["reference"]}
+        )["lead"]
+
+        self.assertEqual(
+            detail["request"]["place"],
+            {
+                "id": "kafd",
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "King Abdullah Financial District",
+            },
+        )
+        self.assertEqual(
+            self.app.ops.funnel()["requested_places"],
+            [{
+                "place_id": "kafd",
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "King Abdullah Financial District",
+                "count": 1,
+            }],
+        )
+
     def test_funnel_maps_approved_place_labels_but_keeps_the_id(self):
         funnel = self.app.ops.funnel()
         self.assertEqual(funnel["requested_places"], [{

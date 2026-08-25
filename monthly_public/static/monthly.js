@@ -1877,12 +1877,25 @@
       { value: "fixed", label: copy("fixedDates") },
       { value: "plus_minus_7", label: copy("flexibleDates") }
     ], saved.flexibility || "fixed");
-    const placeOptions = placesForPurpose(saved.purpose || "family");
-    const place = selectField("listing-place", copy("importantPlace"), [{ value: "", label: copy("allPlaces") }].concat(placeOptions.map(function (item) {
+    let currentPlaceOptions = placesForPurpose(saved.purpose || "family");
+    const place = selectField("listing-place", copy("importantPlace"), [{ value: "", label: copy("allPlaces") }].concat(currentPlaceOptions.map(function (item) {
       return { value: item.id, label: runtime.lang === "ar" ? item.label_ar : item.label_en };
     })), saved.place && saved.place.id);
     const placeField = place.field;
+    function rebuildListingPlaceOptions() {
+      const selected = place.select.value;
+      currentPlaceOptions = placesForPurpose(purpose.select.value);
+      while (place.select.firstChild) place.select.removeChild(place.select.firstChild);
+      [{ id: "", label_ar: copy("allPlaces"), label_en: copy("allPlaces") }].concat(currentPlaceOptions).forEach(function (item) {
+        const option = element("option", "", item.id ? (runtime.lang === "ar" ? item.label_ar : item.label_en) : copy("allPlaces"));
+        option.value = item.id;
+        if (item.id === selected) option.selected = true;
+        place.select.appendChild(option);
+      });
+      if (!currentPlaceOptions.some(function (item) { return item.id === selected; })) place.select.value = "";
+    }
     function togglePlace() {
+      rebuildListingPlaceOptions();
       placeField.hidden = purpose.select.value === "family";
     }
     purpose.select.addEventListener("change", togglePlace);
@@ -1904,7 +1917,7 @@
       if (moveOut) request.move_out = moveOut.input.value;
       else request.duration_months = Number(duration.select.value);
       if (request.purpose !== "family") {
-        const selected = placeOptions.find(function (item) { return item.id === place.select.value; });
+        const selected = currentPlaceOptions.find(function (item) { return item.id === place.select.value; });
         if (selected) request.place = { kind: selected.kind, id: selected.id, label: runtime.lang === "ar" ? selected.label_ar : selected.label_en };
       }
       if (!requestIsComplete(request) || !/^\d{4}-\d{2}-\d{2}$/.test(request.move_in)) {

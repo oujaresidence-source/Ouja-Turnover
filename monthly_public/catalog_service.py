@@ -20,6 +20,7 @@ from .catalog_profiles import (
 from .catalog_store import CatalogStore
 from .publication import validate_listing
 from .settings import MonthlySettings, load_settings
+from .snapshot import SnapshotGeneration, revalidate_generation
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
@@ -71,12 +72,14 @@ class CatalogService:
         settings_fallback: Callable[[], Mapping[str, Any]],
         snapshot_refresh: Callable[[], Mapping[str, Any]],
         clock: Callable[[], dt.datetime] = _utc_now,
+        active_snapshot_provider: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.store = store
         self.source_provider = source_provider
         self.settings_fallback = settings_fallback
         self.snapshot_refresh = snapshot_refresh
         self.clock = clock
+        self.active_snapshot_provider = active_snapshot_provider
 
     def _now(self) -> dt.datetime:
         value = self.clock()
@@ -138,6 +141,22 @@ class CatalogService:
     def _effective_settings(self) -> MonthlySettings:
         return load_settings(self.approved_settings_values())
 
+    def _active_publication(self, listing_id: str) -> Optional[tuple[bool, bool]]:
+        """Return customer-visible publication state when a snapshot is connected."""
+
+        if self.active_snapshot_provider is None:
+            return None
+        snapshot = self.active_snapshot_provider()
+        if snapshot is None:
+            return False, False
+        if isinstance(snapshot, SnapshotGeneration):
+            snapshot = revalidate_generation(snapshot, self._now())
+        by_id = getattr(snapshot, "by_id", {})
+        result = by_id.get(listing_id) if isinstance(by_id, Mapping) else None
+        if result is None:
+            return False, False
+        return bool(result.publishable), bool(result.exact_match_eligible)
+
     @staticmethod
     def _parts(row: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any], Any, Any, Mapping[str, Any]]:
         hostaway = row.get("hostaway") if isinstance(row.get("hostaway"), Mapping) else row
@@ -179,8 +198,12 @@ class CatalogService:
         staff_publication = [
             code for code in publication_codes if code not in _BACKGROUND_BLOCKERS
         ]
-        published = approved is not None and validation.publishable
-        exact = published and validation.exact_match_eligible
+        active_publication = self._active_publication(key)
+        if active_publication is None:
+            published = approved is not None and validation.publishable
+            exact = published and validation.exact_match_eligible
+        else:
+            published, exact = active_publication
         source_title = str(
             hostaway.get("name")
             or hostaway.get("internal")
@@ -404,6 +427,15 @@ class CatalogService:
             place_id: copy.deepcopy(row["approved"])
             for place_id, row in self.store.places().items()
             if row.get("active") and isinstance(row.get("approved"), Mapping)
+        }
+
+    def approved_place_history(self) -> Dict[str, Dict[str, Any]]:
+        """Keep approved labels available for historical leads after deactivation."""
+
+        return {
+            place_id: copy.deepcopy(row["approved"])
+            for place_id, row in self.store.places().items()
+            if isinstance(row.get("approved"), Mapping)
         }
 
     def refresh(self) -> Dict[str, Any]:

@@ -188,7 +188,7 @@ class MonthlyOpsApp:
         try:
             _current, generation = self._public._request_context()
             summary = funnel_summary(self._public.analytics_store, self._public.lead_store)
-            registry = self._public._place_registry(generation)
+            registry = self._public._historical_place_registry(generation)
             places = []
             for row in summary.get("requested_places") or ():
                 value = {
@@ -234,6 +234,19 @@ class MonthlyOpsApp:
         place = request.get("place")
         if isinstance(place, Mapping) and isinstance(place.get("id"), str):
             out["place_id"] = place["id"]
+            label_ar = place.get("label_ar")
+            label_en = place.get("label_en")
+            if (
+                isinstance(label_ar, str)
+                and 0 < len(label_ar) <= 120
+                and isinstance(label_en, str)
+                and 0 < len(label_en) <= 120
+            ):
+                out["place"] = {
+                    "id": place["id"],
+                    "label_ar": label_ar,
+                    "label_en": label_en,
+                }
         return out
 
     @staticmethod
@@ -284,7 +297,7 @@ class MonthlyOpsApp:
                 )
             except Exception:
                 journey = []
-            registry = self._public._place_registry(generation)
+            registry = self._public._historical_place_registry(generation)
             safe_request = self._safe_request(lead)
             request_place_id = safe_request.get("place_id")
             request_place = registry.get(request_place_id)
@@ -654,6 +667,7 @@ class MonthlyPublicApp:
         self.lead_store = lead_store
         self.analytics_store = analytics_store
         self.approved_places = self._prepare_places(approved_places)
+        self.place_history = self.approved_places
         self.session_secret = session_secret
         self.clock = clock
         self.catalog_health_provider = None
@@ -692,16 +706,25 @@ class MonthlyPublicApp:
         )
 
     def replace_configuration(
-        self, settings: MonthlySettings, approved_places: Mapping[str, Any]
+        self,
+        settings: MonthlySettings,
+        approved_places: Mapping[str, Any],
+        historical_places: Optional[Mapping[str, Any]] = None,
     ) -> None:
         """Atomically replace staff-approved public settings and destinations."""
 
         if not isinstance(settings, MonthlySettings):
             raise TypeError("settings must be MonthlySettings")
         prepared = self._prepare_places(approved_places)
+        history = self._prepare_places(
+            historical_places if historical_places is not None else approved_places
+        )
         with self._configuration_lock:
             self.settings = settings
             self.approved_places = prepared
+            merged_history = dict(self.place_history)
+            merged_history.update(history)
+            self.place_history = MappingProxyType(merged_history)
 
     def _configuration(self) -> tuple[MonthlySettings, Mapping[str, Mapping[str, Any]]]:
         """Pin one immutable settings/place pair for a complete request."""
@@ -751,6 +774,11 @@ class MonthlyPublicApp:
                 }
         return registry
 
+    def _historical_place_registry(self, generation: Any) -> Dict[str, Dict[str, Any]]:
+        with self._configuration_lock:
+            history = self.place_history
+        return self._place_registry(generation, history)
+
     def _find(self, request: Mapping[str, Any], generation: Any) -> Optional[Any]:
         listing_id = request.get("listing_id")
         slug = request.get("slug")
@@ -766,6 +794,7 @@ class MonthlyPublicApp:
         place: Any,
         generation: Any,
         approved_places: Optional[Mapping[str, Mapping[str, Any]]] = None,
+        purpose: Optional[str] = None,
     ) -> Optional[Dict[str, str]]:
         if not isinstance(place, Mapping):
             return None
@@ -790,6 +819,18 @@ class MonthlyPublicApp:
                 "المكان غير موجود ضمن الخيارات المعتمدة.",
                 "The place is not in the approved options.",
             )
+        allowed_purposes = registered.get("purposes") or ()
+        if (
+            registered.get("kind") == "destination"
+            and allowed_purposes
+            and purpose not in allowed_purposes
+        ):
+            raise ContractError(
+                "place.id",
+                "place_purpose_not_allowed",
+                "المكان غير معتمد لغرض الإقامة المحدد.",
+                "The destination is not approved for the selected stay purpose.",
+            )
         return {
             "kind": registered["kind"],
             "id": place_id,
@@ -805,7 +846,7 @@ class MonthlyPublicApp:
         result = dict(request)
         if "place" in result:
             result["place"] = self._canonical_place(
-                result["place"], generation, approved_places
+                result["place"], generation, approved_places, result.get("purpose")
             )
         return result
 

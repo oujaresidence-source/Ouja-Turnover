@@ -192,6 +192,17 @@ class CatalogProfileContractTest(unittest.TestCase):
         self.assertTrue(value["coordinates"]["verified"])
         self.assertEqual(value["sources"]["coordinates"], "hostaway_listing")
 
+    def test_one_malformed_source_field_does_not_discard_valid_prefills(self):
+        value = build_prefill(
+            {"id": 101, "bedrooms": 2, "lat": 21.4, "lng": 39.8},
+            {},
+            None,
+            None,
+        )
+        self.assertEqual(value["bedrooms"], 2)
+        self.assertEqual(value["sources"]["bedrooms"], "hostaway_listing")
+        self.assertNotIn("coordinates", value)
+
     def test_title_matched_guide_coordinates_are_never_prefilled_as_verified(self):
         value = build_prefill(
             {"id": 101},

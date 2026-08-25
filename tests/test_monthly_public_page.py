@@ -40,6 +40,8 @@ class MonthlyPublicPageTests(unittest.TestCase):
             source = handle.read()
         self.assertIn("place.purposes.indexOf(purpose)", source)
         self.assertIn('place.kind !== "destination"', source)
+        self.assertIn("function rebuildListingPlaceOptions", source)
+        self.assertIn("currentPlaceOptions = placesForPurpose(purpose.select.value)", source)
 
     def test_arabic_first_shell_has_landmarks_focus_and_live_regions(self):
         from monthly_public.page import render_monthly_page

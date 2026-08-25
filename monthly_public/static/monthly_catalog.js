@@ -5,6 +5,28 @@
   const STEPS = ["identity", "space", "location", "content", "terms", "sources", "approval"];
   const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
   const PURPOSES = ["work", "family", "treatment", "visit"];
+  const DAY_LABELS = {
+    ar: { monday: "الاثنين", tuesday: "الثلاثاء", wednesday: "الأربعاء", thursday: "الخميس", friday: "الجمعة", saturday: "السبت", sunday: "الأحد" },
+    en: { monday: "Monday", tuesday: "Tuesday", wednesday: "Wednesday", thursday: "Thursday", friday: "Friday", saturday: "Saturday", sunday: "Sunday" }
+  };
+  const SOURCE_LABELS = {
+    ar: { connected_listing: "بيانات الشقة المرتبطة", stay_approved: "محتوى عوجا المعتمد", monthly_licence_store: "سجل معلومات الإعلان", monthly_approved: "بيانات شهرية معتمدة", monthly_draft: "مسودة الفريق" },
+    en: { connected_listing: "connected apartment data", stay_approved: "approved Ouja content", monthly_licence_store: "advertising information record", monthly_approved: "approved monthly data", monthly_draft: "team draft" }
+  };
+
+  function translatedDay(day, lang) {
+    const language = lang === "en" ? "en" : "ar";
+    return DAY_LABELS[language][day] || day;
+  }
+
+  function prefillSourceLabel(sources, path, lang) {
+    const language = lang === "en" ? "en" : "ar", key = String(path || "").split(".")[0];
+    const rawSource = sources && sources[key];
+    const source = rawSource === ["host", "away_listing"].join("") ? "connected_listing" : rawSource;
+    const label = SOURCE_LABELS[language][source];
+    if (!label) return "";
+    return (language === "ar" ? "المصدر: " : "Source: ") + label;
+  }
 
   function authPath(path, search) {
     const token = new URLSearchParams(typeof search === "string" ? search : "").get("token");
@@ -37,6 +59,19 @@
 
   function present(value) { return value !== undefined && value !== null && value !== ""; }
   function clone(value) { return value && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : {}; }
+  function retainConflictDraft(latest, localDraft) {
+    const result = clone(latest);
+    result.serverDraft = clone(result.draft);
+    result.draft = clone(localDraft);
+    return result;
+  }
+  function approvalOutcome(result) {
+    const value = result && typeof result === "object" ? result : {}, refresh = value.refresh || {};
+    if (refresh.accepted === true && value.published === true) return "approval_published";
+    if (refresh.accepted === true) return "approval_blocked";
+    if (refresh.pending === true) return "approval_pending";
+    return "approval_failed";
+  }
   function number(value, integer) {
     if (!present(value)) return undefined;
     const result = integer ? Number.parseInt(value, 10) : Number(value);
@@ -89,16 +124,18 @@
   }
 
   function buildSettingsPayload(raw) {
-    const source = raw && typeof raw === "object" ? raw : {}, schedule = {};
+    const source = raw && typeof raw === "object" ? raw : {}, schedule = {}, included = [];
     DAYS.forEach(function (day) {
       const item = source.schedule && source.schedule[day];
       if (item && item.enabled) schedule[day] = [[String(item.start || ""), String(item.end || "")]];
     });
+    if (source.internet_included === true) included.push("internet");
+    if (source.maintenance_included === true) included.push("maintenance");
     return {
       whatsapp_number: String(source.whatsapp_number || "").replace(/[^0-9]/g, ""),
       working_hours: { timezone: String(source.timezone || "Asia/Riyadh"), schedule: schedule },
       commercial_terms: {
-        included: ["internet", "maintenance"],
+        included: included,
         deposit: { amount_sar: number(source.deposit_amount_sar, false), refund_ar: String(source.deposit_refund_ar || "").trim(), refund_en: String(source.deposit_refund_en || "").trim() },
         payment_methods: (Array.isArray(source.payment_methods) ? source.payment_methods : []).map(function (item) { return { ar: String(item.ar || "").trim(), en: String(item.en || "").trim() }; }).filter(function (item) { return item.ar || item.en; })
       },
@@ -139,7 +176,7 @@
     });
   }
 
-  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, completionPercent, filterListings };
+  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, completionPercent, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (typeof document === "undefined") return;
 
@@ -150,21 +187,21 @@
     bedrooms: "غرف النوم", beds_count: "عدد الأسرّة", baths: "دورات المياه", capacity: "عدد السكان", floor_area_sqm: "المساحة بالمتر", yes: "نعم", no: "لا", unknown: "غير مجاب",
     parking: "موقف", elevator: "مصعد", workspace: "مساحة عمل", kitchen: "مطبخ", washer: "غسالة", private_entrance: "مدخل خاص", compound: "مجمع", accessibility: "سهولة وصول", balcony: "شرفة", pool: "مسبح",
     neighborhood: "معرّف الحي", neighborhood_ar: "اسم الحي بالعربي", neighborhood_en: "اسم الحي بالإنجليزي", neighborhood_verified: "تم التحقق من الحي", coordinates: "إحداثيات الشقة أو رابط Google Maps",
-    short_ar: "الوصف المختصر بالعربي", short_en: "الوصف المختصر بالإنجليزي", content_verified: "راجعت المحتوى باللغتين", tagline_ar: "عبارة الشقة بالعربي", tagline_en: "عبارة الشقة بالإنجليزي", section_ar: "تفاصيل القسم بالعربي", section_en: "تفاصيل القسم بالإنجليزي", addSection: "إضافة قسم محتوى",
+    short_ar: "الوصف المختصر بالعربي", short_en: "الوصف المختصر بالإنجليزي", content_verified: "راجعت المحتوى باللغتين", tagline_ar: "عبارة الشقة بالعربي", tagline_en: "عبارة الشقة بالإنجليزي", section_title_ar: "عنوان القسم بالعربي", section_title_en: "عنوان القسم بالإنجليزي", section_body_ar: "تفاصيل القسم بالعربي", section_body_en: "تفاصيل القسم بالإنجليزي", addSection: "إضافة قسم محتوى",
     utilities: "احتساب الخدمات", cleaning: "التنظيف", included: "مشمولة", variable: "متغيرة", excluded: "غير مشمولة", optional: "اختياري", unavailable: "غير متاح", amount: "القيمة بالريال", label_ar: "الشرح بالعربي", label_en: "الشرح بالإنجليزي",
     priceMonths: "أشهر السعر الرسمي", calendar: "التقويم", rating: "التقييم الموثق", licence: "معلومات الإعلان", ready: "جاهز", missing: "ناقص", staff: "بيانات تحتاج إكمال", background: "عوائق المصدر الحي", none: "لا توجد عوائق حالياً.",
-    saved: "حُفظت المسودة.", approvedSaved: "تم الاعتماد وتحديث النسخة الآمنة.", conflict: "حفظ شخص آخر نسخة أحدث. بياناتك باقية في الشاشة؛ راجعها قبل إعادة التحميل.", invalid: "راجع الحقل المحدد وأكمل البيانات المطلوبة.", unauthorized: "انتهت صلاحية الدخول. افتح الصفحة من لوحة عوجا مرة أخرى.", forbidden: "صلاحيتك لا تسمح بالتعديل.", service: "الخدمة غير متاحة مؤقتاً، والبيانات المعتمدة لم تتأثر.",
-    whatsapp: "رقم واتساب بصيغة دولية", timezone: "المنطقة الزمنية", workingHours: "أوقات الرد", from: "من", to: "إلى", deposit: "مبلغ التأمين (ر.س)", refund_ar: "شروط الاسترداد بالعربي", refund_en: "شروط الاسترداد بالإنجليزي", payment_ar: "طريقة الدفع بالعربي", payment_en: "طريقة الدفع بالإنجليزي", addPayment: "إضافة طريقة دفع", longRoute: "مسار مراجعة 4–6 أشهر", settingsSaved: "حُفظت مسودة الإعدادات.", settingsApproved: "تم اعتماد الإعدادات.",
+    saved: "حُفظت المسودة.", approval_published: "تم اعتماد الشقة ونشر النسخة الآمنة.", approval_blocked: "تم اعتماد الشقة، لكنها غير منشورة حتى تُحل عوائق المصدر.", approval_pending: "تم اعتماد الشقة، وتحديث الموقع بانتظار دورة التحديث التالية.", approval_failed: "تم اعتماد الشقة، لكن تحديث الموقع لم ينجح. النسخة السابقة ما زالت آمنة.", conflict: "حفظ شخص آخر نسخة أحدث. حمّلنا رقم النسخة الأحدث وأبقينا تعديلاتك في الحقول للمراجعة وإعادة الحفظ.", conflictCompare: "قارن التغييرات قبل إعادة الحفظ", serverVersion: "نسخة الفريق المحفوظة", yourVersion: "تعديلاتك الحالية", invalid: "راجع الحقل المحدد وأكمل البيانات المطلوبة.", unauthorized: "انتهت صلاحية الدخول. افتح الصفحة من لوحة عوجا مرة أخرى.", forbidden: "صلاحيتك لا تسمح بالتعديل.", service: "الخدمة غير متاحة مؤقتاً، والبيانات المعتمدة لم تتأثر.",
+    whatsapp: "رقم واتساب بصيغة دولية", timezone: "المنطقة الزمنية", workingHours: "أوقات الرد", from: "من", to: "إلى", internetIncluded: "أؤكد أن الإنترنت مشمول", maintenanceIncluded: "أؤكد أن الصيانة مشمولة", deposit: "مبلغ التأمين (ر.س)", refund_ar: "شروط الاسترداد بالعربي", refund_en: "شروط الاسترداد بالإنجليزي", payment_ar: "طريقة الدفع بالعربي", payment_en: "طريقة الدفع بالإنجليزي", addPayment: "إضافة طريقة دفع", longRoute: "مسار مراجعة 4–6 أشهر", settingsSaved: "حُفظت مسودة الإعدادات.", settingsApproved: "تم اعتماد الإعدادات.",
     place_id: "معرّف داخلي للمكان", place_ar: "اسم المكان بالعربي", place_en: "اسم المكان بالإنجليزي", purposes: "أغراض الإقامة", place_coordinates: "إحداثيات المكان أو رابط Google Maps", source_note: "دليل التحقق المختصر", activePlace: "فعّال للموقع", edit: "تعديل", placeSaved: "حُفظت مسودة المكان.", placeApproved: "تم اعتماد المكان.", noPlaces: "لا توجد أماكن معتمدة بعد.", work: "عمل أو انتقال", family: "عائلة", treatment: "علاج", visit: "زيارة", refreshOk: "تم طلب تحديث النسخة الآمنة."
   };
   const EN = Object.assign({}, AR, {
     identity: "Identity and photos", space: "Space and facts", location: "Location", content: "Arabic and English content", terms: "Monthly terms", sources: "Source readiness", approval: "Review and approval",
     received: "Received", review: "Needs review", approved: "Approved", published: "Published", source_blocked: "Blocked by source", ready_for_approval: "Ready to approve", open: "Review apartment", noRows: "No apartments match the filters.", complete: "complete", apartment: "Apartment",
     active: "Visible for monthly stays", name_ar: "Arabic apartment name", name_en: "English apartment name", licence_no: "Advertising information number", expires: "Expiry date", images: "Connected photos", bedrooms: "Bedrooms", beds_count: "Beds", baths: "Bathrooms", capacity: "Residents", floor_area_sqm: "Area in sqm", yes: "Yes", no: "No", unknown: "Unanswered",
-    neighborhood: "Neighborhood ID", neighborhood_ar: "Arabic neighborhood", neighborhood_en: "English neighborhood", neighborhood_verified: "Neighborhood verified", coordinates: "Apartment coordinates or Google Maps URL", short_ar: "Short Arabic description", short_en: "Short English description", content_verified: "I reviewed both languages", tagline_ar: "Arabic tagline", tagline_en: "English tagline", section_ar: "Arabic section details", section_en: "English section details", addSection: "Add content section",
+    neighborhood: "Neighborhood ID", neighborhood_ar: "Arabic neighborhood", neighborhood_en: "English neighborhood", neighborhood_verified: "Neighborhood verified", coordinates: "Apartment coordinates or Google Maps URL", short_ar: "Short Arabic description", short_en: "Short English description", content_verified: "I reviewed both languages", tagline_ar: "Arabic tagline", tagline_en: "English tagline", section_title_ar: "Arabic section title", section_title_en: "English section title", section_body_ar: "Arabic section details", section_body_en: "English section details", addSection: "Add content section",
     utilities: "Utilities", cleaning: "Cleaning", included: "Included", variable: "Variable", excluded: "Excluded", optional: "Optional", unavailable: "Unavailable", amount: "Amount in SAR", label_ar: "Arabic explanation", label_en: "English explanation", priceMonths: "Official-price months", calendar: "Calendar", rating: "Verified rating", licence: "Advertising information", ready: "Ready", missing: "Missing", staff: "Staff data to complete", background: "Live-source blockers", none: "No current blockers.",
-    saved: "Draft saved.", approvedSaved: "Approved and safe snapshot refreshed.", conflict: "Someone saved a newer version. Your entries remain on screen; review them before reloading.", invalid: "Review the relevant field and complete the required data.", unauthorized: "Your access expired. Reopen this page from the Ouja dashboard.", forbidden: "Your role cannot make this change.", service: "The service is temporarily unavailable. Approved data was not changed.",
-    whatsapp: "WhatsApp number in international format", timezone: "Timezone", workingHours: "Response hours", from: "From", to: "To", deposit: "Deposit (SAR)", refund_ar: "Arabic refund terms", refund_en: "English refund terms", payment_ar: "Arabic payment method", payment_en: "English payment method", addPayment: "Add payment method", longRoute: "4–6 month review route", settingsSaved: "Settings draft saved.", settingsApproved: "Settings approved.",
+    saved: "Draft saved.", approval_published: "The apartment was approved and the safe snapshot was published.", approval_blocked: "The apartment was approved but is not published until source blockers are resolved.", approval_pending: "The apartment was approved. Website refresh is waiting for the next refresh pass.", approval_failed: "The apartment was approved, but website refresh failed. The previous safe snapshot remains active.", conflict: "Someone saved a newer version. The latest revision is loaded and your edits remain in the fields for review and retry.", conflictCompare: "Compare changes before saving again", serverVersion: "Saved team version", yourVersion: "Your current edits", invalid: "Review the relevant field and complete the required data.", unauthorized: "Your access expired. Reopen this page from the Ouja dashboard.", forbidden: "Your role cannot make this change.", service: "The service is temporarily unavailable. Approved data was not changed.",
+    whatsapp: "WhatsApp number in international format", timezone: "Timezone", workingHours: "Response hours", from: "From", to: "To", internetIncluded: "I confirm internet is included", maintenanceIncluded: "I confirm maintenance is included", deposit: "Deposit (SAR)", refund_ar: "Arabic refund terms", refund_en: "English refund terms", payment_ar: "Arabic payment method", payment_en: "English payment method", addPayment: "Add payment method", longRoute: "4–6 month review route", settingsSaved: "Settings draft saved.", settingsApproved: "Settings approved.",
     place_id: "Internal place ID", place_ar: "Arabic place name", place_en: "English place name", purposes: "Stay purposes", place_coordinates: "Place coordinates or Google Maps URL", source_note: "Short verification evidence", activePlace: "Active on website", edit: "Edit", placeSaved: "Place draft saved.", placeApproved: "Place approved.", noPlaces: "No approved places yet.", work: "Work or relocation", family: "Family", treatment: "Treatment", visit: "Visit", refreshOk: "Safe snapshot refresh requested."
   });
   const COPY = {
@@ -199,6 +236,35 @@
     if (error.status === 400) { const issue = error.payload && error.payload.issue; return issue && issue[state.lang === "ar" ? "message_ar" : "message_en"] || text("invalid"); }
     if (error.status === 503) return text("service");
     return text("service");
+  }
+  function displayValue(value) {
+    if (value === undefined) return "—";
+    if (value === null) return "null";
+    return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+  }
+  function renderConflictComparison(root, record) {
+    if (!root || !record || !record.serverDraft) return;
+    const server = record.serverDraft, local = record.draft || {}, keys = Array.from(new Set(Object.keys(server).concat(Object.keys(local)))).sort();
+    const changed = keys.filter(function (key) { return JSON.stringify(server[key]) !== JSON.stringify(local[key]); });
+    if (!changed.length) return;
+    const details = node("details", { className: "conflict-comparison" }); details.open = true;
+    details.appendChild(node("summary", { text: text("conflictCompare") }));
+    changed.forEach(function (key) {
+      const row = node("div", { className: "conflict-row" });
+      add(row, node("strong", { text: key.replace(/_/g, " ") }), node("span", { text: text("serverVersion") }), node("pre", { text: displayValue(server[key]) }), node("span", { text: text("yourVersion") }), node("pre", { text: displayValue(local[key]) }));
+      details.appendChild(row);
+    });
+    root.appendChild(details);
+  }
+  function editorError(target, error, record) {
+    const parent = target.parentNode, old = parent && parent.querySelector(".conflict-comparison");
+    if (old) old.remove();
+    target.textContent = failureMessage(error);
+    if (error.status === 409 && parent) renderConflictComparison(parent, record);
+  }
+  function clearEditorConflict(target) {
+    const parent = target.parentNode, old = parent && parent.querySelector(".conflict-comparison");
+    if (old) old.remove();
   }
   async function api(path, options) {
     const config = Object.assign({ credentials: "same-origin", headers: { Accept: "application/json" } }, options || {});
@@ -242,7 +308,12 @@
     if (config.kind === "textarea") control = node("textarea", { name: path, value: value || "" });
     else if (config.kind === "select") { control = node("select", { name: path }); (config.options || []).forEach(function (choice) { const option = node("option", { value: choice[0], text: choice[1] }); if (String(choice[0]) === String(value)) option.selected = true; control.appendChild(option); }); }
     else control = node("input", { type: config.type || "text", name: path, value: value === undefined || value === null ? "" : value, readOnly: config.readOnly });
-    label.appendChild(control); return label;
+    label.appendChild(control);
+    if (state.listing && state.listing.prefill) {
+      const source = prefillSourceLabel(state.listing.prefill.sources, path, state.lang);
+      if (source) label.appendChild(node("small", { className: "field-source", text: source }));
+    }
+    return label;
   }
   function check(labelText, path, checked) { const label = node("label", { className: "check-field" }), input = node("input", { type: "checkbox", name: path, checked: checked }); add(label, input, node("span", { text: labelText })); return label; }
   function get(target, path) { return path.split(".").reduce(function (value, key) { return value && value[key]; }, target); }
@@ -272,7 +343,7 @@
   function renderContent(root) {
     const p = state.profile, part = section("content"), form = grid(); p.structured = p.structured || {}; p.structured.sections = Array.isArray(p.structured.sections) && p.structured.sections.length ? p.structured.sections : [{ title_ar: "", title_en: "", body_ar: "", body_en: "" }];
     add(form, field(text("short_ar"), "short_ar", p.short_ar, { kind: "textarea", full: true }), field(text("short_en"), "short_en", p.short_en, { kind: "textarea", full: true }), check(text("content_verified"), "content_verified", p.content_verified === true), field(text("tagline_ar"), "structured.tagline_ar", p.structured.tagline_ar), field(text("tagline_en"), "structured.tagline_en", p.structured.tagline_en));
-    p.structured.sections.forEach(function (item, index) { const group = node("fieldset", { className: "content-section span-all" }); group.appendChild(node("legend", { text: text("content") + " " + (index + 1) })); const fields = grid(); add(fields, field(text("section_ar"), "structured.sections." + index + ".title_ar", item.title_ar), field(text("section_en"), "structured.sections." + index + ".title_en", item.title_en), field(text("section_ar"), "structured.sections." + index + ".body_ar", item.body_ar, { kind: "textarea" }), field(text("section_en"), "structured.sections." + index + ".body_en", item.body_en, { kind: "textarea" })); group.appendChild(fields); form.appendChild(group); });
+    p.structured.sections.forEach(function (item, index) { const group = node("fieldset", { className: "content-section span-all" }); group.appendChild(node("legend", { text: text("content") + " " + (index + 1) })); const fields = grid(); add(fields, field(text("section_title_ar"), "structured.sections." + index + ".title_ar", item.title_ar), field(text("section_title_en"), "structured.sections." + index + ".title_en", item.title_en), field(text("section_body_ar"), "structured.sections." + index + ".body_ar", item.body_ar, { kind: "textarea" }), field(text("section_body_en"), "structured.sections." + index + ".body_en", item.body_en, { kind: "textarea" })); group.appendChild(fields); form.appendChild(group); });
     if (p.structured.sections.length < 4) { const button = node("button", { type: "button", className: "button button-secondary span-all", text: text("addSection") }); button.addEventListener("click", function () { p.structured.sections.push({ title_ar: "", title_en: "", body_ar: "", body_en: "" }); renderSurvey(); }); form.appendChild(button); }
     part.appendChild(form); root.appendChild(part);
   }
@@ -298,21 +369,31 @@
     try { const result = await api("/api/monthly/ops/listing/" + encodeURIComponent(listingId)); state.listing = result; state.profile = clone(result.prefill); delete state.profile.sources; delete state.profile.source_readiness; state.step = "identity"; id("survey-source-title").textContent = result.source_title; id("survey-meta").textContent = text("apartment") + " " + result.id; id("survey-save-status").textContent = ""; show("survey"); renderSurvey(); }
     catch (error) { globalError(error); }
   }
-  function surveyError(error) { const panel = id("survey-error-summary"); panel.textContent = failureMessage(error); panel.hidden = false; panel.focus(); }
+  function surveyError(error) { const panel = id("survey-error-summary"); empty(panel); panel.appendChild(node("p", { text: failureMessage(error) })); if (error.status === 409) renderConflictComparison(panel, state.listing); panel.hidden = false; panel.focus(); }
+  async function recoverProfileConflict(error, localDraft) {
+    if (error.status !== 409 || !state.listing) return false;
+    try {
+      const latest = await api("/api/monthly/ops/listing/" + encodeURIComponent(state.listing.id));
+      state.listing = retainConflictDraft(latest, localDraft);
+      state.profile = clone(localDraft);
+      renderSurvey();
+    } catch (_reloadError) { return false; }
+    return true;
+  }
   async function saveProfile(preview) {
-    try { const saved = await api("/api/monthly/ops/listing/" + encodeURIComponent(state.listing.id) + "/draft", { method: "POST", body: JSON.stringify({ revision: state.listing.draft_revision, profile: buildProfilePayload(state.profile) }) }); state.listing.draft_revision = saved.draft_revision; id("survey-save-status").textContent = text("saved"); const refreshed = await api("/api/monthly/ops/listing/" + encodeURIComponent(state.listing.id)); state.listing = refreshed; state.profile = clone(refreshed.prefill); delete state.profile.sources; delete state.profile.source_readiness; if (preview) state.step = "approval"; renderSurvey(); return refreshed; }
-    catch (error) { surveyError(error); throw error; }
+    try { const saved = await api("/api/monthly/ops/listing/" + encodeURIComponent(state.listing.id) + "/draft", { method: "POST", body: JSON.stringify({ revision: state.listing.draft_revision, profile: buildProfilePayload(state.profile) }) }); state.listing.draft_revision = saved.draft_revision; id("survey-save-status").textContent = text("saved"); empty(id("survey-error-summary")); id("survey-error-summary").hidden = true; const refreshed = await api("/api/monthly/ops/listing/" + encodeURIComponent(state.listing.id)); state.listing = refreshed; state.profile = clone(refreshed.prefill); delete state.profile.sources; delete state.profile.source_readiness; if (preview) state.step = "approval"; renderSurvey(); return refreshed; }
+    catch (error) { await recoverProfileConflict(error, state.profile); surveyError(error); throw error; }
   }
   async function approveProfile() {
-    try { const listing = await saveProfile(false), result = await api("/api/monthly/ops/listing/" + encodeURIComponent(listing.id) + "/approve", { method: "POST", body: JSON.stringify({ revision: listing.draft_revision }) }); id("survey-save-status").textContent = text("approvedSaved") + (result.background_blockers && result.background_blockers.length ? " · " + result.background_blockers.map(text).join("، ") : ""); await loadRows(); await openListing(listing.id); state.step = "approval"; renderSurvey(); }
+    try { const listing = await saveProfile(false), result = await api("/api/monthly/ops/listing/" + encodeURIComponent(listing.id) + "/approve", { method: "POST", body: JSON.stringify({ revision: listing.draft_revision }) }), outcome = approvalOutcome(result); await loadRows(); await openListing(listing.id); state.step = "approval"; renderSurvey(); id("survey-save-status").textContent = text(outcome) + (result.background_blockers && result.background_blockers.length ? " · " + result.background_blockers.map(text).join("، ") : ""); }
     catch (_error) { return; }
   }
 
   function schedule(value, day) { const periods = value && value.working_hours && value.working_hours.schedule && value.working_hours.schedule[day]; return Array.isArray(periods) && periods[0] ? { enabled: true, start: periods[0][0], end: periods[0][1] } : { enabled: false, start: "13:00", end: "21:00" }; }
   function renderSettings() {
-    const record = state.settings, value = clone(record.draft || record.approved || record.effective || {}), commercial = value.commercial_terms || {}, deposit = commercial.deposit || {}, root = id("global-fields"), form = grid(); empty(root);
-    add(form, field(text("whatsapp"), "whatsapp_number", value.whatsapp_number), field(text("timezone"), "timezone", value.working_hours && value.working_hours.timezone || "Asia/Riyadh"), field(text("deposit"), "deposit_amount_sar", deposit.amount_sar, { type: "number" }), field(text("refund_ar"), "deposit_refund_ar", deposit.refund_ar, { kind: "textarea" }), field(text("refund_en"), "deposit_refund_en", deposit.refund_en, { kind: "textarea" }), field(text("longRoute"), "long_stay_route", value.long_stay_route));
-    const hours = node("fieldset", { className: "settings-group span-all" }); hours.appendChild(node("legend", { text: text("workingHours") })); DAYS.forEach(function (day) { const item = schedule(value, day), row = node("div", { className: "schedule-row" }); row.dataset.day = day; add(row, check(text(day), "schedule." + day + ".enabled", item.enabled), field(text("from"), "schedule." + day + ".start", item.start, { type: "time" }), field(text("to"), "schedule." + day + ".end", item.end, { type: "time" })); hours.appendChild(row); }); form.appendChild(hours);
+    const record = state.settings, value = clone(record.draft || record.approved || record.effective || {}), commercial = value.commercial_terms || {}, included = commercial.included || [], deposit = commercial.deposit || {}, root = id("global-fields"), form = grid(); empty(root);
+    add(form, field(text("whatsapp"), "whatsapp_number", value.whatsapp_number), field(text("timezone"), "timezone", value.working_hours && value.working_hours.timezone || "Asia/Riyadh"), check(text("internetIncluded"), "internet_included", included.includes("internet")), check(text("maintenanceIncluded"), "maintenance_included", included.includes("maintenance")), field(text("deposit"), "deposit_amount_sar", deposit.amount_sar, { type: "number" }), field(text("refund_ar"), "deposit_refund_ar", deposit.refund_ar, { kind: "textarea" }), field(text("refund_en"), "deposit_refund_en", deposit.refund_en, { kind: "textarea" }), field(text("longRoute"), "long_stay_route", value.long_stay_route));
+    const hours = node("fieldset", { className: "settings-group span-all" }); hours.appendChild(node("legend", { text: text("workingHours") })); DAYS.forEach(function (day) { const item = schedule(value, day), row = node("div", { className: "schedule-row" }); row.dataset.day = day; add(row, check(translatedDay(day, state.lang), "schedule." + day + ".enabled", item.enabled), field(text("from"), "schedule." + day + ".start", item.start, { type: "time" }), field(text("to"), "schedule." + day + ".end", item.end, { type: "time" })); hours.appendChild(row); }); form.appendChild(hours);
     const payments = node("fieldset", { className: "settings-group span-all", id: "payment-methods" }); payments.appendChild(node("legend", { text: state.lang === "ar" ? "طرق الدفع المعتمدة" : "Approved payment methods" })); const methods = commercial.payment_methods && commercial.payment_methods.length ? commercial.payment_methods : [{ ar: "", en: "" }];
     methods.forEach(function (method, index) { const row = node("div", { className: "payment-row" }); row.dataset.index = index; add(row, field(text("payment_ar"), "payment_methods." + index + ".ar", method.ar), field(text("payment_en"), "payment_methods." + index + ".en", method.en)); payments.appendChild(row); });
     const addPayment = node("button", { type: "button", className: "button button-secondary", text: text("addPayment") }); addPayment.addEventListener("click", function () { const index = payments.querySelectorAll(".payment-row").length, row = node("div", { className: "payment-row" }); row.dataset.index = index; add(row, field(text("payment_ar"), "payment_methods." + index + ".ar", ""), field(text("payment_en"), "payment_methods." + index + ".en", "")); payments.insertBefore(row, addPayment); }); payments.appendChild(addPayment); form.appendChild(payments); root.appendChild(form);
@@ -321,10 +402,22 @@
     const form = id("global-form"), dayValues = {}, methods = [];
     DAYS.forEach(function (day) { dayValues[day] = { enabled: form.elements["schedule." + day + ".enabled"].checked, start: form.elements["schedule." + day + ".start"].value, end: form.elements["schedule." + day + ".end"].value }; });
     id("payment-methods").querySelectorAll(".payment-row").forEach(function (row) { const index = row.dataset.index; methods.push({ ar: form.elements["payment_methods." + index + ".ar"].value, en: form.elements["payment_methods." + index + ".en"].value }); });
-    return buildSettingsPayload({ whatsapp_number: form.elements.whatsapp_number.value, timezone: form.elements.timezone.value, schedule: dayValues, deposit_amount_sar: form.elements.deposit_amount_sar.value, deposit_refund_ar: form.elements.deposit_refund_ar.value, deposit_refund_en: form.elements.deposit_refund_en.value, payment_methods: methods, long_stay_route: form.elements.long_stay_route.value });
+    return buildSettingsPayload({ whatsapp_number: form.elements.whatsapp_number.value, timezone: form.elements.timezone.value, schedule: dayValues, internet_included: form.elements.internet_included.checked, maintenance_included: form.elements.maintenance_included.checked, deposit_amount_sar: form.elements.deposit_amount_sar.value, deposit_refund_ar: form.elements.deposit_refund_ar.value, deposit_refund_en: form.elements.deposit_refund_en.value, payment_methods: methods, long_stay_route: form.elements.long_stay_route.value });
   }
   async function loadSettings() { state.settings = await api("/api/monthly/ops/settings"); renderSettings(); }
-  async function saveSettings() { const saved = await api("/api/monthly/ops/settings/draft", { method: "POST", body: JSON.stringify({ revision: state.settings.draft_revision, settings: settingsValue() }) }); state.settings.draft_revision = saved.draft_revision; id("settings-status").textContent = text("settingsSaved"); return saved; }
+  async function recoverSettingsConflict(error, localDraft) {
+    if (error.status !== 409) return false;
+    try { state.settings = retainConflictDraft(await api("/api/monthly/ops/settings"), localDraft); renderSettings(); }
+    catch (_reloadError) { return false; }
+    return true;
+  }
+  async function saveSettings() {
+    const localDraft = settingsValue();
+    try {
+      const saved = await api("/api/monthly/ops/settings/draft", { method: "POST", body: JSON.stringify({ revision: state.settings.draft_revision, settings: localDraft }) });
+      state.settings.draft_revision = saved.draft_revision; clearEditorConflict(id("settings-status")); id("settings-status").textContent = text("settingsSaved"); return saved;
+    } catch (error) { await recoverSettingsConflict(error, localDraft); throw error; }
+  }
 
   function renderPlaces() {
     const root = id("places-list"), keys = Object.keys(state.places || {}).sort(); empty(root); if (!keys.length) { root.appendChild(node("p", { className: "empty-row", text: text("noPlaces") })); return; }
@@ -338,7 +431,24 @@
   }
   function placeValue() { const form = id("place-form"); return { id: form.elements.place_id.value.trim(), active: form.elements.active.checked, place: buildPlacePayload({ label_ar: form.elements.label_ar.value, label_en: form.elements.label_en.value, coordinates: form.elements.coordinates.value, source_note: form.elements.source_note.value, purposes: PURPOSES.filter(function (purpose) { return form.elements["purpose." + purpose].checked; }) }) }; }
   async function loadPlaces() { const result = await api("/api/monthly/ops/places"); state.places = result.places || {}; renderPlaces(); }
-  async function savePlace() { const value = placeValue(), saved = await api("/api/monthly/ops/places/draft", { method: "POST", body: JSON.stringify({ place_id: value.id, revision: state.placeRevision, place: value.place }) }); state.placeId = value.id; state.placeRevision = saved.draft_revision; id("places-title").textContent = text("placeSaved"); await loadPlaces(); return saved; }
+  async function recoverPlaceConflict(error, localValue) {
+    if (error.status !== 409) return false;
+    try {
+      const latest = await api("/api/monthly/ops/places");
+      state.places = latest.places || {};
+      const row = state.places[localValue.id] || { draft_revision: 0, approved_revision: 0 };
+      state.places[localValue.id] = Object.assign(retainConflictDraft(row, localValue.place), { active: localValue.active });
+      renderPlaces(); editPlace(localValue.id);
+    } catch (_reloadError) { return false; }
+    return true;
+  }
+  async function savePlace() {
+    const value = placeValue();
+    try {
+      const saved = await api("/api/monthly/ops/places/draft", { method: "POST", body: JSON.stringify({ place_id: value.id, revision: state.placeRevision, place: value.place }) });
+      state.placeId = value.id; state.placeRevision = saved.draft_revision; clearEditorConflict(id("places-title")); id("places-title").textContent = text("placeSaved"); await loadPlaces(); return saved;
+    } catch (error) { await recoverPlaceConflict(error, value); throw error; }
+  }
 
   function bind() {
     id("catalog-ops-link").href = authPath("/monthly/ops", window.location.search); id("catalog-dashboard-link").href = authPath("/dashboard", window.location.search);
@@ -346,10 +456,10 @@
     document.querySelectorAll(".workspace-tab").forEach(function (tab) { tab.addEventListener("click", async function () { const panel = tab.dataset.panel; show(panel); try { if (panel === "global-setup" && !state.settings) await loadSettings(); if (panel === "places") await loadPlaces(); } catch (error) { globalError(error); } }); });
     ["listing-search", "status-filter", "blocker-filter"].forEach(function (key) { id(key).addEventListener("input", renderRows); id(key).addEventListener("change", renderRows); }); id("portfolio-filters").addEventListener("submit", function (event) { event.preventDefault(); renderRows(); });
     id("close-survey").addEventListener("click", function () { show("portfolio"); }); id("survey-form").addEventListener("submit", function (event) { event.preventDefault(); saveProfile(false).catch(function () {}); }); id("preview-profile").addEventListener("click", function () { saveProfile(true).catch(function () {}); }); id("approve-profile").addEventListener("click", approveProfile);
-    id("global-form").addEventListener("submit", function (event) { event.preventDefault(); saveSettings().catch(function (error) { id("settings-status").textContent = failureMessage(error); }); });
-    id("approve-settings").addEventListener("click", async function () { try { const saved = await saveSettings(); await api("/api/monthly/ops/settings/approve", { method: "POST", body: JSON.stringify({ revision: saved.draft_revision }) }); id("settings-status").textContent = text("settingsApproved"); await loadSettings(); await loadRows(); } catch (error) { id("settings-status").textContent = failureMessage(error); } });
-    id("new-place").addEventListener("click", function () { editPlace(null); }); id("place-form").addEventListener("submit", function (event) { event.preventDefault(); savePlace().catch(function (error) { id("places-title").textContent = failureMessage(error); }); });
-    id("approve-place").addEventListener("click", async function () { try { const saved = await savePlace(), value = placeValue(); await api("/api/monthly/ops/places/approve", { method: "POST", body: JSON.stringify({ place_id: state.placeId, revision: saved.draft_revision, active: value.active }) }); id("places-title").textContent = text("placeApproved"); await loadPlaces(); id("place-form").hidden = true; } catch (error) { id("places-title").textContent = failureMessage(error); } });
+    id("global-form").addEventListener("submit", function (event) { event.preventDefault(); saveSettings().catch(function (error) { editorError(id("settings-status"), error, state.settings); }); });
+    id("approve-settings").addEventListener("click", async function () { try { const saved = await saveSettings(); await api("/api/monthly/ops/settings/approve", { method: "POST", body: JSON.stringify({ revision: saved.draft_revision }) }); id("settings-status").textContent = text("settingsApproved"); await loadSettings(); await loadRows(); } catch (error) { editorError(id("settings-status"), error, state.settings); } });
+    id("new-place").addEventListener("click", function () { editPlace(null); }); id("place-form").addEventListener("submit", function (event) { event.preventDefault(); savePlace().catch(function (error) { editorError(id("places-title"), error, state.places[state.placeId]); }); });
+    id("approve-place").addEventListener("click", async function () { try { const saved = await savePlace(), value = placeValue(); await api("/api/monthly/ops/places/approve", { method: "POST", body: JSON.stringify({ place_id: state.placeId, revision: saved.draft_revision, active: value.active }) }); id("places-title").textContent = text("placeApproved"); await loadPlaces(); id("place-form").hidden = true; } catch (error) { editorError(id("places-title"), error, state.places[state.placeId]); } });
     id("refresh-catalog").addEventListener("click", async function () { const button = id("refresh-catalog"); button.disabled = true; try { await api("/api/monthly/ops/refresh", { method: "POST", body: JSON.stringify({}) }); button.textContent = text("refreshOk"); await loadRows(); } catch (error) { globalError(error); } finally { button.disabled = false; } });
   }
 

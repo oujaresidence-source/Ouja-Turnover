@@ -58294,15 +58294,19 @@ def _monthly_public_refresh_snapshot():
     try:
         settings = _monthly_public_settings
         places = _monthly_public_places
+        place_history = places
         if _monthly_catalog_service is not None:
             settings = _monthly_public_load_settings(
                 _monthly_catalog_service.approved_settings_values()
             )
             places = _monthly_catalog_service.approved_places()
+            place_history = _monthly_catalog_service.approved_place_history()
         if settings is None:
             return {"accepted": False, "error": "monthly settings are unavailable"}
         if _monthly_public_app is not None:
-            _monthly_public_app.replace_configuration(settings, places)
+            _monthly_public_app.replace_configuration(
+                settings, places, place_history
+            )
         source = _monthly_public_source_adapter()
         outcome = _monthly_public_snapshot.refresh(
             source, settings, datetime.now(TZ)
@@ -58345,6 +58349,13 @@ def _monthly_public_request_refresh(reason):
         }
     finally:
         _monthly_public_refresh_lock.release()
+        if _monthly_public_refresh_pending.is_set():
+            threading.Thread(
+                target=_monthly_public_request_refresh,
+                args=("coalesced_followup",),
+                name="monthly-public-refresh-followup",
+                daemon=True,
+            ).start()
 
 
 if (_monthly_catalog_store is not None
@@ -58358,6 +58369,11 @@ if (_monthly_catalog_store is not None
             settings_fallback=_monthly_public_settings_fallback_values,
             snapshot_refresh=lambda: _monthly_public_request_refresh("catalog_approval"),
             clock=lambda: datetime.now(TZ),
+            active_snapshot_provider=lambda: (
+                _monthly_public_snapshot.current
+                if _monthly_public_snapshot is not None
+                else None
+            ),
         )
     except Exception as _mcat_service_err:
         print("[monthly-catalog] service unavailable:", _mcat_service_err)

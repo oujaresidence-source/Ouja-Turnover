@@ -35,6 +35,9 @@ class FakeCatalog:
             }
         }
 
+    def approved_place_history(self):
+        return self.approved_places()
+
 
 class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
     @classmethod
@@ -156,8 +159,8 @@ class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
             def __init__(self):
                 self.replaced = None
 
-            def replace_configuration(self, settings, places):
-                self.replaced = (settings, places)
+            def replace_configuration(self, settings, places, history):
+                self.replaced = (settings, places, history)
 
         class Snapshot:
             def __init__(self):
@@ -180,9 +183,10 @@ class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
             result = self.bot._monthly_public_refresh_snapshot()
 
         self.assertTrue(result["accepted"])
-        settings, places = app.replaced
+        settings, places, history = app.replaced
         self.assertEqual(settings.whatsapp_number, "966500000000")
         self.assertIn("hospital", places)
+        self.assertIn("hospital", history)
         self.assertIs(snapshot.values[0], source)
 
     def test_simultaneous_refresh_requests_are_coalesced_to_one_extra_pass(self):
@@ -217,6 +221,47 @@ class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(len(calls), 2)
         self.assertEqual(results[0]["passes"], 2)
+
+    def test_refresh_requested_during_second_pass_gets_a_follow_up_worker(self):
+        first_started = threading.Event()
+        release_first = threading.Event()
+        second_started = threading.Event()
+        release_second = threading.Event()
+        third_finished = threading.Event()
+        calls = []
+
+        def refresh():
+            calls.append(True)
+            if len(calls) == 1:
+                first_started.set()
+                self.assertTrue(release_first.wait(2))
+            elif len(calls) == 2:
+                second_started.set()
+                self.assertTrue(release_second.wait(2))
+            elif len(calls) == 3:
+                third_finished.set()
+            return {"accepted": True, "error": None}
+
+        self.bot._monthly_public_refresh_pending.clear()
+        worker = threading.Thread(
+            target=lambda: self.bot._monthly_public_request_refresh("calendar")
+        )
+        with mock.patch.object(
+            self.bot, "_monthly_public_refresh_snapshot", side_effect=refresh
+        ):
+            worker.start()
+            self.assertTrue(first_started.wait(2))
+            self.bot._monthly_public_request_refresh("engine")
+            release_first.set()
+            self.assertTrue(second_started.wait(2))
+            self.bot._monthly_public_request_refresh("approval")
+            release_second.set()
+            worker.join(2)
+            self.assertTrue(third_finished.wait(2))
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(calls), 3)
+        self.bot._monthly_public_refresh_pending.clear()
 
     def test_refresh_trigger_boundaries_are_background_only(self):
         with open(self.bot.__file__, encoding="utf-8") as handle:

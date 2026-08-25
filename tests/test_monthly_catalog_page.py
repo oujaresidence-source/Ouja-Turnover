@@ -129,7 +129,8 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_javascript_builds_only_approved_contract_fields(self):
         result = self._javascript_result("({"
             "profile:api.buildProfilePayload({active:true,name_ar:'عوجا',name_en:'Ouja',short_ar:'وصف',short_en:'Description',content_verified:true,neighborhood:'malqa',neighborhood_ar:'الملقا',neighborhood_en:'Al Malqa',neighborhood_verified:true,bedrooms:'2',beds_count:'3',baths:'2',capacity:'4',floor_area_sqm:'110.5',images:['https://images.example/1.jpg'],facts:{parking:'yes',pool:'unknown'},licence:{licence_no:'LIC-1',expires:'2027-01-01'},commercial_terms:{utilities:{mode:'included',label_ar:'مشمولة',label_en:'Included'},cleaning:{mode:'optional',amount_sar:'150',label_ar:'اختياري',label_en:'Optional'}},coordinates:'24.7136,46.6753',structured:{tagline_ar:'سكن هادئ',tagline_en:'Quiet stay',sections:[{title_ar:'المعيشة',title_en:'Living',body_ar:'مساحة مريحة',body_en:'Comfortable space'}]},official_prices:{'2026-09':9000},door_code:'1234'}),"
-            "settings:api.buildSettingsPayload({whatsapp_number:'966500000000',timezone:'Asia/Riyadh',schedule:{monday:{enabled:true,start:'13:00',end:'21:00'},friday:{enabled:false,start:'13:00',end:'21:00'}},deposit_amount_sar:'1000',deposit_refund_ar:'يعاد بعد الفحص',deposit_refund_en:'Returned after inspection',payment_methods:[{ar:'تحويل بنكي',en:'Bank transfer'}],long_stay_route:'team_confirmation'}),"
+            "settings:api.buildSettingsPayload({whatsapp_number:'966500000000',timezone:'Asia/Riyadh',schedule:{monday:{enabled:true,start:'13:00',end:'21:00'},friday:{enabled:false,start:'13:00',end:'21:00'}},internet_included:true,maintenance_included:true,deposit_amount_sar:'1000',deposit_refund_ar:'يعاد بعد الفحص',deposit_refund_en:'Returned after inspection',payment_methods:[{ar:'تحويل بنكي',en:'Bank transfer'}],long_stay_route:'team_confirmation'}),"
+            "partialSettings:api.buildSettingsPayload({internet_included:true,maintenance_included:false}),"
             "place:api.buildPlacePayload({label_ar:'مستشفى الملك فيصل',label_en:'King Faisal Hospital',purposes:['treatment','work','treatment'],coordinates:'24.7136,46.6753',source_note:'تم التحقق من الدبوس'})"
             "})")
         profile = result["profile"]
@@ -141,6 +142,7 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertEqual(profile["coordinates"]["source"], "staff_maps_pin")
         self.assertEqual(profile["commercial_terms"]["cleaning"]["amount_sar"], 150)
         self.assertEqual(result["settings"]["commercial_terms"]["included"], ["internet", "maintenance"])
+        self.assertEqual(result["partialSettings"]["commercial_terms"]["included"], ["internet"])
         self.assertEqual(result["settings"]["working_hours"]["schedule"], {"monday": [["13:00", "21:00"]]})
         self.assertEqual(result["place"]["purposes"], ["treatment", "work"])
         self.assertEqual(result["place"]["coordinates"]["verified"], True)
@@ -152,6 +154,53 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
             "{id:'202',source_title:'Ouja | Olaya',status:'source_blocked',staff_blockers:[],background_blockers:['price_missing']}"
             "],{search:'malqa',status:'needs_review',blocker:'licence'})")
         self.assertEqual([row["id"] for row in result], ["101"])
+
+    def test_javascript_localizes_working_days_and_explains_prefill_sources(self):
+        result = self._javascript_result(
+            "({"
+            "days:[api.translatedDay('monday','ar'),api.translatedDay('friday','en')],"
+            "sources:["
+            "api.prefillSourceLabel({bedrooms:'hostaway_listing'},'bedrooms','ar'),"
+            "api.prefillSourceLabel({facts:'monthly_approved'},'facts.pool','en'),"
+            "api.prefillSourceLabel({},'capacity','ar')"
+            "],"
+            "conflict:api.retainConflictDraft({draft_revision:4,draft:{name_ar:'نسخة الخادم'},approved:{name_ar:'معتمد'}},{name_ar:'تعديل محلي'}),"
+            "outcomes:["
+            "api.approvalOutcome({published:true,refresh:{accepted:true}}),"
+            "api.approvalOutcome({published:false,refresh:{accepted:true}}),"
+            "api.approvalOutcome({published:false,refresh:{accepted:false,pending:true}}),"
+            "api.approvalOutcome({published:false,refresh:{accepted:false,error:'down'}})"
+            "]"
+            "})"
+        )
+        self.assertEqual(result["days"], ["الاثنين", "Friday"])
+        self.assertEqual(
+            result["sources"],
+            ["المصدر: بيانات الشقة المرتبطة", "Source: approved monthly data", ""],
+        )
+        self.assertEqual(result["conflict"]["draft_revision"], 4)
+        self.assertEqual(result["conflict"]["draft"], {"name_ar": "تعديل محلي"})
+        self.assertEqual(result["conflict"]["serverDraft"], {"name_ar": "نسخة الخادم"})
+        self.assertEqual(result["conflict"]["approved"], {"name_ar": "معتمد"})
+        self.assertEqual(
+            result["outcomes"],
+            ["approval_published", "approval_blocked", "approval_pending", "approval_failed"],
+        )
+
+    def test_conflict_handlers_reload_current_revisions_without_dropping_local_edits(self):
+        js = JS_FILE.read_text("utf-8")
+        for required in (
+            "recoverProfileConflict",
+            "recoverSettingsConflict",
+            "recoverPlaceConflict",
+            "renderConflictComparison",
+            "serverDraft",
+            "conflict-comparison",
+            'error.status !== 409',
+            'api("/api/monthly/ops/settings")',
+            'api("/api/monthly/ops/places")',
+        ):
+            self.assertIn(required, js)
 
     def test_javascript_contains_seven_step_survey_and_clear_failure_states(self):
         js = JS_FILE.read_text("utf-8")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
-import json
 import math
 import re
 from decimal import Decimal
@@ -540,13 +539,14 @@ def _source_images(value: Any) -> list[str]:
 def _overlay(
     target: Dict[str, Any], sources: Dict[str, str], values: Mapping[str, Any], label: str
 ) -> None:
-    try:
-        safe = parse_profile(values)
-    except CatalogContractError:
-        return
-    for field, value in safe.items():
-        target[field] = copy.deepcopy(value)
-        sources[field] = label
+    for field, value in values.items():
+        try:
+            safe = parse_profile({field: value})
+        except CatalogContractError:
+            continue
+        if field in safe:
+            target[field] = copy.deepcopy(safe[field])
+            sources[field] = label
 
 
 def build_prefill(

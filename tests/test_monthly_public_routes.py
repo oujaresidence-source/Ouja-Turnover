@@ -148,6 +148,16 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertNotIn("lat", result["places"][0])
         self.assertNotIn("lng", result["places"][0])
 
+    def test_destination_cannot_be_submitted_for_an_unapproved_purpose(self):
+        replacement = dict(PLACES["kafd"], purposes=["treatment"])
+        self.app.replace_configuration(valid_settings(), {"kafd": replacement})
+
+        result = self.app.match(match_request(purpose="work"), "ar")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "place_purpose_not_allowed")
+        self.assertEqual(result["error"]["field"], "place.id")
+
     def test_replace_configuration_updates_settings_and_places_together(self):
         replacement = {
             "hospital": {
