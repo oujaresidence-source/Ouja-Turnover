@@ -1,0 +1,101 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from monthly_public.analytics import AnalyticsStore
+from monthly_public.health import build_health
+from monthly_public.settings import load_settings
+from monthly_public.snapshot import build_generation
+from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
+
+
+def source(listings):
+    return {
+        "refresh_ok": True,
+        "catalog_complete": True,
+        "listings": listings,
+        "source_timestamps": {"catalog": "2026-08-25T09:45:00+03:00"},
+    }
+
+
+class HealthTests(unittest.TestCase):
+    def test_exact_counts_and_zero_red_blockers_are_ready(self):
+        generation = build_generation(source([valid_listing(id=1001), valid_listing(id=1002, slug="ouja-1002")]), valid_settings(), NOW)
+        with tempfile.TemporaryDirectory() as folder:
+            analytics = AnalyticsStore(Path(folder) / "analytics.sqlite3", clock=lambda: NOW)
+            report = build_health(generation, valid_settings(), analytics=analytics, now=NOW)
+
+        self.assertEqual(report["refresh_time"], generation.generated_at)
+        self.assertEqual(report["counts"], {"received": 2, "valid": 2, "blocked": 0, "published": 2})
+        self.assertEqual(report["coverage"], {"calendar": 2, "price": 2})
+        self.assertTrue(report["configuration"]["whatsapp"])
+        self.assertTrue(report["configuration"]["working_hours"])
+        self.assertTrue(report["contract_4_6_months"]["ready"])
+        self.assertTrue(report["analytics"]["healthy"])
+        self.assertEqual(report["red_blockers"], [])
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["generation_id"], generation.generation_id)
+        self.assertEqual(report["source_timestamps"], {"catalog": "2026-08-25T09:45:00+03:00"})
+        self.assertEqual(report["coverage_details"]["calendar"]["missing_ids"], [])
+        self.assertEqual(report["coverage_details"]["price"]["missing_ids"], [])
+
+    def test_publication_blockers_include_licence_and_content_details(self):
+        content = valid_listing(id=1001, content_verified=False)
+        licence = valid_listing(id=1002, slug="ouja-1002")
+        licence["licence"]["expires"] = "2026-08-24"
+        generation = build_generation(source([content, licence]), valid_settings(), NOW)
+
+        report = build_health(generation, valid_settings(), now=NOW)
+
+        self.assertEqual(report["counts"], {"received": 2, "valid": 2, "blocked": 2, "published": 0})
+        self.assertIn("1001", report["content_conflicts"])
+        self.assertIn("1002", report["licence_expiry"])
+        codes = {item["code"] for item in report["red_blockers"]}
+        self.assertIn("content_unverified", codes)
+        self.assertIn("licence_expired", codes)
+        self.assertFalse(report["ready"])
+
+    def test_settings_and_contract_blockers_are_explicit(self):
+        settings = load_settings({})
+        generation = build_generation(source([valid_listing()]), settings, NOW)
+
+        report = build_health(generation, settings, now=NOW)
+
+        self.assertFalse(report["configuration"]["whatsapp"])
+        self.assertFalse(report["configuration"]["working_hours"])
+        self.assertFalse(report["contract_4_6_months"]["ready"])
+        codes = {item["code"] for item in report["red_blockers"]}
+        self.assertIn("whatsapp_missing", codes)
+        self.assertIn("working_hours_missing", codes)
+        self.assertIn("long_stay_route_missing", codes)
+
+    def test_expiring_licence_is_reported_as_an_issue_without_fabricating_blocker(self):
+        listing = valid_listing()
+        listing["licence"]["expires"] = "2026-09-01"
+        generation = build_generation(source([listing]), valid_settings(), NOW)
+        report = build_health(generation, valid_settings(), now=NOW)
+        self.assertIn("1001", report["licence_expiry"])
+        self.assertEqual(report["licence_expiry"]["1001"][0]["code"], "licence_expiring")
+        self.assertTrue(report["ready"])
+
+    def test_all_content_issues_are_classified(self):
+        listing = valid_listing(name_en="", amenities=["Wireless", "Unknown private amenity"])
+        generation = build_generation(source([listing]), valid_settings(), NOW)
+        report = build_health(generation, valid_settings(), now=NOW)
+        codes = {item["code"] for item in report["content_conflicts"]["1001"]}
+        self.assertIn("english_title_missing", codes)
+        self.assertIn("untranslated_amenity", codes)
+
+    def test_analytics_health_exception_becomes_a_red_blocker(self):
+        class BrokenHealth:
+            def health(self):
+                raise RuntimeError("unavailable")
+
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        report = build_health(generation, valid_settings(), analytics=BrokenHealth(), now=NOW)
+        self.assertFalse(report["analytics"]["healthy"])
+        self.assertIn("analytics_unhealthy", {item["code"] for item in report["red_blockers"]})
+
+
+if __name__ == "__main__":
+    unittest.main()

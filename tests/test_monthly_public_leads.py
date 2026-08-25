@@ -1,0 +1,218 @@
+import datetime as dt
+import json
+import sqlite3
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+from monthly_public.analytics import AnalyticsStore
+from monthly_public.contracts import ContractError, issue_anonymous_session
+from monthly_public.leads import LeadStore, build_whatsapp_handoff
+from monthly_public.pricing import quote_for
+from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
+
+
+SECRET = b"lead-tests-session-secret-key-32b"
+
+
+class BrokenAnalytics:
+    def record_lifecycle(self, *args, **kwargs):
+        raise sqlite3.OperationalError("disk unavailable")
+
+
+class LeadTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.path = Path(self.folder.name) / "leads.sqlite3"
+        self.session = issue_anonymous_session(SECRET)
+        self.store = LeadStore(self.path, clock=lambda: NOW, reference_factory=lambda now: "OJM-20260825-ABC123")
+
+    def test_reference_is_unique_and_same_request_dedupes_for_thirty_minutes(self):
+        request = {"purpose": "work", "move_in": "2026-09-01", "duration_months": 2, "residents": 2}
+        quote = {"monthly_rate_sar": 12000, "stay_total_sar": 24000, "currency": "SAR"}
+        first = self.store.create(self.session, "1001", request, quote)
+        duplicate = self.store.create(self.session, "1001", request, quote, now=NOW + dt.timedelta(minutes=29, seconds=59))
+        later_store = LeadStore(self.path, clock=lambda: NOW + dt.timedelta(minutes=31), reference_factory=lambda now: "OJM-20260825-ABC123")
+        later = later_store.create(self.session, "1001", request, quote)
+
+        self.assertEqual(first["reference"], duplicate["reference"])
+        self.assertNotEqual(first["reference"], later["reference"])
+        self.assertEqual(later_store.count(), 2)
+
+    def test_nested_unapproved_quote_fields_are_not_stored(self):
+        lead = self.store.create(
+            self.session,
+            "1001",
+            {"purpose": "work"},
+            {
+                "monthly_rate_sar": 12000,
+                "utilities": {
+                    "mode": "variable",
+                    "label_ar": "حسب الاستهلاك",
+                    "label_en": "By use",
+                    "phone": "0500000000",
+                    "notes": "private",
+                },
+                "deposit": {
+                    "amount_sar": 2000,
+                    "refund_ar": "حسب العقد",
+                    "refund_en": "Per contract",
+                    "identity": "secret",
+                },
+            },
+        )
+
+        stored = json.dumps(lead, ensure_ascii=False)
+        for forbidden in ("0500000000", "private", "secret", "phone", "notes", "identity"):
+            self.assertNotIn(forbidden, stored)
+
+    def test_approved_fields_are_type_checked_before_storage(self):
+        with self.assertRaises(ValueError):
+            self.store.create(
+                self.session,
+                "1001",
+                {"purpose": {"phone": "0500000000"}},
+                {"monthly_rate_sar": 12000},
+            )
+        with self.assertRaises(ValueError):
+            self.store.create(
+                self.session,
+                "1001",
+                {"purpose": "work"},
+                {"monthly_rate_sar": "0500000000"},
+            )
+        self.assertEqual(self.store.count(), 0)
+
+    def test_deduped_handoff_uses_the_original_stored_quote(self):
+        listing = {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja"}
+        request = {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1}
+        first_quote = {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR"}
+        changed_quote = {"monthly_rate_sar": 19000, "stay_total_sar": 19000, "currency": "SAR"}
+        first = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, first_quote, now=NOW)
+        duplicate = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, changed_quote, now=NOW + dt.timedelta(minutes=10))
+
+        self.assertEqual(first["lead_reference"], duplicate["lead_reference"])
+        self.assertIn("12,000", duplicate["message"])
+        self.assertNotIn("19,000", duplicate["message"])
+
+    def test_handoff_contains_every_approved_field_and_does_not_store_message_or_pii(self):
+        listing = valid_listing()
+        from monthly_public.publication import validate_listing
+        public_listing = validate_listing(listing, valid_settings(), NOW).listing
+        request = {
+            "purpose": "work",
+            "place": {"kind": "destination", "id": "kafd", "label": "KAFD"},
+            "residents": 2,
+            "sleeping": "one_bedroom",
+            "move_in": "2026-09-01",
+            "duration_months": 2,
+            "flexibility": "fixed",
+            "name": "Must not persist",
+            "phone": "0500000000",
+            "notes": "private",
+        }
+        quote = quote_for(public_listing, request, NOW)
+
+        result = build_whatsapp_handoff(
+            self.store, valid_settings(), self.session, public_listing, request, quote, now=NOW
+        )
+
+        self.assertTrue(result["ok"])
+        message = result["message"]
+        for value in (
+            "1001", "عوجا | بيت بغرفتين في الملقا", "Ouja | Two-bedroom home in Al Malqa",
+            "2026-09-01", "2026-11-01", "2", "work", "KAFD", "12,000", "24,000",
+            "internet", "maintenance", "الكهرباء والماء حسب الاستهلاك", result["lead_reference"],
+            "availability", "deposit", "contract terms",
+            "one_bedroom", "fixed", "2,000", "Bank transfer",
+        ):
+            self.assertIn(value, message)
+        self.assertIn("عادة نرد خلال 30 دقيقة", result["response_window"]["message_ar"])
+        self.assertEqual(parse_qs(urlsplit(result["url"]).query)["text"], [message])
+        stored = json.dumps(self.store.get(result["lead_reference"]), ensure_ascii=False)
+        for forbidden in ("Must not persist", "0500000000", "private", message, "message"):
+            self.assertNotIn(forbidden, stored)
+
+    def test_missing_whatsapp_blocks_without_creating_a_lead(self):
+        from monthly_public.settings import load_settings
+        settings = load_settings({})
+        result = build_whatsapp_handoff(
+            self.store, settings, self.session, {"id": "1001"}, {"purpose": "work"}, {"monthly_rate_sar": 1}, now=NOW
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "whatsapp_not_configured")
+        self.assertEqual(self.store.count(), 0)
+
+    def test_analytics_failure_does_not_block_created_handoff(self):
+        listing = {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja", "neighborhood_ar": "الملقا", "neighborhood_en": "Al Malqa"}
+        request = {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1}
+        quote = {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR", "move_in": "2026-09-01", "move_out": "2026-10-01", "included": (), "utilities": {}, "cleaning": {}}
+        result = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, quote, analytics=BrokenAnalytics(), now=NOW)
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["analytics_recorded"])
+        self.assertEqual(self.store.count(), 1)
+
+    def test_locked_analytics_fails_fast_without_delaying_handoff(self):
+        analytics_path = Path(self.folder.name) / "analytics.sqlite3"
+        analytics = AnalyticsStore(analytics_path, clock=lambda: NOW)
+        locker = sqlite3.connect(str(analytics_path))
+        locker.execute("BEGIN EXCLUSIVE")
+        try:
+            started = time.monotonic()
+            result = build_whatsapp_handoff(
+                self.store,
+                valid_settings(),
+                self.session,
+                {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja"},
+                {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1},
+                {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR"},
+                analytics=analytics,
+                now=NOW,
+            )
+            elapsed = time.monotonic() - started
+        finally:
+            locker.rollback()
+            locker.close()
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["analytics_recorded"])
+        self.assertLess(elapsed, 1.0)
+
+    def test_response_and_outcome_lifecycle_is_valid_and_idempotent(self):
+        lead = self.store.create(self.session, "1001", {"purpose": "work"}, {"monthly_rate_sar": 1})
+        responded = self.store.mark_response(lead["reference"], now=NOW + dt.timedelta(minutes=7))
+        again = self.store.mark_response(lead["reference"], now=NOW + dt.timedelta(minutes=9))
+        self.assertEqual(responded["responded_at"], again["responded_at"])
+        booked = self.store.set_outcome(
+            {"lead_reference": lead["reference"], "outcome": "booked"},
+            now=NOW + dt.timedelta(minutes=8),
+        )
+        self.assertEqual(booked["outcome"], "booked")
+        self.assertEqual(self.store.set_outcome({"lead_reference": lead["reference"], "outcome": "booked"})["outcome"], "booked")
+        with self.assertRaises(ValueError):
+            self.store.set_outcome({"lead_reference": lead["reference"], "outcome": "lost", "lost_reason": "price"})
+
+    def test_outcome_requires_response_and_controlled_reason(self):
+        lead = self.store.create(self.session, "1001", {"purpose": "work"}, {"monthly_rate_sar": 1})
+        with self.assertRaises(ValueError):
+            self.store.set_outcome({"lead_reference": lead["reference"], "outcome": "booked"})
+        self.store.mark_response(lead["reference"])
+        with self.assertRaises(ContractError):
+            self.store.set_outcome({"lead_reference": lead["reference"], "outcome": "lost", "lost_reason": "customer said too expensive"})
+
+    def test_lifecycle_timestamps_cannot_move_backwards(self):
+        lead = self.store.create(self.session, "1001", {"purpose": "work"}, {"monthly_rate_sar": 1})
+        with self.assertRaises(ValueError):
+            self.store.mark_response(lead["reference"], now=NOW - dt.timedelta(seconds=1))
+        self.store.mark_response(lead["reference"], now=NOW + dt.timedelta(minutes=5))
+        with self.assertRaises(ValueError):
+            self.store.set_outcome(
+                {"lead_reference": lead["reference"], "outcome": "booked"},
+                now=NOW + dt.timedelta(minutes=4),
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
