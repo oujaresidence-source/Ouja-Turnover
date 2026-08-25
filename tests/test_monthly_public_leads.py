@@ -9,12 +9,19 @@ from urllib.parse import parse_qs, urlsplit
 
 from monthly_public.analytics import AnalyticsStore
 from monthly_public.contracts import ContractError, issue_anonymous_session
-from monthly_public.leads import LeadStore, build_whatsapp_handoff
+from monthly_public.leads import HandoffValidationError, LeadStore, build_whatsapp_handoff
 from monthly_public.pricing import quote_for
 from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
 
 
 SECRET = b"lead-tests-session-secret-key-32b"
+APPROVED_PLACES = {
+    "kafd": {
+        "kind": "destination",
+        "label_ar": "مركز الملك عبدالله المالي",
+        "label_en": "KAFD",
+    }
+}
 
 
 class BrokenAnalytics:
@@ -29,6 +36,20 @@ class LeadTests(unittest.TestCase):
         self.path = Path(self.folder.name) / "leads.sqlite3"
         self.session = issue_anonymous_session(SECRET)
         self.store = LeadStore(self.path, clock=lambda: NOW, reference_factory=lambda now: "OJM-20260825-ABC123")
+
+    def complete_handoff(self):
+        from monthly_public.publication import validate_listing
+
+        listing = validate_listing(valid_listing(), valid_settings(), NOW).listing
+        request = {
+            "purpose": "family",
+            "residents": 2,
+            "sleeping": "one_bedroom",
+            "move_in": "2026-09-01",
+            "duration_months": 2,
+            "flexibility": "fixed",
+        }
+        return listing, request, quote_for(listing, request, NOW)
 
     def test_reference_is_unique_and_same_request_dedupes_for_thirty_minutes(self):
         request = {"purpose": "work", "move_in": "2026-09-01", "duration_months": 2, "residents": 2}
@@ -69,6 +90,71 @@ class LeadTests(unittest.TestCase):
         for forbidden in ("0500000000", "private", "secret", "phone", "notes", "identity"):
             self.assertNotIn(forbidden, stored)
 
+    def test_place_is_allowlisted_and_labels_are_server_derived(self):
+        request = {
+            "purpose": "work",
+            "place": {
+                "kind": "destination",
+                "id": "kafd",
+                "label": "Client supplied 0500000000",
+            },
+        }
+        lead = self.store.create(
+            self.session,
+            "1001",
+            request,
+            {"monthly_rate_sar": 12000},
+            approved_places=APPROVED_PLACES,
+        )
+        self.assertEqual(
+            lead["request"]["place"],
+            {
+                "kind": "destination",
+                "id": "kafd",
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "KAFD",
+            },
+        )
+        self.assertNotIn("0500000000", json.dumps(lead, ensure_ascii=False))
+        with self.assertRaises(ValueError):
+            self.store.create(
+                self.session,
+                "1002",
+                {"purpose": "work", "place": {"kind": "destination", "id": "unknown", "label": "Unknown"}},
+                {"monthly_rate_sar": 12000},
+                approved_places=APPROVED_PLACES,
+            )
+
+    def test_family_request_without_place_remains_allowed(self):
+        lead = self.store.create(
+            self.session,
+            "1001",
+            {"purpose": "family"},
+            {"monthly_rate_sar": 12000},
+            approved_places=APPROVED_PLACES,
+        )
+        self.assertNotIn("place", lead["request"])
+
+    def test_complete_family_handoff_omits_absent_optional_fields_without_placeholders(self):
+        listing, request, quote = self.complete_handoff()
+        request.pop("sleeping")
+        request.pop("flexibility")
+
+        result = build_whatsapp_handoff(
+            self.store,
+            valid_settings(),
+            self.session,
+            listing,
+            request,
+            quote,
+            now=NOW,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("—", result["message"])
+        self.assertNotIn("Sleeping:", result["message"])
+        self.assertNotIn("Date flexibility:", result["message"])
+
     def test_approved_fields_are_type_checked_before_storage(self):
         with self.assertRaises(ValueError):
             self.store.create(
@@ -87,10 +173,9 @@ class LeadTests(unittest.TestCase):
         self.assertEqual(self.store.count(), 0)
 
     def test_deduped_handoff_uses_the_original_stored_quote(self):
-        listing = {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja"}
-        request = {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1}
-        first_quote = {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR"}
-        changed_quote = {"monthly_rate_sar": 19000, "stay_total_sar": 19000, "currency": "SAR"}
+        listing, request, first_quote = self.complete_handoff()
+        changed_quote = dict(first_quote)
+        changed_quote.update({"monthly_rate_sar": 19000, "stay_total_sar": 38000})
         first = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, first_quote, now=NOW)
         duplicate = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, changed_quote, now=NOW + dt.timedelta(minutes=10))
 
@@ -117,14 +202,21 @@ class LeadTests(unittest.TestCase):
         quote = quote_for(public_listing, request, NOW)
 
         result = build_whatsapp_handoff(
-            self.store, valid_settings(), self.session, public_listing, request, quote, now=NOW
+            self.store,
+            valid_settings(),
+            self.session,
+            public_listing,
+            request,
+            quote,
+            approved_places=APPROVED_PLACES,
+            now=NOW,
         )
 
         self.assertTrue(result["ok"])
         message = result["message"]
         for value in (
             "1001", "عوجا | بيت بغرفتين في الملقا", "Ouja | Two-bedroom home in Al Malqa",
-            "2026-09-01", "2026-11-01", "2", "work", "KAFD", "12,000", "24,000",
+            "2026-09-01", "2026-11-01", "2", "work", "KAFD", "مركز الملك عبدالله المالي", "12,000", "24,000",
             "internet", "maintenance", "الكهرباء والماء حسب الاستهلاك", result["lead_reference"],
             "availability", "deposit", "contract terms",
             "one_bedroom", "fixed", "2,000", "Bank transfer",
@@ -135,6 +227,60 @@ class LeadTests(unittest.TestCase):
         stored = json.dumps(self.store.get(result["lead_reference"]), ensure_ascii=False)
         for forbidden in ("Must not persist", "0500000000", "private", message, "message"):
             self.assertNotIn(forbidden, stored)
+
+    def test_incomplete_handoff_fails_closed_before_creating_a_lead(self):
+        complete_listing = {
+            "id": "1001",
+            "name_ar": "عوجا | الملقا",
+            "name_en": "Ouja | Al Malqa",
+            "neighborhood_ar": "الملقا",
+            "neighborhood_en": "Al Malqa",
+        }
+        complete_request = {
+            "purpose": "family",
+            "residents": 2,
+            "move_in": "2026-09-01",
+            "duration_months": 2,
+        }
+        complete_quote = {
+            "monthly_rate_sar": 12000,
+            "stay_total_sar": 24000,
+            "currency": "SAR",
+            "move_in": "2026-09-01",
+            "move_out": "2026-11-01",
+            "months": 2,
+            "included": ["internet", "maintenance"],
+            "utilities": {"mode": "variable", "label_ar": "حسب الاستهلاك", "label_en": "By use"},
+            "cleaning": {"mode": "optional", "amount_sar": 300, "label_ar": "اختياري", "label_en": "Optional"},
+            "deposit": {"amount_sar": 2000, "refund_ar": "حسب العقد", "refund_en": "Per contract"},
+            "payment_methods": [{"ar": "تحويل بنكي", "en": "Bank transfer"}],
+            "preliminary_contract": False,
+            "preliminary_label_ar": "",
+            "preliminary_label_en": "",
+        }
+        cases = (
+            ({**complete_listing, "name_ar": ""}, complete_request, complete_quote),
+            (complete_listing, {key: value for key, value in complete_request.items() if key != "residents"}, complete_quote),
+            (complete_listing, complete_request, {key: value for key, value in complete_quote.items() if key != "stay_total_sar"}),
+            (complete_listing, complete_request, {**complete_quote, "included": ["internet"]}),
+            (complete_listing, complete_request, {**complete_quote, "payment_methods": []}),
+            (complete_listing, complete_request, {key: value for key, value in complete_quote.items() if key != "preliminary_contract"}),
+            (complete_listing, complete_request, {**complete_quote, "months": 3}),
+        )
+        for listing, request, quote in cases:
+            with self.subTest(listing=listing, request=request, quote=quote):
+                with self.assertRaises(HandoffValidationError):
+                    build_whatsapp_handoff(
+                        self.store,
+                        valid_settings(),
+                        self.session,
+                        listing,
+                        request,
+                        quote,
+                        approved_places=APPROVED_PLACES,
+                        now=NOW,
+                    )
+        self.assertEqual(self.store.count(), 0)
 
     def test_missing_whatsapp_blocks_without_creating_a_lead(self):
         from monthly_public.settings import load_settings
@@ -147,9 +293,7 @@ class LeadTests(unittest.TestCase):
         self.assertEqual(self.store.count(), 0)
 
     def test_analytics_failure_does_not_block_created_handoff(self):
-        listing = {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja", "neighborhood_ar": "الملقا", "neighborhood_en": "Al Malqa"}
-        request = {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1}
-        quote = {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR", "move_in": "2026-09-01", "move_out": "2026-10-01", "included": (), "utilities": {}, "cleaning": {}}
+        listing, request, quote = self.complete_handoff()
         result = build_whatsapp_handoff(self.store, valid_settings(), self.session, listing, request, quote, analytics=BrokenAnalytics(), now=NOW)
         self.assertTrue(result["ok"])
         self.assertFalse(result["analytics_recorded"])
@@ -162,13 +306,14 @@ class LeadTests(unittest.TestCase):
         locker.execute("BEGIN EXCLUSIVE")
         try:
             started = time.monotonic()
+            listing, request, quote = self.complete_handoff()
             result = build_whatsapp_handoff(
                 self.store,
                 valid_settings(),
                 self.session,
-                {"id": "1001", "name_ar": "عوجا", "name_en": "Ouja"},
-                {"purpose": "work", "residents": 1, "move_in": "2026-09-01", "duration_months": 1},
-                {"monthly_rate_sar": 12000, "stay_total_sar": 12000, "currency": "SAR"},
+                listing,
+                request,
+                quote,
                 analytics=analytics,
                 now=NOW,
             )
