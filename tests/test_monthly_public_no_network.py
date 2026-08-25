@@ -200,6 +200,8 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             ("GET", "/api/monthly/ops/funnel"),
             ("POST", "/api/monthly/ops/response"),
             ("POST", "/api/monthly/ops/outcome"),
+            ("POST", "/api/monthly/ops/lead"),
+            ("POST", "/api/monthly/ops/action"),
         }
         saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
         try:
@@ -231,6 +233,8 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             self.bot._api_monthly_v2_ops_funnel,
             self.bot._api_monthly_v2_ops_response,
             self.bot._api_monthly_v2_ops_outcome,
+            self.bot._api_monthly_v2_ops_lead,
+            self.bot._api_monthly_v2_ops_action,
         )
         saved = (
             self.bot.MONTHLY_ENABLED,

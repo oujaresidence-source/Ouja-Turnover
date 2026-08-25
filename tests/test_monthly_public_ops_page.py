@@ -44,12 +44,30 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
         self.assertIn('<html lang="ar" dir="rtl">', html)
         self.assertIn('id="monthly-ops-main"', html)
         self.assertIn('id="ops-language"', html)
+        self.assertIn('data-copy="skipLink"', html)
+        self.assertIn('data-copy-aria="loadingLabel"', html)
         self.assertIn('aria-live="polite"', html)
         self.assertIn('autocomplete="off"', html)
         self.assertIn('name="lead_reference"', html)
         self.assertIn('name="discount_requested"', html)
         self.assertIn('name="outcome"', html)
         self.assertIn('name="lost_reason"', html)
+        self.assertIn('id="lead-lookup"', html)
+        self.assertIn('id="lead-detail"', html)
+        self.assertIn('id="lead-journey"', html)
+        self.assertIn('id="staff-action-form"', html)
+        self.assertIn('id="prepared-alternative"', html)
+        self.assertIn('id="copy-alternative"', html)
+        self.assertIn('name="staff_action"', html)
+        self.assertIn('name="information_reason"', html)
+        self.assertIn('name="alternative_reason"', html)
+        self.assertIn('name="alternative_listing_id"', html)
+        self.assertIn('aria-describedby="lead-reference-error"', html)
+        self.assertIn('id="lead-reference-error"', html)
+        self.assertIn('aria-describedby="lost-reason-error"', html)
+        self.assertIn('id="lost-reason-error"', html)
+        self.assertIn('aria-describedby="staff-action-error"', html)
+        self.assertIn('aria-describedby="alternative-listing-error"', html)
         self.assertIn(module.CSS_PATH, html)
         self.assertIn(module.JS_PATH, html)
         self.assertNotIn("token=", html)
@@ -57,6 +75,7 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
         self.assertNotIn("lead_reference\":", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
+        self.assertNotIn("wa.me", html)
 
     def test_page_and_assets_define_every_required_operations_surface(self):
         module = self._module()
@@ -73,6 +92,9 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
             "response_time_minutes", "discount_request_rate",
             "common_purposes", "requested_places", "duration_bands",
             "lost_reasons",
+            "confirm_request", "request_information", "prepare_alternative",
+            "information_reason", "alternative_listing_id", "lead_journey",
+            "included", "utilities", "cleaning", "deposit", "payment_methods",
         )
         for name in required:
             with self.subTest(name=name):
@@ -91,6 +113,7 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
             "document.cookie", "session_id", ".sessions", "innerHTML",
             "WebSocket", "XMLHttpRequest", "sendBeacon", "api_get(",
             "Hostaway", "hostaway",
+            "wa.me", "openWhatsApp", "sendMessage",
         ):
             self.assertNotIn(token, js)
         self.assertIn(":focus-visible", css)
@@ -125,10 +148,15 @@ const output = {
   booked: ui.buildOutcomePayload('OJM-20260825-ABC', 'booked', ''),
   lost: ui.buildOutcomePayload('OJM-20260825-ABC', 'lost', 'price')
 };
+output.confirm = ui.buildStaffActionPayload('OJM-20260825-ABC', 'confirm_request', {});
+output.information = ui.buildStaffActionPayload('OJM-20260825-ABC', 'request_information', {information_reason:'dates'});
+output.alternative = ui.buildStaffActionPayload('OJM-20260825-ABC', 'prepare_alternative', {alternative_reason:'lower_price', alternative_listing_id:'1002'});
 try { ui.buildOutcomePayload('OJM-20260825-ABC', 'lost', ''); }
 catch (error) { output.lostError = error.message; }
 try { ui.buildOutcomePayload('bad ref', 'booked', ''); }
 catch (error) { output.refError = error.message; }
+try { ui.buildStaffActionPayload('OJM-20260825-ABC', 'request_information', {information_reason:'free text'}); }
+catch (error) { output.actionError = error.message; }
 process.stdout.write(JSON.stringify(output));
 """ % json.dumps(str(JS_FILE))
         result = subprocess.run(
@@ -160,6 +188,18 @@ process.stdout.write(JSON.stringify(output));
         })
         self.assertTrue(value["lostError"])
         self.assertTrue(value["refError"])
+        self.assertEqual(value["confirm"], {
+            "lead_reference": "OJM-20260825-ABC", "action": "confirm_request",
+        })
+        self.assertEqual(value["information"], {
+            "lead_reference": "OJM-20260825-ABC", "action": "request_information",
+            "reason": "dates",
+        })
+        self.assertEqual(value["alternative"], {
+            "lead_reference": "OJM-20260825-ABC", "action": "prepare_alternative",
+            "reason": "lower_price", "alternative_listing_id": "1002",
+        })
+        self.assertTrue(value["actionError"])
 
     def test_javascript_uses_controlled_options_and_never_auto_refreshes_dirty_form(self):
         js = JS_FILE.read_text(encoding="utf-8")
@@ -174,6 +214,12 @@ process.stdout.write(JSON.stringify(output));
         self.assertIn("if (!state.formDirty)", js)
         self.assertIn("refreshAll", js)
         self.assertIn("disabled", js)
+        self.assertIn("setWorkflowEnabled(false)", js)
+        self.assertIn("setWorkflowEnabled(true)", js)
+        self.assertIn("noHomeSelected", js)
+        self.assertIn("label_ar", js)
+        self.assertIn("label_en", js)
+        self.assertIn("navigator.clipboard.writeText", js)
 
 
 class MonthlyOpsBotBoundaryTests(unittest.TestCase):
@@ -252,6 +298,8 @@ class MonthlyOpsBotBoundaryTests(unittest.TestCase):
             self.assertIn(("GET", "/monthly/ops"), paths)
             self.assertIn(("GET", CSS_PATH), paths)
             self.assertIn(("GET", JS_PATH), paths)
+            self.assertIn(("POST", "/api/monthly/ops/lead"), paths)
+            self.assertIn(("POST", "/api/monthly/ops/action"), paths)
             css = run(self.bot._handle_monthly_ops_css(FakeRequest(path=CSS_PATH)))
             js = run(self.bot._handle_monthly_ops_js(FakeRequest(path=JS_PATH)))
             self.assertEqual(css.headers.get("Cache-Control"), "public, max-age=86400")
@@ -264,11 +312,43 @@ class MonthlyOpsBotBoundaryTests(unittest.TestCase):
         source = inspect.getsource(self.bot._handle_monthly_ops)
         source += inspect.getsource(self.bot._handle_monthly_ops_css)
         source += inspect.getsource(self.bot._handle_monthly_ops_js)
+        source += inspect.getsource(self.bot._api_monthly_v2_ops_lead)
+        source += inspect.getsource(self.bot._api_monthly_v2_ops_action)
         for token in (
             "api_get(", "api_post(", "requests.", "_gw_sync(",
             "_mcal_refresh_sync(", "_mengine_refresh_sync(",
         ):
             self.assertNotIn(token, source)
+
+    def test_new_lead_endpoints_share_the_admin_ops_auth_gate(self):
+        saved = (
+            self.bot.MONTHLY_ENABLED,
+            self.bot.MONTHLY_PUBLIC_V2,
+            self.bot._monthly_public_app,
+        )
+        self.bot.MONTHLY_ENABLED = self.bot.MONTHLY_PUBLIC_V2 = True
+        self.bot._monthly_public_app = object()
+        try:
+            for handler in (
+                self.bot._api_monthly_v2_ops_lead,
+                self.bot._api_monthly_v2_ops_action,
+            ):
+                with self.subTest(handler=handler.__name__), mock.patch.object(
+                    self.bot, "_dash_auth", return_value=False
+                ):
+                    response = run(handler(FakeRequest(method="POST")))
+                    self.assertEqual(response.status, 401)
+                with self.subTest(handler=handler.__name__), mock.patch.object(
+                    self.bot, "_dash_auth", return_value=True
+                ), mock.patch.object(self.bot, "_req_role", return_value="viewer"):
+                    response = run(handler(FakeRequest(method="POST")))
+                    self.assertEqual(response.status, 403)
+        finally:
+            (
+                self.bot.MONTHLY_ENABLED,
+                self.bot.MONTHLY_PUBLIC_V2,
+                self.bot._monthly_public_app,
+            ) = saved
 
     def test_dashboard_monthly_block_links_to_ops_and_has_no_discount_pitch(self):
         html = self.bot.DASHBOARD_HTML

@@ -4,6 +4,8 @@
   const API = {
     health: "/api/monthly/ops/health",
     funnel: "/api/monthly/ops/funnel",
+    lead: "/api/monthly/ops/lead",
+    action: "/api/monthly/ops/action",
     response: "/api/monthly/ops/response",
     outcome: "/api/monthly/ops/outcome"
   };
@@ -18,11 +20,17 @@
   ];
   const PURPOSES = ["work", "family", "treatment", "visit"];
   const DURATION_BANDS = ["1_month", "2_3_months", "4_6_months"];
+  const INFORMATION_REASONS = ["dates", "residents", "place", "contract_terms", "other"];
+  const ALTERNATIVE_REASONS = ["lower_price", "dates", "location", "space", "contract_terms"];
+  const STAFF_ACTIONS = ["confirm_request", "request_information", "prepare_alternative"];
   const REFERENCE = /^[A-Z0-9][A-Z0-9-]{5,63}$/;
 
   const COPY = {
     ar: {
       pageTitle: "تشغيل السكن الشهري · عوجا",
+      skipLink: "انتقل إلى المحتوى",
+      brandLabel: "عوجا، تشغيل السكن الشهري",
+      loadingLabel: "جاري تحميل بيانات التشغيل",
       productName: "تشغيل السكن الشهري",
       pageNav: "روابط الصفحة",
       backDashboard: "العودة للوحة عوجا",
@@ -54,9 +62,72 @@
       count: "العدد",
       conversionTitle: "التحويل وسرعة الرد",
       demandTitle: "الطلب المسجل",
-      outcomeTitle: "تحديث نتيجة طلب",
-      outcomeDetail: "استخدم المرجع الكامل. التحديث يضيف مرحلة جديدة ولا يحذف السجل السابق.",
+      outcomeTitle: "مساحة متابعة الطلب",
+      outcomeDetail: "ابحث بالمرجع الكامل قبل تسجيل أي إجراء. لا تُرسل هذه الصفحة رسائل للعملاء.",
       leadReference: "مرجع الطلب",
+      lookupLead: "عرض الطلب",
+      lookingUp: "جاري جلب الطلب",
+      lookupFound: "تم تحميل الطلب. الإجراءات متاحة الآن.",
+      leadDetailTitle: "ملخص الطلب المحفوظ",
+      leadJourneyTitle: "رحلة العميل المسجلة",
+      leadActionsTitle: "إجراءات الفريق السابقة",
+      noHomeSelected: "لم يحدد العميل بيتًا لهذا الطلب.",
+      listingLabel: "الوحدة المختارة",
+      titleLabel: "البيت",
+      purposeLabel: "غرض الإقامة",
+      datesLabel: "التواريخ",
+      durationLabel: "المدة",
+      residentsLabel: "عدد السكان",
+      placeLabel: "معرف المكان",
+      quoteLabel: "السعر الرسمي المحفوظ",
+      includedLabel: "المشمول",
+      utilitiesLabel: "الخدمات المتغيرة",
+      cleaningLabel: "التنظيف",
+      depositLabel: "التأمين والاسترداد",
+      paymentMethodsLabel: "طرق الدفع",
+      internetTerm: "الإنترنت",
+      maintenanceTerm: "الصيانة",
+      createdAt: "تاريخ إنشاء الطلب",
+      respondedAt: "أول رد للفريق",
+      outcomeLabel: "النتيجة",
+      notRecorded: "غير مسجل",
+      emptyJourney: "لا توجد مراحل رحلة معتمدة لهذا الطلب.",
+      emptyActions: "لا توجد إجراءات فريق مسجلة.",
+      rankLabel: "الترتيب {value}",
+      entry_guided: "مساعدة بالاختيار",
+      entry_browse: "تصفح كل البيوت",
+      monthsLabel: "{value} شهر",
+      staffActionTitle: "إجراء متابعة آمن",
+      staffActionDetail: "يسجل الإجراء داخليًا فقط ولا يرسل رسالة أو يفتح واتساب.",
+      staffActionLabel: "الإجراء",
+      confirm_request: "تأكيد مراجعة الطلب",
+      request_information: "طلب معلومات ناقصة",
+      prepare_alternative: "تجهيز بديل",
+      informationReason: "المعلومة المطلوبة",
+      alternativeReason: "سبب تجهيز البديل",
+      alternativeListing: "رقم الوحدة البديلة المنشورة",
+      recordAction: "تسجيل الإجراء",
+      info_dates: "تأكيد التواريخ",
+      info_residents: "تأكيد عدد السكان",
+      info_place: "تأكيد المكان المطلوب",
+      info_contract_terms: "تأكيد شروط العقد المطلوبة",
+      info_other: "معلومة أخرى",
+      alternative_lower_price: "سعر أقل",
+      alternative_dates: "توفر التواريخ",
+      alternative_location: "موقع أنسب",
+      alternative_space: "مساحة أنسب",
+      alternative_contract_terms: "شروط العقد",
+      chooseInformationReason: "اختر المعلومة المطلوبة",
+      chooseAlternativeReason: "اختر سبب تجهيز البديل",
+      invalidInformationReason: "اختر نوع المعلومة المطلوبة.",
+      invalidAlternativeReason: "اختر سبب تجهيز البديل.",
+      invalidAlternativeListing: "أدخل رقم وحدة منشورة صحيحًا.",
+      actionSaved: "تم تسجيل الإجراء وتحديث الطلب والتقارير.",
+      preparedTitle: "ملخص البديل المجهز",
+      copyAlternative: "نسخ الملخص",
+      copied: "تم نسخ الملخص. لم تُرسل أي رسالة.",
+      copyFailed: "تعذر النسخ. حدد النص وانسخه يدويًا.",
+      outcomeUpdateTitle: "تسجيل رد أو نتيجة نهائية",
       actionLabel: "التحديث المطلوب",
       actionResponse: "تسجيل رد الفريق",
       actionBooked: "تسجيل الحجز",
@@ -162,6 +233,9 @@
     },
     en: {
       pageTitle: "Monthly operations · Ouja",
+      skipLink: "Skip to content",
+      brandLabel: "Ouja monthly operations",
+      loadingLabel: "Loading operations data",
       productName: "Monthly operations",
       pageNav: "Page links",
       backDashboard: "Back to Ouja dashboard",
@@ -193,9 +267,72 @@
       count: "Count",
       conversionTitle: "Conversion and response time",
       demandTitle: "Recorded demand",
-      outcomeTitle: "Update a lead outcome",
-      outcomeDetail: "Use the full reference. Updates add a stage and never delete earlier history.",
+      outcomeTitle: "Lead follow-up workspace",
+      outcomeDetail: "Look up the full reference before recording an action. This page does not message customers.",
       leadReference: "Lead reference",
+      lookupLead: "View lead",
+      lookingUp: "Loading lead",
+      lookupFound: "The lead is loaded. Staff controls are now available.",
+      leadDetailTitle: "Saved request summary",
+      leadJourneyTitle: "Recorded customer journey",
+      leadActionsTitle: "Previous staff actions",
+      noHomeSelected: "The customer did not select a home for this lead.",
+      listingLabel: "Selected listing",
+      titleLabel: "Home",
+      purposeLabel: "Stay purpose",
+      datesLabel: "Dates",
+      durationLabel: "Duration",
+      residentsLabel: "Residents",
+      placeLabel: "Place ID",
+      quoteLabel: "Saved official quote",
+      includedLabel: "Included",
+      utilitiesLabel: "Variable services",
+      cleaningLabel: "Cleaning",
+      depositLabel: "Deposit and refund",
+      paymentMethodsLabel: "Payment methods",
+      internetTerm: "Internet",
+      maintenanceTerm: "Maintenance",
+      createdAt: "Lead created",
+      respondedAt: "First team response",
+      outcomeLabel: "Outcome",
+      notRecorded: "Not recorded",
+      emptyJourney: "No approved journey stages are recorded for this lead.",
+      emptyActions: "No staff actions are recorded.",
+      rankLabel: "Rank {value}",
+      entry_guided: "Help me choose",
+      entry_browse: "Browse all homes",
+      monthsLabel: "{value} months",
+      staffActionTitle: "Safe follow-up action",
+      staffActionDetail: "This only records an internal action. It does not send a message or open WhatsApp.",
+      staffActionLabel: "Action",
+      confirm_request: "Confirm request review",
+      request_information: "Request missing information",
+      prepare_alternative: "Prepare an alternative",
+      informationReason: "Information needed",
+      alternativeReason: "Alternative reason",
+      alternativeListing: "Published alternative listing ID",
+      recordAction: "Record action",
+      info_dates: "Confirm dates",
+      info_residents: "Confirm resident count",
+      info_place: "Confirm requested place",
+      info_contract_terms: "Confirm requested contract terms",
+      info_other: "Other information",
+      alternative_lower_price: "Lower price",
+      alternative_dates: "Date availability",
+      alternative_location: "Better location",
+      alternative_space: "Better space",
+      alternative_contract_terms: "Contract terms",
+      chooseInformationReason: "Choose the information needed",
+      chooseAlternativeReason: "Choose the alternative reason",
+      invalidInformationReason: "Choose the information needed.",
+      invalidAlternativeReason: "Choose the alternative reason.",
+      invalidAlternativeListing: "Enter a valid published listing ID.",
+      actionSaved: "The action was recorded and the lead and reports were refreshed.",
+      preparedTitle: "Prepared alternative summary",
+      copyAlternative: "Copy summary",
+      copied: "The summary was copied. No message was sent.",
+      copyFailed: "Copy failed. Select and copy the text manually.",
+      outcomeUpdateTitle: "Record a response or final outcome",
       actionLabel: "Update to record",
       actionResponse: "Record team response",
       actionBooked: "Record booking",
@@ -346,8 +483,31 @@
     return payload;
   }
 
+  function buildStaffActionPayload(reference, action, values) {
+    const payload = {lead_reference: normalizeReference(reference), action: action};
+    const fields = values || {};
+    if (action === "confirm_request") return payload;
+    if (action === "request_information") {
+      if (!INFORMATION_REASONS.includes(fields.information_reason)) throw new Error("invalid information reason");
+      payload.reason = fields.information_reason;
+      return payload;
+    }
+    if (action === "prepare_alternative") {
+      if (!ALTERNATIVE_REASONS.includes(fields.alternative_reason)) throw new Error("invalid alternative reason");
+      const listing = String(fields.alternative_listing_id || "").trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(listing)) throw new Error("invalid alternative listing");
+      payload.reason = fields.alternative_reason;
+      payload.alternative_listing_id = listing;
+      return payload;
+    }
+    throw new Error("invalid staff action");
+  }
+
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = {authPath, safeRatio, isTrackedNumber, buildResponsePayload, buildOutcomePayload};
+    module.exports = {
+      authPath, safeRatio, isTrackedNumber, buildResponsePayload,
+      buildOutcomePayload, buildStaffActionPayload
+    };
   }
   if (typeof document === "undefined") return;
 
@@ -355,6 +515,8 @@
     lang: "ar",
     health: null,
     funnel: null,
+    lead: null,
+    prepared: null,
     formDirty: false,
     submitting: false,
     refreshing: false
@@ -413,8 +575,11 @@
     language.textContent = state.lang === "ar" ? "English" : "العربية";
     language.setAttribute("aria-label", state.lang === "ar" ? "Switch to English" : "التبديل إلى العربية");
     renderLostOptions();
+    renderStaffReasonOptions();
     if (state.health) renderHealth(state.health);
     if (state.funnel) renderFunnel(state.funnel);
+    if (state.lead) renderLead(state.lead);
+    if (state.prepared) renderPreparedAlternative(state.prepared);
   }
 
   function metric(container, label, value) {
@@ -613,7 +778,9 @@
       return PURPOSES.includes(row.purpose) ? text(row.purpose) : String(row.purpose || text("unavailable"));
     });
     demandGroup(demand, text("places"), Array.isArray(data.requested_places) ? data.requested_places : [], function (row) {
-      return String(row.place_id || text("unavailable"));
+      const label = state.lang === "ar" ? row.label_ar : row.label_en;
+      const placeId = String(row.place_id || text("unavailable"));
+      return label ? String(label) + " (" + placeId + ")" : placeId;
     });
     const durationRows = DURATION_BANDS.map(function (band) {
       return {band: band, count: Number((data.duration_bands || {})[band]) || 0};
@@ -737,41 +904,350 @@
     if (LOST_REASONS.includes(selected)) select.value = selected;
   }
 
+  function renderReasonOptions(select, choices, blankKey, prefix) {
+    const selected = select.value;
+    select.replaceChildren();
+    const blank = node("option", "", text(blankKey));
+    blank.value = "";
+    select.append(blank);
+    choices.forEach(function (reason) {
+      const option = node("option", "", text(prefix + reason));
+      option.value = reason;
+      select.append(option);
+    });
+    if (choices.includes(selected)) select.value = selected;
+  }
+
+  function renderStaffReasonOptions() {
+    renderReasonOptions(
+      document.getElementById("information-reason"),
+      INFORMATION_REASONS,
+      "chooseInformationReason",
+      "info_"
+    );
+    renderReasonOptions(
+      document.getElementById("alternative-reason"),
+      ALTERNATIVE_REASONS,
+      "chooseAlternativeReason",
+      "alternative_"
+    );
+  }
+
+  function setFieldError(input, errorLine, message) {
+    input.setAttribute("aria-invalid", message ? "true" : "false");
+    errorLine.textContent = message || "";
+  }
+
+  function clearWorkflowErrors() {
+    [
+      ["lead-reference", "lead-reference-error"],
+      ["staff-action", "staff-action-error"],
+      ["information-reason", "information-reason-error"],
+      ["alternative-reason", "alternative-reason-error"],
+      ["alternative-listing-id", "alternative-listing-error"],
+      ["lost-reason", "lost-reason-error"]
+    ].forEach(function (ids) {
+      setFieldError(document.getElementById(ids[0]), document.getElementById(ids[1]), "");
+    });
+  }
+
+  function setWorkflowEnabled(enabled) {
+    const active = enabled && !state.submitting;
+    document.getElementById("staff-action").disabled = !active;
+    document.getElementById("submit-staff-action").disabled = !active;
+    document.getElementById("lead-action").disabled = !active;
+    document.getElementById("discount-requested").disabled = !active;
+    document.getElementById("submit-outcome").disabled = !active;
+    syncStaffFields();
+    syncOutcomeFields();
+  }
+
+  function detailRow(container, label, value) {
+    const row = node("div");
+    row.append(node("dt", "", label), node("dd", "", value || text("notRecorded")));
+    container.append(row);
+  }
+
+  function durationText(request) {
+    if (request.duration_months) return number(request.duration_months) + (state.lang === "ar" ? " شهر" : " months");
+    if (request.duration_days) return number(request.duration_days) + (state.lang === "ar" ? " يوم" : " days");
+    return text("notRecorded");
+  }
+
+  function quoteText(quote) {
+    if (!quote || !isTrackedNumber(quote.monthly_rate_sar)) return text("notRecorded");
+    const monthly = number(quote.monthly_rate_sar);
+    const total = isTrackedNumber(quote.stay_total_sar) ? number(quote.stay_total_sar) : "—";
+    return state.lang === "ar"
+      ? monthly + " ر.س شهريًا · الإجمالي " + total + " ر.س"
+      : "SAR " + monthly + " monthly · SAR " + total + " total";
+  }
+
+  function localizedTerm(item) {
+    if (!item || typeof item !== "object") return text("notRecorded");
+    const label = state.lang === "ar" ? item.label_ar : item.label_en;
+    return label || text("notRecorded");
+  }
+
+  function includedText(quote) {
+    const included = Array.isArray(quote && quote.included) ? quote.included : [];
+    const labels = included.map(function (item) {
+      if (item === "internet") return text("internetTerm");
+      if (item === "maintenance") return text("maintenanceTerm");
+      return String(item);
+    });
+    return labels.length ? labels.join(" · ") : text("notRecorded");
+  }
+
+  function depositText(quote) {
+    const deposit = quote && quote.deposit;
+    if (!deposit || typeof deposit !== "object") return text("notRecorded");
+    const amount = isTrackedNumber(deposit.amount_sar)
+      ? (state.lang === "ar" ? number(deposit.amount_sar) + " ر.س" : "SAR " + number(deposit.amount_sar))
+      : text("notRecorded");
+    const refund = state.lang === "ar" ? deposit.refund_ar : deposit.refund_en;
+    return refund ? amount + " · " + refund : amount;
+  }
+
+  function paymentMethodsText(quote) {
+    const payment_methods = Array.isArray(quote && quote.payment_methods) ? quote.payment_methods : [];
+    const labels = payment_methods.map(function (item) {
+      return item && (state.lang === "ar" ? item.ar : item.en);
+    }).filter(Boolean);
+    return labels.length ? labels.join(" · ") : text("notRecorded");
+  }
+
+  function renderLead(data) {
+    state.lead = data;
+    const detail = document.getElementById("lead-detail-list");
+    detail.replaceChildren();
+    const requestData = data.request || {};
+    const title = data.title && (state.lang === "ar" ? data.title.ar : data.title.en);
+    const selected = data.listing_id
+      ? String(data.listing_id) + (title ? " · " + title : "")
+      : text("noHomeSelected");
+    detailRow(detail, text("leadReference"), data.reference);
+    detailRow(detail, text("listingLabel"), selected);
+    detailRow(detail, text("purposeLabel"), PURPOSES.includes(requestData.purpose) ? text(requestData.purpose) : requestData.purpose);
+    detailRow(detail, text("datesLabel"), [requestData.move_in, requestData.move_out].filter(Boolean).join(" – "));
+    detailRow(detail, text("durationLabel"), durationText(requestData));
+    detailRow(detail, text("residentsLabel"), requestData.residents ? number(requestData.residents) : null);
+    detailRow(detail, text("placeLabel"), requestData.place_id);
+    detailRow(detail, text("quoteLabel"), quoteText(data.quote));
+    detailRow(detail, text("includedLabel"), includedText(data.quote));
+    detailRow(detail, text("utilitiesLabel"), localizedTerm(data.quote && data.quote.utilities));
+    detailRow(detail, text("cleaningLabel"), localizedTerm(data.quote && data.quote.cleaning));
+    detailRow(detail, text("depositLabel"), depositText(data.quote));
+    detailRow(detail, text("paymentMethodsLabel"), paymentMethodsText(data.quote));
+    detailRow(detail, text("createdAt"), dateTime(data.created_at));
+    detailRow(detail, text("respondedAt"), data.responded_at ? dateTime(data.responded_at) : null);
+    detailRow(detail, text("outcomeLabel"), data.outcome ? stageLabel(data.outcome) : null);
+
+    const journeyList = document.getElementById("lead-journey-list");
+    journeyList.replaceChildren();
+    const lead_journey = Array.isArray(data.journey) ? data.journey : [];
+    lead_journey.forEach(function (item) {
+      const details = [];
+      if (item.listing_id) details.push(text("listingId", {id: item.listing_id}));
+      if (item.rank) details.push(text("rankLabel", {value: number(item.rank)}));
+      if (["guided", "browse"].includes(item.entry_route)) details.push(text("entry_" + item.entry_route));
+      if (item.purpose && PURPOSES.includes(item.purpose)) details.push(text(item.purpose));
+      if (item.place_id) details.push(String(item.place_id));
+      if (item.duration_months) details.push(text("monthsLabel", {value: number(item.duration_months)}));
+      if (item.duration_band && DURATION_BANDS.includes(item.duration_band)) details.push(text(item.duration_band));
+      const copy = stageLabel(item.event) + (details.length ? " · " + details.join(" · ") : "");
+      journeyList.append(node("li", "", copy));
+    });
+    if (!journeyList.children.length) journeyList.append(node("li", "empty-line", text("emptyJourney")));
+
+    const actions = document.getElementById("lead-actions-list");
+    actions.replaceChildren();
+    (Array.isArray(data.actions) ? data.actions : []).forEach(function (item) {
+      const details = [text(item.action)];
+      if (item.reason) {
+        const prefix = item.action === "request_information" ? "info_" : "alternative_";
+        details.push(text(prefix + item.reason));
+      }
+      if (item.alternative_listing_id) details.push(text("listingId", {id: item.alternative_listing_id}));
+      details.push(dateTime(item.created_at));
+      actions.append(node("li", "", details.join(" · ")));
+    });
+    if (!actions.children.length) actions.append(node("li", "empty-line", text("emptyActions")));
+  }
+
+  function renderPreparedAlternative(data) {
+    state.prepared = data;
+    const panel = document.getElementById("prepared-alternative");
+    const message = state.lang === "ar" ? data.message_ar : data.message_en;
+    document.getElementById("prepared-alternative-copy").textContent = message || "";
+    panel.hidden = !message;
+  }
+
+  function syncStaffFields() {
+    const enabled = Boolean(state.lead) && !state.submitting;
+    const action = document.getElementById("staff-action").value;
+    const information = action === "request_information";
+    const alternative = action === "prepare_alternative";
+    document.getElementById("information-reason-field").hidden = !information;
+    document.getElementById("alternative-reason-field").hidden = !alternative;
+    document.getElementById("alternative-listing-field").hidden = !alternative;
+    document.getElementById("information-reason").disabled = !enabled || !information;
+    document.getElementById("information-reason").required = information;
+    document.getElementById("alternative-reason").disabled = !enabled || !alternative;
+    document.getElementById("alternative-reason").required = alternative;
+    document.getElementById("alternative-listing-id").disabled = !enabled || !alternative;
+    document.getElementById("alternative-listing-id").required = alternative;
+  }
+
   function syncOutcomeFields() {
     const action = document.getElementById("lead-action").value;
+    const enabled = Boolean(state.lead) && !state.submitting;
     document.getElementById("discount-field").hidden = action !== "response";
     document.getElementById("lost-reason-field").hidden = action !== "lost";
+    document.getElementById("discount-requested").disabled = !enabled || action !== "response";
+    document.getElementById("lost-reason").disabled = !enabled || action !== "lost";
     document.getElementById("lost-reason").required = action === "lost";
+  }
+
+  function apiErrorMessage(error) {
+    const payloadError = error && error.payload && error.payload.error;
+    return payloadError
+      ? (state.lang === "ar" ? payloadError.message_ar : payloadError.message_en)
+      : text("apiFailureDetail");
+  }
+
+  async function loadLead(showProgress) {
+    const reference = document.getElementById("lead-reference");
+    const errorLine = document.getElementById("lead-reference-error");
+    const statusLine = document.getElementById("lookup-status");
+    let normalized;
+    setFieldError(reference, errorLine, "");
+    try {
+      normalized = normalizeReference(reference.value);
+    } catch (_error) {
+      setFieldError(reference, errorLine, text("invalidReference"));
+      reference.focus();
+      return false;
+    }
+    const button = document.getElementById("lead-lookup");
+    button.disabled = true;
+    if (showProgress) statusLine.textContent = text("lookingUp");
+    try {
+      const result = await post(API.lead, {lead_reference: normalized});
+      if (!result || result.ok !== true || !result.lead) throw new Error("lead lookup rejected");
+      state.lead = result.lead;
+      reference.value = result.lead.reference;
+      renderLead(result.lead);
+      document.getElementById("lead-workspace").hidden = false;
+      setWorkflowEnabled(true);
+      state.formDirty = false;
+      if (showProgress) statusLine.textContent = text("lookupFound");
+      return true;
+    } catch (error) {
+      state.lead = null;
+      document.getElementById("lead-workspace").hidden = true;
+      setWorkflowEnabled(false);
+      if (["auth", "forbidden", "disabled"].includes(error.kind)) showError(error.kind, false);
+      setFieldError(reference, errorLine, apiErrorMessage(error));
+      if (showProgress) statusLine.textContent = "";
+      reference.focus();
+      return false;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function submitStaffAction(event) {
+    event.preventDefault();
+    if (state.submitting || !state.lead) return;
+    clearWorkflowErrors();
+    const actionSelect = document.getElementById("staff-action");
+    const information = document.getElementById("information-reason");
+    const alternativeReason = document.getElementById("alternative-reason");
+    const alternativeListing = document.getElementById("alternative-listing-id");
+    const statusLine = document.getElementById("staff-action-status");
+    let payload;
+    try {
+      payload = buildStaffActionPayload(state.lead.reference, actionSelect.value, {
+        information_reason: information.value,
+        alternative_reason: alternativeReason.value,
+        alternative_listing_id: alternativeListing.value
+      });
+    } catch (_error) {
+      if (!STAFF_ACTIONS.includes(actionSelect.value)) {
+        setFieldError(actionSelect, document.getElementById("staff-action-error"), text("invalidAction"));
+        actionSelect.focus();
+      } else if (actionSelect.value === "request_information") {
+        setFieldError(information, document.getElementById("information-reason-error"), text("invalidInformationReason"));
+        information.focus();
+      } else if (!ALTERNATIVE_REASONS.includes(alternativeReason.value)) {
+        setFieldError(alternativeReason, document.getElementById("alternative-reason-error"), text("invalidAlternativeReason"));
+        alternativeReason.focus();
+      } else {
+        setFieldError(alternativeListing, document.getElementById("alternative-listing-error"), text("invalidAlternativeListing"));
+        alternativeListing.focus();
+      }
+      return;
+    }
+
+    state.submitting = true;
+    setWorkflowEnabled(false);
+    statusLine.className = "";
+    statusLine.textContent = text("submitting");
+    try {
+      const result = await post(API.action, payload);
+      if (!result || result.ok !== true) throw new Error("staff action rejected");
+      state.prepared = result.prepared_alternative || null;
+      if (state.prepared) renderPreparedAlternative(state.prepared);
+      else document.getElementById("prepared-alternative").hidden = true;
+      statusLine.className = "success";
+      statusLine.textContent = text("actionSaved");
+      state.formDirty = false;
+      await loadLead(false);
+      await refreshAll(true);
+    } catch (error) {
+      statusLine.className = "error";
+      if (["auth", "forbidden", "disabled"].includes(error.kind)) showError(error.kind, false);
+      statusLine.textContent = apiErrorMessage(error);
+      const field = error.payload && error.payload.error && error.payload.error.field;
+      if (field === "alternative_listing_id") {
+        setFieldError(alternativeListing, document.getElementById("alternative-listing-error"), statusLine.textContent);
+        alternativeListing.focus();
+      }
+    } finally {
+      state.submitting = false;
+      if (state.lead) setWorkflowEnabled(true);
+    }
   }
 
   async function submitOutcome(event) {
     event.preventDefault();
-    if (state.submitting) return;
+    if (state.submitting || !state.lead) return;
     const reference = document.getElementById("lead-reference");
     const action = document.getElementById("lead-action").value;
     const reason = document.getElementById("lost-reason");
     const statusLine = document.getElementById("form-status");
-    reference.setAttribute("aria-invalid", "false");
-    reason.setAttribute("aria-invalid", "false");
+    setFieldError(reference, document.getElementById("lead-reference-error"), "");
+    setFieldError(reason, document.getElementById("lost-reason-error"), "");
     let endpoint;
     let payload;
     try {
       if (action === "response") {
         endpoint = API.response;
-        payload = buildResponsePayload(reference.value, document.getElementById("discount-requested").value);
+        payload = buildResponsePayload(state.lead.reference, document.getElementById("discount-requested").value);
       } else if (action === "booked" || action === "lost") {
         endpoint = API.outcome;
-        payload = buildOutcomePayload(reference.value, action, reason.value);
+        payload = buildOutcomePayload(state.lead.reference, action, reason.value);
       } else {
         throw new Error("invalid action");
       }
     } catch (error) {
-      if (!REFERENCE.test(String(reference.value || "").trim().toUpperCase())) {
-        reference.setAttribute("aria-invalid", "true");
+      if (!REFERENCE.test(String(state.lead.reference || "").trim().toUpperCase())) {
+        setFieldError(reference, document.getElementById("lead-reference-error"), text("invalidReference"));
         statusLine.textContent = text("invalidReference");
         reference.focus();
       } else if (action === "lost" && !LOST_REASONS.includes(reason.value)) {
-        reason.setAttribute("aria-invalid", "true");
+        setFieldError(reason, document.getElementById("lost-reason-error"), text("chooseLostReason"));
         statusLine.textContent = text("chooseLostReason");
         reason.focus();
       } else {
@@ -782,8 +1258,7 @@
     }
 
     state.submitting = true;
-    const submit = document.getElementById("submit-outcome");
-    submit.disabled = true;
+    setWorkflowEnabled(false);
     statusLine.className = "";
     statusLine.textContent = text("submitting");
     try {
@@ -794,17 +1269,29 @@
       state.formDirty = false;
       document.getElementById("lead-outcome-form").reset();
       syncOutcomeFields();
+      await loadLead(false);
       await refreshAll(true);
     } catch (error) {
       statusLine.className = "error";
       if (["auth", "forbidden", "disabled"].includes(error.kind)) showError(error.kind, false);
-      const payloadError = error.payload && error.payload.error;
-      statusLine.textContent = payloadError
-        ? (state.lang === "ar" ? payloadError.message_ar : payloadError.message_en)
-        : text("apiFailureDetail");
+      statusLine.textContent = apiErrorMessage(error);
     } finally {
       state.submitting = false;
-      submit.disabled = false;
+      if (state.lead) setWorkflowEnabled(true);
+    }
+  }
+
+  async function copyPreparedAlternative() {
+    const statusLine = document.getElementById("copy-status");
+    const value = document.getElementById("prepared-alternative-copy").textContent;
+    try {
+      if (!value || !navigator.clipboard || !navigator.clipboard.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+      statusLine.className = "success";
+      statusLine.textContent = text("copied");
+    } catch (_error) {
+      statusLine.className = "error";
+      statusLine.textContent = text("copyFailed");
     }
   }
 
@@ -817,12 +1304,35 @@
     window.location.assign(authPath("/dashboard", window.location.href));
   });
   document.getElementById("refresh-ops").addEventListener("click", function () { refreshAll(true); });
+  document.getElementById("lead-lookup-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    loadLead(true);
+  });
+  document.getElementById("lead-reference").addEventListener("input", function () {
+    const current = state.lead && state.lead.reference;
+    const entered = String(this.value || "").trim().toUpperCase();
+    state.formDirty = true;
+    if (current && entered !== current) {
+      state.lead = null;
+      state.prepared = null;
+      document.getElementById("lead-workspace").hidden = true;
+      setWorkflowEnabled(false);
+    }
+  });
+  document.getElementById("staff-action").addEventListener("change", syncStaffFields);
+  document.getElementById("staff-action-form").addEventListener("input", function () { state.formDirty = true; });
+  document.getElementById("staff-action-form").addEventListener("change", function () { state.formDirty = true; });
+  document.getElementById("staff-action-form").addEventListener("submit", submitStaffAction);
+  document.getElementById("copy-alternative").addEventListener("click", copyPreparedAlternative);
   document.getElementById("lead-action").addEventListener("change", syncOutcomeFields);
   document.getElementById("lead-outcome-form").addEventListener("input", function () { state.formDirty = true; });
   document.getElementById("lead-outcome-form").addEventListener("change", function () { state.formDirty = true; });
   document.getElementById("lead-outcome-form").addEventListener("submit", submitOutcome);
 
   setCopy();
+  renderStaffReasonOptions();
+  setWorkflowEnabled(false);
+  syncStaffFields();
   syncOutcomeFields();
   refreshAll(false);
   window.setInterval(function () {
