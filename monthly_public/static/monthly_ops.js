@@ -163,6 +163,8 @@
       notReady: "غير جاهز",
       lastCheck: "آخر فحص: {value}",
       lastRefresh: "آخر تحديث ناجح: {value}",
+      calendarRefresh: "آخر تحديث للتقويم: {value}",
+      engineRefresh: "آخر لقطة موثقة لمحرك السعر: {value}",
       unavailable: "غير متاح",
       noBlockers: "لا توجد موانع إطلاق حمراء.",
       noContentIssues: "لا توجد تعارضات محتوى مسجلة.",
@@ -368,6 +370,8 @@
       notReady: "Not ready",
       lastCheck: "Last check: {value}",
       lastRefresh: "Last successful refresh: {value}",
+      calendarRefresh: "Latest calendar refresh: {value}",
+      engineRefresh: "Latest verified pricing-engine snapshot: {value}",
       unavailable: "Unavailable",
       noBlockers: "No red launch blockers.",
       noContentIssues: "No content conflicts are recorded.",
@@ -664,6 +668,9 @@
       : text("blockedDetail", {count: number(blockers.length)});
     document.getElementById("checked-at").textContent = text("lastCheck", {value: dateTime(data.checked_at)});
     document.getElementById("last-refresh").textContent = text("lastRefresh", {value: dateTime(data.refresh_time)});
+    const sourceTimestamps = data.source_timestamps || {};
+    document.getElementById("calendar-refresh").textContent = text("calendarRefresh", {value: dateTime(sourceTimestamps.calendar)});
+    document.getElementById("engine-refresh").textContent = text("engineRefresh", {value: dateTime(sourceTimestamps.engine)});
 
     const counts = data.counts || {};
     const countList = document.getElementById("inventory-counts");
@@ -1017,6 +1024,14 @@
     return labels.length ? labels.join(" · ") : text("notRecorded");
   }
 
+  function placeText(place, fallback) {
+    if (place && typeof place === "object") {
+      const label = state.lang === "ar" ? place.label_ar : place.label_en;
+      if (label) return label + (place.id ? " · " + place.id : "");
+    }
+    return fallback || text("notRecorded");
+  }
+
   function renderLead(data) {
     state.lead = data;
     const detail = document.getElementById("lead-detail-list");
@@ -1032,7 +1047,7 @@
     detailRow(detail, text("datesLabel"), [requestData.move_in, requestData.move_out].filter(Boolean).join(" – "));
     detailRow(detail, text("durationLabel"), durationText(requestData));
     detailRow(detail, text("residentsLabel"), requestData.residents ? number(requestData.residents) : null);
-    detailRow(detail, text("placeLabel"), requestData.place_id);
+    detailRow(detail, text("placeLabel"), placeText(requestData.place, requestData.place_id));
     detailRow(detail, text("quoteLabel"), quoteText(data.quote));
     detailRow(detail, text("includedLabel"), includedText(data.quote));
     detailRow(detail, text("utilitiesLabel"), localizedTerm(data.quote && data.quote.utilities));
@@ -1052,7 +1067,7 @@
       if (item.rank) details.push(text("rankLabel", {value: number(item.rank)}));
       if (["guided", "browse"].includes(item.entry_route)) details.push(text("entry_" + item.entry_route));
       if (item.purpose && PURPOSES.includes(item.purpose)) details.push(text(item.purpose));
-      if (item.place_id) details.push(String(item.place_id));
+      if (item.place_id) details.push(placeText(item.place, String(item.place_id)));
       if (item.duration_months) details.push(text("monthsLabel", {value: number(item.duration_months)}));
       if (item.duration_band && DURATION_BANDS.includes(item.duration_band)) details.push(text(item.duration_band));
       const copy = stageLabel(item.event) + (details.length ? " · " + details.join(" · ") : "");

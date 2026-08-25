@@ -271,13 +271,35 @@ class MonthlyOpsApp:
                 )
             except Exception:
                 journey = []
+            registry = self._public._place_registry(generation)
+            safe_request = self._safe_request(lead)
+            request_place_id = safe_request.get("place_id")
+            request_place = registry.get(request_place_id)
+            if isinstance(request_place, Mapping):
+                safe_request["place"] = {
+                    "id": request_place_id,
+                    "label_ar": request_place.get("label_ar"),
+                    "label_en": request_place.get("label_en"),
+                }
+            safe_journey = []
+            for raw_item in journey:
+                item = dict(raw_item)
+                place_id = item.get("place_id")
+                registered = registry.get(place_id)
+                if isinstance(registered, Mapping):
+                    item["place"] = {
+                        "id": place_id,
+                        "label_ar": registered.get("label_ar"),
+                        "label_en": registered.get("label_en"),
+                    }
+                safe_journey.append(item)
             return {
                 "ok": True,
                 "lead": {
                     "reference": reference,
                     "listing_id": listing_id,
                     "title": title,
-                    "request": self._safe_request(lead),
+                    "request": safe_request,
                     "quote": dict(lead.get("quote") or {}),
                     "created_at": lead.get("created_at"),
                     "responded_at": lead.get("responded_at"),
@@ -295,7 +317,7 @@ class MonthlyOpsApp:
                         }
                         for row in self._public.lead_store.actions_for(reference)
                     ],
-                    "journey": journey,
+                    "journey": safe_journey,
                 },
             }
         except Exception:

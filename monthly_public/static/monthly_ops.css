@@ -250,6 +250,15 @@ p {
   overflow-wrap: anywhere;
 }
 
+.source-refreshes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: 34rem;
+  text-align: end;
+}
+
 .launch-panel .time-note {
   color: rgba(255, 255, 255, 0.78);
 }

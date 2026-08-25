@@ -254,7 +254,16 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             "en": "Ouja | Two-bedroom home in Al Malqa",
         })
         self.assertEqual(lead["request"]["place_id"], "kafd")
-        self.assertNotIn("place", lead["request"])
+        self.assertEqual(lead["request"]["place"], {
+            "id": "kafd",
+            "label_ar": "مركز الملك عبدالله المالي",
+            "label_en": "King Abdullah Financial District",
+        })
+        completion = next(
+            row for row in lead["journey"]
+            if row["event"] == "matcher_completion"
+        )
+        self.assertEqual(completion["place"], lead["request"]["place"])
         self.assertEqual(lead["quote"]["deposit"]["amount_sar"], 2000)
         self.assertEqual(
             [(row["event"], row.get("listing_id"), row.get("rank")) for row in lead["journey"]],
