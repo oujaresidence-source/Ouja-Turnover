@@ -23,10 +23,11 @@ from .contracts import (
 )
 from .health import build_health
 from .leads import HandoffValidationError, build_whatsapp_handoff
-from .matching import rank
+from .matching import rank, space_matches
 from .presentation import present_card, present_listing
 from .pricing import add_months, quote_for
 from .settings import MonthlySettings, response_window
+from .snapshot import revalidate_generation
 
 
 _LEAD_REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
@@ -143,12 +144,13 @@ class MonthlyOpsApp:
 
     def health(self) -> Dict[str, Any]:
         try:
+            current = self._public._now()
             return build_health(
                 self._public._generation(),
                 self._public.settings,
                 analytics=self._public.analytics_store,
                 lead_store=self._public.lead_store,
-                now=self._public._now(),
+                now=current,
             )
         except Exception:
             return {
@@ -291,14 +293,23 @@ class MonthlyPublicApp:
     def _generation(self) -> Any:
         return self.snapshot_store.current
 
-    def _published(self) -> tuple[Any, ...]:
+    def _request_context(self) -> tuple[dt.datetime, Any]:
+        """Pin one base generation and one clock value for the whole request."""
+
+        current = self._now()
         generation = self._generation()
+        if generation is not None:
+            generation = revalidate_generation(generation, current)
+        return current, generation
+
+    @staticmethod
+    def _published(generation: Any) -> tuple[Any, ...]:
         return tuple(generation.published) if generation is not None else ()
 
-    def _place_registry(self) -> Dict[str, Dict[str, Any]]:
+    def _place_registry(self, generation: Any) -> Dict[str, Dict[str, Any]]:
         """Merge configured destinations with verified published neighborhoods."""
         registry = {key: dict(value) for key, value in self.approved_places.items()}
-        for result in self._published():
+        for result in self._published(generation):
             listing = result.listing
             key = listing.get("neighborhood")
             if key and key not in registry:
@@ -309,23 +320,25 @@ class MonthlyPublicApp:
                 }
         return registry
 
-    def _find(self, request: Mapping[str, Any]) -> Optional[Any]:
+    def _find(self, request: Mapping[str, Any], generation: Any) -> Optional[Any]:
         listing_id = request.get("listing_id")
         slug = request.get("slug")
-        for result in self._published():
+        for result in self._published(generation):
             if listing_id is not None and result.listing["id"] == listing_id:
                 return result
             if slug is not None and result.listing.get("slug") == slug:
                 return result
         return None
 
-    def _canonical_place(self, place: Any) -> Optional[Dict[str, str]]:
+    def _canonical_place(
+        self, place: Any, generation: Any
+    ) -> Optional[Dict[str, str]]:
         if not isinstance(place, Mapping):
             return None
         place_id = str(place.get("id") or "")
         registered = self.approved_places.get(place_id)
         if registered is None and place.get("kind") == "neighborhood":
-            for result in self._published():
+            for result in self._published(generation):
                 listing = result.listing
                 if listing.get("neighborhood") == place_id:
                     registered = {
@@ -347,22 +360,24 @@ class MonthlyPublicApp:
             "label": registered["label_ar"],
         }
 
-    def _canonical_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _canonical_request(
+        self, request: Dict[str, Any], generation: Any
+    ) -> Dict[str, Any]:
         result = dict(request)
         if "place" in result:
-            result["place"] = self._canonical_place(result["place"])
+            result["place"] = self._canonical_place(result["place"], generation)
         return result
 
     def config(self, lang: Any = "ar") -> Dict[str, Any]:
         try:
             language = _language(lang)
-            current = self._now()
+            current, generation = self._request_context()
         except ContractError as error:
             return _contract_error(error)
         except Exception:
             return _internal_error()
         blockers = [item.as_dict() for item in self.settings.blockers]
-        if self._generation() is None:
+        if generation is None:
             blockers.append(
                 {
                     "field": "snapshot",
@@ -394,7 +409,7 @@ class MonthlyPublicApp:
         ]
         seen = {row["id"] for row in places if row["kind"] == "neighborhood"}
         neighborhoods = []
-        for result in self._published():
+        for result in self._published(generation):
             listing = result.listing
             key = listing.get("neighborhood")
             if not key or key in seen:
@@ -413,7 +428,7 @@ class MonthlyPublicApp:
             "default_lang": "ar",
             "lang": language,
             "session_id": session_id,
-            "eligible_count": len(self._published()),
+            "eligible_count": len(self._published(generation)),
             "places": places,
             "neighborhoods": neighborhoods,
             "response_window": response_window(self.settings, current),
@@ -423,7 +438,8 @@ class MonthlyPublicApp:
 
     def browse(self, value: Any) -> Dict[str, Any]:
         try:
-            request = self._canonical_request(parse_browse_query(value))
+            current, generation = self._request_context()
+            request = self._canonical_request(parse_browse_query(value), generation)
             language = _language(request.get("lang"))
             has_dates = _window(request) is not None
             if request.get("move_in") and not has_dates:
@@ -435,7 +451,7 @@ class MonthlyPublicApp:
                 )
             results = []
             pending = unavailable = missing_price = 0
-            for result in self._published():
+            for result in self._published(generation):
                 listing = result.listing
                 if request.get("residents") is not None and listing.get("capacity", -1) < request["residents"]:
                     continue
@@ -456,7 +472,7 @@ class MonthlyPublicApp:
                 if availability == "unavailable":
                     unavailable += 1
                     continue
-                quote = quote_for(listing, _pricing_request(request), self._now())
+                quote = quote_for(listing, _pricing_request(request), current)
                 if quote is None:
                     missing_price += 1
                     continue
@@ -499,21 +515,21 @@ class MonthlyPublicApp:
 
     def match(self, value: Any, lang: Any = "ar") -> Dict[str, Any]:
         try:
-            generation = self._generation()
+            current, generation = self._request_context()
             if generation is None:
                 return _error(
                     "snapshot_missing",
                     "لا توجد خيارات منشورة حاليًا.",
                     "No published homes are currently available.",
                 )
-            request = self._canonical_request(parse_match_request(value))
+            request = self._canonical_request(parse_match_request(value), generation)
             language = _language(lang)
             result = rank(
                 generation,
                 request,
                 language,
-                now=self._now(),
-                places=self._place_registry(),
+                now=current,
+                places=self._place_registry(generation),
             )
             return {"ok": True, **result}
         except ContractError as error:
@@ -523,9 +539,10 @@ class MonthlyPublicApp:
 
     def listing(self, value: Any) -> Dict[str, Any]:
         try:
-            request = self._canonical_request(parse_listing_request(value))
+            current, generation = self._request_context()
+            request = self._canonical_request(parse_listing_request(value), generation)
             language = _language(request.get("lang"))
-            result = self._find(request)
+            result = self._find(request, generation)
             if result is None:
                 return _error(
                     "listing_not_found",
@@ -547,7 +564,7 @@ class MonthlyPublicApp:
                 availability = _availability(result, request)
                 status = availability
                 if availability == "available":
-                    quote = quote_for(result.listing, _pricing_request(request), self._now())
+                    quote = quote_for(result.listing, _pricing_request(request), current)
                     if quote is None:
                         status = "price_missing"
             return {"ok": True, "listing": detail, "quote": quote, "quote_status": status}
@@ -571,6 +588,7 @@ class MonthlyPublicApp:
 
     def lead(self, value: Any) -> Dict[str, Any]:
         try:
+            current, generation = self._request_context()
             if not isinstance(value, Mapping):
                 raise ContractError(
                     "request",
@@ -590,17 +608,26 @@ class MonthlyPublicApp:
             session_id = parse_event(
                 {"event": "whatsapp_click", "session_id": value.get("session_id")},
                 session_secret=self.session_secret,
-                allowed_place_ids=self._place_registry(),
+                allowed_place_ids=self._place_registry(generation),
             )["session_id"]
-            request = self._canonical_request(parse_match_request(value.get("request")))
+            request = self._canonical_request(
+                parse_match_request(value.get("request")), generation
+            )
             request["lang"] = language
             parsed_listing = parse_listing_request({"listing_id": value.get("listing_id")})
-            result = self._find(parsed_listing)
+            result = self._find(parsed_listing, generation)
             if result is None:
                 return _error(
                     "listing_not_found",
                     "الشقة غير موجودة ضمن الخيارات المنشورة.",
                     "The listing is not in the published catalog.",
+                    field="listing_id",
+                )
+            if not space_matches(result.listing, request):
+                return _error(
+                    "listing_request_mismatch",
+                    "الشقة المحددة لا تطابق السعة أو ترتيب النوم المطلوب.",
+                    "The selected listing does not match the requested capacity or sleeping setup.",
                     field="listing_id",
                 )
             availability = _availability(result, request)
@@ -610,7 +637,7 @@ class MonthlyPublicApp:
                     "التوفر غير مؤكد للتواريخ المحددة.",
                     "Availability is not confirmed for the selected dates.",
                 )
-            quote = quote_for(result.listing, _pricing_request(request), self._now())
+            quote = quote_for(result.listing, _pricing_request(request), current)
             if quote is None:
                 return _error(
                     "price_missing",
@@ -625,8 +652,8 @@ class MonthlyPublicApp:
                 request,
                 quote,
                 analytics=self.analytics_store,
-                approved_places=self._place_registry(),
-                now=self._now(),
+                approved_places=self._place_registry(generation),
+                now=current,
             )
             if handoff.get("ok") is False:
                 blocked = _error(
@@ -651,10 +678,12 @@ class MonthlyPublicApp:
 
     def event(self, value: Any) -> Dict[str, Any]:
         try:
+            current, generation = self._request_context()
+            places = self._place_registry(generation)
             event = parse_event(
                 value,
                 session_secret=self.session_secret,
-                allowed_place_ids=self._place_registry(),
+                allowed_place_ids=places,
             )
         except ContractError as error:
             return _contract_error(error)
@@ -664,8 +693,8 @@ class MonthlyPublicApp:
             recorded = self.analytics_store.record(
                 event,
                 session_secret=self.session_secret,
-                allowed_place_ids=self._place_registry(),
-                now=self._now(),
+                allowed_place_ids=places,
+                now=current,
             )
             return {"ok": True, "event": recorded, "analytics_recorded": True}
         except Exception:

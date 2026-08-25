@@ -1,3 +1,4 @@
+import datetime as dt
 import os
 import tempfile
 import unittest
@@ -56,7 +57,8 @@ def match_request(**overrides):
 class MonthlyPublicRouteContracts(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.clock = lambda: NOW
+        self.now = NOW
+        self.clock = lambda: self.now
         listing = valid_listing()
         second = valid_listing(
             id=1002,
@@ -209,6 +211,62 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertIsNone(result["quote"])
         self.assertEqual(result["quote_status"], "price_missing")
 
+    def test_customer_reads_recheck_calendar_freshness_at_request_time(self):
+        self.now = NOW + dt.timedelta(minutes=61)
+        dated = {"move_in": "2026-09-01", "duration_months": 1}
+
+        undated = self.app.browse({"lang": "en"})
+        self.assertTrue(undated["results"])
+        self.assertTrue(all(
+            row["availability_status"] == "pending" for row in undated["results"]
+        ))
+        browsed = self.app.browse(dated)
+        self.assertEqual(browsed["results"], [])
+        self.assertEqual(browsed["counts"]["pending"], 2)
+        matched = self.app.match(match_request(), lang="en")
+        self.assertEqual(matched["top"], ())
+        self.assertEqual(matched["pending_count"], 2)
+        detail = self.app.listing({"listing_id": "1001", **dated})
+        self.assertEqual(detail["quote_status"], "pending")
+        made = self.app.lead(
+            {
+                "session_id": self.session(),
+                "listing_id": "1001",
+                "request": match_request(),
+                "lang": "ar",
+            }
+        )
+        self.assertFalse(made["ok"])
+        self.assertEqual(made["error"]["code"], "availability_pending")
+        self.assertEqual(self.leads.count(), 0)
+
+    def test_expired_licence_is_removed_and_makes_health_not_ready(self):
+        expiring = valid_listing()
+        expiring["licence"]["expires"] = NOW.date().isoformat()
+        refreshed = self.snapshot.refresh(
+            {
+                "refresh_ok": True,
+                "catalog_complete": True,
+                "listings": [expiring],
+            },
+            valid_settings(),
+            NOW,
+        )
+        self.assertTrue(refreshed.accepted)
+        self.now = NOW + dt.timedelta(days=1)
+
+        self.assertEqual(self.app.config()["eligible_count"], 0)
+        self.assertEqual(self.app.browse({"lang": "en"})["results"], [])
+        self.assertEqual(
+            self.app.listing({"listing_id": "1001"})["error"]["code"],
+            "listing_not_found",
+        )
+        health = self.app.ops.health()
+        self.assertFalse(health["ready"])
+        self.assertIn(
+            "licence_expired", {row["code"] for row in health["red_blockers"]}
+        )
+
     def test_lead_recomputes_quote_and_rejects_client_price_message_and_reference(self):
         payload = {
             "session_id": self.session(),
@@ -229,6 +287,71 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
             rejected = self.app.lead({**payload, field: value})
             self.assertFalse(rejected["ok"])
             self.assertEqual(rejected["error"]["code"], "unknown_field")
+
+    def test_lead_rejects_a_listing_that_fails_capacity_or_sleeping_gates(self):
+        session = self.session()
+        for changes in (
+            {"residents": 5},
+            {"sleeping": "three_bedrooms"},
+            {"residents": 4, "sleeping": "separate_beds"},
+        ):
+            with self.subTest(changes=changes):
+                made = self.app.lead(
+                    {
+                        "session_id": session,
+                        "listing_id": "1001",
+                        "request": match_request(**changes),
+                        "lang": "ar",
+                    }
+                )
+                self.assertFalse(made["ok"])
+                self.assertEqual(
+                    made["error"]["code"], "listing_request_mismatch"
+                )
+        self.assertEqual(self.leads.count(), 0)
+
+    def test_public_request_pins_generation_during_an_atomic_swap(self):
+        first = SnapshotStore()
+        second = SnapshotStore()
+        self.assertTrue(first.refresh(
+            {"refresh_ok": True, "catalog_complete": True,
+             "listings": [valid_listing()]},
+            valid_settings(), NOW,
+        ).accepted)
+        self.assertTrue(second.refresh(
+            {"refresh_ok": True, "catalog_complete": True, "listings": [
+                valid_listing(id=2001, slug="ouja-2001"),
+                valid_listing(id=2002, slug="ouja-2002"),
+            ]},
+            valid_settings(), NOW,
+        ).accepted)
+
+        class SwappingStore:
+            def __init__(self, old, new):
+                self.old = old
+                self.new = new
+                self.reads = 0
+
+            @property
+            def current(self):
+                self.reads += 1
+                return self.old if self.reads == 1 else self.new
+
+        swapping = SwappingStore(first.current, second.current)
+        app = MonthlyPublicApp(
+            snapshot_store=swapping,
+            settings=valid_settings(),
+            lead_store=self.leads,
+            analytics_store=self.analytics,
+            approved_places=PLACES,
+            session_secret=SECRET,
+            clock=self.clock,
+        )
+
+        config = app.config()
+
+        self.assertEqual(config["eligible_count"], 1)
+        self.assertEqual(swapping.reads, 1)
 
     def test_analytics_failure_never_blocks_navigation_or_lead_creation(self):
         app = MonthlyPublicApp(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional
 
 from .settings import MonthlySettings
-from .snapshot import SnapshotGeneration
+from .snapshot import SnapshotGeneration, revalidate_generation
 
 
 _CONTENT_CODES = frozenset(
@@ -21,6 +21,9 @@ _CONTENT_CODES = frozenset(
 )
 _LICENCE_CODES = frozenset(
     {"licence_missing", "licence_expiry_missing", "licence_expiry_invalid", "licence_expired", "licence_expiring"}
+)
+_CALENDAR_READINESS_CODES = frozenset(
+    {"calendar_missing", "calendar_stale", "calendar_future", "calendar_invalid"}
 )
 
 
@@ -65,6 +68,8 @@ def build_health(
             "price": {"covered": 0, "missing_ids": []},
         }
     else:
+        if now is not None:
+            generation = revalidate_generation(generation, now)
         raw_counts = generation.counts
         refresh_time = generation.generated_at
         generation_id = generation.generation_id
@@ -91,6 +96,11 @@ def build_health(
             licence_items = [_issue(item, listing_id=listing_id) for item in result.blockers + result.warnings if item.code in _LICENCE_CODES]
             if licence_items:
                 licences[listing_id] = licence_items
+            red.extend(
+                _issue(item, listing_id=listing_id)
+                for item in result.warnings
+                if item.code in _CALENDAR_READINESS_CODES
+            )
 
     for blocker in settings.blockers:
         red.append(_issue(blocker, source="settings"))

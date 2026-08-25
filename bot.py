@@ -57136,6 +57136,8 @@ async def _handle_elite_img(request):
 
 async def _handle_monthly_v2_img(request):
     """V2 never fetches an image from the request path; the browser loads it directly."""
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
     url = request.query.get("u", "") or ""
     if not url.lower().startswith(("http://", "https://")):
         raise web.HTTPNotFound()
@@ -57238,6 +57240,12 @@ MONTHLY_ENABLED = os.environ.get("MONTHLY_ENABLED", "1") != "0"
 # Staged locally until the v2 page renderer lands (Task 7). Setting 0 is the
 # explicit rollback to the untouched handlers below; it never changes live data.
 MONTHLY_PUBLIC_V2 = os.environ.get("MONTHLY_PUBLIC_V2", "0") == "1"
+
+
+def _monthly_public_v2_enabled():
+    return bool(MONTHLY_ENABLED and MONTHLY_PUBLIC_V2)
+
+
 # Own WhatsApp number for monthly leads; falls back to the shared STAY_WHATSAPP until set.
 MONTHLY_WHATSAPP = re.sub(r"\D", "", os.environ.get("MONTHLY_WHATSAPP", "") or "") or STAY_WHATSAPP
 MONTHLY_IMG_PROXY = ELITE_IMG_PROXY                       # reuse the proven /elite WebP proxy machinery
@@ -57958,7 +57966,7 @@ _monthly_public_session_secret = (
 )
 _monthly_public_snapshot = None
 _monthly_public_app = None
-if _HAS_MONTHLY_PUBLIC:
+if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
     try:
         _monthly_public_snapshot = _MonthlySnapshotStore(
             _state_path("monthly_public_snapshot.json")
@@ -58141,7 +58149,9 @@ def _monthly_public_source_adapter():
 
 def _monthly_public_refresh_snapshot():
     """Background/boot boundary only; a failure retains SnapshotStore.current."""
-    if _monthly_public_snapshot is None or _monthly_public_settings is None:
+    if (not _monthly_public_v2_enabled()
+            or _monthly_public_snapshot is None
+            or _monthly_public_settings is None):
         return {"accepted": False, "error": "monthly public is not configured"}
     try:
         source = _monthly_public_source_adapter()
@@ -58741,6 +58751,14 @@ def _monthly_public_unavailable():
     }, 503)
 
 
+def _monthly_public_v2_gate():
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    if _monthly_public_app is None:
+        return _monthly_public_unavailable()
+    return None
+
+
 def _monthly_v2_browse_query(request):
     raw = dict(request.query)
     out = {}
@@ -58784,8 +58802,9 @@ def _monthly_v2_listing_query(request, listing_id):
 
 
 async def _api_monthly_v2_config(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     result = await asyncio.to_thread(
         _monthly_public_app.config, request.query.get("lang", "ar")
     )
@@ -58793,8 +58812,9 @@ async def _api_monthly_v2_config(request):
 
 
 async def _api_monthly_v2_search(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     result = await asyncio.to_thread(
         _monthly_public_app.browse, _monthly_v2_browse_query(request)
     )
@@ -58802,8 +58822,9 @@ async def _api_monthly_v2_search(request):
 
 
 async def _api_monthly_v2_featured(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     result = await asyncio.to_thread(
         _monthly_public_app.browse, {"lang": request.query.get("lang", "ar")}
     )
@@ -58814,15 +58835,17 @@ async def _api_monthly_v2_featured(request):
 
 
 async def _api_monthly_v2_deals(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     # V2 has no discount/deal claim until an official cached quote proves one.
     return _json({"ok": True, "results": []})
 
 
 async def _api_monthly_v2_listing(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     result = await asyncio.to_thread(
         _monthly_public_app.listing,
         _monthly_v2_listing_query(request, request.match_info.get("id", "")),
@@ -58831,8 +58854,9 @@ async def _api_monthly_v2_listing(request):
 
 
 async def _api_monthly_v2_quote(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     result = await asyncio.to_thread(
         _monthly_public_app.quote,
         _monthly_v2_listing_query(request, request.query.get("id", "")),
@@ -58841,8 +58865,9 @@ async def _api_monthly_v2_quote(request):
 
 
 async def _api_monthly_v2_match(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     body = await _read_body(request)
     lang = body.pop("lang", "ar") if isinstance(body, dict) else "ar"
     result = await asyncio.to_thread(_monthly_public_app.match, body, lang)
@@ -58850,16 +58875,18 @@ async def _api_monthly_v2_match(request):
 
 
 async def _api_monthly_v2_lead(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     body = await _read_body(request)
     result = await asyncio.to_thread(_monthly_public_app.lead, body)
     return _monthly_public_response(result)
 
 
 async def _api_monthly_v2_event(request):
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     body = await _read_body(request)
     result = await asyncio.to_thread(_monthly_public_app.event, body)
     return _monthly_public_response(result)
@@ -58874,29 +58901,32 @@ def _monthly_ops_gate(request):
 
 
 async def _api_monthly_v2_ops_health(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     denied = _monthly_ops_gate(request)
     if denied:
         return denied
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
     return _json(await asyncio.to_thread(_monthly_public_app.ops.health))
 
 
 async def _api_monthly_v2_ops_funnel(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     denied = _monthly_ops_gate(request)
     if denied:
         return denied
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
     return _json(await asyncio.to_thread(_monthly_public_app.ops.funnel))
 
 
 async def _api_monthly_v2_ops_response(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     denied = _monthly_ops_gate(request)
     if denied:
         return denied
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
     result = await asyncio.to_thread(
         _monthly_public_app.ops.response, await _read_body(request)
     )
@@ -58904,15 +58934,30 @@ async def _api_monthly_v2_ops_response(request):
 
 
 async def _api_monthly_v2_ops_outcome(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
     denied = _monthly_ops_gate(request)
     if denied:
         return denied
-    if _monthly_public_app is None:
-        return _monthly_public_unavailable()
     result = await asyncio.to_thread(
         _monthly_public_app.ops.outcome, await _read_body(request)
     )
     return _monthly_public_response(result)
+
+
+def _register_monthly_v2_only_routes(router):
+    """Register stateful/new V2 endpoints only while both switches are active."""
+    if not _monthly_public_v2_enabled():
+        return
+    router.add_post("/api/monthly/match", _api_monthly_v2_match)
+    router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
+    router.add_post("/api/monthly/event", _api_monthly_v2_event)
+    router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
+    router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
+    router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
+    router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
+
 
 async def _api_monthly_admin(request):
     """Token-gated config control (dashboard Manage tab is v2; this is the API behind it)."""
@@ -59280,13 +59325,15 @@ async def _api_gw_sync(request):
 #   • create endpoints → require the tab's CREATE permission.
 #   • other POST/PUT/DELETE/PATCH → require the tab's WRITE permission.
 # Endpoints with their own auth (team tokens, shared secrets, public forms) stay exempt.
+_MONTHLY_PUBLIC_V2_WRITES = frozenset({
+    "/api/monthly/match",
+    "/api/monthly/lead",
+    "/api/monthly/event",
+})
 _ROLE_EXEMPT_WRITES = {
     "/api/auth/login", "/api/auth/logout",   # the login flow itself
     "/api/expenses/ingest",                  # shared-secret auth (Google Apps Script)
     "/api/stay/event",                       # public website analytics beacon
-    "/api/monthly/match",                    # public monthly guided matcher
-    "/api/monthly/lead",                     # signed anonymous session + server quote
-    "/api/monthly/event",                    # signed anonymous funnel analytics
     "/api/clean-feedback",                   # public guest feedback form (token in body)
     "/api/oujact/photo-upload",              # cleaning-team token auth
     "/api/oujact/report-submit",             # cleaning-team token auth
@@ -59413,7 +59460,12 @@ def _perm_403(tab, action):
 async def _role_enforce_mw(request, handler):
     p = request.path
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        if p.startswith("/api/") and p not in _ROLE_EXEMPT_WRITES:
+        monthly_public_write = (
+            _monthly_public_v2_enabled() and p in _MONTHLY_PUBLIC_V2_WRITES
+        )
+        if (p.startswith("/api/")
+                and p not in _ROLE_EXEMPT_WRITES
+                and not monthly_public_write):
             # create endpoints first (a create path also matches its broad write prefix)
             for cpath, tab in _ROLE_CREATE_RULES:
                 if p == cpath:
@@ -59746,13 +59798,7 @@ async def start_web_server():
                                                         if MONTHLY_PUBLIC_V2 else _api_monthly_listing))
         app.router.add_get("/api/monthly/quote", (_api_monthly_v2_quote
                                                   if MONTHLY_PUBLIC_V2 else _api_monthly_quote))
-        app.router.add_post("/api/monthly/match", _api_monthly_v2_match)
-        app.router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
-        app.router.add_post("/api/monthly/event", _api_monthly_v2_event)
-        app.router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
-        app.router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
-        app.router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
-        app.router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
+        _register_monthly_v2_only_routes(app.router)
         app.router.add_get("/api/monthly/admin", _api_monthly_admin)
         app.router.add_post("/api/monthly/admin", _api_monthly_admin)
         app.router.add_get("/monthly/{slug}", _handle_monthly_detail)
@@ -60745,7 +60791,7 @@ async def monthly_calendar_loop():
         res = await asyncio.to_thread(_mcal_refresh_sync)
         print("monthly calendar: %s units warm, %s failed, %sms"
               % (res["ok"], res["err"], res["last_ms"]))
-        if _HAS_MONTHLY_PUBLIC:
+        if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
             await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly calendar loop error:", e)
@@ -60772,7 +60818,7 @@ async def monthly_engine_loop():
                      100.0 * (res.get("coverage") or 0)))
         else:
             print("monthly engine: not refreshed —", res.get("err"))
-        if _HAS_MONTHLY_PUBLIC:
+        if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
             await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly engine loop error:", e)

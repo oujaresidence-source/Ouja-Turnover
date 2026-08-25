@@ -1,5 +1,6 @@
-import tempfile
+import datetime as dt
 import sqlite3
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -101,6 +102,25 @@ class HealthTests(unittest.TestCase):
         self.assertIn("1001", report["licence_expiry"])
         self.assertEqual(report["licence_expiry"]["1001"][0]["code"], "licence_expiring")
         self.assertTrue(report["ready"])
+
+    def test_request_time_stale_calendar_is_not_reported_ready(self):
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        checked = NOW + dt.timedelta(minutes=61)
+        with tempfile.TemporaryDirectory() as folder:
+            report = build_health(
+                generation,
+                valid_settings(),
+                analytics=AnalyticsStore(Path(folder) / "analytics.sqlite3", clock=lambda: checked),
+                lead_store=LeadStore(Path(folder) / "leads.sqlite3", clock=lambda: checked),
+                now=checked,
+            )
+
+        self.assertFalse(report["ready"])
+        self.assertEqual(report["coverage"]["calendar"], 0)
+        self.assertEqual(report["coverage_details"]["calendar"]["stale_ids"], ["1001"])
+        self.assertIn(
+            "calendar_stale", {row["code"] for row in report["red_blockers"]}
+        )
 
     def test_missing_conversion_stores_are_red_launch_blockers(self):
         generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
