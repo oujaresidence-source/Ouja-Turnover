@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import calendar
 import datetime as dt
+import hashlib
+import hmac
 import re
+import secrets
 from typing import Any, Collection, Dict, Mapping, Optional
 
 
@@ -66,9 +70,10 @@ _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _PLACE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _LEAD_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _ANON_SESSION_RE = re.compile(
-    r"^anon_(?=[A-Za-z0-9_-]{16,123}$)(?=[A-Za-z0-9_-]*[A-Za-z])"
-    r"[A-Za-z0-9_-]+$"
+    r"^anon_([A-Za-z0-9_-]{32})\.([A-Za-z0-9_-]{43})$"
 )
+_SESSION_HMAC_CONTEXT = b"ouja-monthly-anonymous-session:v1:"
+MIN_SESSION_SECRET_BYTES = 32
 
 # Abuse ceilings protect request parsing only. They do not describe Ouja's
 # inventory; capacity and bedroom facts always come from the published snapshot.
@@ -236,14 +241,61 @@ def _integer(
     return parsed
 
 
-def _anonymous_session(value: Any, field: str = "session_id") -> str:
+def _session_secret(value: Any) -> Optional[bytes]:
+    if isinstance(value, bytearray):
+        value = bytes(value)
+    if not isinstance(value, bytes) or len(value) < MIN_SESSION_SECRET_BYTES:
+        return None
+    return value
+
+
+def _session_signature(secret: bytes, nonce: str) -> str:
+    digest = hmac.new(
+        secret,
+        _SESSION_HMAC_CONTEXT + nonce.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def issue_anonymous_session(secret: Any) -> str:
+    """Issue one process-verifiable anonymous browser session token."""
+
+    secret_bytes = _session_secret(secret)
+    if secret_bytes is None:
+        raise ValueError("session secret must contain at least 32 bytes")
+    nonce = secrets.token_urlsafe(24)
+    return "anon_%s.%s" % (nonce, _session_signature(secret_bytes, nonce))
+
+
+def _anonymous_session(
+    value: Any, secret: Any, field: str = "session_id"
+) -> str:
     session_id = _required_text(value, field, max_length=128)
-    if not _ANON_SESSION_RE.fullmatch(session_id):
+    match = _ANON_SESSION_RE.fullmatch(session_id)
+    if match is None:
         raise _error(
             field,
             "invalid_format",
             "معرّف الجلسة المجهول غير صحيح.",
             "The anonymous session identifier is invalid.",
+        )
+    secret_bytes = _session_secret(secret)
+    if secret_bytes is None:
+        raise _error(
+            field,
+            "server_configuration",
+            "تعذر التحقق من الجلسة بسبب إعداد الخادم.",
+            "The session cannot be verified because server configuration is missing.",
+        )
+    nonce, supplied_signature = match.groups()
+    expected_signature = _session_signature(secret_bytes, nonce)
+    if not hmac.compare_digest(supplied_signature, expected_signature):
+        raise _error(
+            field,
+            "invalid_signature",
+            "تعذر التحقق من الجلسة المجهولة.",
+            "The anonymous session signature is invalid.",
         )
     return session_id
 
@@ -383,9 +435,22 @@ def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any
             "Choose either a stay duration or move-out date, not both.",
         )
     if duration_value not in (None, ""):
-        result["duration_months"] = _integer(
+        duration_months = _integer(
             duration_value, "duration_months", minimum=1, maximum=6
         )
+        if "move_in" in result:
+            try:
+                _add_calendar_months(
+                    dt.date.fromisoformat(result["move_in"]), duration_months
+                )
+            except (OverflowError, ValueError):
+                raise _error(
+                    "move_in",
+                    "unsupported_date",
+                    "التاريخ خارج النطاق المدعوم.",
+                    "The date is outside the supported range.",
+                )
+        result["duration_months"] = duration_months
     if move_out_value not in (None, ""):
         result["move_out"] = _date(move_out_value, "move_out")
         if "move_in" not in result:
@@ -512,7 +577,6 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
             "purpose",
             "place",
             "lang",
-            "session_id",
         },
     )
     result: Dict[str, Any] = {}
@@ -545,8 +609,6 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
         result["place"] = _place(data["place"])
     if data.get("lang") not in (None, ""):
         result["lang"] = _choice(data["lang"], "lang", LANGUAGES)
-    if data.get("session_id") not in (None, ""):
-        result["session_id"] = _anonymous_session(data["session_id"])
     return result
 
 
@@ -725,7 +787,10 @@ def _event_context(
 
 
 def parse_event(
-    value: Any, *, allowed_place_ids: Optional[Collection[str]] = None
+    value: Any,
+    *,
+    session_secret: Any = None,
+    allowed_place_ids: Optional[Collection[str]] = None,
 ) -> Dict[str, Any]:
     """Validate an anonymous funnel event and discard nonessential context."""
 
@@ -733,7 +798,9 @@ def parse_event(
     _reject_unknown(data, {"event", "session_id", "context"})
     return {
         "event": _choice(data.get("event"), "event", PUBLIC_EVENT_NAMES),
-        "session_id": _anonymous_session(data.get("session_id")),
+        "session_id": _anonymous_session(
+            data.get("session_id"), session_secret
+        ),
         "context": _event_context(
             data.get("context"), _place_allowlist(allowed_place_ids)
         ),
