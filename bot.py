@@ -57147,13 +57147,8 @@ async def _handle_elite_img(request):
 
 
 async def _handle_monthly_v2_img(request):
-    """V2 never fetches an image from the request path; the browser loads it directly."""
-    if not _monthly_public_v2_enabled():
-        return _monthly_off()
-    url = request.query.get("u", "") or ""
-    if not url.lower().startswith(("http://", "https://")):
-        raise web.HTTPNotFound()
-    raise web.HTTPFound(url)
+    """V2 has no image-proxy endpoint; retained only as a closed test seam."""
+    return _monthly_off()
 
 
 _ELITE_GEO_URL = "https://oujaguide.netlify.app/data.json"
@@ -59868,8 +59863,8 @@ async def start_web_server():
             app.router.add_get(_MONTHLY_PUBLIC_CSS_PATH, _handle_monthly_v2_css)
             app.router.add_get(_MONTHLY_PUBLIC_JS_PATH, _handle_monthly_v2_js)
         app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)
-        app.router.add_get("/monthly/img", (_handle_monthly_v2_img
-                                             if MONTHLY_PUBLIC_V2 else _handle_elite_img))
+        if not MONTHLY_PUBLIC_V2:
+            app.router.add_get("/monthly/img", _handle_elite_img)
         app.router.add_get("/api/monthly/config", (_api_monthly_v2_config
                                                    if MONTHLY_PUBLIC_V2 else _api_monthly_config))
         app.router.add_get("/api/monthly/featured", (_api_monthly_v2_featured

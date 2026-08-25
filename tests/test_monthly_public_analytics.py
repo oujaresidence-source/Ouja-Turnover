@@ -269,6 +269,32 @@ class AnalyticsStoreTests(unittest.TestCase):
                 "booked", self.session, reference, now=NOW + dt.timedelta(minutes=5)
             )
 
+    def test_lead_creation_atomically_records_one_durable_whatsapp_click(self):
+        reference = "OJM-20260825-ABC123"
+
+        first = self.store.record_lead_creation(
+            self.session, reference, listing_id="1001", now=NOW
+        )
+        retried = self.store.record_lead_creation(
+            self.session,
+            reference,
+            listing_id="1001",
+            now=NOW + dt.timedelta(minutes=2),
+        )
+
+        self.assertEqual(first, retried)
+        linked = [
+            event for event in self.store.events()
+            if event["lead_reference"] == reference
+        ]
+        self.assertEqual(
+            [event["event"] for event in linked],
+            ["whatsapp_click", "lead_created"],
+        )
+        self.assertTrue(all(event["trusted"] for event in linked))
+        self.assertEqual(linked[0]["context"], {"listing_id": "1001"})
+        self.assertEqual(linked[1]["context"], {})
+
     def test_lost_requires_controlled_reason_and_other_lifecycle_rejects_it(self):
         reference = "OJM-20260825-ABC123"
         with self.assertRaises(ValueError):

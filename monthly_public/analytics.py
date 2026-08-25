@@ -20,6 +20,7 @@ from .contracts import (
 
 
 _LEAD_REFERENCE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
+_LISTING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 
 
 def _utc_now() -> dt.datetime:
@@ -109,6 +110,78 @@ class AnalyticsStore:
         }
 
     record_public = record
+
+    def record_lead_creation(
+        self,
+        session_id: str,
+        lead_reference: str,
+        *,
+        listing_id: Optional[str] = None,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, Any]:
+        """Atomically persist the contact click and created-lead lifecycle.
+
+        Navigation to WhatsApp happens only after the server creates a lead, so
+        this transaction is the durable conversion boundary.  Retries return
+        the original persisted timestamps and reject conflicting identities.
+        """
+
+        reference = str(lead_reference or "").strip().upper()
+        if not _LEAD_REFERENCE.fullmatch(reference):
+            raise ValueError("invalid lead reference")
+        if not isinstance(session_id, str) or not session_id.startswith("anon_"):
+            raise ValueError("invalid anonymous session")
+        normalized_listing: Optional[str] = None
+        if listing_id is not None:
+            normalized_listing = str(listing_id).strip()
+            if not _LISTING_ID.fullmatch(normalized_listing):
+                raise ValueError("invalid listing ID")
+        occurred = _as_datetime(now if now is not None else self.clock()).isoformat()
+        expected = (
+            ("whatsapp_click", {"listing_id": normalized_listing} if normalized_listing else {}),
+            ("lead_created", {}),
+        )
+        result_rows: Dict[str, sqlite3.Row] = {}
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT id, event_name, session_id, context_json, occurred_at FROM monthly_public_events WHERE lead_reference = ? AND trusted = 1 ORDER BY id",
+                (reference,),
+            ).fetchall()
+            if rows and any(row["session_id"] != session_id for row in rows):
+                raise ValueError("lead reference belongs to another anonymous session")
+            names = {row["event_name"] for row in rows}
+            if names and "lead_created" not in names:
+                raise ValueError("lead reference has no created-lead lifecycle")
+            by_name = {row["event_name"]: row for row in rows}
+            for event, context in expected:
+                payload = json.dumps(context, sort_keys=True, separators=(",", ":"))
+                existing = by_name.get(event)
+                if existing is not None:
+                    if existing["context_json"] != payload:
+                        raise ValueError("trusted lead creation retry conflicts with stored event")
+                    result_rows[event] = existing
+                    continue
+                connection.execute(
+                    "INSERT INTO monthly_public_events(event_name, session_id, lead_reference, context_json, occurred_at, trusted) VALUES (?, ?, ?, ?, ?, 1)",
+                    (event, session_id, reference, payload, occurred),
+                )
+                result_rows[event] = connection.execute(
+                    "SELECT id, event_name, session_id, context_json, occurred_at FROM monthly_public_events WHERE event_name = ? AND lead_reference = ?",
+                    (event, reference),
+                ).fetchone()
+        return {
+            "session_id": session_id,
+            "lead_reference": reference,
+            "events": [
+                {
+                    "event": event,
+                    "context": json.loads(result_rows[event]["context_json"]),
+                    "occurred_at": result_rows[event]["occurred_at"],
+                }
+                for event, _context in expected
+            ],
+        }
 
     def record_lifecycle(
         self,

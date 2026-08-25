@@ -25,6 +25,21 @@ def run_node(expression):
     return json.loads(completed.stdout)
 
 
+def run_node_async(expression):
+    script = "const ui=require(%s); Promise.resolve(%s).then(out=>process.stdout.write(JSON.stringify(out))).catch(error=>{process.stderr.write(String(error && error.stack || error));process.exit(1)});" % (
+        json.dumps(JS_PATH),
+        expression,
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
 class MonthlyPublicMatcherReducerTests(unittest.TestCase):
     def test_work_branch_adds_place_and_back_preserves_answers(self):
         state = run_node("(() => { let s=ui.initialMatcherState(); s=ui.answerStep(s,'purpose','work'); s=ui.answerStep(s,'place',{kind:'destination',id:'kafd',label:'KAFD'}); s=ui.answerStep(s,'residents',2); s=ui.goBack(s); return s; })()")
@@ -106,12 +121,12 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["replaced"], issued)
         self.assertIsNone(values["rejected"])
 
-    def test_general_help_contact_state_explains_blockers_and_localizes_response_window(self):
+    def test_contact_state_explains_blockers_and_localizes_response_window(self):
         session = "anon_" + "A" * 32 + "." + "b" * 43
         values = run_node(
-            "({missingNumber:ui.generalHelpContactState({session_id:%s,blockers:[{field:'whatsapp_number'}],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'ar'),"
-            "missingSession:ui.generalHelpContactState({blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
-            "enabled:ui.generalHelpContactState({session_id:%s,blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
+            "({missingNumber:ui.contactState({session_id:%s,blockers:[{field:'whatsapp_number'}],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'ar'),"
+            "missingSession:ui.contactState({blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
+            "enabled:ui.contactState({session_id:%s,blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
             "handoff:ui.responseWindowMessage({response_window:{message_ar:'رد الحوالة',message_en:'Handoff reply'}},'ar')})"
             % (json.dumps(session), json.dumps(session))
         )
@@ -147,6 +162,34 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(value["reasons"], ["Verified fit"])
         self.assertEqual(value["tradeoff"], "Useful tradeoff")
 
+    def test_near_match_adjusted_dates_become_the_canonical_listing_request(self):
+        values = run_node(
+            "({near:ui.canonicalListingRequest({purpose:'work',residents:2,sleeping:'one_bedroom',move_in:'2026-09-01',duration_months:2,flexibility:'plus_minus_7'},{changed_condition:'dates',adjusted_move_in:'2026-09-03',adjusted_move_out:'2026-11-03'}),"
+            "exact:ui.canonicalListingRequest({move_in:'2026-09-01',duration_months:2},{changed_condition:''}),"
+            "label:ui.adjustedDateWindow({changed_condition:'dates',adjusted_move_in:'2026-09-03',adjusted_move_out:'2026-11-03'})})"
+        )
+
+        self.assertEqual(values["near"]["move_in"], "2026-09-03")
+        self.assertEqual(values["near"]["move_out"], "2026-11-03")
+        self.assertNotIn("duration_months", values["near"])
+        self.assertEqual(values["near"]["purpose"], "work")
+        self.assertEqual(values["exact"], {"move_in": "2026-09-01", "duration_months": 2})
+        self.assertEqual(values["label"], {"move_in": "2026-09-03", "move_out": "2026-11-03"})
+
+    def test_invalid_signature_retries_once_with_the_fresh_config_token(self):
+        saved = "anon_" + "A" * 32 + "." + "b" * 43
+        fresh = "anon_" + "C" * 32 + "." + "d" * 43
+        values = run_node_async(
+            "(async()=>{let calls=[];let rotated='';const ok=await ui.retryOnceForInvalidSignature(async token=>{calls.push(token);if(calls.length===1){const error=new Error('rotated');error.code='invalid_signature';throw error;}return 'ok';},%s,%s,token=>{rotated=token;});let failedCalls=0;const failed=await ui.retryOnceForInvalidSignature(async()=>{failedCalls+=1;const error=new Error('still invalid');error.code='invalid_signature';throw error;},%s,%s,()=>{}).then(()=>null,error=>error.code);return {ok:ok,calls:calls,rotated:rotated,failed_calls:failedCalls,failed:failed};})()"
+            % (json.dumps(saved), json.dumps(fresh), json.dumps(saved), json.dumps(fresh))
+        )
+
+        self.assertEqual(values["ok"], "ok")
+        self.assertEqual(values["calls"], [saved, fresh])
+        self.assertEqual(values["rotated"], fresh)
+        self.assertEqual(values["failed_calls"], 2)
+        self.assertEqual(values["failed"], "invalid_signature")
+
 
 class MonthlyPublicStaticContentTests(unittest.TestCase):
     def setUp(self):
@@ -178,7 +221,7 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
 
     def test_boot_and_popstate_apply_validated_url_state_before_route_loading(self):
         self.assertGreaterEqual(self.js.count("applyLocationSearch()"), 2)
-        self.assertIn("runtime.listingQuery", self.js)
+        self.assertIn("runtime.listingRequest", self.js)
         self.assertIn("parseLocationSearch", self.js)
 
     def test_price_and_whatsapp_ui_use_server_contracts_without_auto_sending(self):
@@ -202,7 +245,7 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("general_help: true", self.js)
 
     def test_empty_result_help_renders_a_visible_blocker_or_response_window(self):
-        self.assertIn("generalHelpContactState", self.js)
+        self.assertIn("contactState", self.js)
         self.assertIn('"contact-blocked"', self.js)
         self.assertIn('"contact-note"', self.js)
         self.assertIn('data-response-window', self.js)
@@ -211,6 +254,57 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
             self.js.index("function renderListingPage")
         ]
         self.assertIn("responseWindowMessage(handoff", general_handoff)
+
+    def test_one_canonical_listing_request_drives_quote_form_url_and_lead(self):
+        for hook in (
+            "runtime.listingRequest",
+            "canonicalListingRequest",
+            "adjustedDateWindow",
+            "copy(\"adjustedDates\"",
+        ):
+            self.assertIn(hook, self.js)
+        self.assertNotIn("runtime.request || runtime.listingQuery", self.js)
+        self.assertIn("request: runtime.listingRequest", self.js)
+        self.assertIn("queryString(runtime.listingRequest)", self.js)
+
+    def test_browse_entry_clears_guided_state_without_clearing_browse_filters(self):
+        navigate = self.js[self.js.index("function navigate") : self.js.index("function stateMessage")]
+        for hook in (
+            "runtime.request = null",
+            "runtime.matcher = initialMatcherState()",
+            "runtime.results = null",
+            "runtime.recommendationContext = null",
+            "runtime.listingRequest = {}",
+        ):
+            self.assertIn(hook, navigate)
+        self.assertNotIn("runtime.browseQuery = {}", navigate)
+
+    def test_browse_card_does_not_create_guided_recommendation_context(self):
+        open_listing = self.js[
+            self.js.index("function openListing") : self.js.index("function createCard")
+        ]
+        self.assertIn('const guided = runtime.page.route !== "browse"', open_listing)
+        self.assertIn(
+            "runtime.recommendationContext = guided ? safeRecommendationContext(item, runtime.lang) : null",
+            open_listing,
+        )
+        self.assertIn("const sourceRequest = guided ? runtime.request : runtime.browseQuery", open_listing)
+
+    def test_contact_state_is_shared_by_home_results_and_listing(self):
+        self.assertIn("function contactState", self.js)
+        self.assertNotIn("function generalHelpContactState", self.js)
+        for function_name in ("responseProof", "renderResults", "quoteCard", "renderListingPage"):
+            start = self.js.index("function " + function_name)
+            next_function = self.js.find("\n  function ", start + 12)
+            if next_function < 0:
+                next_function = len(self.js)
+            self.assertIn("contactState(", self.js[start:next_function])
+        self.assertNotIn('track("whatsapp_click"', self.js)
+
+    def test_config_keeps_a_fresh_rotation_token_and_retries_event_and_lead(self):
+        self.assertIn("runtime.config.fresh_session_id = issued", self.js)
+        self.assertIn("retryOnceForInvalidSignature", self.js)
+        self.assertGreaterEqual(self.js.count("withSessionRetry("), 3)
 
     def test_listing_uses_real_gallery_photos_for_story_and_a_mobile_action(self):
         for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
