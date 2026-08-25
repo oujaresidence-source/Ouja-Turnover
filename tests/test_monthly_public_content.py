@@ -188,19 +188,19 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["exact"], {"move_in": "2026-09-01", "duration_months": 2})
         self.assertEqual(values["label"], {"move_in": "2026-09-03", "move_out": "2026-11-03"})
 
-    def test_invalid_signature_retries_once_with_the_fresh_config_token(self):
-        saved = "anon_" + "A" * 32 + "." + "b" * 43
-        fresh = "anon_" + "C" * 32 + "." + "d" * 43
+    def test_non_signature_failure_does_not_refresh_or_retry(self):
+        current = "anon_" + "A" * 32 + "." + "b" * 43
+        cached = "anon_" + "E" * 32 + "." + "f" * 43
+        minted = "anon_" + "C" * 32 + "." + "d" * 43
         values = run_node_async(
-            "(async()=>{let calls=[];let rotated='';const ok=await ui.retryOnceForInvalidSignature(async token=>{calls.push(token);if(calls.length===1){const error=new Error('rotated');error.code='invalid_signature';throw error;}return 'ok';},%s,%s,token=>{rotated=token;});let failedCalls=0;const failed=await ui.retryOnceForInvalidSignature(async()=>{failedCalls+=1;const error=new Error('still invalid');error.code='invalid_signature';throw error;},%s,%s,()=>{}).then(()=>null,error=>error.code);return {ok:ok,calls:calls,rotated:rotated,failed_calls:failedCalls,failed:failed};})()"
-            % (json.dumps(saved), json.dumps(fresh), json.dumps(saved), json.dumps(fresh))
+            "(async()=>{let calls=0;let refreshes=0;let rotated='';const failed=await ui.retrySessionOperation(async()=>{calls+=1;const error=new Error('network');error.code='request_failed';throw error;},%s,%s,async()=>{refreshes+=1;return %s;},token=>{rotated=token;}).then(()=>null,error=>error.code);return {calls:calls,refreshes:refreshes,rotated:rotated,failed:failed};})()"
+            % (json.dumps(current), json.dumps(cached), json.dumps(minted))
         )
 
-        self.assertEqual(values["ok"], "ok")
-        self.assertEqual(values["calls"], [saved, fresh])
-        self.assertEqual(values["rotated"], fresh)
-        self.assertEqual(values["failed_calls"], 2)
-        self.assertEqual(values["failed"], "invalid_signature")
+        self.assertEqual(values["calls"], 1)
+        self.assertEqual(values["refreshes"], 0)
+        self.assertEqual(values["rotated"], "")
+        self.assertEqual(values["failed"], "request_failed")
 
     def test_open_tab_rotation_mints_one_token_when_both_saved_tokens_are_stale(self):
         stale = "anon_" + "A" * 32 + "." + "b" * 43
@@ -225,6 +225,20 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["failed_calls"], 2)
         self.assertEqual(values["failed_refreshes"], 1)
         self.assertEqual(values["failed"], "invalid_signature")
+
+    def test_rotation_ignores_a_distinct_cached_token_signed_before_rotation(self):
+        current = "anon_" + "A" * 32 + "." + "b" * 43
+        cached = "anon_" + "E" * 32 + "." + "f" * 43
+        minted = "anon_" + "C" * 32 + "." + "d" * 43
+        values = run_node_async(
+            "(async()=>{let calls=[];let refreshes=0;let rotated='';const ok=await ui.retrySessionOperation(async token=>{calls.push(token);if(calls.length===1){const error=new Error('rotated');error.code='invalid_signature';throw error;}return 'ok';},%s,%s,async()=>{refreshes+=1;return %s;},token=>{rotated=token;});return {ok:ok,calls:calls,refreshes:refreshes,rotated:rotated};})()"
+            % (json.dumps(current), json.dumps(cached), json.dumps(minted))
+        )
+
+        self.assertEqual(values["ok"], "ok")
+        self.assertEqual(values["calls"], [current, minted])
+        self.assertEqual(values["refreshes"], 1)
+        self.assertEqual(values["rotated"], minted)
 
 
 class MonthlyPublicStaticContentTests(unittest.TestCase):
@@ -339,7 +353,8 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
 
     def test_config_keeps_a_fresh_rotation_token_and_retries_event_and_lead(self):
         self.assertIn("runtime.config.fresh_session_id = issued", self.js)
-        self.assertIn("retryOnceForInvalidSignature", self.js)
+        self.assertNotIn("function retryOnceForInvalidSignature", self.js)
+        self.assertNotIn("function recoverySessionToken", self.js)
         self.assertIn("getJSON(ENDPOINTS.config", self.js)
         self.assertIn(
             "retrySessionOperation(operation, current, fresh, mintFreshSessionToken",
