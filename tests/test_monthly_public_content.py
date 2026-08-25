@@ -106,6 +106,28 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["replaced"], issued)
         self.assertIsNone(values["rejected"])
 
+    def test_general_help_contact_state_explains_blockers_and_localizes_response_window(self):
+        session = "anon_" + "A" * 32 + "." + "b" * 43
+        values = run_node(
+            "({missingNumber:ui.generalHelpContactState({session_id:%s,blockers:[{field:'whatsapp_number'}],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'ar'),"
+            "missingSession:ui.generalHelpContactState({blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
+            "enabled:ui.generalHelpContactState({session_id:%s,blockers:[],response_window:{message_ar:'رد عربي',message_en:'English reply'}},'en'),"
+            "handoff:ui.responseWindowMessage({response_window:{message_ar:'رد الحوالة',message_en:'Handoff reply'}},'ar')})"
+            % (json.dumps(session), json.dumps(session))
+        )
+
+        self.assertTrue(values["missingNumber"]["disabled"])
+        self.assertIn("واتساب", values["missingNumber"]["message"])
+        self.assertEqual(values["missingNumber"]["response_message"], "")
+        self.assertTrue(values["missingSession"]["disabled"])
+        self.assertIn("secure request session", values["missingSession"]["message"].lower())
+        self.assertEqual(values["missingSession"]["response_message"], "")
+        self.assertEqual(
+            values["enabled"],
+            {"disabled": False, "message": "", "response_message": "English reply"},
+        )
+        self.assertEqual(values["handoff"], "رد الحوالة")
+
     def test_public_availability_hides_undated_confirmed_state(self):
         values = run_node("({undated:['confirmed','available','pending','unavailable'].map(v=>ui.publicAvailabilityStatus(v,false)),dated:['confirmed','available','pending','unavailable','invented'].map(v=>ui.publicAvailabilityStatus(v,true))})")
 
@@ -178,6 +200,17 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("window.location.assign(handoffUrl)", self.js)
         self.assertNotIn("window.open(handoff.url", self.js)
         self.assertIn("general_help: true", self.js)
+
+    def test_empty_result_help_renders_a_visible_blocker_or_response_window(self):
+        self.assertIn("generalHelpContactState", self.js)
+        self.assertIn('"contact-blocked"', self.js)
+        self.assertIn('"contact-note"', self.js)
+        self.assertIn('data-response-window', self.js)
+        general_handoff = self.js[
+            self.js.index("async function prepareGeneralHelp"):
+            self.js.index("function renderListingPage")
+        ]
+        self.assertIn("responseWindowMessage(handoff", general_handoff)
 
     def test_listing_uses_real_gallery_photos_for_story_and_a_mobile_action(self):
         for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
