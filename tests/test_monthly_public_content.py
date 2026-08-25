@@ -165,14 +165,26 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
     def test_near_match_adjusted_dates_become_the_canonical_listing_request(self):
         values = run_node(
             "({near:ui.canonicalListingRequest({purpose:'work',residents:2,sleeping:'one_bedroom',move_in:'2026-09-01',duration_months:2,flexibility:'plus_minus_7'},{changed_condition:'dates',adjusted_move_in:'2026-09-03',adjusted_move_out:'2026-11-03'}),"
+            "exactDates:ui.canonicalListingRequest({move_in:'2026-09-01',move_out:'2026-11-01'},{changed_condition:'dates',adjusted_move_in:'2026-09-03',adjusted_move_out:'2026-11-03'}),"
             "exact:ui.canonicalListingRequest({move_in:'2026-09-01',duration_months:2},{changed_condition:''}),"
             "label:ui.adjustedDateWindow({changed_condition:'dates',adjusted_move_in:'2026-09-03',adjusted_move_out:'2026-11-03'})})"
         )
 
-        self.assertEqual(values["near"]["move_in"], "2026-09-03")
-        self.assertEqual(values["near"]["move_out"], "2026-11-03")
-        self.assertNotIn("duration_months", values["near"])
-        self.assertEqual(values["near"]["purpose"], "work")
+        self.assertEqual(
+            values["near"],
+            {
+                "purpose": "work",
+                "residents": 2,
+                "sleeping": "one_bedroom",
+                "move_in": "2026-09-03",
+                "duration_months": 2,
+                "flexibility": "plus_minus_7",
+            },
+        )
+        self.assertEqual(
+            values["exactDates"],
+            {"move_in": "2026-09-03", "move_out": "2026-11-03"},
+        )
         self.assertEqual(values["exact"], {"move_in": "2026-09-01", "duration_months": 2})
         self.assertEqual(values["label"], {"move_in": "2026-09-03", "move_out": "2026-11-03"})
 
@@ -188,6 +200,30 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["calls"], [saved, fresh])
         self.assertEqual(values["rotated"], fresh)
         self.assertEqual(values["failed_calls"], 2)
+        self.assertEqual(values["failed"], "invalid_signature")
+
+    def test_open_tab_rotation_mints_one_token_when_both_saved_tokens_are_stale(self):
+        stale = "anon_" + "A" * 32 + "." + "b" * 43
+        minted = "anon_" + "C" * 32 + "." + "d" * 43
+        values = run_node_async(
+            "(async()=>{if(typeof ui.retrySessionOperation!=='function')return {missing:true};let calls=[];let refreshes=0;let rotated='';const ok=await ui.retrySessionOperation(async token=>{calls.push(token);if(calls.length===1){const error=new Error('rotated');error.code='invalid_signature';throw error;}return 'ok';},%s,%s,async()=>{refreshes+=1;return %s;},token=>{rotated=token;});let failedCalls=0;let failedRefreshes=0;const failed=await ui.retrySessionOperation(async()=>{failedCalls+=1;const error=new Error('still invalid');error.code='invalid_signature';throw error;},%s,%s,async()=>{failedRefreshes+=1;return %s;},()=>{}).then(()=>null,error=>error.code);return {ok:ok,calls:calls,refreshes:refreshes,rotated:rotated,failed_calls:failedCalls,failed_refreshes:failedRefreshes,failed:failed};})()"
+            % (
+                json.dumps(stale),
+                json.dumps(stale),
+                json.dumps(minted),
+                json.dumps(stale),
+                json.dumps(stale),
+                json.dumps(minted),
+            )
+        )
+
+        self.assertNotIn("missing", values)
+        self.assertEqual(values["ok"], "ok")
+        self.assertEqual(values["calls"], [stale, minted])
+        self.assertEqual(values["refreshes"], 1)
+        self.assertEqual(values["rotated"], minted)
+        self.assertEqual(values["failed_calls"], 2)
+        self.assertEqual(values["failed_refreshes"], 1)
         self.assertEqual(values["failed"], "invalid_signature")
 
 
@@ -304,6 +340,11 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
     def test_config_keeps_a_fresh_rotation_token_and_retries_event_and_lead(self):
         self.assertIn("runtime.config.fresh_session_id = issued", self.js)
         self.assertIn("retryOnceForInvalidSignature", self.js)
+        self.assertIn("getJSON(ENDPOINTS.config", self.js)
+        self.assertIn(
+            "retrySessionOperation(operation, current, fresh, mintFreshSessionToken",
+            self.js,
+        )
         self.assertGreaterEqual(self.js.count("withSessionRetry("), 3)
 
     def test_listing_uses_real_gallery_photos_for_story_and_a_mobile_action(self):
