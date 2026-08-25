@@ -397,6 +397,49 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertEqual(made["error"]["code"], "whatsapp_not_configured")
         self.assertEqual(self.leads.count(), 0)
 
+    def test_general_help_lead_is_allowed_only_for_a_verified_empty_match(self):
+        session = self.session()
+        empty_request = match_request(residents=50, sleeping="four_plus_bedrooms")
+
+        made = self.app.lead(
+            {
+                "session_id": session,
+                "general_help": True,
+                "request": empty_request,
+                "lang": "en",
+            }
+        )
+
+        self.assertTrue(made["ok"])
+        stored = self.leads.get(made["lead_reference"])
+        self.assertEqual(stored["lead_kind"], "general_help")
+        rejected = self.app.lead(
+            {
+                "session_id": session,
+                "general_help": True,
+                "request": match_request(),
+                "lang": "en",
+            }
+        )
+        self.assertFalse(rejected["ok"])
+        self.assertEqual(rejected["error"]["code"], "general_help_not_allowed")
+
+    def test_general_help_does_not_bypass_pending_availability(self):
+        self.now = NOW + dt.timedelta(minutes=61)
+
+        made = self.app.lead(
+            {
+                "session_id": self.session(),
+                "general_help": True,
+                "request": match_request(),
+                "lang": "ar",
+            }
+        )
+
+        self.assertFalse(made["ok"])
+        self.assertEqual(made["error"]["code"], "availability_pending")
+        self.assertEqual(self.leads.count(), 0)
+
     def test_event_and_malformed_input_are_safe_and_bilingual(self):
         event = self.app.event(
             {"event": "landing_view", "session_id": self.session(), "context": {"phone": "secret"}}

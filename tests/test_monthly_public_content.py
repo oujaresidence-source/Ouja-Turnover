@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import unittest
+import re
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -84,6 +85,46 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
 
         self.assertEqual(values, ["https://wa.me/966500000000?text=ok", "", "", ""])
 
+    def test_location_search_accepts_v2_and_legacy_aliases_and_rejects_bad_values(self):
+        values = run_node("({v2:ui.parseLocationSearch('?move_in=2026-09-01&duration_months=2&residents=3&bedrooms=2','listing'),legacy:ui.parseLocationSearch('?move_in=2026-09-01&months=4&guests=5&beds=studio','browse'),bad:ui.parseLocationSearch('?move_in=not-a-date&months=99&guests=phone&beds=all&neighborhood=../../etc','browse')})")
+
+        self.assertEqual(values["v2"], {"move_in": "2026-09-01", "duration_months": 2, "residents": 3, "bedrooms": 2})
+        self.assertEqual(values["legacy"], {"move_in": "2026-09-01", "duration_months": 4, "residents": 5, "bedrooms": 0})
+        self.assertEqual(values["bad"], {})
+
+    def test_studio_url_filter_keeps_zero_as_the_selected_value(self):
+        values = run_node("({studio:ui.optionIsSelected(0,0),blank:ui.optionIsSelected(0,''),unset:ui.optionIsSelected(null,'')})")
+
+        self.assertEqual(values, {"studio": True, "blank": False, "unset": True})
+
+    def test_existing_valid_session_token_wins_over_new_config_token(self):
+        existing = "anon_" + "A" * 32 + "." + "b" * 43
+        issued = "anon_" + "C" * 32 + "." + "d" * 43
+        values = run_node("({kept:ui.chooseSessionToken(%s,%s),replaced:ui.chooseSessionToken('forged',%s),rejected:ui.chooseSessionToken('bad','also-bad')})" % (json.dumps(existing), json.dumps(issued), json.dumps(issued)))
+
+        self.assertEqual(values["kept"], existing)
+        self.assertEqual(values["replaced"], issued)
+        self.assertIsNone(values["rejected"])
+
+    def test_public_availability_hides_undated_confirmed_state(self):
+        values = run_node("({undated:['confirmed','available','pending','unavailable'].map(v=>ui.publicAvailabilityStatus(v,false)),dated:['confirmed','available','pending','unavailable','invented'].map(v=>ui.publicAvailabilityStatus(v,true))})")
+
+        self.assertEqual(values["undated"], ["", "", "", ""])
+        self.assertEqual(values["dated"], ["", "available", "pending", "unavailable", ""])
+
+    def test_ranked_impressions_include_near_matches_once(self):
+        values = run_node("ui.rankedImpressionIds({top:[{id:'1'},{id:'2'}],near_matches:[{id:'3'},{id:'2'}],alternatives:[{id:'4'},{id:'3'}],catalog:[{id:'5'}]})")
+
+        self.assertEqual(values, ["1", "2", "3", "4"])
+
+    def test_recommendation_context_is_bounded_and_listing_specific(self):
+        value = run_node("ui.safeRecommendationContext({id:'1001',reasons:['Verified fit','',7,'A'.repeat(400)],tradeoff:'Useful tradeoff'},'en')")
+
+        self.assertEqual(value["listing_id"], "1001")
+        self.assertEqual(value["lang"], "en")
+        self.assertEqual(value["reasons"], ["Verified fit"])
+        self.assertEqual(value["tradeoff"], "Useful tradeoff")
+
 
 class MonthlyPublicStaticContentTests(unittest.TestCase):
     def setUp(self):
@@ -113,6 +154,11 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         ):
             self.assertIn(hook, self.js)
 
+    def test_boot_and_popstate_apply_validated_url_state_before_route_loading(self):
+        self.assertGreaterEqual(self.js.count("applyLocationSearch()"), 2)
+        self.assertIn("runtime.listingQuery", self.js)
+        self.assertIn("parseLocationSearch", self.js)
+
     def test_price_and_whatsapp_ui_use_server_contracts_without_auto_sending(self):
         for field in (
             "monthly_rate_sar",
@@ -131,10 +177,47 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("safeWhatsAppUrl(handoff.url)", self.js)
         self.assertIn("window.location.assign(handoffUrl)", self.js)
         self.assertNotIn("window.open(handoff.url", self.js)
+        self.assertIn("general_help: true", self.js)
 
     def test_listing_uses_real_gallery_photos_for_story_and_a_mobile_action(self):
-        for hook in ("story-photo", "listing.highlights", "sticky-mobile-action"):
+        for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
             self.assertIn(hook, self.js)
+
+    def test_ranked_clicks_do_not_duplicate_visible_impressions(self):
+        self.assertIn("rankedImpressionIds", self.js)
+        self.assertNotIn('if (rank) track("result_impression"', self.js)
+
+    def test_guided_listing_context_and_short_verified_inclusions_are_rendered(self):
+        for hook in ("recommendationContext", "whyRecommended", "approvedIncluded(item.quote.included", "tradeoff"):
+            self.assertIn(hook, self.js)
+
+    def test_mobile_dom_order_puts_price_before_licence_and_gallery_does_not_force_crop(self):
+        price_position = self.js.index("price.appendChild(quoteCard")
+        licence_position = self.js.index("wrap.appendChild(licenceDetails")
+        self.assertLess(price_position, licence_position)
+        gallery_css = self.css[self.css.index(".gallery img {"):self.css.index(".listing-layout {")]
+        self.assertIn("height: auto", gallery_css)
+        self.assertNotIn("object-fit: cover", gallery_css)
+
+    def test_english_headings_use_local_serif_while_controls_remain_sans(self):
+        self.assertRegex(self.css, r'(?s)\[dir="ltr"\]\s+:is\(h1, h2, h3\).*?Georgia')
+        self.assertIn('[dir="ltr"] body', self.css)
+
+    def test_primary_button_meets_wcag_aa_contrast(self):
+        def rgb(value):
+            return tuple(int(value[index:index + 2], 16) / 255 for index in (1, 3, 5))
+
+        def luminance(value):
+            channels = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in rgb(value)]
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+        variables = dict(re.findall(r"(--[\w-]+):\s*(#[0-9a-fA-F]{6})", self.css))
+        block = self.css[self.css.index(".button-primary {"):self.css.index(".button-primary:hover")]
+        background_name = re.search(r"background:\s*var\((--[\w-]+)\)", block).group(1)
+        color_name = re.search(r"color:\s*var\((--[\w-]+)\)", block).group(1)
+        first, second = luminance(variables[background_name]), luminance(variables[color_name])
+        contrast = (max(first, second) + 0.05) / (min(first, second) + 0.05)
+        self.assertGreaterEqual(contrast, 4.5)
 
     def test_dom_rendering_avoids_unsafe_interpolation_and_browser_pii_storage(self):
         forbidden = (

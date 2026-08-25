@@ -237,6 +237,9 @@ class LeadStore:
                     reference TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
                     listing_id TEXT NOT NULL,
+                    lead_kind TEXT NOT NULL DEFAULT 'listing' CHECK (
+                        lead_kind IN ('listing', 'general_help')
+                    ),
                     request_key TEXT NOT NULL,
                     request_json TEXT NOT NULL,
                     quote_json TEXT NOT NULL,
@@ -267,6 +270,10 @@ class LeadStore:
                     )
                     """
                 )
+            if "lead_kind" not in columns:
+                connection.execute(
+                    "ALTER TABLE monthly_public_leads ADD COLUMN lead_kind TEXT NOT NULL DEFAULT 'listing'"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_monthly_lead_dedupe ON monthly_public_leads(session_id, listing_id, request_key, created_at)"
             )
@@ -277,6 +284,7 @@ class LeadStore:
             "reference": row["reference"],
             "session_id": row["session_id"],
             "listing_id": row["listing_id"],
+            "lead_kind": row["lead_kind"],
             "request": json.loads(row["request_json"]),
             "quote": json.loads(row["quote_json"]),
             "created_at": row["created_at"],
@@ -347,6 +355,58 @@ class LeadStore:
         with self._connection() as connection:
             row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (str(reference).upper(),)).fetchone()
         return self._row(row) if row is not None else None
+
+    def create_general(
+        self,
+        session_id: str,
+        request: Any,
+        *,
+        approved_places: Any = None,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, Any]:
+        """Create a deduplicated help lead with no listing and no price quote."""
+
+        if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
+            raise ValueError("invalid anonymous session")
+        safe_request = _approved_request(request, approved_places)
+        for field in ("purpose", "residents", "move_in"):
+            if field not in safe_request:
+                raise ValueError("incomplete general help request")
+        if not any(field in safe_request for field in ("duration_months", "move_out")):
+            raise ValueError("incomplete general help request")
+        request_json = json.dumps(safe_request, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        quote_json = "{}"
+        request_key = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+        current = _time(now if now is not None else self.clock())
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            candidates = connection.execute(
+                "SELECT * FROM monthly_public_leads WHERE session_id = ? AND listing_id = '' AND lead_kind = 'general_help' AND request_key = ? ORDER BY created_at DESC LIMIT 8",
+                (session_id, request_key),
+            ).fetchall()
+            for candidate in candidates:
+                created = dt.datetime.fromisoformat(candidate["created_at"])
+                if dt.timedelta(0) <= current.astimezone(created.tzinfo) - created <= dt.timedelta(minutes=DEDUPE_MINUTES):
+                    return self._row(candidate)
+            base_reference = str(self.reference_factory(current)).strip().upper()
+            if not _REFERENCE_RE.fullmatch(base_reference):
+                raise ValueError("reference factory returned an invalid reference")
+            for attempt in range(10):
+                suffix = "" if attempt == 0 else "-%d" % (attempt + 1)
+                reference = base_reference[: 64 - len(suffix)] + suffix
+                if not _REFERENCE_RE.fullmatch(reference):
+                    raise ValueError("reference factory returned an invalid reference")
+                try:
+                    connection.execute(
+                        "INSERT INTO monthly_public_leads(reference, session_id, listing_id, lead_kind, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, '', 'general_help', ?, ?, ?, ?, ?)",
+                        (reference, session_id, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
+                    )
+                    row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (reference,)).fetchone()
+                    return self._row(row)
+                except sqlite3.IntegrityError:
+                    continue
+        raise RuntimeError("could not create a unique lead reference")
 
     def list_all(self) -> list[Dict[str, Any]]:
         with self._connection() as connection:
@@ -656,6 +716,90 @@ def build_whatsapp_handoff(
         ),
         "مرجع الطلب / Lead reference: %s" % lead["reference"],
         "فضلاً أكدوا التوفر والإجمالي والتأمين وشروط العقد. / Please confirm availability, total, deposit, and contract terms.",
+        "%s / %s" % (window["message_ar"], window["message_en"]),
+    ])
+    message = "\n".join(lines)
+    recorded = None
+    if analytics is not None:
+        try:
+            analytics.record_lifecycle("lead_created", session_id, lead["reference"], now=current)
+            recorded = True
+        except Exception:
+            recorded = False
+    return {
+        "ok": True,
+        "blocked": False,
+        "lead_reference": lead["reference"],
+        "message": message,
+        "url": "https://wa.me/%s?text=%s" % (settings.whatsapp_number, url_quote(message, safe="")),
+        "response_window": window,
+        "analytics_recorded": recorded,
+    }
+
+
+def build_general_whatsapp_handoff(
+    store: LeadStore,
+    settings: MonthlySettings,
+    session_id: str,
+    request: Mapping[str, Any],
+    *,
+    analytics: Any = None,
+    approved_places: Any = None,
+    now: Optional[dt.datetime] = None,
+) -> Dict[str, Any]:
+    """Prepare a no-match help request without a listing, price, or personal data."""
+
+    current = _time(now if now is not None else store.clock())
+    window = response_window(settings, current)
+    if not settings.whatsapp_number:
+        return {
+            "ok": False,
+            "blocked": True,
+            "code": "whatsapp_not_configured",
+            "message_ar": "تعذر تجهيز واتساب حتى يكتمل إعداد رقم عوجا.",
+            "message_en": "WhatsApp handoff is blocked until Ouja's number is configured.",
+            "response_window": window,
+        }
+    try:
+        lead = store.create_general(
+            session_id,
+            request,
+            approved_places=approved_places,
+            now=current,
+        )
+    except ValueError as error:
+        raise HandoffValidationError("request_incomplete", str(error))
+    safe_request = lead["request"]
+    duration = safe_request.get("duration_months") or safe_request.get("duration_days")
+    duration_unit = "months / أشهر" if safe_request.get("duration_months") else "days / أيام"
+    move_out = safe_request.get("move_out")
+    if not move_out and safe_request.get("duration_months"):
+        move_out = add_months(safe_request["move_in"], safe_request["duration_months"])
+    place = safe_request.get("place") if isinstance(safe_request.get("place"), Mapping) else None
+    lines = [
+        "طلب مساعدة لسكن شهري / Monthly-stay help request",
+        "لم يتم اختيار منزل. / No home was selected.",
+        "التواريخ / Dates: %s → %s (%s %s)" % (
+            safe_request["move_in"], move_out, duration, duration_unit
+        ),
+        "المقيمون / Residents: %s" % safe_request["residents"],
+        "الغرض / Purpose: %s" % safe_request["purpose"],
+    ]
+    if safe_request.get("sleeping"):
+        lines.append("ترتيب النوم / Sleeping: %s" % safe_request["sleeping"])
+    if safe_request.get("flexibility"):
+        lines.append("مرونة التواريخ / Date flexibility: %s" % safe_request["flexibility"])
+    if place:
+        labels = " / ".join(
+            str(place.get(field) or "").strip()
+            for field in ("label_ar", "label_en")
+            if place.get(field)
+        )
+        if labels:
+            lines.append("الوجهة أو الحي المعتمد / Approved destination or neighborhood: %s" % labels)
+    lines.extend([
+        "مرجع الطلب / Lead reference: %s" % lead["reference"],
+        "فضلاً ساعدوا الضيف في إيجاد خيار وتأكيد التوفر والسعر والشروط. / Please help find and confirm an option, including availability, price, and terms.",
         "%s / %s" % (window["message_ar"], window["message_en"]),
     ])
     message = "\n".join(lines)
