@@ -195,4 +195,3 @@ def present_listing(result: Any, lang: str) -> Dict[str, Any]:
         },
         "licence": dict(listing.get("licence") or {}),
     }
-
