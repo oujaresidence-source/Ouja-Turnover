@@ -187,6 +187,37 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
         finally:
             self.bot._mcal = original
 
+    def test_calendar_adapter_rejects_malformed_cached_rows(self):
+        malformed_rows = (
+            None,
+            [],
+            "not-a-calendar-row",
+            [2, 400, 0],
+            ["1", 400, 0],
+            [1, 400],
+            [1, 400, 2],
+            [1, "400", 0],
+        )
+        original = self.bot._mcal
+        try:
+            for row in malformed_rows:
+                with self.subTest(row=row):
+                    self.bot._mcal = {
+                        "units": {"1001": {"2026-09-01": row}},
+                        "unit_synced_at": {
+                            "1001": "2026-08-25T09:40:00+03:00",
+                        },
+                    }
+                    calendar = self.bot._monthly_public_calendar("1001")
+                    self.assertIsNone(calendar)
+                    publication = validate_listing(
+                        valid_listing(calendar=calendar), valid_settings(), NOW
+                    )
+                    self.assertEqual(publication.availability_status, "pending")
+                    self.assertFalse(publication.exact_match_eligible)
+        finally:
+            self.bot._mcal = original
+
     def test_cold_rating_cache_is_warmed_locally_without_network(self):
         saved = {
             "gw_cache": self.bot._gw_cache,
