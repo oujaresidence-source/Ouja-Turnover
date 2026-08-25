@@ -155,6 +155,7 @@
       paymentMethods: "طرق الدفع",
       contactWhatsApp: "جهّز طلب واتساب",
       contactBlocked: "التواصل عبر واتساب غير جاهز حاليًا. تقدر تكمل تصفح البيوت والأسعار.",
+      secureSessionBlocked: "تعذر تجهيز جلسة آمنة لطلب واتساب حاليًا. أعد تحميل الصفحة أو أكمل تصفح البيوت.",
       completeDetails: "أكمل تفاصيل الإقامة لتجهيز طلب واتساب.",
       preparingWhatsApp: "جاري تجهيز مرجع الطلب ورسالة واتساب.",
       openingWhatsApp: "تم إنشاء المرجع {reference}. جاري فتح واتساب، والرسالة لن تُرسل إلا باختيارك.",
@@ -307,6 +308,7 @@
       paymentMethods: "Payment methods",
       contactWhatsApp: "Prepare WhatsApp request",
       contactBlocked: "WhatsApp contact is not ready. You can still browse homes and prices.",
+      secureSessionBlocked: "A secure request session is unavailable. Reload the page or continue browsing homes.",
       completeDetails: "Complete the stay details to prepare a WhatsApp request.",
       preparingWhatsApp: "Creating your lead reference and WhatsApp message.",
       openingWhatsApp: "Reference {reference} created. Opening WhatsApp; the message is sent only if you choose to send it.",
@@ -397,6 +399,26 @@
   function chooseSessionToken(existing, issued) {
     if (validSessionToken(existing)) return existing;
     return validSessionToken(issued) ? issued : null;
+  }
+
+  function responseWindowMessage(source, lang) {
+    if (!source || typeof source !== "object") return "";
+    const windowValue = source.response_window && typeof source.response_window === "object" ? source.response_window : source;
+    const value = windowValue[lang === "en" ? "message_en" : "message_ar"];
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function generalHelpContactState(config, lang) {
+    const language = lang === "en" ? "en" : "ar";
+    const value = config && typeof config === "object" ? config : {};
+    const blockers = Array.isArray(value.blockers) ? value.blockers : [];
+    if (blockers.some(function (item) { return item && item.field === "whatsapp_number"; })) {
+      return { disabled: true, message: COPY[language].contactBlocked, response_message: "" };
+    }
+    if (!validSessionToken(value.session_id)) {
+      return { disabled: true, message: COPY[language].secureSessionBlocked, response_message: "" };
+    }
+    return { disabled: false, message: "", response_message: responseWindowMessage(value, language) };
   }
 
   function validDate(value) {
@@ -894,9 +916,7 @@
   }
 
   function responseProof() {
-    const windowValue = runtime.config && runtime.config.response_window;
-    if (!windowValue) return null;
-    const message = windowValue[runtime.lang === "ar" ? "message_ar" : "message_en"];
+    const message = responseWindowMessage(runtime.config, runtime.lang);
     return message ? proofItem(message, "") : null;
   }
 
@@ -1392,9 +1412,15 @@
       if (!result.pending_count && requestIsComplete(runtime.request)) {
         const help = stateMessage(copy("generalHelpTitle"), copy("generalHelpText"), "warning");
         const control = button(copy("generalHelpAction"), "button button-primary", function () { prepareGeneralHelp(control); });
-        const blocked = (runtime.config.blockers || []).some(function (item) { return item.field === "whatsapp_number"; });
-        control.disabled = blocked || !runtime.config.session_id;
+        const contactState = generalHelpContactState(runtime.config, runtime.lang);
+        control.disabled = contactState.disabled;
+        if (contactState.message) help.appendChild(element("p", "contact-blocked", contactState.message));
         help.appendChild(control);
+        if (contactState.response_message) {
+          const response = element("p", "contact-note", contactState.response_message);
+          response.setAttribute("data-response-window", "");
+          help.appendChild(response);
+        }
         wrap.appendChild(help);
       }
       wrap.appendChild(actionLink(copy("browseCta"), "/monthly/search", "button button-outline", function (event) {
@@ -1825,7 +1851,17 @@
       });
       const handoffUrl = safeWhatsAppUrl(handoff.url);
       if (!handoffUrl) throw new Error(copy("leadFailed"));
-      announce(copy("openingWhatsApp", { reference: handoff.lead_reference }));
+      const responseMessage = responseWindowMessage(handoff, runtime.lang);
+      if (responseMessage && control.parentNode) {
+        let note = control.parentNode.querySelector("[data-response-window]");
+        if (!note) {
+          note = element("p", "contact-note");
+          note.setAttribute("data-response-window", "");
+          control.parentNode.appendChild(note);
+        }
+        note.textContent = responseMessage;
+      }
+      announce(copy("openingWhatsApp", { reference: handoff.lead_reference }) + (responseMessage ? " " + responseMessage : ""));
       window.location.assign(handoffUrl);
     } catch (error) {
       control.disabled = false;
@@ -1944,12 +1980,14 @@
     buildSteps: buildSteps,
     chooseSessionToken: chooseSessionToken,
     focusQuestion: focusQuestion,
+    generalHelpContactState: generalHelpContactState,
     goBack: goBack,
     initialMatcherState: initialMatcherState,
     optionIsSelected: optionIsSelected,
     parseLocationSearch: parseLocationSearch,
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
+    responseWindowMessage: responseWindowMessage,
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,
