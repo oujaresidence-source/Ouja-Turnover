@@ -30,9 +30,10 @@ DEDUPE_MINUTES = 30
 _SESSION_RE = re.compile(r"^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$")
 _REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _LISTING_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_JOURNEY_RE = re.compile(r"^journey_[A-Za-z0-9_-]{22,64}$")
 STAFF_ACTIONS = ("confirm_request", "request_information", "prepare_alternative")
 INFORMATION_REASONS = ("dates", "residents", "place", "contract_terms", "other")
-ALTERNATIVE_REASONS = ("lower_price", "dates", "location", "space", "contract_terms")
+ALTERNATIVE_REASONS = ("lower_price", "dates", "location", "space")
 
 
 class HandoffValidationError(ValueError):
@@ -239,6 +240,7 @@ class LeadStore:
                 CREATE TABLE IF NOT EXISTS monthly_public_leads (
                     reference TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL,
+                    journey_id TEXT,
                     listing_id TEXT NOT NULL,
                     lead_kind TEXT NOT NULL DEFAULT 'listing' CHECK (
                         lead_kind IN ('listing', 'general_help')
@@ -277,6 +279,10 @@ class LeadStore:
                 connection.execute(
                     "ALTER TABLE monthly_public_leads ADD COLUMN lead_kind TEXT NOT NULL DEFAULT 'listing'"
                 )
+            if "journey_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE monthly_public_leads ADD COLUMN journey_id TEXT"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_monthly_lead_dedupe ON monthly_public_leads(session_id, listing_id, request_key, created_at)"
             )
@@ -305,6 +311,7 @@ class LeadStore:
         return {
             "reference": row["reference"],
             "session_id": row["session_id"],
+            "journey_id": row["journey_id"],
             "listing_id": row["listing_id"],
             "lead_kind": row["lead_kind"],
             "request": json.loads(row["request_json"]),
@@ -330,6 +337,7 @@ class LeadStore:
         quote: Any,
         *,
         approved_places: Any = None,
+        journey_id: Any = None,
         now: Optional[dt.datetime] = None,
     ) -> Dict[str, Any]:
         if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
@@ -337,6 +345,11 @@ class LeadStore:
         listing = str(listing_id or "").strip()
         if not _LISTING_RE.fullmatch(listing):
             raise ValueError("invalid listing ID")
+        normalized_journey = None
+        if journey_id not in (None, ""):
+            normalized_journey = str(journey_id).strip()
+            if not _JOURNEY_RE.fullmatch(normalized_journey):
+                raise ValueError("invalid journey ID")
         safe_request = _approved_request(request, approved_places)
         safe_quote = _approved_quote(quote)
         request_json = json.dumps(safe_request, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -347,8 +360,8 @@ class LeadStore:
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             candidates = connection.execute(
-                "SELECT * FROM monthly_public_leads WHERE session_id = ? AND listing_id = ? AND request_key = ? ORDER BY created_at DESC LIMIT 8",
-                (session_id, listing, request_key),
+                "SELECT * FROM monthly_public_leads WHERE session_id = ? AND journey_id IS ? AND listing_id = ? AND request_key = ? ORDER BY created_at DESC LIMIT 8",
+                (session_id, normalized_journey, listing, request_key),
             ).fetchall()
             for candidate in candidates:
                 created = dt.datetime.fromisoformat(candidate["created_at"])
@@ -364,8 +377,8 @@ class LeadStore:
                     raise ValueError("reference factory returned an invalid reference")
                 try:
                     connection.execute(
-                        "INSERT INTO monthly_public_leads(reference, session_id, listing_id, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (reference, session_id, listing, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
+                        "INSERT INTO monthly_public_leads(reference, session_id, journey_id, listing_id, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (reference, session_id, normalized_journey, listing, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
                     )
                     row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (reference,)).fetchone()
                     return self._row(row)
@@ -411,7 +424,7 @@ class LeadStore:
         quote: Any = None,
         now: Optional[dt.datetime] = None,
     ) -> Dict[str, Any]:
-        """Append one controlled staff action and start response time once."""
+        """Append one controlled internal action without claiming customer contact."""
 
         normalized = str(reference or "").strip().upper()
         if not _REFERENCE_RE.fullmatch(normalized):
@@ -453,12 +466,6 @@ class LeadStore:
             created = dt.datetime.fromisoformat(lead_row["created_at"])
             if current_time.astimezone(created.tzinfo) < created:
                 raise ValueError("staff action cannot precede lead creation")
-            response_started = lead_row["responded_at"] is None
-            if response_started:
-                connection.execute(
-                    "UPDATE monthly_public_leads SET responded_at = ?, updated_at = ? WHERE reference = ? AND responded_at IS NULL",
-                    (current, current, normalized),
-                )
             cursor = connection.execute(
                 """
                 INSERT INTO monthly_public_lead_actions(
@@ -485,7 +492,7 @@ class LeadStore:
         return {
             "action": self._action_row(action_row),
             "lead": self._row(lead_row),
-            "response_started": response_started,
+            "response_started": False,
         }
 
     def create_general(
@@ -494,12 +501,18 @@ class LeadStore:
         request: Any,
         *,
         approved_places: Any = None,
+        journey_id: Any = None,
         now: Optional[dt.datetime] = None,
     ) -> Dict[str, Any]:
         """Create a deduplicated help lead with no listing and no price quote."""
 
         if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
             raise ValueError("invalid anonymous session")
+        normalized_journey = None
+        if journey_id not in (None, ""):
+            normalized_journey = str(journey_id).strip()
+            if not _JOURNEY_RE.fullmatch(normalized_journey):
+                raise ValueError("invalid journey ID")
         safe_request = _approved_request(request, approved_places)
         for field in ("purpose", "residents", "move_in"):
             if field not in safe_request:
@@ -514,8 +527,8 @@ class LeadStore:
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             candidates = connection.execute(
-                "SELECT * FROM monthly_public_leads WHERE session_id = ? AND listing_id = '' AND lead_kind = 'general_help' AND request_key = ? ORDER BY created_at DESC LIMIT 8",
-                (session_id, request_key),
+                "SELECT * FROM monthly_public_leads WHERE session_id = ? AND journey_id IS ? AND listing_id = '' AND lead_kind = 'general_help' AND request_key = ? ORDER BY created_at DESC LIMIT 8",
+                (session_id, normalized_journey, request_key),
             ).fetchall()
             for candidate in candidates:
                 created = dt.datetime.fromisoformat(candidate["created_at"])
@@ -531,8 +544,8 @@ class LeadStore:
                     raise ValueError("reference factory returned an invalid reference")
                 try:
                     connection.execute(
-                        "INSERT INTO monthly_public_leads(reference, session_id, listing_id, lead_kind, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, '', 'general_help', ?, ?, ?, ?, ?)",
-                        (reference, session_id, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
+                        "INSERT INTO monthly_public_leads(reference, session_id, journey_id, listing_id, lead_kind, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, '', 'general_help', ?, ?, ?, ?, ?)",
+                        (reference, session_id, normalized_journey, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
                     )
                     row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (reference,)).fetchone()
                     return self._row(row)
@@ -785,6 +798,7 @@ def build_whatsapp_handoff(
     *,
     analytics: Any = None,
     approved_places: Any = None,
+    journey_id: Any = None,
     now: Optional[dt.datetime] = None,
 ) -> Dict[str, Any]:
     """Create an anonymous lead and a bilingual pre-filled WhatsApp URL."""
@@ -808,6 +822,7 @@ def build_whatsapp_handoff(
         request,
         quote,
         approved_places=approved_places,
+        journey_id=journey_id,
         now=current,
     )
     request = lead["request"]
@@ -862,6 +877,7 @@ def build_whatsapp_handoff(
                 session_id,
                 lead["reference"],
                 listing_id=listing_id,
+                journey_id=lead.get("journey_id"),
                 now=current,
             )
             recorded = True
@@ -886,6 +902,7 @@ def build_general_whatsapp_handoff(
     *,
     analytics: Any = None,
     approved_places: Any = None,
+    journey_id: Any = None,
     now: Optional[dt.datetime] = None,
 ) -> Dict[str, Any]:
     """Prepare a no-match help request without a listing, price, or personal data."""
@@ -906,6 +923,7 @@ def build_general_whatsapp_handoff(
             session_id,
             request,
             approved_places=approved_places,
+            journey_id=journey_id,
             now=current,
         )
     except ValueError as error:
@@ -947,7 +965,12 @@ def build_general_whatsapp_handoff(
     recorded = None
     if analytics is not None:
         try:
-            analytics.record_lead_creation(session_id, lead["reference"], now=current)
+            analytics.record_lead_creation(
+                session_id,
+                lead["reference"],
+                journey_id=lead.get("journey_id"),
+                now=current,
+            )
             recorded = True
         except Exception:
             recorded = False

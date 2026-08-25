@@ -327,6 +327,7 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
     def test_lead_recomputes_quote_and_rejects_client_price_message_and_reference(self):
         payload = {
             "session_id": self.session(),
+            "journey_id": "journey_AAAAAAAAAAAAAAAAAAAAAA",
             "listing_id": "1001",
             "request": match_request(),
             "lang": "ar",
@@ -335,7 +336,9 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertTrue(made["ok"])
         self.assertIn("SAR 12,000", made["message"])
         self.assertTrue(made["url"].startswith("https://wa.me/966500000000?text="))
-        self.assertEqual(self.leads.get(made["lead_reference"])["quote"]["stay_total_sar"], 12000)
+        stored = self.leads.get(made["lead_reference"])
+        self.assertEqual(stored["quote"]["stay_total_sar"], 12000)
+        self.assertEqual(stored["journey_id"], payload["journey_id"])
         linked = [
             event for event in self.analytics.events()
             if event["lead_reference"] == made["lead_reference"]
@@ -343,6 +346,9 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertEqual(
             [event["event"] for event in linked],
             ["whatsapp_click", "lead_created"],
+        )
+        self.assertTrue(
+            all(event["context"]["journey_id"] == payload["journey_id"] for event in linked)
         )
         for field, value in (
             ("price", 1),

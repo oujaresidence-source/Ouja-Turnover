@@ -64,7 +64,7 @@ class LeadActionStoreTests(unittest.TestCase):
             approved_places=PLACES,
         )
 
-    def test_actions_append_and_only_the_first_starts_team_response(self):
+    def test_internal_actions_append_without_claiming_a_team_response(self):
         first = self.store.add_action(
             self.lead["reference"], "confirm_request", now=NOW + dt.timedelta(minutes=2)
         )
@@ -75,9 +75,9 @@ class LeadActionStoreTests(unittest.TestCase):
             now=NOW + dt.timedelta(minutes=3),
         )
 
-        self.assertTrue(first["response_started"])
+        self.assertFalse(first["response_started"])
         self.assertFalse(second["response_started"])
-        self.assertIsNotNone(self.store.get(self.lead["reference"])["responded_at"])
+        self.assertIsNone(self.store.get(self.lead["reference"])["responded_at"])
         actions = self.store.actions_for(self.lead["reference"])
         self.assertEqual([row["action"] for row in actions], [
             "confirm_request", "request_information",
@@ -187,6 +187,7 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             clock=self.clock,
         )
         self.session = issue_anonymous_session(SECRET)
+        self.journey_id = "journey_AAAAAAAAAAAAAAAAAAAAAA"
         self.record_journey()
         self.lead = self.leads.create(
             self.session,
@@ -206,9 +207,14 @@ class OpsLeadWorkflowTests(unittest.TestCase):
                 "payment_methods": [{"ar": "تحويل بنكي", "en": "Bank transfer"}],
             },
             approved_places=PLACES,
+            journey_id=self.journey_id,
         )
         self.analytics.record_lead_creation(
-            self.session, self.lead["reference"], listing_id="1001", now=NOW
+            self.session,
+            self.lead["reference"],
+            listing_id="1001",
+            journey_id=self.journey_id,
+            now=NOW,
         )
 
     def refresh(self, *listings):
@@ -232,6 +238,7 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             ("result_impression", {"listing_id": "1002", "rank": 2}),
             ("listing_view", {"listing_id": "1001"}),
         ):
+            context["journey_id"] = self.journey_id
             self.analytics.record(
                 {"event": event, "session_id": self.session, "context": context},
                 session_secret=SECRET,
@@ -288,7 +295,10 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             {
                 "event": "listing_view",
                 "session_id": self.session,
-                "context": {"listing_id": "1002"},
+                "context": {
+                    "listing_id": "1002",
+                    "journey_id": self.journey_id,
+                },
             },
             session_secret=SECRET,
             allowed_place_ids=("kafd",),
@@ -329,7 +339,7 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             "count": 1,
         }])
 
-    def test_first_staff_action_marks_one_response_and_actions_are_append_only(self):
+    def test_internal_staff_actions_do_not_mark_a_customer_response(self):
         first = self.app.ops.action({
             "lead_reference": self.lead["reference"],
             "action": "confirm_request",
@@ -347,7 +357,8 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             row["event"] for row in self.analytics.events()
             if row["lead_reference"] == self.lead["reference"]
         ]
-        self.assertEqual(lifecycle.count("team_response"), 1)
+        self.assertEqual(lifecycle.count("team_response"), 0)
+        self.assertIsNone(self.leads.get(self.lead["reference"])["responded_at"])
         detail = self.app.ops.lead({"lead_reference": self.lead["reference"]})["lead"]
         self.assertEqual([row["action"] for row in detail["actions"]], [
             "confirm_request", "request_information",
@@ -446,6 +457,30 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             "reason": "lower_price", "alternative_listing_id": "1002",
         })
         self.assertEqual(no_price["error"]["code"], "alternative_price_missing")
+        self.assertEqual(self.leads.actions_for(self.lead["reference"]), [])
+
+    def test_alternative_reason_requires_verified_comparative_evidence(self):
+        unsupported = self.app.ops.action({
+            "lead_reference": self.lead["reference"],
+            "action": "prepare_alternative",
+            "reason": "contract_terms",
+            "alternative_listing_id": "1002",
+        })
+        self.assertEqual(unsupported["error"]["code"], "invalid_request")
+
+        for reason, code in (
+            ("space", "alternative_space_not_better"),
+            ("location", "alternative_location_not_better"),
+            ("dates", "alternative_dates_not_better"),
+        ):
+            with self.subTest(reason=reason):
+                rejected = self.app.ops.action({
+                    "lead_reference": self.lead["reference"],
+                    "action": "prepare_alternative",
+                    "reason": reason,
+                    "alternative_listing_id": "1002",
+                })
+                self.assertEqual(rejected["error"]["code"], code)
         self.assertEqual(self.leads.actions_for(self.lead["reference"]), [])
 
     def test_lookup_and_action_reject_unknown_fields_and_unknown_reference(self):

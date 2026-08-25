@@ -21,6 +21,7 @@ from .contracts import (
 
 _LEAD_REFERENCE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _LISTING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+_JOURNEY_ID = re.compile(r"^journey_[A-Za-z0-9_-]{22,64}$")
 
 
 def _utc_now() -> dt.datetime:
@@ -117,6 +118,7 @@ class AnalyticsStore:
         lead_reference: str,
         *,
         listing_id: Optional[str] = None,
+        journey_id: Optional[str] = None,
         now: Optional[dt.datetime] = None,
     ) -> Dict[str, Any]:
         """Atomically persist the contact click and created-lead lifecycle.
@@ -136,10 +138,24 @@ class AnalyticsStore:
             normalized_listing = str(listing_id).strip()
             if not _LISTING_ID.fullmatch(normalized_listing):
                 raise ValueError("invalid listing ID")
+        normalized_journey: Optional[str] = None
+        if journey_id not in (None, ""):
+            normalized_journey = str(journey_id).strip()
+            if not _JOURNEY_ID.fullmatch(normalized_journey):
+                raise ValueError("invalid journey ID")
         occurred = _as_datetime(now if now is not None else self.clock()).isoformat()
+        journey_context = (
+            {"journey_id": normalized_journey} if normalized_journey else {}
+        )
         expected = (
-            ("whatsapp_click", {"listing_id": normalized_listing} if normalized_listing else {}),
-            ("lead_created", {}),
+            (
+                "whatsapp_click",
+                {
+                    **({"listing_id": normalized_listing} if normalized_listing else {}),
+                    **journey_context,
+                },
+            ),
+            ("lead_created", journey_context),
         )
         result_rows: Dict[str, sqlite3.Row] = {}
         with self._connection() as connection:
@@ -294,7 +310,7 @@ class AnalyticsStore:
         with self._connection() as connection:
             target = connection.execute(
                 """
-                SELECT id FROM monthly_public_events
+                SELECT id, context_json FROM monthly_public_events
                 WHERE session_id = ? AND lead_reference = ?
                   AND event_name = 'lead_created' AND trusted = 1
                 ORDER BY id LIMIT 1
@@ -303,24 +319,22 @@ class AnalyticsStore:
             ).fetchone()
             if target is None:
                 return []
-            previous = connection.execute(
-                """
-                SELECT MAX(id) FROM monthly_public_events
-                WHERE session_id = ? AND event_name = 'lead_created'
-                  AND trusted = 1 AND id < ?
-                """,
-                (session_id, target["id"]),
-            ).fetchone()[0]
+            try:
+                target_context = json.loads(target["context_json"])
+            except (TypeError, ValueError):
+                target_context = {}
+            journey_id = target_context.get("journey_id")
+            if not isinstance(journey_id, str) or not _JOURNEY_ID.fullmatch(journey_id):
+                journey_id = None
             rows = connection.execute(
                 """
-                SELECT event_name, context_json, occurred_at
+                SELECT event_name, lead_reference, context_json, occurred_at
                 FROM monthly_public_events
                 WHERE session_id = ?
-                  AND id > ? AND id <= ?
-                  AND (lead_reference IS NULL OR lead_reference = ?)
+                  AND id <= ?
                 ORDER BY id
                 """,
-                (session_id, int(previous or 0), target["id"], reference),
+                (session_id, target["id"]),
             ).fetchall()
         journey = []
         for row in rows:
@@ -331,6 +345,15 @@ class AnalyticsStore:
                 context = json.loads(row["context_json"])
             except (TypeError, ValueError):
                 context = {}
+            if row["lead_reference"] is not None and row["lead_reference"] != reference:
+                continue
+            if journey_id is not None:
+                if context.get("journey_id") != journey_id:
+                    continue
+            elif row["lead_reference"] != reference:
+                # Historical leads without a journey ID are deliberately kept
+                # narrow rather than inferred from event insertion order.
+                continue
             item: Dict[str, Any] = {
                 "event": event,
                 "occurred_at": row["occurred_at"],

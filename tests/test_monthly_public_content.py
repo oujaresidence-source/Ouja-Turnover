@@ -362,6 +362,11 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         )
         self.assertGreaterEqual(self.js.count("withSessionRetry("), 3)
 
+    def test_browser_correlates_each_funnel_journey_with_its_created_lead(self):
+        self.assertIn("function createJourneyId", self.js)
+        self.assertIn("journey_id: runtime.journeyId", self.js)
+        self.assertIn("journey_id: runtime.journeyId", self.js[self.js.index("function safeEventContext"):])
+
     def test_listing_uses_real_gallery_photos_for_story_and_a_mobile_action(self):
         for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
             self.assertIn(hook, self.js)

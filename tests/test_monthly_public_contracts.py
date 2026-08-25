@@ -279,6 +279,31 @@ class OtherPublicContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.field, "context.lead_reference")
         self.assertEqual(caught.exception.code, "not_allowed")
 
+    def test_public_event_accepts_only_an_opaque_journey_correlation_id(self):
+        parsed = parse_event(
+            {
+                "event": "listing_view",
+                "session_id": ANON_SESSION,
+                "context": {
+                    "listing_id": "1001",
+                    "journey_id": "journey_AAAAAAAAAAAAAAAAAAAAAA",
+                },
+            }
+        )
+        self.assertEqual(
+            parsed["context"]["journey_id"],
+            "journey_AAAAAAAAAAAAAAAAAAAAAA",
+        )
+        for value in ("journey_short", "0500000000", "journey_<script>"):
+            with self.subTest(value=value), self.assertRaises(ContractError):
+                parse_event(
+                    {
+                        "event": "listing_view",
+                        "session_id": ANON_SESSION,
+                        "context": {"journey_id": value},
+                    }
+                )
+
     def test_session_id_requires_a_high_entropy_anonymous_token(self):
         self.assertEqual(
             parse_event({"event": "landing_view", "session_id": ANON_SESSION})[
