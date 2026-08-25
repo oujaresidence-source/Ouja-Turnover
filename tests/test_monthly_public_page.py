@@ -34,6 +34,13 @@ class AssetParser(html.parser.HTMLParser):
 
 
 class MonthlyPublicPageTests(unittest.TestCase):
+    def test_matcher_filters_destinations_by_approved_purpose_scope(self):
+        path = os.path.join(ROOT, "monthly_public", "static", "monthly.js")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("place.purposes.indexOf(purpose)", source)
+        self.assertIn('place.kind !== "destination"', source)
+
     def test_arabic_first_shell_has_landmarks_focus_and_live_regions(self):
         from monthly_public.page import render_monthly_page
 

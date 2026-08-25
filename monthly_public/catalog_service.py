@@ -15,6 +15,7 @@ from .catalog_profiles import (
     parse_global_settings,
     parse_place,
     parse_profile,
+    settings_form_values,
 )
 from .catalog_store import CatalogStore
 from .publication import validate_listing
@@ -355,7 +356,7 @@ class CatalogService:
         parsed = load_settings(effective)
         return {
             **record,
-            "effective": copy.deepcopy(dict(effective)),
+            "effective": settings_form_values(parsed),
             "effective_source": "catalog_approved" if approved is not None else "environment_fallback",
             "blockers": [issue.as_dict() for issue in parsed.blockers],
         }

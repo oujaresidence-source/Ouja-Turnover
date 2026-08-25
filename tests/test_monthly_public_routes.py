@@ -136,6 +136,18 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
             result["session_id"],
         )
 
+    def test_config_exposes_purpose_scope_but_not_destination_coordinates(self):
+        replacement = dict(
+            PLACES["kafd"], purposes=["work", "visit"]
+        )
+        self.app.replace_configuration(valid_settings(), {"kafd": replacement})
+
+        result = self.app.config()
+
+        self.assertEqual(result["places"][0]["purposes"], ["work", "visit"])
+        self.assertNotIn("lat", result["places"][0])
+        self.assertNotIn("lng", result["places"][0])
+
     def test_replace_configuration_updates_settings_and_places_together(self):
         replacement = {
             "hospital": {

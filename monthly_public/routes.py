@@ -16,6 +16,7 @@ from typing import Any, Dict, Mapping, Optional
 from .analytics import funnel_summary
 from .contracts import (
     ContractError,
+    PURPOSES,
     issue_anonymous_session,
     parse_browse_query,
     parse_event,
@@ -662,7 +663,20 @@ class MonthlyPublicApp:
             label_en = str(raw.get("label_en") or "").strip()
             if kind not in ("destination", "neighborhood") or not label_ar or not label_en:
                 continue
-            out[place_id] = dict(raw, kind=kind, label_ar=label_ar, label_en=label_en)
+            purposes = []
+            if isinstance(raw.get("purposes"), (list, tuple)):
+                purposes = [
+                    value
+                    for value in raw["purposes"]
+                    if value in PURPOSES and value not in purposes
+                ]
+            out[place_id] = dict(
+                raw,
+                kind=kind,
+                label_ar=label_ar,
+                label_en=label_en,
+                purposes=purposes,
+            )
         return MappingProxyType(
             {key: MappingProxyType(dict(value)) for key, value in out.items()}
         )
@@ -822,6 +836,11 @@ class MonthlyPublicApp:
                 "kind": row["kind"],
                 "label_ar": row["label_ar"],
                 "label_en": row["label_en"],
+                **(
+                    {"purposes": list(row["purposes"])}
+                    if row.get("purposes")
+                    else {}
+                ),
             }
             for place_id, row in sorted(approved_places.items())
         ]

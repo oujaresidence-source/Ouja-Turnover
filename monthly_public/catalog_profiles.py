@@ -63,6 +63,15 @@ FACT_FIELDS = frozenset(
         "pool",
     }
 )
+_DAY_NAMES = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
 
 
 class CatalogContractError(ValueError):
@@ -465,6 +474,32 @@ def parse_global_settings(value: Any) -> Dict[str, Any]:
     }
 
 
+def settings_form_values(settings: Any) -> Dict[str, Any]:
+    """Expose a parsed setting object as safe, editable form values."""
+
+    schedule: Dict[str, list[list[str]]] = {}
+    hours = getattr(settings, "working_hours", None)
+    if hours is not None:
+        for day_index, periods in hours.schedule.items():
+            if not isinstance(day_index, int) or not 0 <= day_index < len(_DAY_NAMES):
+                continue
+            schedule[_DAY_NAMES[day_index]] = [
+                [period.start.strftime("%H:%M"), period.end.strftime("%H:%M")]
+                for period in periods
+            ]
+    return {
+        "whatsapp_number": getattr(settings, "whatsapp_number", None),
+        "working_hours": {
+            "timezone": getattr(hours, "timezone", None),
+            "schedule": schedule,
+        },
+        "commercial_terms": _plain(
+            getattr(settings, "commercial_terms", {}) or {}
+        ),
+        "long_stay_route": getattr(settings, "long_stay_route", None),
+    }
+
+
 def parse_place(value: Any) -> Dict[str, Any]:
     raw = _mapping(value, "place")
     _reject_unknown(raw, {"label_ar", "label_en", "purposes", "coordinates", "source_note"})
@@ -688,4 +723,5 @@ __all__ = [
     "parse_global_settings",
     "parse_place",
     "parse_profile",
+    "settings_form_values",
 ]

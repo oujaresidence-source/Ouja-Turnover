@@ -1,5 +1,6 @@
 import copy
 import datetime as dt
+import json
 import os
 import tempfile
 import unittest
@@ -145,6 +146,34 @@ class CatalogServiceTest(unittest.TestCase):
         after = service.settings()
         self.assertEqual(after["effective_source"], "catalog_approved")
         self.assertEqual(after["effective"]["whatsapp_number"], "966500000000")
+
+    def test_environment_settings_are_exposed_as_safe_form_values(self):
+        values = valid_settings_values()
+        service = CatalogService(
+            self.store,
+            source_provider=lambda: copy.deepcopy(self.source),
+            settings_fallback=lambda: {
+                "MONTHLY_WHATSAPP": values["whatsapp_number"],
+                "MONTHLY_WORKING_HOURS": json.dumps(values["working_hours"]),
+                "MONTHLY_COMMERCIAL_TERMS": json.dumps(values["commercial_terms"]),
+                "MONTHLY_LONG_STAY_ROUTE": values["long_stay_route"],
+            },
+            snapshot_refresh=self._refresh,
+            clock=lambda: NOW,
+        )
+
+        result = service.settings()
+
+        self.assertEqual(result["effective"]["whatsapp_number"], "966500000000")
+        self.assertIsInstance(result["effective"]["working_hours"], dict)
+        self.assertEqual(
+            result["effective"]["working_hours"]["schedule"]["sunday"][0],
+            ["09:00", "18:00"],
+        )
+        self.assertEqual(
+            result["effective"]["commercial_terms"]["included"],
+            ["internet", "maintenance"],
+        )
 
     def test_only_active_approved_places_reach_the_customer_registry(self):
         service = self.service()

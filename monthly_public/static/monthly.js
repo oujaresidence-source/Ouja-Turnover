@@ -1215,11 +1215,17 @@
     panel.appendChild(choiceList(values, runtime.matcher.answers.purpose, function (value) { applyMatcherAnswer("purpose", value); }));
   }
 
-  function placesForPurpose() {
+  function placesForPurpose(requestedPurpose) {
     const configured = [].concat((runtime.config && runtime.config.places) || [], (runtime.config && runtime.config.neighborhoods) || []);
+    const purpose = requestedPurpose || (runtime.matcher && runtime.matcher.answers && runtime.matcher.answers.purpose);
     const seen = {};
     return configured.filter(function (place) {
       if (!place || !place.id || seen[place.id]) return false;
+      if (place.kind !== "destination") {
+        seen[place.id] = true;
+        return true;
+      }
+      if (purpose && Array.isArray(place.purposes) && place.purposes.length && place.purposes.indexOf(purpose) === -1) return false;
       seen[place.id] = true;
       return true;
     });
@@ -1871,7 +1877,7 @@
       { value: "fixed", label: copy("fixedDates") },
       { value: "plus_minus_7", label: copy("flexibleDates") }
     ], saved.flexibility || "fixed");
-    const placeOptions = placesForPurpose();
+    const placeOptions = placesForPurpose(saved.purpose || "family");
     const place = selectField("listing-place", copy("importantPlace"), [{ value: "", label: copy("allPlaces") }].concat(placeOptions.map(function (item) {
       return { value: item.id, label: runtime.lang === "ar" ? item.label_ar : item.label_en };
     })), saved.place && saved.place.id);
