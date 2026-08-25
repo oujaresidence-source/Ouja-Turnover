@@ -178,7 +178,15 @@ class MonthlyOpsApp:
             }
 
     def response(self, value: Any) -> Dict[str, Any]:
-        if not isinstance(value, Mapping) or set(value) != {"lead_reference"}:
+        if (
+            not isinstance(value, Mapping)
+            or "lead_reference" not in value
+            or not set(value).issubset({"lead_reference", "discount_requested"})
+            or (
+                "discount_requested" in value
+                and not isinstance(value["discount_requested"], bool)
+            )
+        ):
             return _error("invalid_request", "طلب تحديث الرد غير صحيح.", "The response update is invalid.")
         reference = str(value.get("lead_reference") or "").strip().upper()
         if not _LEAD_REFERENCE_RE.fullmatch(reference):
@@ -189,7 +197,11 @@ class MonthlyOpsApp:
                 field="lead_reference",
             )
         try:
-            lead = self._public.lead_store.mark_response(reference, now=self._public._now())
+            lead = self._public.lead_store.mark_response(
+                reference,
+                discount_requested=value.get("discount_requested"),
+                now=self._public._now(),
+            )
         except KeyError:
             return _error(
                 "lead_not_found",

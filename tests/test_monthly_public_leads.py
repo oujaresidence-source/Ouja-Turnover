@@ -63,6 +63,90 @@ class LeadTests(unittest.TestCase):
         self.assertNotEqual(first["reference"], later["reference"])
         self.assertEqual(later_store.count(), 2)
 
+    def test_team_response_records_only_an_explicit_discount_request_boolean(self):
+        first = self.store.create(
+            self.session,
+            "1001",
+            {"purpose": "work"},
+            {"monthly_rate_sar": 12000},
+        )
+        second = self.store.create(
+            self.session,
+            "1002",
+            {"purpose": "family"},
+            {"monthly_rate_sar": 9000},
+        )
+
+        requested = self.store.mark_response(
+            first["reference"], discount_requested=True
+        )
+        not_requested = self.store.mark_response(
+            second["reference"], discount_requested=False
+        )
+
+        self.assertIs(requested["discount_requested"], True)
+        self.assertIs(not_requested["discount_requested"], False)
+        with self.assertRaises(ValueError):
+            self.store.mark_response(first["reference"], discount_requested=1)
+
+    def test_existing_database_migrates_discount_request_as_unknown(self):
+        legacy_path = Path(self.folder.name) / "legacy-leads.sqlite3"
+        with sqlite3.connect(str(legacy_path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE monthly_public_leads (
+                    reference TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    listing_id TEXT NOT NULL,
+                    request_key TEXT NOT NULL,
+                    request_json TEXT NOT NULL,
+                    quote_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    responded_at TEXT,
+                    outcome TEXT CHECK (outcome IS NULL OR outcome IN ('booked', 'lost')),
+                    outcome_at TEXT,
+                    lost_reason TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO monthly_public_leads(
+                    reference, session_id, listing_id, request_key,
+                    request_json, quote_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "OJM-20260825-LEGACY",
+                    self.session,
+                    "1001",
+                    "legacy-key",
+                    '{"purpose":"work"}',
+                    '{"monthly_rate_sar":12000}',
+                    NOW.isoformat(),
+                    NOW.isoformat(),
+                ),
+            )
+
+        migrated = LeadStore(legacy_path, clock=lambda: NOW)
+
+        with sqlite3.connect(str(legacy_path)) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(monthly_public_leads)"
+                ).fetchall()
+            }
+        self.assertIn("discount_requested", columns)
+        self.assertIsNone(
+            migrated.get("OJM-20260825-LEGACY")["discount_requested"]
+        )
+        updated = migrated.mark_response(
+            "OJM-20260825-LEGACY", discount_requested=False
+        )
+        self.assertIs(updated["discount_requested"], False)
+
     def test_nested_unapproved_quote_fields_are_not_stored(self):
         lead = self.store.create(
             self.session,

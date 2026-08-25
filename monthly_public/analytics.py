@@ -347,6 +347,14 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
     ]
     lead_sessions = {row["session_id"] for row in lead_rows}
     booked = sum(row["outcome"] == "booked" for row in lead_rows)
+    discount_classified = [
+        row
+        for row in lead_rows
+        if isinstance(row.get("discount_requested"), bool)
+    ]
+    discount_requested = sum(
+        row["discount_requested"] is True for row in discount_classified
+    )
     return {
         "stages": stages,
         "leads": {
@@ -373,9 +381,11 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
             "response_to_booking": _conversion(booked, len(responded)),
         },
         "discount_request_rate": {
-            "status": "not_tracked",
-            "count": 0,
-            "rate": None,
+            "status": "tracked" if discount_classified else "not_tracked",
+            "count": discount_requested,
+            "numerator": discount_requested,
+            "denominator": len(discount_classified),
+            "rate": _conversion(discount_requested, len(discount_classified)),
         },
         "sessions": sessions,
     }
