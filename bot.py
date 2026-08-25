@@ -29,6 +29,7 @@ import os
 import re
 import io
 import json
+import copy
 import time
 import shutil
 import html as _html
@@ -176,6 +177,11 @@ except Exception as _ml_err:            # pragma: no cover
 # Hostaway/provider capability; bot.py only hands it prepared cached snapshots.
 try:
     from monthly_public.analytics import AnalyticsStore as _MonthlyAnalyticsStore
+    from monthly_public.catalog_profiles import (
+        apply_approved_profile as _monthly_catalog_apply_approved_profile,
+    )
+    from monthly_public.catalog_service import CatalogService as _MonthlyCatalogService
+    from monthly_public.catalog_store import CatalogStore as _MonthlyCatalogStore
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
     from monthly_public.page import (
         ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
@@ -198,6 +204,8 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     print("[monthly-public] import failed (v2 routes disabled):", _mpub_err)
     _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
     _monthly_public_load_settings = _MonthlySnapshotStore = None
+    _MonthlyCatalogService = _MonthlyCatalogStore = None
+    _monthly_catalog_apply_approved_profile = None
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
     _MONTHLY_OPS_CSS_PATH = _MONTHLY_OPS_JS_PATH = ""
@@ -57972,6 +57980,8 @@ _monthly_public_session_secret = (
 )
 _monthly_public_snapshot = None
 _monthly_public_app = None
+_monthly_catalog_store = None
+_monthly_catalog_service = None
 if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
     try:
         _monthly_public_snapshot = _MonthlySnapshotStore(
@@ -57991,6 +58001,15 @@ if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
     except Exception as _mpub_init_err:
         print("[monthly-public] local stores unavailable:", _mpub_init_err)
         _monthly_public_app = None
+
+if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED and _MonthlyCatalogStore is not None:
+    try:
+        _monthly_catalog_store = _MonthlyCatalogStore(
+            _state_path("monthly_catalog.sqlite3")
+        )
+    except Exception as _mcat_init_err:
+        print("[monthly-catalog] approval store unavailable:", _mcat_init_err)
+        _monthly_catalog_store = None
 
 
 def _monthly_public_listing_terms(listing_id):
@@ -58076,7 +58095,7 @@ def _monthly_public_engine_prices(listing_id):
     return out
 
 
-def _monthly_public_source_adapter():
+def _monthly_public_source_adapter(include_approved=True):
     """Build validator input solely from already-cached/state-backed sources."""
     if not isinstance(_gw_cache.get("listings"), list):
         raise ValueError("guest listing cache is malformed")
@@ -58088,6 +58107,11 @@ def _monthly_public_source_adapter():
     # _gw_ratings_map never pulls Hostaway or any external source.
     ratings = _gw_ratings_map()
     hidden = _monthly_hidden_set()
+    approved_profiles = {}
+    if (include_approved
+            and _monthly_catalog_service is not None
+            and _monthly_catalog_apply_approved_profile is not None):
+        approved_profiles = _monthly_catalog_service.approved_profiles()
     listings = []
     for snap in (_gw_cache.get("listings") or []):
         if not isinstance(snap, dict):
@@ -58106,7 +58130,7 @@ def _monthly_public_source_adapter():
                 and configured_coordinates.get("source")):
             coordinates = dict(configured_coordinates)
         facts = ov.get("facts") if isinstance(ov.get("facts"), dict) else {}
-        listings.append({
+        prepared = {
             "id": snap.get("id"),
             "active": bool(snap.get("active")) and ov.get("visible") is not False and lid not in hidden,
             "slug": _gw_slug(snap, ov),
@@ -58140,7 +58164,11 @@ def _monthly_public_source_adapter():
             "calendar": _monthly_public_calendar(lid),
             "commercial_terms": _monthly_public_listing_terms(lid),
             "coordinates": coordinates,
-        })
+        }
+        if approved_profiles:
+            approved = approved_profiles.get(lid)
+            prepared = _monthly_catalog_apply_approved_profile(prepared, approved)
+        listings.append(prepared)
     return {
         "refresh_ok": True,
         "catalog_complete": True,
@@ -58153,21 +58181,141 @@ def _monthly_public_source_adapter():
     }
 
 
+def _monthly_catalog_prefill_source():
+    """Allowlisted cached inputs for the authenticated apartment survey."""
+    base = _monthly_public_source_adapter(include_approved=False)
+    public_by_id = {
+        str(row.get("id")): row
+        for row in (base.get("listings") or [])
+        if isinstance(row, dict)
+    }
+    listings = []
+    for snap in (_gw_cache.get("listings") or []):
+        if not isinstance(snap, dict):
+            continue
+        lid = str(snap.get("id") or "")
+        public = public_by_id.get(lid)
+        if not lid or not isinstance(public, dict):
+            continue
+        ov = (_gw_overrides.get(lid) or {}) if isinstance(_gw_overrides, dict) else {}
+        stay = {}
+        aliases = {
+            "title_ar": "title_ar",
+            "title_en": "title_en",
+            "short_ar": "short_ar",
+            "short_en": "short_en",
+            "structured": "structured",
+            "content_verified": "content_verified",
+            "facts": "facts",
+            "floor_area_sqm": "floor_area_sqm",
+        }
+        for source_key, target_key in aliases.items():
+            if source_key in ov:
+                stay[target_key] = copy.deepcopy(ov.get(source_key))
+        for key in (
+            "neighborhood", "neighborhood_ar", "neighborhood_en",
+            "neighborhood_verified", "commercial_terms",
+        ):
+            if public.get(key) is not None:
+                stay[key] = copy.deepcopy(public.get(key))
+        hostaway = {
+            "id": snap.get("id"),
+            "name": snap.get("name"),
+            "active": snap.get("active"),
+            "bedrooms": snap.get("bedrooms"),
+            "beds": snap.get("beds"),
+            "beds_count": snap.get("beds_count"),
+            "baths": snap.get("baths"),
+            "capacity": snap.get("capacity"),
+            "images": [
+                {"url": row.get("url")}
+                for row in (snap.get("images") or [])
+                if isinstance(row, dict) and row.get("url")
+            ],
+            "amenities": [
+                str(value) for value in (snap.get("amenities") or [])
+                if isinstance(value, str)
+            ],
+            "lat": snap.get("lat"),
+            "lng": snap.get("lng"),
+        }
+        rating = None
+        if public.get("rating_verified") is True:
+            rating = {
+                "rating": public.get("rating"),
+                "count": public.get("reviews_count"),
+            }
+        listings.append({
+            "id": lid,
+            "hostaway": hostaway,
+            "stay": stay,
+            "licence": copy.deepcopy(public.get("licence")),
+            "rating": rating,
+            "publication": copy.deepcopy(public),
+        })
+    return {
+        "refresh_ok": base.get("refresh_ok") is True,
+        "catalog_complete": base.get("catalog_complete") is True,
+        "listings": listings,
+        "source_timestamps": copy.deepcopy(base.get("source_timestamps") or {}),
+    }
+
+
+def _monthly_public_settings_fallback_values():
+    return {
+        "MONTHLY_WHATSAPP": (
+            os.environ.get("MONTHLY_WHATSAPP")
+            if os.environ.get("MONTHLY_WHATSAPP") not in (None, "")
+            else os.environ.get("STAY_WHATSAPP")
+        ),
+        "MONTHLY_WORKING_HOURS": os.environ.get("MONTHLY_WORKING_HOURS"),
+        "MONTHLY_COMMERCIAL_TERMS": os.environ.get("MONTHLY_COMMERCIAL_TERMS"),
+        "MONTHLY_LONG_STAY_ROUTE": os.environ.get("MONTHLY_LONG_STAY_ROUTE"),
+    }
+
+
 def _monthly_public_refresh_snapshot():
     """Background/boot boundary only; a failure retains SnapshotStore.current."""
     if (not MONTHLY_ENABLED
-            or _monthly_public_snapshot is None
-            or _monthly_public_settings is None):
+            or _monthly_public_snapshot is None):
         return {"accepted": False, "error": "monthly public is not configured"}
     try:
+        settings = _monthly_public_settings
+        places = _monthly_public_places
+        if _monthly_catalog_service is not None:
+            settings = _monthly_public_load_settings(
+                _monthly_catalog_service.approved_settings_values()
+            )
+            places = _monthly_catalog_service.approved_places()
+        if settings is None:
+            return {"accepted": False, "error": "monthly settings are unavailable"}
+        if _monthly_public_app is not None:
+            _monthly_public_app.replace_configuration(settings, places)
         source = _monthly_public_source_adapter()
         outcome = _monthly_public_snapshot.refresh(
-            source, _monthly_public_settings, datetime.now(TZ)
+            source, settings, datetime.now(TZ)
         )
         return {"accepted": outcome.accepted, "error": outcome.error}
     except Exception as error:
         _monthly_public_snapshot.last_error = str(error)
         return {"accepted": False, "error": str(error)}
+
+
+if (_monthly_catalog_store is not None
+        and _MonthlyCatalogService is not None
+        and _HAS_MONTHLY_PUBLIC
+        and MONTHLY_ENABLED):
+    try:
+        _monthly_catalog_service = _MonthlyCatalogService(
+            _monthly_catalog_store,
+            source_provider=_monthly_catalog_prefill_source,
+            settings_fallback=_monthly_public_settings_fallback_values,
+            snapshot_refresh=_monthly_public_refresh_snapshot,
+            clock=lambda: datetime.now(TZ),
+        )
+    except Exception as _mcat_service_err:
+        print("[monthly-catalog] service unavailable:", _mcat_service_err)
+        _monthly_catalog_service = None
 
 
 MONTHLY_HTML = r"""<!doctype html>
