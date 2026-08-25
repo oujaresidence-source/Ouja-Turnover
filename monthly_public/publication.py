@@ -17,6 +17,7 @@ from .settings import MonthlySettings
 
 
 CALENDAR_STALE_MINUTES = 60
+CALENDAR_FUTURE_SKEW_MINUTES = 5
 LICENCE_EXPIRY_WARNING_DAYS = 14
 MIN_PUBLIC_IMAGES = 3
 
@@ -418,10 +419,46 @@ def validate_listing(
         if synced is None or now.astimezone(synced.tzinfo) - synced > dt.timedelta(minutes=max(1, calendar_stale_minutes)):
             availability_status = "pending"
             warnings.append(_issue("calendar_stale", "calendar.synced_at", "التوفر قيد التأكيد لأن التقويم قديم.", "Availability is pending because the calendar is stale."))
+        elif synced - now.astimezone(synced.tzinfo) > dt.timedelta(
+            minutes=CALENDAR_FUTURE_SKEW_MINUTES
+        ):
+            availability_status = "pending"
+            warnings.append(_issue("calendar_future", "calendar.synced_at", "التوفر قيد التأكيد لأن وقت التقويم غير صحيح.", "Availability is pending because the calendar timestamp is in the future."))
+        coverage_from = _parse_date(calendar.get("from"))
+        coverage_to = _parse_date(calendar.get("to"))
+        coverage_valid = (
+            coverage_from is not None
+            and coverage_to is not None
+            and coverage_from < coverage_to
+        )
+        if not coverage_valid:
+            availability_status = "pending"
+            warnings.append(_issue("calendar_invalid", "calendar", "التوفر قيد التأكيد لأن نطاق التقويم غير صحيح.", "Availability is pending because calendar coverage is invalid."))
+        blocked_dates = calendar.get("blocked_dates")
+        blocked_dates_valid = isinstance(blocked_dates, (list, tuple))
+        if not blocked_dates_valid:
+            blocked_dates = ()
+        elif any(
+            not isinstance(value, str) or _parse_date(value) is None
+            for value in blocked_dates
+        ):
+            blocked_dates_valid = False
+        if not blocked_dates_valid:
+            availability_status = "pending"
+            warnings.append(_issue("calendar_invalid", "calendar.blocked_dates", "التوفر قيد التأكيد لأن أيام التقويم المحجوزة غير مكتملة.", "Availability is pending because blocked calendar dates are incomplete."))
         clean_calendar = {
             "synced_at": _text(calendar.get("synced_at")),
-            "from": _text(calendar.get("from")),
-            "to": _text(calendar.get("to")),
+            "from": coverage_from.isoformat() if coverage_valid else "",
+            "to": coverage_to.isoformat() if coverage_valid else "",
+            "blocked_dates": tuple(
+                sorted(
+                    {
+                        str(value)
+                        for value in blocked_dates
+                        if isinstance(value, str) and _parse_date(value) is not None
+                    }
+                )
+            ),
         }
 
     rating = _number(source.get("rating"), minimum=1.0)

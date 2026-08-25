@@ -62,6 +62,17 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(set(generation.blocked_ids), {"1002", "1003"})
         self.assertEqual(generation.missing_price_ids, ("1003",))
 
+    def test_invalid_calendar_is_not_counted_as_covered(self):
+        invalid = valid_listing(id=1001)
+        invalid["calendar"]["from"] = "not-a-date"
+
+        generation = build_generation(
+            source_with([invalid]), valid_settings(), NOW
+        )
+
+        self.assertEqual(generation.counts["calendar_covered"], 0)
+        self.assertEqual(generation.stale_calendar_ids, ("1001",))
+
     def test_duplicate_or_empty_catalog_is_a_generation_error(self):
         with self.assertRaises(ValueError):
             build_generation(source_with([]), valid_settings(), NOW)

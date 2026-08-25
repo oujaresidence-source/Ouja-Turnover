@@ -120,7 +120,13 @@ def build_generation(
         result.listing["id"] for result in results if "calendar_missing" in _codes(result, "warnings")
     )
     stale_calendar_ids = tuple(
-        result.listing["id"] for result in results if "calendar_stale" in _codes(result, "warnings")
+        result.listing["id"]
+        for result in results
+        if {
+            "calendar_stale",
+            "calendar_future",
+            "calendar_invalid",
+        }.intersection(_codes(result, "warnings"))
     )
     missing_price_ids = tuple(
         result.listing["id"] for result in results if "price_missing" in _codes(result, "blockers")
@@ -130,7 +136,9 @@ def build_generation(
         "validated": len(results),
         "blocked": len(blocked_ids),
         "published": len(published_ids),
-        "calendar_covered": len(results) - len(missing_calendar_ids) - len(stale_calendar_ids),
+        "calendar_covered": sum(
+            result.availability_status == "confirmed" for result in results
+        ),
         "price_covered": len(results) - len(missing_price_ids),
     }
     timestamps = source.get("source_timestamps")
@@ -206,7 +214,10 @@ def _generation_from_dict(value: Any) -> SnapshotGeneration:
         "validated": len(generation.results),
         "blocked": len(actual_blocked),
         "published": len(actual_published),
-        "calendar_covered": len(generation.results) - len(generation.missing_calendar_ids) - len(generation.stale_calendar_ids),
+        "calendar_covered": sum(
+            result.availability_status == "confirmed"
+            for result in generation.results
+        ),
         "price_covered": len(generation.results) - len(generation.missing_price_ids),
     }
     if (
