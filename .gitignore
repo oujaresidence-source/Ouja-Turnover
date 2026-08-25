@@ -3,5 +3,6 @@ __pycache__/
 .claude/
 .DS_Store
 .agents/
+.worktrees/
 /_*.py
 ouja-redesign-v3.html
