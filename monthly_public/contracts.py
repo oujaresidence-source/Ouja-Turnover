@@ -234,7 +234,9 @@ def _add_calendar_months(value: dt.date, months: int) -> dt.date:
     return dt.date(year, month, day)
 
 
-def _derive_calendar_months(move_in: str, move_out: str, field: str) -> int:
+def _calendar_span(
+    move_in: str, move_out: str, field: str
+) -> tuple[int, Optional[int]]:
     start = dt.date.fromisoformat(move_in)
     end = dt.date.fromisoformat(move_out)
     if end <= start:
@@ -253,15 +255,15 @@ def _derive_calendar_months(move_in: str, move_out: str, field: str) -> int:
             "مدة الإقامة يجب أن تكون من شهر إلى ستة أشهر.",
             "The stay must be between one and six months.",
         )
-    for months in range(1, 7):
-        if _add_calendar_months(start, months) == end:
-            return months
-    raise _error(
-        field,
-        "invalid_span",
-        "تاريخ الخروج يجب أن يطابق مدة شهرية كاملة من شهر إلى ستة أشهر.",
-        "Move-out must match a complete one-to-six-calendar-month stay.",
+    exact_months = next(
+        (
+            months
+            for months in range(1, 7)
+            if _add_calendar_months(start, months) == end
+        ),
+        None,
     )
+    return (end - start).days, exact_months
 
 
 def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any]:
@@ -302,9 +304,12 @@ def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any
                 "تاريخ الدخول مطلوب عند تحديد تاريخ الخروج.",
                 "Move-in date is required when move-out is provided.",
             )
-        result["duration_months"] = _derive_calendar_months(
+        duration_days, exact_months = _calendar_span(
             result["move_in"], result["move_out"], "move_out"
         )
+        result["duration_days"] = duration_days
+        if exact_months is not None:
+            result["duration_months"] = exact_months
     return result
 
 
@@ -464,9 +469,12 @@ def _event_context(value: Any) -> Dict[str, Any]:
                 "تاريخ الدخول مطلوب عند حفظ تاريخ الخروج.",
                 "Move-in date is required when move-out is recorded.",
             )
-        _derive_calendar_months(
+        duration_days, exact_months = _calendar_span(
             safe["move_in"], safe["move_out"], "context.move_out"
         )
+        safe["duration_days"] = duration_days
+        if exact_months is not None:
+            safe["duration_months"] = exact_months
     if data.get("duration_band") not in (None, ""):
         safe["duration_band"] = _choice(
             data["duration_band"],
