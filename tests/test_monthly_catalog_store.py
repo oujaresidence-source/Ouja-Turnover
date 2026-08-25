@@ -141,6 +141,111 @@ class CatalogStoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.save_profile_draft("101", {}, 0, "")
 
+    def test_seed_approved_places_once_is_atomic_and_idempotent(self):
+        places = [
+            {
+                "id": "biz_kafd",
+                "kind": "destination",
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "King Abdullah Financial District",
+                "purposes": ["work"],
+                "lat": 24.7672,
+                "lng": 46.6431,
+                "source": "priority_places_2026_08_25",
+                "verified": True,
+            },
+            {
+                "id": "health_kfshrc",
+                "kind": "destination",
+                "label_ar": "مستشفى الملك فيصل التخصصي",
+                "label_en": "King Faisal Specialist Hospital",
+                "purposes": ["treatment", "family"],
+                "lat": 24.6717,
+                "lng": 46.6758,
+                "source": "priority_places_2026_08_25",
+                "verified": True,
+            },
+        ]
+
+        seeded = self.store.seed_approved_places_once(
+            "priority_places_2026_08_25_v1", places, "system:priority_places"
+        )
+        self.assertEqual(seeded["imported"], 2)
+        self.assertEqual(seeded["skipped_existing"], 0)
+        self.assertFalse(seeded["already_applied"])
+        rows = self.store.places()
+        self.assertEqual(set(rows), {"biz_kafd", "health_kfshrc"})
+        self.assertTrue(all(row["active"] for row in rows.values()))
+        self.assertTrue(
+            all(row["draft"] == row["approved"] for row in rows.values())
+        )
+        self.assertTrue(
+            all(row["approved_revision"] == 1 for row in rows.values())
+        )
+
+        again = self.store.seed_approved_places_once(
+            "priority_places_2026_08_25_v1", places, "system:priority_places"
+        )
+        self.assertTrue(again["already_applied"])
+        self.assertEqual(again["imported"], 2)
+        self.assertEqual(len(self.store.audit()), 2)
+
+        reopened = CatalogStore(self.path, clock=lambda: NOW)
+        after_restart = reopened.seed_approved_places_once(
+            "priority_places_2026_08_25_v1", places, "system:priority_places"
+        )
+        self.assertTrue(after_restart["already_applied"])
+        self.assertEqual(len(reopened.audit()), 2)
+
+    def test_seed_approved_places_preserves_existing_staff_record(self):
+        existing = {
+            "label_ar": "اسم اعتمده الفريق",
+            "label_en": "Staff-approved name",
+        }
+        self.store.save_place_draft("biz_kafd", existing, 0, "ops")
+        self.store.approve_place("biz_kafd", 1, True, "manager")
+
+        seeded = self.store.seed_approved_places_once(
+            "priority_places_2026_08_25_v1",
+            [
+                {
+                    "id": "biz_kafd",
+                    "label_ar": "اسم الملف",
+                    "label_en": "Workbook name",
+                },
+                {
+                    "id": "events_ricec",
+                    "label_ar": "واجهة الرياض للمعارض",
+                    "label_en": "Riyadh Front Exhibition Center",
+                },
+            ],
+            "system:priority_places",
+        )
+
+        self.assertEqual(seeded["imported"], 1)
+        self.assertEqual(seeded["skipped_existing"], 1)
+        self.assertEqual(self.store.places()["biz_kafd"]["approved"], existing)
+
+    def test_seed_approved_places_rolls_back_invalid_batch(self):
+        with self.assertRaises(ValueError):
+            self.store.seed_approved_places_once(
+                "priority_places_2026_08_25_v1",
+                [
+                    {"id": "biz_kafd", "label_ar": "كافد"},
+                    {"id": "bad place", "label_ar": "غير صالح"},
+                ],
+                "system:priority_places",
+            )
+        self.assertEqual(self.store.places(), {})
+
+        corrected = self.store.seed_approved_places_once(
+            "priority_places_2026_08_25_v1",
+            [{"id": "biz_kafd", "label_ar": "كافد"}],
+            "system:priority_places",
+        )
+        self.assertEqual(corrected["imported"], 1)
+        self.assertFalse(corrected["already_applied"])
+
 
 if __name__ == "__main__":
     unittest.main()

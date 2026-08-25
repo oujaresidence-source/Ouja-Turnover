@@ -174,6 +174,13 @@ class CatalogStore:
                     occurred_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS monthly_catalog_migrations (
+                    migration_id TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    applied_by TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_monthly_catalog_audit_target
                 ON monthly_catalog_audit(target, id DESC);
                 """
@@ -456,6 +463,93 @@ class CatalogStore:
                 "SELECT * FROM monthly_catalog_places ORDER BY place_id"
             ).fetchall()
         return {row["place_id"]: self._place_result(row["place_id"], row) for row in rows}
+
+    def seed_approved_places_once(
+        self,
+        migration_id: str,
+        places: list[Mapping[str, Any]],
+        actor: str,
+    ) -> Dict[str, Any]:
+        """Insert approved places once without replacing any staff-owned record."""
+
+        migration_key = _record_id(migration_id, "migration ID")
+        by = _actor(actor)
+        if not isinstance(places, list) or not places:
+            raise ValueError("places must be a non-empty list")
+
+        prepared = []
+        seen = set()
+        for place in places:
+            if not isinstance(place, Mapping):
+                raise ValueError("place must be a mapping")
+            value = dict(place)
+            place_key = _record_id(value.pop("id", None), "place ID")
+            if place_key in seen:
+                raise ValueError("duplicate place ID")
+            seen.add(place_key)
+            payload = _canonical_json(value)
+            prepared.append((place_key, value, payload))
+
+        occurred = self._now()
+        with self._write() as connection:
+            prior = connection.execute(
+                "SELECT result_json FROM monthly_catalog_migrations WHERE migration_id = ?",
+                (migration_key,),
+            ).fetchone()
+            if prior is not None:
+                result = _decoded(prior["result_json"]) or {}
+                result["already_applied"] = True
+                return result
+
+            imported = 0
+            skipped_existing = 0
+            for place_key, value, payload in prepared:
+                existing = connection.execute(
+                    "SELECT 1 FROM monthly_catalog_places WHERE place_id = ?",
+                    (place_key,),
+                ).fetchone()
+                if existing is not None:
+                    skipped_existing += 1
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO monthly_catalog_places(
+                        place_id, draft_json, approved_json,
+                        draft_revision, approved_revision, active,
+                        draft_updated_at, draft_updated_by,
+                        approved_at, approved_by
+                    ) VALUES (?, ?, ?, 1, 1, 1, ?, ?, ?, ?)
+                    """,
+                    (place_key, payload, payload, occurred, by, occurred, by),
+                )
+                self._audit_insert(
+                    connection,
+                    "place:%s" % place_key,
+                    "place_seeded",
+                    1,
+                    self._fields(value) + ["active"],
+                    by,
+                    occurred,
+                )
+                imported += 1
+
+            result = {
+                "migration_id": migration_key,
+                "imported": imported,
+                "skipped_existing": skipped_existing,
+                "total": len(prepared),
+                "applied_at": occurred,
+                "already_applied": False,
+            }
+            connection.execute(
+                """
+                INSERT INTO monthly_catalog_migrations(
+                    migration_id, result_json, applied_at, applied_by
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (migration_key, _canonical_json(result), occurred, by),
+            )
+        return result
 
     def save_place_draft(
         self,
