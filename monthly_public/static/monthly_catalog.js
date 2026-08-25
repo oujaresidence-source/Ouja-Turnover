@@ -215,9 +215,10 @@
       });
       if (Array.isArray(source.structured.emblems)) structured.emblems = clone(source.structured.emblems);
       if (Array.isArray(source.structured.sections)) {
-        structured.sections = source.structured.sections.map(function (item) {
+        const sections = source.structured.sections.map(function (item) {
           return { title_ar: String(item.title_ar || "").trim(), title_en: String(item.title_en || "").trim(), body_ar: String(item.body_ar || "").trim(), body_en: String(item.body_en || "").trim() };
         }).filter(function (item) { return item.title_ar || item.title_en || item.body_ar || item.body_en; });
+        if (sections.length) structured.sections = sections;
       }
       if (Object.keys(structured).length) profile.structured = structured;
     }

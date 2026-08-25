@@ -73,6 +73,11 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, html.lower())
 
+    def test_catalog_asset_version_changes_for_the_empty_section_fix(self):
+        from monthly_public.catalog_page import ASSET_VERSION
+
+        self.assertEqual(ASSET_VERSION, "v20260826a")
+
     def test_styles_preserve_operations_tokens_and_accessibility(self):
         css = CSS_FILE.read_text("utf-8")
         for required in (
@@ -212,6 +217,19 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertEqual(result["settings"]["working_hours"]["schedule"], {"monday": [["13:00", "21:00"]]})
         self.assertEqual(result["place"]["purposes"], ["treatment", "work"])
         self.assertEqual(result["place"]["coordinates"]["verified"], True)
+
+    def test_javascript_omits_the_empty_structured_section_placeholder(self):
+        result = self._javascript_result(
+            "api.buildProfilePayload({structured:{"
+            "tagline_ar:'سكن هادئ',tagline_en:'Quiet stay',"
+            "sections:[{title_ar:'',title_en:'',body_ar:'',body_en:''}]"
+            "}})"
+        )
+
+        self.assertEqual(
+            result["structured"],
+            {"tagline_ar": "سكن هادئ", "tagline_en": "Quiet stay"},
+        )
 
     def test_javascript_filters_truthful_inventory_without_duplicate_rows(self):
         result = self._javascript_result("api.filterListings(["
