@@ -57994,6 +57994,7 @@ _monthly_public_snapshot = None
 _monthly_public_app = None
 _monthly_catalog_store = None
 _monthly_catalog_service = None
+_monthly_catalog_seed_status = None
 if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
     try:
         _monthly_public_snapshot = _MonthlySnapshotStore(
@@ -58375,6 +58376,20 @@ if (_monthly_catalog_store is not None
                 else None
             ),
         )
+        try:
+            _monthly_catalog_seed_status = (
+                _monthly_catalog_service.seed_priority_places()
+            )
+        except Exception as _mcat_seed_err:
+            _monthly_catalog_seed_status = {
+                "applied": False,
+                "error": type(_mcat_seed_err).__name__,
+            }
+            print(
+                "[monthly-catalog] launch blocker: priority place seed failed:",
+                type(_mcat_seed_err).__name__,
+            )
+        _monthly_public_refresh_snapshot()
     except Exception as _mcat_service_err:
         print("[monthly-catalog] service unavailable:", _mcat_service_err)
         _monthly_catalog_service = None

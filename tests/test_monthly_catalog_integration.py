@@ -274,6 +274,20 @@ class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
         ):
             self.assertIn(required, source)
 
+    def test_priority_places_seed_before_startup_configuration_refresh(self):
+        with open(self.bot.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        service_start = source.index(
+            "_monthly_catalog_service = _MonthlyCatalogService("
+        )
+        seed = source.index(
+            "_monthly_catalog_service.seed_priority_places()", service_start
+        )
+        refresh = source.index("_monthly_public_refresh_snapshot()", seed)
+
+        self.assertLess(service_start, seed)
+        self.assertLess(seed, refresh)
+
 
 if __name__ == "__main__":
     unittest.main()

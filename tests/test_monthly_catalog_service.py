@@ -214,6 +214,93 @@ class CatalogServiceTest(unittest.TestCase):
         self.assertIn("hospital", service.approved_place_history())
         self.assertIn("hospital", service.places()["places"])
 
+    def test_priority_places_seed_once_and_power_the_nearest_five(self):
+        service = self.service()
+
+        seeded = service.seed_priority_places()
+        listing = service.listing("101")
+        places = service.places()
+        health = service.health()
+
+        self.assertEqual(seeded["imported"], 25)
+        self.assertFalse(seeded["already_applied"])
+        self.assertEqual(len(listing["nearest_places"]), 5)
+        self.assertEqual(
+            [row["distance_km"] for row in listing["nearest_places"]],
+            sorted(row["distance_km"] for row in listing["nearest_places"]),
+        )
+        self.assertFalse(
+            any(row["id"].startswith("edu_") for row in listing["nearest_places"])
+        )
+        self.assertEqual(
+            places["category_counts"],
+            {
+                "business_hubs": 5,
+                "events": 5,
+                "family_retail": 5,
+                "hospitals": 5,
+                "riyadh_season": 5,
+            },
+        )
+        self.assertTrue(health["priority_place_migration"]["applied"])
+        self.assertEqual(health["verified_apartment_coordinates"], 1)
+        self.assertEqual(health["missing_apartment_coordinates"], 0)
+
+        second = service.seed_priority_places()
+        self.assertTrue(second["already_applied"])
+        self.assertEqual(len(self.store.audit()), 25)
+
+    def test_listing_has_no_proximity_claim_without_verified_apartment_pin(self):
+        self.source["listings"][0]["hostaway"].pop("lat")
+        self.source["listings"][0]["hostaway"].pop("lng")
+        service = self.service()
+        service.seed_priority_places()
+
+        listing = service.listing("101")
+        health = service.health()
+
+        self.assertEqual(listing["nearest_places"], [])
+        self.assertEqual(health["verified_apartment_coordinates"], 0)
+        self.assertEqual(health["missing_apartment_coordinates"], 1)
+
+    def test_listing_returns_every_nearby_place_when_fewer_than_five_exist(self):
+        self.store.seed_approved_places_once(
+            "two_places_v1",
+            [
+                {
+                    "id": "place_one",
+                    "kind": "destination",
+                    "label_ar": "المكان الأول",
+                    "label_en": "Place One",
+                    "category_id": "events",
+                    "priority": 1,
+                    "lat": 24.80,
+                    "lng": 46.62,
+                    "source": "staff_maps_pin",
+                    "verified": True,
+                },
+                {
+                    "id": "place_two",
+                    "kind": "destination",
+                    "label_ar": "المكان الثاني",
+                    "label_en": "Place Two",
+                    "category_id": "hospitals",
+                    "priority": 2,
+                    "lat": 24.81,
+                    "lng": 46.63,
+                    "source": "staff_maps_pin",
+                    "verified": True,
+                },
+            ],
+            "system:test",
+        )
+
+        result = self.service().listing("101")
+
+        self.assertEqual([row["id"] for row in result["nearest_places"]], [
+            "place_one", "place_two",
+        ])
+
     def test_refresh_failure_does_not_undo_the_approved_revision(self):
         self.refresh_result = RuntimeError("source unavailable")
         service = self.service()

@@ -364,6 +364,34 @@ class OpsLeadWorkflowTests(unittest.TestCase):
             "count": 1,
         }])
 
+    def test_operations_health_keeps_priority_place_and_pin_coverage(self):
+        self.app.catalog_health_provider = lambda: {
+            "configured": True,
+            "write_probe": True,
+            "journal_mode": "delete",
+            "priority_place_migration": {
+                "applied": True,
+                "migration_id": "priority_places_2026_08_25_v1",
+                "imported": 25,
+            },
+            "destination_categories": {
+                "business_hubs": 5,
+                "events": 5,
+                "family_retail": 5,
+                "hospitals": 5,
+                "riyadh_season": 5,
+            },
+            "verified_apartment_coordinates": 53,
+            "missing_apartment_coordinates": 0,
+        }
+
+        catalog = self.app.ops.health()["catalog"]
+
+        self.assertTrue(catalog["priority_place_migration"]["applied"])
+        self.assertEqual(catalog["destination_categories"]["hospitals"], 5)
+        self.assertEqual(catalog["verified_apartment_coordinates"], 53)
+        self.assertEqual(catalog["missing_apartment_coordinates"], 0)
+
     def test_internal_staff_actions_do_not_mark_a_customer_response(self):
         first = self.app.ops.action({
             "lead_reference": self.lead["reference"],

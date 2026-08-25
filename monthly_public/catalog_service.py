@@ -19,6 +19,11 @@ from .catalog_profiles import (
 )
 from .catalog_store import CatalogStore
 from .publication import validate_listing
+from .priority_places import (
+    PRIORITY_PLACE_MIGRATION_ID,
+    load_priority_places,
+    nearest_places,
+)
 from .settings import MonthlySettings, load_settings
 from .snapshot import SnapshotGeneration, revalidate_generation
 
@@ -80,6 +85,10 @@ class CatalogService:
         self.snapshot_refresh = snapshot_refresh
         self.clock = clock
         self.active_snapshot_provider = active_snapshot_provider
+        self._priority_place_migration = {
+            "applied": False,
+            "migration_id": PRIORITY_PLACE_MIGRATION_ID,
+        }
 
     def _now(self) -> dt.datetime:
         value = self.clock()
@@ -263,6 +272,11 @@ class CatalogService:
                     "neighborhood": prefill.get("neighborhood"),
                     "neighborhood_ar": prefill.get("neighborhood_ar"),
                     "neighborhood_en": prefill.get("neighborhood_en"),
+                    "coordinates_verified": (
+                        isinstance(prefill.get("coordinates"), Mapping)
+                        and prefill["coordinates"].get("verified") is True
+                        and bool(prefill["coordinates"].get("source"))
+                    ),
                     "bedrooms": prefill.get("bedrooms"),
                     "completion_percent": prepared["completion"]["percent"],
                     "status": self._row_status(prepared),
@@ -335,6 +349,11 @@ class CatalogService:
                 "licence_present": bool((public_listing.get("licence") or {}).get("licence_no")),
             },
             "source_timestamps": prepared["source_timestamps"],
+            "nearest_places": nearest_places(
+                prepared["prefill"].get("coordinates"),
+                self.approved_places(),
+                limit=5,
+            ),
             "audit": self.store.audit("listing:%s" % prepared["id"], limit=30),
         }
 
@@ -397,14 +416,43 @@ class CatalogService:
 
     def places(self) -> Dict[str, Any]:
         rows = self.store.places()
+        active = sorted(
+            place_id
+            for place_id, row in rows.items()
+            if row.get("active") and row.get("approved") is not None
+        )
+        category_counts: Dict[str, int] = {}
+        for place_id in active:
+            category_id = str(rows[place_id]["approved"].get("category_id") or "")
+            if category_id:
+                category_counts[category_id] = category_counts.get(category_id, 0) + 1
         return {
             "places": rows,
-            "active": sorted(
-                place_id
-                for place_id, row in rows.items()
-                if row.get("active") and row.get("approved") is not None
-            ),
+            "active": active,
+            "category_counts": dict(sorted(category_counts.items())),
         }
+
+    def seed_priority_places(self) -> Dict[str, Any]:
+        """Apply the approved workbook extract once without replacing staff edits."""
+
+        try:
+            result = self.store.seed_approved_places_once(
+                PRIORITY_PLACE_MIGRATION_ID,
+                load_priority_places(),
+                "system:priority_places",
+            )
+        except Exception as error:
+            self._priority_place_migration = {
+                "applied": False,
+                "migration_id": PRIORITY_PLACE_MIGRATION_ID,
+                "error": type(error).__name__,
+            }
+            raise
+        self._priority_place_migration = {
+            **copy.deepcopy(result),
+            "applied": True,
+        }
+        return copy.deepcopy(result)
 
     def save_place_draft(
         self, place_id: str, value: Any, revision: int, actor: str
@@ -471,6 +519,16 @@ class CatalogService:
             "settings_source": settings["effective_source"],
             "settings_ready": not settings["blockers"],
             "active_destinations": len(places["active"]),
+            "destination_categories": copy.deepcopy(places["category_counts"]),
+            "priority_place_migration": copy.deepcopy(
+                self._priority_place_migration
+            ),
+            "verified_apartment_coordinates": sum(
+                row["coordinates_verified"] for row in portfolio["listings"]
+            ),
+            "missing_apartment_coordinates": sum(
+                not row["coordinates_verified"] for row in portfolio["listings"]
+            ),
             "write_probe": probe.get("ok") is True,
             "journal_mode": probe.get("journal_mode"),
         }

@@ -131,6 +131,10 @@ def build_health(
         "settings_source": None,
         "settings_ready": False,
         "active_destinations": 0,
+        "destination_categories": {},
+        "priority_place_migration": {"applied": False},
+        "verified_apartment_coordinates": 0,
+        "missing_apartment_coordinates": 0,
         "write_probe": False,
         "journal_mode": None,
     }
@@ -142,10 +146,16 @@ def build_health(
             "published_profiles",
             "profile_completion_average",
             "active_destinations",
+            "verified_apartment_coordinates",
+            "missing_apartment_coordinates",
         ):
             value = catalog.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 catalog_health[key] = value
+        for key in ("destination_categories", "priority_place_migration"):
+            value = catalog.get(key)
+            if isinstance(value, Mapping):
+                catalog_health[key] = dict(value)
         catalog_health["settings_source"] = catalog.get("settings_source")
         catalog_health["settings_ready"] = catalog.get("settings_ready") is True
         catalog_health["write_probe"] = catalog.get("write_probe") is True
