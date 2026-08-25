@@ -57134,6 +57134,14 @@ async def _handle_elite_img(request):
     return web.Response(body=data, content_type="image/webp", headers=headers)
 
 
+async def _handle_monthly_v2_img(request):
+    """V2 never fetches an image from the request path; the browser loads it directly."""
+    url = request.query.get("u", "") or ""
+    if not url.lower().startswith(("http://", "https://")):
+        raise web.HTTPNotFound()
+    raise web.HTTPFound(url)
+
+
 _ELITE_GEO_URL = "https://oujaguide.netlify.app/data.json"
 _elite_geo_cache = {"map": None, "ts": 0.0}
 
@@ -57998,6 +58006,10 @@ def _monthly_public_calendar(listing_id):
     if not dates:
         return None
     try:
+        parsed_dates = [datetime.strptime(day, "%Y-%m-%d").date() for day in dates]
+        if any(current - previous != timedelta(days=1)
+               for previous, current in zip(parsed_dates, parsed_dates[1:])):
+            return None
         coverage_to = (datetime.strptime(dates[-1], "%Y-%m-%d").date()
                        + timedelta(days=1)).isoformat()
     except ValueError:
@@ -58045,7 +58057,9 @@ def _monthly_public_source_adapter():
     if _HAS_MONTHLY:
         for row in (_monthly.db.licence_all() or []):
             licences[str(row.get("unit_id"))] = row
-    ratings = (_gw_ratings_cache.get("map") or {}) if isinstance(_gw_ratings_cache, dict) else {}
+    # Local-only: aggregates the in-memory _reviews store and warms a cold map;
+    # _gw_ratings_map never pulls Hostaway or any external source.
+    ratings = _gw_ratings_map()
     hidden = _monthly_hidden_set()
     listings = []
     for snap in (_gw_cache.get("listings") or []):
@@ -59257,6 +59271,9 @@ _ROLE_EXEMPT_WRITES = {
     "/api/auth/login", "/api/auth/logout",   # the login flow itself
     "/api/expenses/ingest",                  # shared-secret auth (Google Apps Script)
     "/api/stay/event",                       # public website analytics beacon
+    "/api/monthly/match",                    # public monthly guided matcher
+    "/api/monthly/lead",                     # signed anonymous session + server quote
+    "/api/monthly/event",                    # signed anonymous funnel analytics
     "/api/clean-feedback",                   # public guest feedback form (token in body)
     "/api/oujact/photo-upload",              # cleaning-team token auth
     "/api/oujact/report-submit",             # cleaning-team token auth
@@ -59702,7 +59719,8 @@ async def start_web_server():
         app.router.add_get("/monthly/", _handle_monthly)
         app.router.add_get("/monthly/search", _handle_monthly_search)
         app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)
-        app.router.add_get("/monthly/img", _handle_elite_img)        # reuse the proven WebP proxy
+        app.router.add_get("/monthly/img", (_handle_monthly_v2_img
+                                             if MONTHLY_PUBLIC_V2 else _handle_elite_img))
         app.router.add_get("/api/monthly/config", (_api_monthly_v2_config
                                                    if MONTHLY_PUBLIC_V2 else _api_monthly_config))
         app.router.add_get("/api/monthly/featured", (_api_monthly_v2_featured
