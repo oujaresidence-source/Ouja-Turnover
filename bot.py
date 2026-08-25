@@ -58002,9 +58002,22 @@ def _monthly_public_calendar(listing_id):
     succeeded_at = (_mcal.get("unit_synced_at") or {}).get(lid)
     if not isinstance(rows, dict) or not rows or not succeeded_at:
         return None
-    dates = sorted(day for day in rows if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(day)))
-    if not dates:
-        return None
+    for day, row in rows.items():
+        if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            return None
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            return None
+        available, price, has_reservation = row
+        if not (type(available) is bool
+                or (type(available) is int and available in (0, 1))):
+            return None
+        if price is not None and not (
+                type(price) in (int, float) and 0 < price < float("inf")):
+            return None
+        if not (type(has_reservation) is bool
+                or (type(has_reservation) is int and has_reservation in (0, 1))):
+            return None
+    dates = sorted(rows)
     try:
         parsed_dates = [datetime.strptime(day, "%Y-%m-%d").date() for day in dates]
         if any(current - previous != timedelta(days=1)
@@ -58017,7 +58030,7 @@ def _monthly_public_calendar(listing_id):
     blocked = []
     for day in dates:
         row = rows.get(day)
-        if isinstance(row, (list, tuple)) and row and not bool(row[0]):
+        if not bool(row[0]):
             blocked.append(day)
     return {"synced_at": succeeded_at, "from": dates[0], "to": coverage_to,
             "blocked_dates": blocked}
