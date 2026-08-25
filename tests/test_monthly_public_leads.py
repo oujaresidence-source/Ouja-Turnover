@@ -9,7 +9,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from monthly_public.analytics import AnalyticsStore
 from monthly_public.contracts import ContractError, issue_anonymous_session
-from monthly_public.leads import HandoffValidationError, LeadStore, build_whatsapp_handoff
+from monthly_public.leads import (
+    HandoffValidationError,
+    LeadStore,
+    build_general_whatsapp_handoff,
+    build_whatsapp_handoff,
+)
 from monthly_public.pricing import quote_for
 from tests.monthly_public_fixtures import NOW, valid_listing, valid_settings
 
@@ -401,6 +406,63 @@ class LeadTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertEqual(result["code"], "whatsapp_not_configured")
+        self.assertEqual(self.store.count(), 0)
+
+    def test_general_help_handoff_stores_no_listing_quote_message_or_pii(self):
+        request = {
+            "purpose": "family",
+            "residents": 6,
+            "sleeping": "three_bedrooms",
+            "move_in": "2026-09-01",
+            "duration_months": 2,
+            "flexibility": "fixed",
+            "phone": "0500000000",
+            "notes": "private",
+        }
+
+        result = build_general_whatsapp_handoff(
+            self.store,
+            valid_settings(),
+            self.session,
+            request,
+            analytics=AnalyticsStore(Path(self.folder.name) / "general-analytics.sqlite3", clock=lambda: NOW),
+            now=NOW,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertIn("لم يتم اختيار منزل", result["message"])
+        self.assertIn("No home was selected", result["message"])
+        self.assertIn("find and confirm an option", result["message"])
+        for forbidden in ("Listing:", "Displayed monthly price", "SAR ", "0500000000", "private"):
+            self.assertNotIn(forbidden, result["message"])
+        stored = self.store.get(result["lead_reference"])
+        self.assertEqual(stored["lead_kind"], "general_help")
+        self.assertEqual(stored["listing_id"], "")
+        self.assertEqual(stored["quote"], {})
+        serialized = json.dumps(stored, ensure_ascii=False)
+        for forbidden in (result["message"], "0500000000", "private"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_general_help_handoff_requires_whatsapp_and_complete_request(self):
+        from monthly_public.settings import load_settings
+
+        blocked = build_general_whatsapp_handoff(
+            self.store,
+            load_settings({}),
+            self.session,
+            {"purpose": "family", "residents": 2, "move_in": "2026-09-01", "duration_months": 1},
+            now=NOW,
+        )
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(blocked["code"], "whatsapp_not_configured")
+        with self.assertRaises(HandoffValidationError):
+            build_general_whatsapp_handoff(
+                self.store,
+                valid_settings(),
+                self.session,
+                {"purpose": "family"},
+                now=NOW,
+            )
         self.assertEqual(self.store.count(), 0)
 
     def test_analytics_failure_does_not_block_created_handoff(self):

@@ -184,6 +184,7 @@ try:
         PAGE_ROUTES as _MONTHLY_PUBLIC_PAGE_ROUTES,
         render_monthly_page as _render_monthly_public_page,
     )
+    from monthly_public.legacy import render_legacy_monthly_page as _render_monthly_legacy_page
     from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
     from monthly_public.settings import load_settings as _monthly_public_load_settings
     from monthly_public.snapshot import SnapshotStore as _MonthlySnapshotStore
@@ -195,6 +196,7 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
     _render_monthly_public_page = None
+    _render_monthly_legacy_page = None
     _HAS_MONTHLY_PUBLIC = False
 
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
@@ -57976,7 +57978,7 @@ _monthly_public_session_secret = (
 )
 _monthly_public_snapshot = None
 _monthly_public_app = None
-if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
+if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
     try:
         _monthly_public_snapshot = _MonthlySnapshotStore(
             _state_path("monthly_public_snapshot.json")
@@ -58159,7 +58161,7 @@ def _monthly_public_source_adapter():
 
 def _monthly_public_refresh_snapshot():
     """Background/boot boundary only; a failure retains SnapshotStore.current."""
-    if (not _monthly_public_v2_enabled()
+    if (not MONTHLY_ENABLED
             or _monthly_public_snapshot is None
             or _monthly_public_settings is None):
         return {"accepted": False, "error": "monthly public is not configured"}
@@ -58626,49 +58628,37 @@ document.addEventListener('click',function(e){var c=e.target.closest&&e.target.c
 </body></html>"""
 
 def _monthly_render(route="home", listing=None, base=""):
-    title = "عوجا بالشهر · شقق مفروشة شهرية في الرياض"
-    desc = "استأجر شقة عوجا مفروشة بالشهر في الرياض — اختر تاريخ دخولك والمدة، شوف السعر قبل وبعد الخصم، وكلّمنا واتساب."
-    og = ""
-    path = {"home": "/monthly", "search": "/monthly/search", "listing": "/monthly"}.get(route, "/monthly")
-    if listing:
-        title = (listing.get("name_ar") or title) + " · عوجا بالشهر"
-        desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
-        og = listing.get("cover") or ""
-        path = "/monthly/" + (listing.get("slug") or str(listing.get("id")))
-    hcfg = _gw_hero_resolve()
-    if not listing and hcfg.get("url"):
-        og = og or hcfg["url"]
-    cfg = _monthly_cfg_public()
-    cfg.update({"hero": _monthly_hero_url(), "imgproxy": MONTHLY_IMG_PROXY,
-                "whatsapp": MONTHLY_WHATSAPP, "noo": _gw_noo_options(),
-                "neighborhoods": _gw_neighborhoods_with_counts()})
-    data = {"route": route, "listing": listing, "config": cfg}
-    blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
-    if listing:
-        ld = {"@context": "https://schema.org", "@type": "Apartment",
-              "name": listing.get("name_ar") or listing.get("name_en") or "",
-              "description": desc, "url": (base or "") + path,
-              "numberOfRooms": listing.get("beds"),
-              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh",
-                          "addressRegion": (listing.get("area") or "Riyadh"), "addressCountry": "SA"}}
-        if listing.get("cover"):
-            ld["image"] = listing["cover"]
-        ld = {k: v for k, v in ld.items() if v not in (None, "", {})}
-    else:
-        ld = {"@context": "https://schema.org", "@type": "LodgingBusiness",
-              "name": "Ouja Monthly · عوجا بالشهر", "description": desc,
-              "url": (base or "") + "/monthly",
-              "address": {"@type": "PostalAddress", "addressLocality": "Riyadh", "addressCountry": "SA"}}
-        if hcfg.get("url"):
-            ld["image"] = hcfg["url"]
-    ld_blob = json.dumps(ld, ensure_ascii=False).replace("</", "<\\/")
-    return (MONTHLY_HTML
-            .replace("/*__MONTHLY_DATA__*/null", blob)
-            .replace("/*__MONTHLY_JSONLD__*/null", ld_blob)
-            .replace("__MONTHLY_TITLE__", _gw_he(title))
-            .replace("__MONTHLY_DESC__", _gw_he(desc))
-            .replace("__MONTHLY_OG__", _gw_he(og))
-            .replace("__MONTHLY_URL__", _gw_he((base or "") + path)))
+    if _render_monthly_legacy_page is None:
+        return "<!doctype html><html lang='ar' dir='rtl'><body><a href='/monthly/search'>تصفح البيوت</a></body></html>"
+    generation = (_monthly_public_snapshot.current
+                  if _monthly_public_snapshot is not None else None)
+    published = list(generation.published) if generation is not None else []
+
+    def safe_row(result):
+        value = result.listing
+        images = list(value.get("images") or ())
+        return {
+            "id": value.get("id"),
+            "slug": value.get("slug"),
+            "name_ar": value.get("name_ar"),
+            "name_en": value.get("name_en"),
+            "area": value.get("neighborhood_ar"),
+            "bedrooms": value.get("bedrooms"),
+            "capacity": value.get("capacity"),
+            "cover": images[0] if images else "",
+            "images": images,
+        }
+
+    catalog = [safe_row(result) for result in published]
+    safe_listing = None
+    if route == "listing" and isinstance(listing, dict):
+        wanted_id = str(listing.get("id") or "")
+        wanted_slug = str(listing.get("slug") or "")
+        match = next((result for result in published
+                      if str(result.listing.get("id") or "") == wanted_id
+                      or str(result.listing.get("slug") or "") == wanted_slug), None)
+        safe_listing = safe_row(match) if match is not None else None
+    return _render_monthly_legacy_page(route, listing=safe_listing, catalog=catalog)
 
 # ---- Ouja Monthly public routes (NO token); reuse /api/stay/event + /elite/img machinery ----
 def _monthly_off():
@@ -60885,7 +60875,7 @@ async def monthly_calendar_loop():
         res = await asyncio.to_thread(_mcal_refresh_sync)
         print("monthly calendar: %s units warm, %s failed, %sms"
               % (res["ok"], res["err"], res["last_ms"]))
-        if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
+        if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
             await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly calendar loop error:", e)
@@ -60912,7 +60902,7 @@ async def monthly_engine_loop():
                      100.0 * (res.get("coverage") or 0)))
         else:
             print("monthly engine: not refreshed —", res.get("err"))
-        if _HAS_MONTHLY_PUBLIC and _monthly_public_v2_enabled():
+        if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
             await asyncio.to_thread(_monthly_public_refresh_snapshot)
     except Exception as e:
         print("monthly engine loop error:", e)

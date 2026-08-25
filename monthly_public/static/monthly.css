@@ -6,6 +6,7 @@
   --palm-100: #e0ebe5;
   --bronze-700: #8a642f;
   --bronze-600: #a5793b;
+  --bronze-400: #d4b27c;
   --bronze-100: #f0e6d5;
   --stone-300: #d8cdbb;
   --stone-200: #e8dfd0;
@@ -61,6 +62,10 @@ body {
 
 [dir="ltr"] body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+
+[dir="ltr"] :is(h1, h2, h3) {
+  font-family: Georgia, "Times New Roman", serif;
 }
 
 button,
@@ -401,12 +406,12 @@ p {
 }
 
 .button-primary {
-  background: var(--bronze-600);
+  background: var(--bronze-400);
   color: var(--palm-950);
 }
 
 .button-primary:hover {
-  background: #bc9256;
+  background: #e2c69b;
 }
 
 .button-secondary {
@@ -587,6 +592,12 @@ p {
   font-size: 1.1rem;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
+}
+
+.card-included {
+  margin-block: -4px 10px;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
 }
 
 .availability {
@@ -889,6 +900,7 @@ p {
 .gallery {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 6px;
   margin-block-end: 36px;
 }
@@ -906,13 +918,7 @@ p {
 
 .gallery img {
   width: 100%;
-  height: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-}
-
-.gallery figure:first-child img {
-  aspect-ratio: 16 / 10;
+  height: auto;
 }
 
 .listing-layout {
@@ -954,6 +960,7 @@ p {
 }
 
 .story-section,
+.recommendation-proof,
 .amenities-section,
 .location-section,
 .licence-section {
@@ -977,8 +984,7 @@ p {
 
 .story-photo {
   width: 100%;
-  aspect-ratio: 3 / 2;
-  object-fit: cover;
+  height: auto;
 }
 
 .story-copy {
@@ -1178,11 +1184,6 @@ p {
 
   .gallery figure:first-child {
     grid-column: auto;
-    grid-row: span 2;
-  }
-
-  .gallery figure:first-child img {
-    aspect-ratio: auto;
   }
 
   .listing-layout {
@@ -1192,12 +1193,11 @@ p {
 
   .story-item {
     grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
-    align-items: stretch;
+    align-items: start;
   }
 
   .story-photo {
-    height: 100%;
-    aspect-ratio: auto;
+    height: auto;
   }
 
   .price-column {

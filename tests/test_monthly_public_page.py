@@ -186,6 +186,48 @@ class MonthlyPublicPageBotBoundaryTests(unittest.TestCase):
             {"slug": "ouja-al-malqa-1001", "lang": "en"},
         )
 
+    def test_legacy_rollback_renderer_is_browse_safe_and_has_no_discount_pitch(self):
+        risky_listing = {
+            "id": "1001",
+            "slug": "ouja-1001",
+            "name_ar": "عوجا | الملقا",
+            "name_en": "Ouja | Al Malqa",
+            "area": "الملقا",
+            "cover": "https://images.example.test/1001.jpg",
+            "images": ["https://images.example.test/1001.jpg"],
+            "m_before": 15000,
+            "m_after": 12000,
+            "m_pct": 0.2,
+            "ceiling": 0.3,
+            "quote": {"before": 15000, "after": 12000, "pct": 0.2},
+        }
+
+        for route, listing in (("home", None), ("search", None), ("listing", risky_listing)):
+            with self.subTest(route=route), mock.patch.object(
+                self.bot, "_monthly_public_snapshot", None
+            ):
+                rendered = self.bot._monthly_render(route, listing).casefold()
+                for phrase in (
+                    "up to",
+                    "maximum discount",
+                    "reference price",
+                    "قبل الخصم",
+                    "أقصى خصم",
+                    "خصم يصل",
+                    "m_before",
+                    "m_after",
+                    "q.before",
+                    "q.after",
+                    "<s>",
+                    "line-through",
+                ):
+                    self.assertNotIn(phrase, rendered)
+                self.assertNotIn("15000", rendered)
+                self.assertNotIn("12000", rendered)
+                if route == "listing":
+                    self.assertNotIn("عوجا | الملقا", rendered)
+                self.assertIn("/monthly/search", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

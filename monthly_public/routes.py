@@ -22,7 +22,11 @@ from .contracts import (
     parse_outcome,
 )
 from .health import build_health
-from .leads import HandoffValidationError, build_whatsapp_handoff
+from .leads import (
+    HandoffValidationError,
+    build_general_whatsapp_handoff,
+    build_whatsapp_handoff,
+)
 from .matching import rank, space_matches
 from .presentation import present_card, present_listing
 from .pricing import add_months, quote_for
@@ -608,7 +612,7 @@ class MonthlyPublicApp:
                     "صيغة الطلب غير صحيحة.",
                     "The request format is invalid.",
                 )
-            unknown = sorted(set(value) - {"session_id", "listing_id", "request", "lang"})
+            unknown = sorted(set(value) - {"session_id", "listing_id", "general_help", "request", "lang"})
             if unknown:
                 raise ContractError(
                     unknown[0],
@@ -626,6 +630,67 @@ class MonthlyPublicApp:
                 parse_match_request(value.get("request")), generation
             )
             request["lang"] = language
+            if value.get("general_help") is True:
+                if value.get("listing_id") not in (None, ""):
+                    return _error(
+                        "general_help_listing_not_allowed",
+                        "طلب المساعدة العام لا يقبل اختيار بيت.",
+                        "A general-help request cannot include a selected home.",
+                        field="listing_id",
+                    )
+                if generation is None:
+                    return _error(
+                        "snapshot_missing",
+                        "لا توجد لقطة نشر صالحة لتأكيد عدم وجود خيار.",
+                        "No valid publication snapshot can verify that no option exists.",
+                    )
+                match_request = dict(request)
+                match_request.pop("lang", None)
+                ranked = rank(
+                    generation,
+                    match_request,
+                    language,
+                    now=current,
+                    places=self._place_registry(generation),
+                )
+                if ranked.get("pending_count"):
+                    return _error(
+                        "availability_pending",
+                        "التوفر قيد التأكيد. لا يمكن إنشاء طلب عام قبل اكتمال التحقق.",
+                        "Availability is pending. A general request cannot be created before verification completes.",
+                    )
+                if ranked.get("top") or ranked.get("near_matches"):
+                    return _error(
+                        "general_help_not_allowed",
+                        "يوجد خيار موثّق يمكن اختياره لهذا الطلب.",
+                        "A verified home can be selected for this request.",
+                    )
+                handoff = build_general_whatsapp_handoff(
+                    self.lead_store,
+                    self.settings,
+                    session_id,
+                    request,
+                    analytics=self.analytics_store,
+                    approved_places=self._place_registry(generation),
+                    now=current,
+                )
+                if handoff.get("ok") is False:
+                    blocked = _error(
+                        str(handoff.get("code") or "handoff_blocked"),
+                        str(handoff.get("message_ar") or "تعذر تجهيز طلب واتساب بشكل آمن."),
+                        str(handoff.get("message_en") or "The WhatsApp handoff could not be prepared safely."),
+                    )
+                    if handoff.get("response_window") is not None:
+                        blocked["response_window"] = handoff["response_window"]
+                    return blocked
+                return handoff
+            if value.get("general_help") not in (None, False):
+                raise ContractError(
+                    "general_help",
+                    "invalid_type",
+                    "نوع طلب المساعدة غير صحيح.",
+                    "The general-help flag is invalid.",
+                )
             parsed_listing = parse_listing_request({"listing_id": value.get("listing_id")})
             result = self._find(parsed_listing, generation)
             if result is None:

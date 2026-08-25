@@ -95,7 +95,9 @@
       allAvailable: "كل الشقق المتاحة",
       nearMatches: "أقرب خيارات موثقة",
       whyFits: "ليش تناسبك",
+      whyRecommended: "لماذا رشحناها لك؟",
       tradeoff: "نقطة تستحق الانتباه",
+      quoteIncludes: "يشمل {items}",
       viewHome: "اعرض تفاصيل البيت",
       noExact: "ما لقينا تطابقًا كاملًا للتفاصيل المحددة.",
       nearHelp: "هذي الخيارات تغيّر شرطًا واحدًا بشكل واضح، بدون افتراض توفر غير موثق.",
@@ -157,6 +159,9 @@
       preparingWhatsApp: "جاري تجهيز مرجع الطلب ورسالة واتساب.",
       openingWhatsApp: "تم إنشاء المرجع {reference}. جاري فتح واتساب، والرسالة لن تُرسل إلا باختيارك.",
       leadFailed: "تعذر تجهيز طلب واتساب بشكل آمن.",
+      generalHelpTitle: "خلّ فريق عوجا يساعدك",
+      generalHelpText: "ما راح نختار بيتًا أو ندّعي توفرًا. نرسل تفاصيل بحثك فقط عشان يساعدك الفريق في إيجاد خيار وتأكيده.",
+      generalHelpAction: "جهّز طلب مساعدة",
       selectPurpose: "سبب الإقامة",
       selectSleeping: "ترتيب النوم",
       selectFlexibility: "مرونة التواريخ"
@@ -242,7 +247,9 @@
       allAvailable: "All available homes",
       nearMatches: "Closest verified options",
       whyFits: "Why it fits",
+      whyRecommended: "Why we recommended it",
       tradeoff: "A useful trade-off",
+      quoteIncludes: "Includes {items}",
       viewHome: "View home details",
       noExact: "No exact match was found for the selected details.",
       nearHelp: "These options clearly change one condition without assuming unverified availability.",
@@ -304,6 +311,9 @@
       preparingWhatsApp: "Creating your lead reference and WhatsApp message.",
       openingWhatsApp: "Reference {reference} created. Opening WhatsApp; the message is sent only if you choose to send it.",
       leadFailed: "The WhatsApp request could not be prepared safely.",
+      generalHelpTitle: "Ask the Ouja team for help",
+      generalHelpText: "No home will be selected and no availability will be assumed. We only send your search details so the team can find and confirm an option.",
+      generalHelpAction: "Prepare help request",
       selectPurpose: "Stay purpose",
       selectSleeping: "Sleeping arrangement",
       selectFlexibility: "Date flexibility"
@@ -321,6 +331,8 @@
     ["flexible", "flexibleSleeping"]
   ];
   const STORAGE_KEY = "ouja_monthly_anonymous_state_v2";
+  const SESSION_TOKEN_RE = /^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/;
+  const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
   const ENDPOINTS = {
     config: "/api/monthly/config",
     browse: "/api/monthly/search",
@@ -335,6 +347,9 @@
     config: null,
     matcher: null,
     request: null,
+    listingQuery: {},
+    recommendationContext: null,
+    impressedListingIds: new Set(),
     results: null,
     currentListing: null,
     quote: null,
@@ -373,6 +388,100 @@
   function approvedIncluded(values) {
     if (!Array.isArray(values)) return [];
     return ["internet", "maintenance"].filter(function (key) { return values.indexOf(key) !== -1; });
+  }
+
+  function validSessionToken(value) {
+    return typeof value === "string" && SESSION_TOKEN_RE.test(value);
+  }
+
+  function chooseSessionToken(existing, issued) {
+    if (validSessionToken(existing)) return existing;
+    return validSessionToken(issued) ? issued : null;
+  }
+
+  function validDate(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const parsed = new Date(value + "T00:00:00Z");
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }
+
+  function boundedInteger(value, minimum, maximum) {
+    if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : null;
+  }
+
+  function parseLocationSearch(search, route) {
+    const values = {};
+    const params = new URLSearchParams(typeof search === "string" ? search : "");
+    const moveIn = params.get("move_in");
+    const moveOut = params.get("move_out");
+    const months = boundedInteger(params.get("duration_months") || params.get("months"), 1, 6);
+    const residents = boundedInteger(params.get("residents") || params.get("guests"), 1, 50);
+    const rawBedrooms = params.get("bedrooms") || params.get("beds");
+    const bedrooms = rawBedrooms === "studio" ? 0 : boundedInteger(rawBedrooms, 0, 20);
+    if (validDate(moveIn)) values.move_in = moveIn;
+    if (validDate(moveOut) && values.move_in && moveOut > values.move_in) values.move_out = moveOut;
+    else if (months !== null) values.duration_months = months;
+    if (residents !== null) values.residents = residents;
+    if (bedrooms !== null) values.bedrooms = bedrooms;
+    const neighborhood = params.get("neighborhood");
+    if (neighborhood && SAFE_ID_RE.test(neighborhood)) values.neighborhood = neighborhood;
+    const placeValue = params.get("place");
+    if (placeValue) {
+      try {
+        const place = JSON.parse(placeValue);
+        if (place && ["destination", "neighborhood"].indexOf(place.kind) !== -1 && SAFE_ID_RE.test(place.id || "") && typeof place.label === "string" && place.label.length > 0 && place.label.length <= 120) {
+          values.place = { kind: place.kind, id: place.id, label: place.label };
+        }
+      } catch (_error) {
+        /* Invalid URL state is ignored rather than sent to the API. */
+      }
+    }
+    if (route === "listing") {
+      const purpose = params.get("purpose");
+      const sleeping = params.get("sleeping");
+      const flexibility = params.get("flexibility");
+      if (PURPOSE_KEYS.indexOf(purpose) !== -1) values.purpose = purpose;
+      if (SLEEPING.some(function (row) { return row[0] === sleeping; })) values.sleeping = sleeping;
+      if (["fixed", "plus_minus_7"].indexOf(flexibility) !== -1) values.flexibility = flexibility;
+    }
+    return values;
+  }
+
+  function publicAvailabilityStatus(value, hasDates) {
+    if (!hasDates) return "";
+    return ["available", "pending", "unavailable"].indexOf(value) !== -1 ? value : "";
+  }
+
+  function rankedImpressionIds(result) {
+    const seen = {};
+    return [].concat(result && result.top || [], result && result.near_matches || [], result && result.alternatives || []).reduce(function (ids, item) {
+      const id = item && item.id !== undefined ? String(item.id) : "";
+      if (id && !seen[id]) {
+        seen[id] = true;
+        ids.push(id);
+      }
+      return ids;
+    }, []);
+  }
+
+  function optionIsSelected(selected, value) {
+    if (selected === undefined || selected === null) return String(value) === "";
+    return String(selected) === String(value);
+  }
+
+  function safeRecommendationContext(item, lang) {
+    const rawId = item && item.id !== undefined ? item.id : item && item.listing_id;
+    const listingId = rawId !== undefined ? String(rawId) : "";
+    if (!SAFE_ID_RE.test(listingId)) return null;
+    const reasons = (Array.isArray(item.reasons) ? item.reasons : []).filter(function (reason) {
+      return typeof reason === "string" && reason.trim().length > 0 && reason.trim().length <= 300;
+    }).slice(0, 4).map(function (reason) { return reason.trim(); });
+    const tradeoff = typeof item.tradeoff === "string" && item.tradeoff.trim().length <= 300 ? item.tradeoff.trim() : "";
+    if (!reasons.length && !tradeoff) return null;
+    const slug = typeof item.slug === "string" && SAFE_ID_RE.test(item.slug) ? item.slug : null;
+    return { listing_id: listingId, slug: slug, lang: lang === "en" ? "en" : "ar", reasons: reasons, tradeoff: tradeoff };
   }
 
   function buildSteps(answers) {
@@ -523,7 +632,8 @@
       lang: runtime.lang,
       session_id: runtime.config && runtime.config.session_id,
       matcher: runtime.matcher,
-      request: runtime.request
+      request: runtime.request,
+      recommendation_context: runtime.recommendationContext
     };
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -662,9 +772,30 @@
     return { route: "home", slug: null, listing_id: null };
   }
 
+  function applyLocationSearch() {
+    const parsed = parseLocationSearch(window.location.search, runtime.page.route);
+    if (runtime.page.route === "browse") {
+      runtime.browseQuery = parsed;
+      runtime.listingQuery = {};
+      return;
+    }
+    if (runtime.page.route === "listing") {
+      runtime.listingQuery = parsed;
+      if (window.location.search || Object.keys(parsed).length) {
+        runtime.request = requestIsComplete(parsed) ? parsed : null;
+      } else {
+        const identifier = String(runtime.page.listing_id || runtime.page.slug || "");
+        if (!runtime.recommendationContext || [runtime.recommendationContext.listing_id, runtime.recommendationContext.slug].indexOf(identifier) === -1) runtime.request = null;
+      }
+      return;
+    }
+    runtime.listingQuery = {};
+  }
+
   function navigate(page, path, entryRoute) {
     if (entryRoute === "browse") {
       runtime.request = null;
+      runtime.recommendationContext = null;
       persistState();
     }
     runtime.page = page;
@@ -702,10 +833,12 @@
   }
 
   async function loadConfig() {
-    runtime.config = await getJSON(ENDPOINTS.config, { lang: runtime.lang });
     const saved = sessionPayload();
+    runtime.config = await getJSON(ENDPOINTS.config, { lang: runtime.lang });
+    runtime.config.session_id = chooseSessionToken(saved.session_id, runtime.config.session_id);
     if (!runtime.matcher) runtime.matcher = initialMatcherState(saved.matcher);
     if (!runtime.request && saved.request) runtime.request = saved.request;
+    if (!runtime.recommendationContext) runtime.recommendationContext = safeRecommendationContext(saved.recommendation_context || {}, saved.recommendation_context && saved.recommendation_context.lang);
     persistState();
     return runtime.config;
   }
@@ -724,6 +857,8 @@
     const actions = element("div", "hero-actions");
     const guided = button(copy("guidedCta"), "button button-primary", function () {
       runtime.matcher = initialMatcherState();
+      runtime.impressedListingIds = new Set();
+      runtime.recommendationContext = null;
       persistState();
       track("matcher_start", { entry_route: "guided" });
       navigate({ route: "match", slug: null, listing_id: null }, "/monthly/match", "guided");
@@ -802,17 +937,19 @@
     return safeSlug ? "/monthly/" + safeSlug : "/monthly/id/" + encodeURIComponent(item.id);
   }
 
-  function openListing(event, item, rank) {
+  function openListing(event, item) {
     event.preventDefault();
     const page = { route: "listing", listing_id: String(item.id), slug: null };
-    if (rank) track("result_impression", { listing_id: String(item.id), rank: rank });
-    navigate(page, listingPath(item));
+    runtime.recommendationContext = safeRecommendationContext(item, runtime.lang);
+    runtime.listingQuery = runtime.page.route === "browse" ? Object.assign({}, runtime.browseQuery) : {};
+    persistState();
+    navigate(page, listingPath(item) + queryString(runtime.listingQuery));
   }
 
   function createCard(item, index) {
     const card = element("article", "listing-card");
     const path = listingPath(item);
-    const media = actionLink("", path, "listing-card-media", function (event) { openListing(event, item, index); });
+    const media = actionLink("", path, "listing-card-media", function (event) { openListing(event, item); });
     const imageUrl = safeImageUrl(item.cover && item.cover.url);
     if (imageUrl) {
       const image = element("img");
@@ -826,7 +963,7 @@
     }
     const body = element("div", "listing-card-body");
     const heading = element("h3");
-    heading.appendChild(actionLink(item.title, path, "", function (event) { openListing(event, item, index); }));
+    heading.appendChild(actionLink(item.title, path, "", function (event) { openListing(event, item); }));
     append(body, heading);
     if (item.neighborhood) body.appendChild(element("p", "listing-location", item.neighborhood));
     body.appendChild(factsList(item));
@@ -836,10 +973,15 @@
     }
     if (item.quote && item.quote.monthly_rate_sar !== undefined) {
       body.appendChild(element("p", "price-line", copy("perMonth", { amount: formatNumber(item.quote.monthly_rate_sar) })));
+      const included = approvedIncluded(item.quote.included || []).map(function (key) { return copy(key); });
+      if (included.length) body.appendChild(element("p", "card-included", copy("quoteIncludes", { items: included.join(runtime.lang === "ar" ? "، " : ", ") })));
     }
-    const availability = element("p", "availability " + (item.availability_status || "pending"));
-    append(availability, svgIcon(item.availability_status === "available" ? "check" : "alert"), document.createTextNode(availabilityLabel(item.availability_status)));
-    body.appendChild(availability);
+    const status = publicAvailabilityStatus(item.availability_status, Boolean(item.quote));
+    if (status) {
+      const availability = element("p", "availability " + status);
+      append(availability, svgIcon(status === "available" ? "check" : "alert"), document.createTextNode(availabilityLabel(status)));
+      body.appendChild(availability);
+    }
     append(card, media, body);
     return card;
   }
@@ -923,6 +1065,8 @@
 
   function applyMatcherAnswer(step, value) {
     runtime.matcher = answerStep(runtime.matcher, step, value);
+    runtime.impressedListingIds = new Set();
+    runtime.recommendationContext = null;
     persistState();
     if (step === "dates") {
       recordAnswer("move_in", value.move_in);
@@ -1190,7 +1334,7 @@
       append(trade, element("strong", "", copy("tradeoff")), element("p", "", item.tradeoff));
       content.appendChild(trade);
     }
-    const link = actionLink(copy("viewHome"), listingPath(item), "button button-dark", function (event) { openListing(event, item, index); });
+    const link = actionLink(copy("viewHome"), listingPath(item), "button button-dark", function (event) { openListing(event, item); });
     content.appendChild(link);
     append(card, media, content);
     return card;
@@ -1231,6 +1375,8 @@
       runtime.matcher = initialMatcherState();
       runtime.request = null;
       runtime.results = null;
+      runtime.recommendationContext = null;
+      runtime.impressedListingIds = new Set();
       persistState();
       renderMatcher();
     }));
@@ -1243,15 +1389,27 @@
     if (result.alternatives && result.alternatives.length) wrap.appendChild(resultsSection(copy("strongOptions"), "", result.alternatives, false));
     if (result.catalog && result.catalog.length) wrap.appendChild(resultsSection(copy("allAvailable"), "", result.catalog, false));
     if (!(result.top && result.top.length) && !(result.near_matches && result.near_matches.length)) {
+      if (!result.pending_count && requestIsComplete(runtime.request)) {
+        const help = stateMessage(copy("generalHelpTitle"), copy("generalHelpText"), "warning");
+        const control = button(copy("generalHelpAction"), "button button-primary", function () { prepareGeneralHelp(control); });
+        const blocked = (runtime.config.blockers || []).some(function (item) { return item.field === "whatsapp_number"; });
+        control.disabled = blocked || !runtime.config.session_id;
+        help.appendChild(control);
+        wrap.appendChild(help);
+      }
       wrap.appendChild(actionLink(copy("browseCta"), "/monthly/search", "button button-outline", function (event) {
         event.preventDefault();
         navigate({ route: "browse", slug: null, listing_id: null }, "/monthly/search", "browse");
       }));
     }
     target.appendChild(wrap);
-    const ids = [].concat(result.top || [], result.alternatives || []).slice(0, 100).map(function (item) { return String(item.id); });
+    const ids = rankedImpressionIds(result).slice(0, 100);
     track("results_view", Object.assign(eventContextFromRequest(runtime.request || {}), { listing_ids: ids }));
-    ids.forEach(function (id, index) { track("result_impression", { listing_id: id, rank: index + 1 }); });
+    ids.forEach(function (id, index) {
+      if (runtime.impressedListingIds.has(id)) return;
+      runtime.impressedListingIds.add(id);
+      track("result_impression", { listing_id: id, rank: index + 1 });
+    });
     announce(copy("resultsTitle"));
     focusMain();
   }
@@ -1265,7 +1423,7 @@
     options.forEach(function (row) {
       const option = element("option", "", row.label);
       option.value = String(row.value);
-      if (String(selected || "") === String(row.value)) option.selected = true;
+      if (optionIsSelected(selected, row.value)) option.selected = true;
       select.appendChild(option);
     });
     append(field, label, select);
@@ -1370,7 +1528,7 @@
   function listingQuery(identifier, bySlug) {
     const values = { lang: runtime.lang };
     if (bySlug) values.lookup = "slug";
-    const request = runtime.request;
+    const request = Object.keys(runtime.listingQuery || {}).length ? runtime.listingQuery : runtime.request;
     if (request) {
       ["move_in", "move_out", "duration_months", "residents", "purpose"].forEach(function (key) {
         if (request[key] !== undefined) values[key] = request[key];
@@ -1402,7 +1560,7 @@
       image.src = url;
       image.alt = photo.alt || listing.title || "";
       image.width = index === 0 ? 1200 : 600;
-      image.height = index === 0 ? 750 : 450;
+      image.sizes = index === 0 ? "(min-width: 768px) 50vw, 100vw" : "(min-width: 768px) 25vw, 50vw";
       image.loading = index === 0 ? "eager" : "lazy";
       image.decoding = "async";
       figure.appendChild(image);
@@ -1430,6 +1588,26 @@
       title.appendChild(highlights);
     }
     content.appendChild(title);
+    const context = runtime.recommendationContext;
+    if (context && context.listing_id === String(listing.id) && context.lang === runtime.lang) {
+      const proof = element("section", "recommendation-proof");
+      proof.appendChild(element("h2", "", copy("whyRecommended")));
+      if (context.reasons.length) {
+        const reasons = element("ul", "reason-list");
+        context.reasons.forEach(function (reason) {
+          const row = element("li");
+          append(row, svgIcon("check"), document.createTextNode(reason));
+          reasons.appendChild(row);
+        });
+        proof.appendChild(reasons);
+      }
+      if (context.tradeoff) {
+        const trade = element("div", "tradeoff");
+        append(trade, element("strong", "", copy("tradeoff")), element("p", "", context.tradeoff));
+        proof.appendChild(trade);
+      }
+      content.appendChild(proof);
+    }
     if (listing.story && listing.story.length) {
       const story = element("section", "story-section");
       story.appendChild(element("h2", "", copy("story")));
@@ -1443,7 +1621,7 @@
           image.src = photoUrl;
           image.alt = (photo && photo.alt) || listing.title || "";
           image.width = 720;
-          image.height = 480;
+          image.sizes = "(min-width: 768px) 32vw, 100vw";
           image.loading = "lazy";
           image.decoding = "async";
           row.appendChild(image);
@@ -1482,7 +1660,6 @@
       if (listing.location.description) location.appendChild(element("p", "", listing.location.description));
       content.appendChild(location);
     }
-    content.appendChild(licenceDetails(listing));
     return content;
   }
 
@@ -1556,7 +1733,7 @@
 
   function stayDetailsForm(listing) {
     const form = element("form", "date-form");
-    const saved = runtime.request || {};
+    const saved = runtime.request || runtime.listingQuery || {};
     const purpose = selectField("listing-purpose", copy("selectPurpose"), PURPOSE_KEYS.map(function (key) { return { value: key, label: copy(key) }; }), saved.purpose || "family");
     const residents = formField("listing-residents", copy("residentsLabel"), "number", saved.residents || 1);
     residents.input.min = "1";
@@ -1603,7 +1780,9 @@
         return;
       }
       runtime.request = request;
+      runtime.listingQuery = {};
       persistState();
+      window.history.replaceState(runtime.page, "", listingPath(listing) + queryString(request));
       loadListing(listing.id, false);
     });
     return form;
@@ -1632,6 +1811,29 @@
     }
   }
 
+  async function prepareGeneralHelp(control) {
+    control.disabled = true;
+    control.textContent = copy("preparingWhatsApp");
+    announce(copy("preparingWhatsApp"));
+    track("whatsapp_click", eventContextFromRequest(runtime.request || {}));
+    try {
+      const handoff = await postJSON(ENDPOINTS.lead, {
+        session_id: runtime.config.session_id,
+        general_help: true,
+        request: runtime.request,
+        lang: runtime.lang
+      });
+      const handoffUrl = safeWhatsAppUrl(handoff.url);
+      if (!handoffUrl) throw new Error(copy("leadFailed"));
+      announce(copy("openingWhatsApp", { reference: handoff.lead_reference }));
+      window.location.assign(handoffUrl);
+    } catch (error) {
+      control.disabled = false;
+      control.textContent = copy("generalHelpAction");
+      announce(error.message || copy("leadFailed"), true);
+    }
+  }
+
   function renderListingPage(listing, quote, status) {
     const target = clearMain();
     const wrap = element("article", "page-width listing-page");
@@ -1642,6 +1844,7 @@
     price.appendChild(quoteCard(listing, quote, status));
     layout.appendChild(price);
     wrap.appendChild(layout);
+    wrap.appendChild(licenceDetails(listing));
     target.appendChild(wrap);
     if (quote && requestIsComplete(runtime.request)) {
       const mobile = element("div", "sticky-mobile-action");
@@ -1672,6 +1875,17 @@
     }
   }
 
+  async function localizeRecommendationContext() {
+    const context = runtime.recommendationContext;
+    if (!context || context.lang === runtime.lang || !requestIsComplete(runtime.request)) return;
+    const result = await postJSON(ENDPOINTS.match, Object.assign({ lang: runtime.lang }, runtime.request));
+    const item = [].concat(result.top || [], result.near_matches || [], result.alternatives || []).find(function (row) {
+      return String(row.id) === context.listing_id;
+    });
+    runtime.recommendationContext = item ? safeRecommendationContext(item, runtime.lang) : null;
+    persistState();
+  }
+
   async function loadRoute(withFocus) {
     try {
       if (!runtime.config) await loadConfig();
@@ -1683,6 +1897,7 @@
       else if (runtime.page.route === "browse") await renderBrowse();
       else if (runtime.page.route === "listing") {
         const identifier = runtime.page.listing_id || runtime.page.slug;
+        await localizeRecommendationContext();
         await loadListing(identifier, Boolean(runtime.page.slug && !runtime.page.listing_id));
       }
       if (withFocus) focusMain();
@@ -1697,6 +1912,8 @@
     runtime.lang = saved.lang === "en" ? "en" : "ar";
     runtime.matcher = initialMatcherState(saved.matcher);
     runtime.request = saved.request || null;
+    runtime.recommendationContext = safeRecommendationContext(saved.recommendation_context || {}, saved.recommendation_context && saved.recommendation_context.lang);
+    applyLocationSearch();
     document.documentElement.lang = runtime.lang;
     document.documentElement.dir = runtime.lang === "ar" ? "rtl" : "ltr";
     applyShellCopy();
@@ -1705,6 +1922,7 @@
     });
     window.addEventListener("popstate", function () {
       runtime.page = routeFromLocation();
+      applyLocationSearch();
       loadRoute(true);
     });
     runtime.booted = true;
@@ -1724,9 +1942,15 @@
     boot: boot,
     buildMatchRequest: buildMatchRequest,
     buildSteps: buildSteps,
+    chooseSessionToken: chooseSessionToken,
     focusQuestion: focusQuestion,
     goBack: goBack,
     initialMatcherState: initialMatcherState,
+    optionIsSelected: optionIsSelected,
+    parseLocationSearch: parseLocationSearch,
+    publicAvailabilityStatus: publicAvailabilityStatus,
+    rankedImpressionIds: rankedImpressionIds,
+    safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,
     setLanguage: setLanguage
