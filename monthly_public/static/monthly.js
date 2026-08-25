@@ -452,27 +452,16 @@
     return value;
   }
 
-  function recoverySessionToken(current, fresh, code) {
-    if (code !== "invalid_signature" || !validSessionToken(fresh) || fresh === current) return null;
-    return fresh;
-  }
-
-  async function retrySessionOperation(operation, current, fresh, refresh, onRotate) {
+  async function retrySessionOperation(operation, current, _cachedFresh, refresh, onRotate) {
     try {
       return await operation(current);
     } catch (error) {
-      let replacement = recoverySessionToken(current, fresh, error && error.code);
-      if (!replacement && error && error.code === "invalid_signature" && typeof refresh === "function") {
-        replacement = await refresh();
-      }
+      if (!error || error.code !== "invalid_signature" || typeof refresh !== "function") throw error;
+      const replacement = await refresh();
       if (!validSessionToken(replacement) || replacement === current) throw error;
       if (typeof onRotate === "function") onRotate(replacement);
       return operation(replacement);
     }
-  }
-
-  function retryOnceForInvalidSignature(operation, current, fresh, onRotate) {
-    return retrySessionOperation(operation, current, fresh, null, onRotate);
   }
 
   function boundedInteger(value, minimum, maximum) {
@@ -2080,10 +2069,8 @@
     parseLocationSearch: parseLocationSearch,
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
-    recoverySessionToken: recoverySessionToken,
     responseWindowMessage: responseWindowMessage,
     retrySessionOperation: retrySessionOperation,
-    retryOnceForInvalidSignature: retryOnceForInvalidSignature,
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,
