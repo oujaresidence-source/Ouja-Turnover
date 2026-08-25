@@ -86,6 +86,17 @@ class MatchRequestContractTests(unittest.TestCase):
 
         self.assertEqual(parsed["move_out"], "2026-11-01")
         self.assertEqual(parsed["duration_months"], 2)
+        self.assertEqual(parsed["duration_days"], 61)
+
+    def test_move_out_only_accepts_a_chosen_date_between_month_anniversaries(self):
+        request = valid_match_request(move_out="2026-11-15")
+        request.pop("duration_months")
+
+        parsed = parse_match_request(request)
+
+        self.assertEqual(parsed["move_out"], "2026-11-15")
+        self.assertEqual(parsed["duration_days"], 75)
+        self.assertNotIn("duration_months", parsed)
 
     def test_required_date_selection_rejects_duration_and_move_out_together(self):
         with self.assertRaises(ContractError) as caught:
