@@ -1,5 +1,6 @@
 import copy
 import json
+import threading
 import unittest
 from unittest import mock
 
@@ -183,6 +184,50 @@ class MonthlyCatalogBotIntegrationTest(unittest.TestCase):
         self.assertEqual(settings.whatsapp_number, "966500000000")
         self.assertIn("hospital", places)
         self.assertIs(snapshot.values[0], source)
+
+    def test_simultaneous_refresh_requests_are_coalesced_to_one_extra_pass(self):
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def refresh():
+            calls.append(True)
+            if len(calls) == 1:
+                started.set()
+                self.assertTrue(release.wait(2))
+            return {"accepted": True, "error": None}
+
+        results = []
+        self.bot._monthly_public_refresh_pending.clear()
+        worker = threading.Thread(
+            target=lambda: results.append(
+                self.bot._monthly_public_request_refresh("calendar")
+            )
+        )
+        with mock.patch.object(
+            self.bot, "_monthly_public_refresh_snapshot", side_effect=refresh
+        ):
+            worker.start()
+            self.assertTrue(started.wait(2))
+            pending = self.bot._monthly_public_request_refresh("engine")
+            self.assertTrue(pending["pending"])
+            release.set()
+            worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(results[0]["passes"], 2)
+
+    def test_refresh_trigger_boundaries_are_background_only(self):
+        with open(self.bot.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        for required in (
+            '_monthly_public_request_refresh("startup")',
+            '_monthly_public_request_refresh("calendar")',
+            '_monthly_public_request_refresh("pricing_engine")',
+            '_monthly_public_request_refresh("listing_cache")',
+        ):
+            self.assertIn(required, source)
 
 
 if __name__ == "__main__":

@@ -58313,6 +58313,40 @@ def _monthly_public_refresh_snapshot():
         return {"accepted": False, "error": str(error)}
 
 
+_monthly_public_refresh_lock = threading.Lock()
+_monthly_public_refresh_pending = threading.Event()
+
+
+def _monthly_public_request_refresh(reason):
+    """Coalesce background refreshes and allow at most one follow-up pass."""
+    refresh_reason = str(reason or "background")[:80]
+    if not _monthly_public_refresh_lock.acquire(False):
+        _monthly_public_refresh_pending.set()
+        return {
+            "accepted": False,
+            "pending": True,
+            "passes": 0,
+            "reason": refresh_reason,
+        }
+    result = {"accepted": False, "error": "refresh unavailable"}
+    passes = 0
+    try:
+        while passes < 2:
+            _monthly_public_refresh_pending.clear()
+            passes += 1
+            result = _monthly_public_refresh_snapshot()
+            if not _monthly_public_refresh_pending.is_set():
+                break
+        return {
+            **dict(result),
+            "pending": _monthly_public_refresh_pending.is_set(),
+            "passes": passes,
+            "reason": refresh_reason,
+        }
+    finally:
+        _monthly_public_refresh_lock.release()
+
+
 if (_monthly_catalog_store is not None
         and _MonthlyCatalogService is not None
         and _HAS_MONTHLY_PUBLIC
@@ -58322,7 +58356,7 @@ if (_monthly_catalog_store is not None
             _monthly_catalog_store,
             source_provider=_monthly_catalog_prefill_source,
             settings_fallback=_monthly_public_settings_fallback_values,
-            snapshot_refresh=_monthly_public_refresh_snapshot,
+            snapshot_refresh=lambda: _monthly_public_request_refresh("catalog_approval"),
             clock=lambda: datetime.now(TZ),
         )
     except Exception as _mcat_service_err:
@@ -59902,6 +59936,10 @@ async def _api_gw_sync(request):
     if not _dash_auth(request):
         return _json({"error": "forbidden"}, 403)
     res = await asyncio.to_thread(_gw_sync, True)
+    if res.get("ok") and _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
+        await asyncio.to_thread(
+            lambda: _monthly_public_request_refresh("listing_cache")
+        )
     return _json(res)
 
 # ===================== Stage-1 security: role enforcement + headers =====================
@@ -61384,8 +61422,10 @@ async def monthly_calendar_loop():
         res = await asyncio.to_thread(_mcal_refresh_sync)
         print("monthly calendar: %s units warm, %s failed, %sms"
               % (res["ok"], res["err"], res["last_ms"]))
-        if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
-            await asyncio.to_thread(_monthly_public_refresh_snapshot)
+        if res.get("ok") and _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
+            await asyncio.to_thread(
+                lambda: _monthly_public_request_refresh("calendar")
+            )
     except Exception as e:
         print("monthly calendar loop error:", e)
 
@@ -61411,8 +61451,10 @@ async def monthly_engine_loop():
                      100.0 * (res.get("coverage") or 0)))
         else:
             print("monthly engine: not refreshed —", res.get("err"))
-        if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
-            await asyncio.to_thread(_monthly_public_refresh_snapshot)
+        if res.get("ok") and _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
+            await asyncio.to_thread(
+                lambda: _monthly_public_request_refresh("pricing_engine")
+            )
     except Exception as e:
         print("monthly engine loop error:", e)
 
@@ -68917,6 +68959,10 @@ async def on_ready():
         _loop_guard(_lp, _nm)
         _lp._error_guarded = True
     _pending = []          # collected here, started staggered below (see _staggered_start)
+    if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
+        asyncio.create_task(asyncio.to_thread(
+            lambda: _monthly_public_request_refresh("startup")
+        ))
     if not poll_loop.is_running():
         _pending.append(poll_loop)
     if not oujact_daily_loop.is_running():

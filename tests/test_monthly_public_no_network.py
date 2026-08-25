@@ -124,7 +124,7 @@ class MonthlyPublicNoNetworkTests(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
                 found[node.name] = ast.get_source_segment(source, node) or ""
         self.assertEqual(set(found), names)
-        forbidden = ("api_get(", "api_post(", "_gw_sync(", "_mcal_refresh_sync(", "_mengine_refresh_sync(")
+        forbidden = ("api_get(", "api_post(", "_gw_sync(", "_mcal_refresh_sync(", "_mengine_refresh_sync(", "_monthly_public_request_refresh(")
         for name, body in found.items():
             for token in forbidden:
                 self.assertNotIn(token, body, "%s reached %s" % (name, token))
