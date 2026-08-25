@@ -138,6 +138,20 @@ class CatalogProfileContractTest(unittest.TestCase):
                 self.assertEqual(caught.exception.field, field)
                 self.assertEqual(caught.exception.code, "language_mismatch")
 
+    def test_language_error_keeps_the_exact_field_for_the_dashboard(self):
+        with self.assertRaises(CatalogContractError) as caught:
+            parse_profile({"name_ar": "Ouja English title"})
+
+        self.assertEqual(
+            caught.exception.as_dict(),
+            {
+                "field": "name_ar",
+                "code": "language_mismatch",
+                "message_ar": "استخدم لغة الحقل المحددة.",
+                "message_en": "Use the language assigned to this field.",
+            },
+        )
+
     def test_optional_cleaning_requires_a_non_negative_sar_amount(self):
         terms = valid_profile()["commercial_terms"]
         terms["cleaning"].pop("amount_sar")

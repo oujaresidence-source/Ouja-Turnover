@@ -126,6 +126,70 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertIsNone(result["coords"][1])
         self.assertEqual(result["percent"], 31)
 
+    def test_readiness_uses_current_values_and_catches_the_92_percent_language_error(self):
+        result = self._javascript_result(
+            "api.profileReadiness({"
+            "active:true,name_ar:'English only',name_en:'Ouja home',"
+            "short_ar:'وصف عربي',short_en:'English description',"
+            "content_verified:true,bedrooms:2,baths:2,capacity:4,"
+            "neighborhood:'malqa',neighborhood_ar:'الملقا',"
+            "neighborhood_en:'Al Malqa',neighborhood_verified:true,"
+            "images:['1','2','3'],licence:{licence_no:'LIC-1',expires:'2027-01-01'},"
+            "commercial_terms:{utilities:{mode:'included',label_ar:'مشمولة',label_en:'Included'},"
+            "cleaning:{mode:'optional',amount_sar:150,label_ar:'اختياري',label_en:'Optional'}}"
+            "})"
+        )
+
+        self.assertEqual(result["percent"], 92)
+        self.assertFalse(result["ready_for_approval"])
+        self.assertEqual(
+            result["staff_blockers"], ["arabic_title_language_mismatch"]
+        )
+
+    def test_all_listing_blockers_and_error_fields_have_bilingual_labels(self):
+        codes = [
+            "active_missing", "arabic_title_missing",
+            "arabic_title_language_mismatch", "english_title_missing",
+            "english_title_language_mismatch", "arabic_content_missing",
+            "arabic_content_language_mismatch", "english_content_missing",
+            "english_content_language_mismatch", "content_unverified",
+            "bedrooms_missing", "bathrooms_missing", "capacity_missing",
+            "neighbourhood_missing", "images_missing", "licence_missing",
+            "commercial_terms_missing", "commercial_terms_language_mismatch",
+            "price_missing", "calendar_missing", "calendar_stale",
+            "calendar_future", "calendar_invalid", "rating_unverified",
+            "rating_invalid", "source_refresh_failed", "catalog_incomplete",
+            "licence_expiry_missing", "licence_expiry_invalid",
+            "licence_expired", "title_bedroom_conflict",
+            "untranslated_amenity", "coordinates_unverified",
+        ]
+        expression = (
+            "({labels:%s.flatMap(function(code){return ["
+            "api.translatedBlocker(code,'ar'),api.translatedBlocker(code,'en')]}),"
+            "fields:[api.issueFieldLabel('name_ar','ar'),"
+            "api.issueFieldLabel('structured.sections.0.body_en','en')],"
+            "steps:[api.fieldStep('name_ar'),"
+            "api.fieldStep('structured.sections.0.body_en'),"
+            "api.fieldStep('commercial_terms.cleaning.label_ar')]})"
+        ) % json.dumps(codes)
+        result = self._javascript_result(expression)
+
+        self.assertTrue(all(label and "_" not in label for label in result["labels"]))
+        self.assertEqual(result["fields"], ["اسم الشقة بالعربي", "English section details"])
+        self.assertEqual(result["steps"], ["identity", "content", "terms"])
+
+    def test_survey_error_names_and_focuses_the_exact_api_field(self):
+        js = JS_FILE.read_text("utf-8")
+        for required in (
+            "issue.field",
+            "issueFieldLabel(issue.field, state.lang)",
+            "fieldStep(issue.field)",
+            "control.name === issue.field",
+            'control.setAttribute("aria-invalid", "true")',
+            "control.focus()",
+        ):
+            self.assertIn(required, js)
+
     def test_javascript_builds_only_approved_contract_fields(self):
         result = self._javascript_result("({"
             "profile:api.buildProfilePayload({active:true,name_ar:'عوجا',name_en:'Ouja',short_ar:'وصف',short_en:'Description',content_verified:true,neighborhood:'malqa',neighborhood_ar:'الملقا',neighborhood_en:'Al Malqa',neighborhood_verified:true,bedrooms:'2',beds_count:'3',baths:'2',capacity:'4',floor_area_sqm:'110.5',images:['https://images.example/1.jpg'],facts:{parking:'yes',pool:'unknown'},licence:{licence_no:'LIC-1',expires:'2027-01-01'},commercial_terms:{utilities:{mode:'included',label_ar:'مشمولة',label_en:'Included'},cleaning:{mode:'optional',amount_sar:'150',label_ar:'اختياري',label_en:'Optional'}},coordinates:'24.7136,46.6753',structured:{tagline_ar:'سكن هادئ',tagline_en:'Quiet stay',sections:[{title_ar:'المعيشة',title_en:'Living',body_ar:'مساحة مريحة',body_en:'Comfortable space'}]},official_prices:{'2026-09':9000},door_code:'1234'}),"

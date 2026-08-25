@@ -13,6 +13,98 @@
     ar: { connected_listing: "بيانات الشقة المرتبطة", stay_approved: "محتوى عوجا المعتمد", monthly_licence_store: "سجل معلومات الإعلان", monthly_approved: "بيانات شهرية معتمدة", monthly_draft: "مسودة الفريق" },
     en: { connected_listing: "connected apartment data", stay_approved: "approved Ouja content", monthly_licence_store: "advertising information record", monthly_approved: "approved monthly data", monthly_draft: "team draft" }
   };
+  const BLOCKER_LABELS = {
+    active_missing: { ar: "حدد ظهور الشقة في السكن الشهري", en: "Choose whether the apartment is visible for monthly stays" },
+    arabic_title_missing: { ar: "اسم الشقة بالعربي ناقص", en: "Arabic apartment name is missing" },
+    arabic_title_language_mismatch: { ar: "اسم الشقة العربي يحتاج نصًا عربيًا", en: "Arabic apartment name needs Arabic text" },
+    english_title_missing: { ar: "اسم الشقة بالإنجليزي ناقص", en: "English apartment name is missing" },
+    english_title_language_mismatch: { ar: "اسم الشقة الإنجليزي يحتاج نصًا إنجليزيًا", en: "English apartment name needs English text" },
+    arabic_content_missing: { ar: "الوصف العربي ناقص", en: "Arabic description is missing" },
+    arabic_content_language_mismatch: { ar: "المحتوى العربي يحتاج نصًا عربيًا مكتملًا", en: "Arabic content needs complete Arabic text" },
+    english_content_missing: { ar: "الوصف الإنجليزي ناقص", en: "English description is missing" },
+    english_content_language_mismatch: { ar: "المحتوى الإنجليزي يحتاج نصًا إنجليزيًا مكتملًا", en: "English content needs complete English text" },
+    content_unverified: { ar: "راجع المحتوى باللغتين", en: "Review the content in both languages" },
+    bedrooms_missing: { ar: "عدد غرف النوم ناقص", en: "Bedroom count is missing" },
+    bathrooms_missing: { ar: "عدد دورات المياه ناقص", en: "Bathroom count is missing" },
+    capacity_missing: { ar: "عدد السكان ناقص", en: "Resident capacity is missing" },
+    neighbourhood_missing: { ar: "بيانات الحي الموثقة ناقصة", en: "Verified neighborhood details are missing" },
+    neighbourhood_language_mismatch: { ar: "أسماء الحي تحتاج العربي والإنجليزي الصحيح", en: "Neighborhood names need valid Arabic and English text" },
+    images_missing: { ar: "تحتاج الشقة ثلاث صور على الأقل", en: "The apartment needs at least three photos" },
+    licence_missing: { ar: "معلومات الإعلان ناقصة", en: "Advertising information is missing" },
+    commercial_terms_missing: { ar: "شروط الخدمات والتنظيف ناقصة", en: "Utilities and cleaning terms are missing" },
+    commercial_terms_language_mismatch: { ar: "شروح الشروط تحتاج العربي والإنجليزي الصحيح", en: "Terms need valid Arabic and English explanations" },
+    price_missing: { ar: "السعر الشهري الرسمي ناقص", en: "Official monthly price is missing" },
+    calendar_missing: { ar: "تغطية التقويم ناقصة", en: "Calendar coverage is missing" },
+    calendar_stale: { ar: "بيانات التقويم قديمة", en: "Calendar data is stale" },
+    calendar_future: { ar: "وقت تحديث التقويم غير صحيح", en: "Calendar refresh time is invalid" },
+    calendar_invalid: { ar: "بيانات التقويم غير صالحة", en: "Calendar data is invalid" },
+    rating_unverified: { ar: "التقييم غير موثق", en: "Rating is not verified" },
+    rating_invalid: { ar: "بيانات التقييم غير صالحة", en: "Rating data is invalid" },
+    source_refresh_failed: { ar: "آخر تحديث للمصدر لم ينجح", en: "The latest source refresh failed" },
+    catalog_incomplete: { ar: "بيانات المخزون المستلمة غير مكتملة", en: "Received inventory data is incomplete" },
+    licence_expiry_missing: { ar: "تاريخ انتهاء معلومات الإعلان ناقص", en: "Advertising expiry date is missing" },
+    licence_expiry_invalid: { ar: "تاريخ انتهاء معلومات الإعلان غير صحيح", en: "Advertising expiry date is invalid" },
+    licence_expired: { ar: "معلومات الإعلان منتهية", en: "Advertising information has expired" },
+    title_bedroom_conflict: { ar: "اسم الشقة يتعارض مع عدد غرف النوم", en: "Apartment name conflicts with the bedroom count" },
+    untranslated_amenity: { ar: "إحدى المزايا غير مترجمة", en: "An amenity is not translated" },
+    coordinates_unverified: { ar: "إحداثيات الشقة غير موثقة", en: "Apartment coordinates are not verified" },
+    listing_id_missing: { ar: "معرّف الشقة ناقص", en: "Apartment ID is missing" }
+  };
+  const FIELD_LABELS = {
+    active: { ar: "ظهور الشقة", en: "Apartment visibility" },
+    name_ar: { ar: "اسم الشقة بالعربي", en: "Arabic apartment name" },
+    name_en: { ar: "اسم الشقة بالإنجليزي", en: "English apartment name" },
+    short_ar: { ar: "الوصف المختصر بالعربي", en: "Short Arabic description" },
+    short_en: { ar: "الوصف المختصر بالإنجليزي", en: "Short English description" },
+    content_verified: { ar: "مراجعة المحتوى", en: "Content review" },
+    bedrooms: { ar: "غرف النوم", en: "Bedrooms" },
+    beds_count: { ar: "عدد الأسرّة", en: "Beds" },
+    baths: { ar: "دورات المياه", en: "Bathrooms" },
+    capacity: { ar: "عدد السكان", en: "Residents" },
+    floor_area_sqm: { ar: "المساحة بالمتر", en: "Area in sqm" },
+    neighborhood: { ar: "معرّف الحي", en: "Neighborhood ID" },
+    neighborhood_ar: { ar: "اسم الحي بالعربي", en: "Arabic neighborhood" },
+    neighborhood_en: { ar: "اسم الحي بالإنجليزي", en: "English neighborhood" },
+    neighborhood_verified: { ar: "التحقق من الحي", en: "Neighborhood verification" },
+    coordinates: { ar: "إحداثيات الشقة", en: "Apartment coordinates" },
+    "licence.licence_no": { ar: "رقم معلومات الإعلان", en: "Advertising information number" },
+    "licence.expires": { ar: "تاريخ انتهاء معلومات الإعلان", en: "Advertising expiry date" },
+    "structured.tagline_ar": { ar: "عبارة الشقة بالعربي", en: "Arabic tagline" },
+    "structured.tagline_en": { ar: "عبارة الشقة بالإنجليزي", en: "English tagline" },
+    "structured.sections.*.title_ar": { ar: "عنوان القسم بالعربي", en: "Arabic section title" },
+    "structured.sections.*.title_en": { ar: "عنوان القسم بالإنجليزي", en: "English section title" },
+    "structured.sections.*.body_ar": { ar: "تفاصيل القسم بالعربي", en: "Arabic section details" },
+    "structured.sections.*.body_en": { ar: "تفاصيل القسم بالإنجليزي", en: "English section details" },
+    "commercial_terms.utilities.mode": { ar: "احتساب الخدمات", en: "Utilities" },
+    "commercial_terms.utilities.label_ar": { ar: "شرح الخدمات بالعربي", en: "Arabic utilities explanation" },
+    "commercial_terms.utilities.label_en": { ar: "شرح الخدمات بالإنجليزي", en: "English utilities explanation" },
+    "commercial_terms.cleaning.mode": { ar: "التنظيف", en: "Cleaning" },
+    "commercial_terms.cleaning.amount_sar": { ar: "قيمة التنظيف", en: "Cleaning amount" },
+    "commercial_terms.cleaning.label_ar": { ar: "شرح التنظيف بالعربي", en: "Arabic cleaning explanation" },
+    "commercial_terms.cleaning.label_en": { ar: "شرح التنظيف بالإنجليزي", en: "English cleaning explanation" }
+  };
+
+  function translatedBlocker(code, lang) {
+    const language = lang === "en" ? "en" : "ar", value = BLOCKER_LABELS[code];
+    return value ? value[language] : String(code || "").replace(/_/g, " ");
+  }
+
+  function issueFieldLabel(field, lang) {
+    const language = lang === "en" ? "en" : "ar";
+    const key = String(field || "").replace(/structured\.sections\.\d+\./, "structured.sections.*.");
+    const value = FIELD_LABELS[key];
+    return value ? value[language] : String(field || "").replace(/_/g, " ");
+  }
+
+  function fieldStep(field) {
+    const value = String(field || "");
+    if (/^(active|name_|licence\.|images)/.test(value)) return "identity";
+    if (/^(bedrooms|beds_count|baths|capacity|floor_area_sqm|facts\.)/.test(value)) return "space";
+    if (/^(neighborhood|coordinates)/.test(value)) return "location";
+    if (/^(short_|content_verified|structured\.)/.test(value)) return "content";
+    if (/^commercial_terms\./.test(value)) return "terms";
+    return null;
+  }
 
   function translatedDay(day, lang) {
     const language = lang === "en" ? "en" : "ar";
@@ -153,15 +245,72 @@
     };
   }
 
-  function completionPercent(profile) {
+  function matchesLanguage(value, language) {
+    if (!present(value)) return false;
+    return language === "ar" ? /[\u0600-\u06ff]/.test(String(value)) : /[A-Za-z]/.test(String(value));
+  }
+
+  function structuredLanguageReady(profile, language) {
+    const structured = profile && profile.structured;
+    if (!structured || typeof structured !== "object") return true;
+    const suffix = language === "ar" ? "_ar" : "_en";
+    for (const key of ["tagline" + suffix, "neighborhood" + suffix]) {
+      if (present(structured[key]) && !matchesLanguage(structured[key], language)) return false;
+    }
+    for (const emblem of Array.isArray(structured.emblems) ? structured.emblems : []) {
+      if (!emblem || !matchesLanguage(emblem[language], language)) return false;
+    }
+    for (const section of Array.isArray(structured.sections) ? structured.sections : []) {
+      if (!section || !matchesLanguage(section["title" + suffix], language) || !matchesLanguage(section["body" + suffix], language)) return false;
+    }
+    return true;
+  }
+
+  function profileReadiness(profile) {
     const value = profile && typeof profile === "object" ? profile : {};
-    if (value.active === false) return 100;
-    const checks = [value.active === true, Boolean(value.name_ar), Boolean(value.name_en), Boolean(value.short_ar), Boolean(value.short_en), value.content_verified === true,
-      Number.isInteger(Number(value.bedrooms)), Number.isInteger(Number(value.baths)), Number.isInteger(Number(value.capacity)),
-      Boolean(value.neighborhood && value.neighborhood_ar && value.neighborhood_en && value.neighborhood_verified === true),
-      Array.isArray(value.images) && value.images.length >= 3, Boolean(value.licence && value.licence.licence_no && value.licence.expires),
-      Boolean(value.commercial_terms && value.commercial_terms.utilities && value.commercial_terms.cleaning)];
-    return Math.round(100 * checks.filter(Boolean).length / checks.length);
+    if (value.active === false) return { percent: 100, ready_for_approval: true, staff_blockers: [] };
+    const terms = value.commercial_terms || {}, utilities = terms.utilities || {}, cleaning = terms.cleaning || {};
+    const termsPresent = ["included", "variable", "excluded"].includes(utilities.mode)
+      && ["included", "optional", "unavailable"].includes(cleaning.mode)
+      && present(utilities.label_ar) && present(utilities.label_en)
+      && present(cleaning.label_ar) && present(cleaning.label_en)
+      && (cleaning.mode !== "optional" || (Number.isFinite(Number(cleaning.amount_sar)) && Number(cleaning.amount_sar) >= 0));
+    const termsLanguageReady = matchesLanguage(utilities.label_ar, "ar")
+      && matchesLanguage(utilities.label_en, "en")
+      && matchesLanguage(cleaning.label_ar, "ar")
+      && matchesLanguage(cleaning.label_en, "en");
+    const checks = [
+      ["active_missing", value.active === true],
+      [!present(value.name_ar) ? "arabic_title_missing" : "arabic_title_language_mismatch", matchesLanguage(value.name_ar, "ar")],
+      [!present(value.name_en) ? "english_title_missing" : "english_title_language_mismatch", matchesLanguage(value.name_en, "en")],
+      [!present(value.short_ar) ? "arabic_content_missing" : "arabic_content_language_mismatch", matchesLanguage(value.short_ar, "ar") && structuredLanguageReady(value, "ar")],
+      [!present(value.short_en) ? "english_content_missing" : "english_content_language_mismatch", matchesLanguage(value.short_en, "en") && structuredLanguageReady(value, "en")],
+      ["content_unverified", value.content_verified === true],
+      ["bedrooms_missing", Number.isInteger(Number(value.bedrooms))],
+      ["bathrooms_missing", Number.isInteger(Number(value.baths))],
+      ["capacity_missing", Number.isInteger(Number(value.capacity))],
+      [
+        present(value.neighborhood_ar) && present(value.neighborhood_en)
+          ? "neighbourhood_language_mismatch"
+          : "neighbourhood_missing",
+        Boolean(value.neighborhood && value.neighborhood_verified === true)
+          && matchesLanguage(value.neighborhood_ar, "ar")
+          && matchesLanguage(value.neighborhood_en, "en")
+      ],
+      ["images_missing", Array.isArray(value.images) && value.images.length >= 3],
+      ["licence_missing", Boolean(value.licence && value.licence.licence_no && value.licence.expires)],
+      [termsPresent ? "commercial_terms_language_mismatch" : "commercial_terms_missing", termsPresent && termsLanguageReady]
+    ];
+    const blockers = checks.filter(function (item) { return !item[1]; }).map(function (item) { return item[0]; });
+    return {
+      percent: Math.round(100 * (checks.length - blockers.length) / checks.length),
+      ready_for_approval: blockers.length === 0,
+      staff_blockers: blockers
+    };
+  }
+
+  function completionPercent(profile) {
+    return profileReadiness(profile).percent;
   }
 
   function filterListings(listings, filters) {
@@ -176,7 +325,7 @@
     });
   }
 
-  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, completionPercent, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
+  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, profileReadiness, completionPercent, translatedBlocker, issueFieldLabel, fieldStep, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (typeof document === "undefined") return;
 
@@ -210,7 +359,7 @@
   };
   const state = { lang: "ar", listings: [], counts: {}, listing: null, profile: {}, step: "identity", settings: null, places: {}, placeId: "", placeRevision: 0 };
   const id = function (value) { return document.getElementById(value); };
-  const text = function (key) { return (state.lang === "ar" ? AR : EN)[key] || key.replace(/_/g, " "); };
+  const text = function (key) { return (state.lang === "ar" ? AR : EN)[key] || translatedBlocker(key, state.lang); };
 
   function node(tag, values) {
     const result = document.createElement(tag), options = values || {};
@@ -233,7 +382,13 @@
   function failureMessage(error) {
     if (error.status === 401) return text("unauthorized"); if (error.status === 403) return text("forbidden");
     if (error.status === 409 || error.code === "revision_conflict") return text("conflict");
-    if (error.status === 400) { const issue = error.payload && error.payload.issue; return issue && issue[state.lang === "ar" ? "message_ar" : "message_en"] || text("invalid"); }
+    if (error.status === 400) {
+      const issue = error.payload && error.payload.issue;
+      if (!issue) return text("invalid");
+      const message = issue[state.lang === "ar" ? "message_ar" : "message_en"] || text("invalid");
+      const label = issue.field && issueFieldLabel(issue.field, state.lang);
+      return label ? label + ": " + message : message;
+    }
     if (error.status === 503) return text("service");
     return text("service");
   }
@@ -356,20 +511,39 @@
     const source = state.listing.source_readiness || {}, part = section("sources", state.lang === "ar" ? "هذه معلومات للعرض فقط وتتحدث من النسخة الآمنة." : "These read-only values come from the safe snapshot."), cards = node("div", { className: "readiness-grid" }), months = source.price_months || [];
     add(cards, readiness(text("priceMonths"), months.join("، "), months.length > 0), readiness(text("calendar"), source.calendar && Object.keys(source.calendar).length, Boolean(source.calendar && Object.keys(source.calendar).length)), readiness(text("rating"), source.rating && source.rating.rating, Boolean(source.rating && source.rating.rating)), readiness(text("images"), source.image_count, source.image_count >= 3), readiness(text("licence"), source.licence_present ? text("ready") : "—", source.licence_present)); part.appendChild(cards); root.appendChild(part);
   }
-  function issueGroup(title, values) { const box = node("div", { className: "blocker-group" }); box.appendChild(node("h4", { text: title })); if (!values || !values.length) box.appendChild(node("p", { text: text("none") })); else { const list = node("ul"); values.forEach(function (value) { list.appendChild(node("li", { text: text(value) })); }); box.appendChild(list); } return box; }
-  function renderApproval(root) { const part = section("approval", state.lang === "ar" ? "الاعتماد ينشر فقط بعد نجاح فحوص الشقة والمصادر الحية." : "Approval publishes only after listing and live-source checks pass."); part.appendChild(node("strong", { className: "approval-meter", text: completionPercent(buildProfilePayload(state.profile)) + "% " + text("complete") })); part.appendChild(issueGroup(text("staff"), state.listing.staff_blockers)); part.appendChild(issueGroup(text("background"), state.listing.background_blockers)); root.appendChild(part); }
-  function updateCompletion() { const percent = completionPercent(buildProfilePayload(state.profile)), root = id("survey-completion"), track = node("div", { className: "progress-track" }), fill = node("span"); empty(root); root.appendChild(node("strong", { text: percent + "%" })); fill.style.width = percent + "%"; track.appendChild(fill); root.appendChild(track); }
+  function issueGroup(title, values) { const box = node("div", { className: "blocker-group" }); box.appendChild(node("h4", { text: title })); if (!values || !values.length) box.appendChild(node("p", { text: text("none") })); else { const list = node("ul"); values.forEach(function (value) { list.appendChild(node("li", { text: translatedBlocker(value, state.lang) })); }); box.appendChild(list); } return box; }
+  function renderApproval(root) { const part = section("approval", state.lang === "ar" ? "الاعتماد ينشر فقط بعد نجاح فحوص الشقة والمصادر الحية." : "Approval publishes only after listing and live-source checks pass."), readiness = profileReadiness(buildProfilePayload(state.profile)); part.appendChild(node("strong", { className: "approval-meter", text: readiness.percent + "% " + text("complete") })); part.appendChild(issueGroup(text("staff"), readiness.staff_blockers)); part.appendChild(issueGroup(text("background"), state.listing.background_blockers)); root.appendChild(part); }
+  function updateCompletion() { const readiness = profileReadiness(buildProfilePayload(state.profile)), percent = readiness.percent, root = id("survey-completion"), track = node("div", { className: "progress-track" }), fill = node("span"); empty(root); root.appendChild(node("strong", { text: percent + "%" })); fill.style.width = percent + "%"; track.appendChild(fill); root.appendChild(track); }
   function renderSurvey() {
     const root = id("survey-sections"), progress = id("survey-progress"); empty(root); empty(progress);
     STEPS.forEach(function (step) { const button = node("button", { type: "button", className: state.step === step ? "active" : "", text: text(step) }); button.addEventListener("click", function () { state.step = step; renderSurvey(); }); progress.appendChild(button); });
     ({ identity: renderIdentity, space: renderSpace, location: renderLocation, content: renderContent, terms: renderTerms, sources: renderSources, approval: renderApproval })[state.step](root);
-    root.querySelectorAll("input,select,textarea").forEach(function (control) { const update = function () { let value = control.type === "checkbox" ? control.checked : control.value; set(state.profile, control.name, value); updateCompletion(); }; control.addEventListener("input", update); control.addEventListener("change", update); }); updateCompletion();
+    root.querySelectorAll("input,select,textarea").forEach(function (control) { const update = function () { let value = control.type === "checkbox" ? control.checked : control.value; set(state.profile, control.name, value); control.removeAttribute("aria-invalid"); updateCompletion(); }; control.addEventListener("input", update); control.addEventListener("change", update); }); updateCompletion();
   }
   async function openListing(listingId) {
     try { const result = await api("/api/monthly/ops/listing/" + encodeURIComponent(listingId)); state.listing = result; state.profile = clone(result.prefill); delete state.profile.sources; delete state.profile.source_readiness; state.step = "identity"; id("survey-source-title").textContent = result.source_title; id("survey-meta").textContent = text("apartment") + " " + result.id; id("survey-save-status").textContent = ""; show("survey"); renderSurvey(); }
     catch (error) { globalError(error); }
   }
-  function surveyError(error) { const panel = id("survey-error-summary"); empty(panel); panel.appendChild(node("p", { text: failureMessage(error) })); if (error.status === 409) renderConflictComparison(panel, state.listing); panel.hidden = false; panel.focus(); }
+  function surveyError(error) {
+    const issue = error.payload && error.payload.issue;
+    if (issue && issue.field) {
+      const step = fieldStep(issue.field);
+      if (step && state.step !== step) { state.step = step; renderSurvey(); }
+    }
+    const panel = id("survey-error-summary"); empty(panel);
+    panel.appendChild(node("p", { text: failureMessage(error) }));
+    if (error.status === 409) renderConflictComparison(panel, state.listing);
+    panel.hidden = false;
+    if (issue && issue.field) {
+      const control = Array.from(id("survey-form").elements).find(function (control) { return control.name === issue.field; });
+      if (control) {
+        control.setAttribute("aria-invalid", "true");
+        control.focus();
+        return;
+      }
+    }
+    panel.focus();
+  }
   async function recoverProfileConflict(error, localDraft) {
     if (error.status !== 409 || !state.listing) return false;
     try {
