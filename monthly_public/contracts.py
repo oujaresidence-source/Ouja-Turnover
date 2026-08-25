@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 import re
 from typing import Any, Dict, Mapping, Optional
@@ -45,9 +46,20 @@ LOST_REASONS = (
     "booked_elsewhere",
     "other",
 )
+MATCHER_QUESTIONS = (
+    "purpose",
+    "place",
+    "residents",
+    "sleeping",
+    "move_in",
+    "move_out",
+    "duration_months",
+    "flexibility",
+)
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_PLACE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,79}$")
 _LEAD_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 
 
@@ -214,6 +226,44 @@ def _place(value: Any, field: str = "place") -> Dict[str, str]:
     }
 
 
+def _add_calendar_months(value: dt.date, months: int) -> dt.date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return dt.date(year, month, day)
+
+
+def _derive_calendar_months(move_in: str, move_out: str, field: str) -> int:
+    start = dt.date.fromisoformat(move_in)
+    end = dt.date.fromisoformat(move_out)
+    if end <= start:
+        raise _error(
+            field,
+            "invalid_range",
+            "تاريخ الخروج يجب أن يكون بعد تاريخ الدخول.",
+            "Move-out date must be after move-in date.",
+        )
+    minimum = _add_calendar_months(start, 1)
+    maximum = _add_calendar_months(start, 6)
+    if end < minimum or end > maximum:
+        raise _error(
+            field,
+            "out_of_range",
+            "مدة الإقامة يجب أن تكون من شهر إلى ستة أشهر.",
+            "The stay must be between one and six months.",
+        )
+    for months in range(1, 7):
+        if _add_calendar_months(start, months) == end:
+            return months
+    raise _error(
+        field,
+        "invalid_span",
+        "تاريخ الخروج يجب أن يطابق مدة شهرية كاملة من شهر إلى ستة أشهر.",
+        "Move-out must match a complete one-to-six-calendar-month stay.",
+    )
+
+
 def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any]:
     result: Dict[str, Any] = {}
     move_in_value = data.get("move_in")
@@ -232,6 +282,13 @@ def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any
             "حدد مدة الإقامة أو تاريخ الخروج.",
             "Choose a stay duration or move-out date.",
         )
+    if duration_value not in (None, "") and move_out_value not in (None, ""):
+        raise _error(
+            "move_out",
+            "mutually_exclusive",
+            "اختر مدة الإقامة أو تاريخ الخروج، وليس الاثنين معًا.",
+            "Choose either a stay duration or move-out date, not both.",
+        )
     if duration_value not in (None, ""):
         result["duration_months"] = _integer(
             duration_value, "duration_months", minimum=1, maximum=6
@@ -245,13 +302,9 @@ def _date_selection(data: Mapping[str, Any], *, required: bool) -> Dict[str, Any
                 "تاريخ الدخول مطلوب عند تحديد تاريخ الخروج.",
                 "Move-in date is required when move-out is provided.",
             )
-        if result["move_out"] <= result["move_in"]:
-            raise _error(
-                "move_out",
-                "invalid_range",
-                "تاريخ الخروج يجب أن يكون بعد تاريخ الدخول.",
-                "Move-out date must be after move-in date.",
-            )
+        result["duration_months"] = _derive_calendar_months(
+            result["move_in"], result["move_out"], "move_out"
+        )
     return result
 
 
@@ -402,6 +455,18 @@ def _event_context(value: Any) -> Dict[str, Any]:
         )
     if data.get("move_in") not in (None, ""):
         safe["move_in"] = _date(data["move_in"], "context.move_in")
+    if data.get("move_out") not in (None, ""):
+        safe["move_out"] = _date(data["move_out"], "context.move_out")
+        if "move_in" not in safe:
+            raise _error(
+                "context.move_in",
+                "required",
+                "تاريخ الدخول مطلوب عند حفظ تاريخ الخروج.",
+                "Move-in date is required when move-out is recorded.",
+            )
+        _derive_calendar_months(
+            safe["move_in"], safe["move_out"], "context.move_out"
+        )
     if data.get("duration_band") not in (None, ""):
         safe["duration_band"] = _choice(
             data["duration_band"],
@@ -418,14 +483,36 @@ def _event_context(value: Any) -> Dict[str, Any]:
         safe["entry_route"] = _choice(
             data["entry_route"], "context.entry_route", ENTRY_ROUTES
         )
-    if data.get("question") not in (None, ""):
-        safe["question"] = _required_text(
-            data["question"], "context.question", max_length=80, safe_id=True
+    if data.get("question") not in (None, "") or data.get("answer") not in (None, ""):
+        question = _choice(
+            data.get("question"), "context.question", MATCHER_QUESTIONS
         )
-    if data.get("answer") not in (None, ""):
-        safe["answer"] = _required_text(
-            data["answer"], "context.answer", max_length=80, safe_id=True
-        )
+        answer = data.get("answer")
+        if question == "purpose":
+            parsed_answer: Any = _choice(answer, "context.answer", PURPOSES)
+        elif question == "sleeping":
+            parsed_answer = _choice(answer, "context.answer", SLEEPING_OPTIONS)
+        elif question == "flexibility":
+            parsed_answer = _choice(answer, "context.answer", FLEXIBILITY_OPTIONS)
+        elif question == "residents":
+            parsed_answer = _integer(answer, "context.answer", minimum=1, maximum=20)
+        elif question == "duration_months":
+            parsed_answer = _integer(answer, "context.answer", minimum=1, maximum=6)
+        elif question in ("move_in", "move_out"):
+            parsed_answer = _date(answer, "context.answer")
+        else:
+            parsed_answer = _required_text(
+                answer, "context.answer", max_length=80
+            )
+            if not _PLACE_ID_RE.fullmatch(parsed_answer):
+                raise _error(
+                    "context.answer",
+                    "invalid_format",
+                    "معرّف المكان غير صحيح.",
+                    "The place identifier is invalid.",
+                )
+        safe["question"] = question
+        safe["answer"] = parsed_answer
     if data.get("lead_reference") not in (None, ""):
         lead = _required_text(
             data["lead_reference"], "context.lead_reference", max_length=64

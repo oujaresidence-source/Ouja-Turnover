@@ -72,10 +72,36 @@ class MatchRequestContractTests(unittest.TestCase):
 
     def test_rejects_move_out_on_or_before_move_in(self):
         request = valid_match_request(move_out="2026-09-01")
+        request.pop("duration_months")
         with self.assertRaises(ContractError) as caught:
             parse_match_request(request)
         self.assertEqual(caught.exception.field, "move_out")
         self.assertEqual(caught.exception.code, "invalid_range")
+
+    def test_move_out_only_derives_an_exact_calendar_month_duration(self):
+        request = valid_match_request(move_out="2026-11-01")
+        request.pop("duration_months")
+
+        parsed = parse_match_request(request)
+
+        self.assertEqual(parsed["move_out"], "2026-11-01")
+        self.assertEqual(parsed["duration_months"], 2)
+
+    def test_required_date_selection_rejects_duration_and_move_out_together(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(valid_match_request(move_out="2026-11-01"))
+        self.assertEqual(caught.exception.field, "move_out")
+        self.assertEqual(caught.exception.code, "mutually_exclusive")
+
+    def test_move_out_only_rejects_stays_under_one_or_over_six_months(self):
+        for move_out in ("2026-09-30", "2027-03-02"):
+            with self.subTest(move_out=move_out):
+                request = valid_match_request(move_out=move_out)
+                request.pop("duration_months")
+                with self.assertRaises(ContractError) as caught:
+                    parse_match_request(request)
+                self.assertEqual(caught.exception.field, "move_out")
+                self.assertEqual(caught.exception.code, "out_of_range")
 
     def test_rejects_unknown_fields_that_can_change_business_behavior(self):
         with self.assertRaises(ContractError) as caught:
@@ -173,6 +199,79 @@ class OtherPublicContractTests(unittest.TestCase):
                 }
             )
         self.assertEqual(caught.exception.field, "customer_name")
+
+    def test_matcher_answer_uses_controlled_options_and_typed_numbers(self):
+        purpose = parse_event(
+            {
+                "event": "matcher_answer",
+                "session_id": "anon_12345678",
+                "context": {"question": "purpose", "answer": "work"},
+            }
+        )
+        residents = parse_event(
+            {
+                "event": "matcher_answer",
+                "session_id": "anon_12345678",
+                "context": {"question": "residents", "answer": "4"},
+            }
+        )
+
+        self.assertEqual(purpose["context"]["answer"], "work")
+        self.assertEqual(residents["context"]["answer"], 4)
+
+    def test_matcher_answer_cannot_store_a_phone_like_arbitrary_value(self):
+        for question in ("purpose", "residents", "sleeping", "place"):
+            with self.subTest(question=question):
+                with self.assertRaises(ContractError) as caught:
+                    parse_event(
+                        {
+                            "event": "matcher_answer",
+                            "session_id": "anon_12345678",
+                            "context": {
+                                "question": question,
+                                "answer": "0500000000",
+                            },
+                        }
+                    )
+                self.assertEqual(caught.exception.field, "context.answer")
+
+    def test_matcher_question_is_a_controlled_key(self):
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "matcher_answer",
+                    "session_id": "anon_12345678",
+                    "context": {"question": "phone", "answer": "work"},
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.question")
+        self.assertEqual(caught.exception.code, "unsupported")
+
+    def test_event_retains_a_validated_move_out_date(self):
+        parsed = parse_event(
+            {
+                "event": "listing_view",
+                "session_id": "anon_12345678",
+                "context": {
+                    "move_in": "2026-09-01",
+                    "move_out": "2026-11-01",
+                },
+            }
+        )
+        self.assertEqual(parsed["context"]["move_out"], "2026-11-01")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_event(
+                {
+                    "event": "listing_view",
+                    "session_id": "anon_12345678",
+                    "context": {
+                        "move_in": "2026-09-01",
+                        "move_out": "2026-02-30",
+                    },
+                }
+            )
+        self.assertEqual(caught.exception.field, "context.move_out")
 
     def test_outcome_uses_only_controlled_lost_reasons(self):
         parsed = parse_outcome(
