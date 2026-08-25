@@ -186,6 +186,11 @@ try:
         CatalogStore as _MonthlyCatalogStore,
         RevisionConflict as _CatalogRevisionConflict,
     )
+    from monthly_public.catalog_page import (
+        CSS_PATH as _MONTHLY_CATALOG_CSS_PATH,
+        JS_PATH as _MONTHLY_CATALOG_JS_PATH,
+        render_monthly_catalog_page as _render_monthly_catalog_page,
+    )
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
     from monthly_public.page import (
         ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
@@ -214,8 +219,10 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
     _MONTHLY_OPS_CSS_PATH = _MONTHLY_OPS_JS_PATH = ""
+    _MONTHLY_CATALOG_CSS_PATH = _MONTHLY_CATALOG_JS_PATH = ""
     _render_monthly_public_page = None
     _render_monthly_ops_page = None
+    _render_monthly_catalog_page = None
     _render_monthly_legacy_page = None
     _HAS_MONTHLY_PUBLIC = False
 
@@ -59350,6 +59357,59 @@ async def _handle_monthly_ops(request):
     )
 
 
+async def _handle_monthly_catalog(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    denied = _monthly_ops_gate(request)
+    if denied is not None:
+        return denied
+    if _render_monthly_catalog_page is None:
+        return _monthly_public_unavailable()
+    return web.Response(
+        text=_render_monthly_catalog_page(),
+        content_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def _handle_monthly_catalog_css(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(
+        os.path.dirname(__file__), "monthly_public", "static", "monthly_catalog.css"
+    )
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="text/css",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+async def _handle_monthly_catalog_js(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(
+        os.path.dirname(__file__), "monthly_public", "static", "monthly_catalog.js"
+    )
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="application/javascript",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 async def _handle_monthly_ops_css(request):
     if not _monthly_public_v2_enabled():
         return _monthly_off()
@@ -59464,8 +59524,11 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
     router.add_post("/api/monthly/event", _api_monthly_v2_event)
     router.add_get("/monthly/ops", _handle_monthly_ops)
+    router.add_get("/monthly/ops/listings", _handle_monthly_catalog)
     router.add_get(_MONTHLY_OPS_CSS_PATH, _handle_monthly_ops_css)
     router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
+    router.add_get(_MONTHLY_CATALOG_CSS_PATH, _handle_monthly_catalog_css)
+    router.add_get(_MONTHLY_CATALOG_JS_PATH, _handle_monthly_catalog_js)
     router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
     router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
     router.add_post("/api/monthly/ops/lead", _api_monthly_v2_ops_lead)

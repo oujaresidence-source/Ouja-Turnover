@@ -31,6 +31,7 @@ def render_monthly_ops_page() -> str:
         <span data-copy="productName">تشغيل السكن الشهري</span>
       </div>
       <nav class="ops-nav" aria-label="روابط الصفحة" data-copy-aria="pageNav">
+        <a id="monthly-catalog-link" href="/monthly/ops/listings" data-copy="listingData">بيانات الشقق</a>
         <a id="ops-dashboard-link" href="/dashboard" data-copy="backDashboard">العودة للوحة عوجا</a>
         <button id="ops-language" type="button" aria-label="Switch to English">English</button>
       </nav>

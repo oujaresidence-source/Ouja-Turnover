@@ -196,6 +196,9 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             ("GET", "/monthly/ops"),
             ("GET", self.bot._MONTHLY_OPS_CSS_PATH),
             ("GET", self.bot._MONTHLY_OPS_JS_PATH),
+            ("GET", "/monthly/ops/listings"),
+            ("GET", self.bot._MONTHLY_CATALOG_CSS_PATH),
+            ("GET", self.bot._MONTHLY_CATALOG_JS_PATH),
             ("GET", "/api/monthly/ops/health"),
             ("GET", "/api/monthly/ops/funnel"),
             ("POST", "/api/monthly/ops/response"),
@@ -257,6 +260,9 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             self.bot._api_monthly_catalog_place_draft,
             self.bot._api_monthly_catalog_place_approve,
             self.bot._api_monthly_catalog_refresh,
+            self.bot._handle_monthly_catalog,
+            self.bot._handle_monthly_catalog_css,
+            self.bot._handle_monthly_catalog_js,
         )
         saved = (
             self.bot.MONTHLY_ENABLED,

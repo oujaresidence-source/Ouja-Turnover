@@ -33,6 +33,7 @@
       loadingLabel: "جاري تحميل بيانات التشغيل",
       productName: "تشغيل السكن الشهري",
       pageNav: "روابط الصفحة",
+      listingData: "بيانات الشقق",
       backDashboard: "العودة للوحة عوجا",
       readinessLabel: "قرار الإطلاق",
       loadingTitle: "جاري فحص جاهزية السكن الشهري",
@@ -239,6 +240,7 @@
       loadingLabel: "Loading operations data",
       productName: "Monthly operations",
       pageNav: "Page links",
+      listingData: "Listing data",
       backDashboard: "Back to Ouja dashboard",
       readinessLabel: "Launch decision",
       loadingTitle: "Checking monthly-stay readiness",
@@ -1311,6 +1313,10 @@
   document.getElementById("ops-language").addEventListener("click", function () {
     state.lang = state.lang === "ar" ? "en" : "ar";
     setCopy();
+  });
+  document.getElementById("monthly-catalog-link").addEventListener("click", function (event) {
+    event.preventDefault();
+    window.location.assign(authPath("/monthly/ops/listings", window.location.href));
   });
   document.getElementById("ops-dashboard-link").addEventListener("click", function (event) {
     event.preventDefault();
