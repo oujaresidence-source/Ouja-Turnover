@@ -9,6 +9,8 @@ from __future__ import annotations
 import datetime as dt
 import math
 import re
+import threading
+from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional
 
 from .analytics import funnel_summary
@@ -152,9 +154,10 @@ class MonthlyOpsApp:
     def health(self) -> Dict[str, Any]:
         try:
             current = self._public._now()
+            settings, _places = self._public._configuration()
             return build_health(
                 self._public._generation(),
-                self._public.settings,
+                settings,
                 analytics=self._public.analytics_store,
                 lead_store=self._public.lead_store,
                 now=current,
@@ -636,6 +639,7 @@ class MonthlyPublicApp:
         if not isinstance(settings, MonthlySettings):
             raise TypeError("settings must be MonthlySettings")
         self.snapshot_store = snapshot_store
+        self._configuration_lock = threading.RLock()
         self.settings = settings
         self.lead_store = lead_store
         self.analytics_store = analytics_store
@@ -645,7 +649,7 @@ class MonthlyPublicApp:
         self.ops = MonthlyOpsApp(self)
 
     @staticmethod
-    def _prepare_places(values: Any) -> Dict[str, Dict[str, Any]]:
+    def _prepare_places(values: Any) -> Mapping[str, Mapping[str, Any]]:
         if not isinstance(values, Mapping):
             return {}
         out = {}
@@ -659,7 +663,27 @@ class MonthlyPublicApp:
             if kind not in ("destination", "neighborhood") or not label_ar or not label_en:
                 continue
             out[place_id] = dict(raw, kind=kind, label_ar=label_ar, label_en=label_en)
-        return out
+        return MappingProxyType(
+            {key: MappingProxyType(dict(value)) for key, value in out.items()}
+        )
+
+    def replace_configuration(
+        self, settings: MonthlySettings, approved_places: Mapping[str, Any]
+    ) -> None:
+        """Atomically replace staff-approved public settings and destinations."""
+
+        if not isinstance(settings, MonthlySettings):
+            raise TypeError("settings must be MonthlySettings")
+        prepared = self._prepare_places(approved_places)
+        with self._configuration_lock:
+            self.settings = settings
+            self.approved_places = prepared
+
+    def _configuration(self) -> tuple[MonthlySettings, Mapping[str, Mapping[str, Any]]]:
+        """Pin one immutable settings/place pair for a complete request."""
+
+        with self._configuration_lock:
+            return self.settings, self.approved_places
 
     def _now(self) -> dt.datetime:
         value = self.clock()
@@ -683,9 +707,15 @@ class MonthlyPublicApp:
     def _published(generation: Any) -> tuple[Any, ...]:
         return tuple(generation.published) if generation is not None else ()
 
-    def _place_registry(self, generation: Any) -> Dict[str, Dict[str, Any]]:
+    def _place_registry(
+        self,
+        generation: Any,
+        approved_places: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """Merge configured destinations with verified published neighborhoods."""
-        registry = {key: dict(value) for key, value in self.approved_places.items()}
+        if approved_places is None:
+            _settings, approved_places = self._configuration()
+        registry = {key: dict(value) for key, value in approved_places.items()}
         for result in self._published(generation):
             listing = result.listing
             key = listing.get("neighborhood")
@@ -708,12 +738,17 @@ class MonthlyPublicApp:
         return None
 
     def _canonical_place(
-        self, place: Any, generation: Any
+        self,
+        place: Any,
+        generation: Any,
+        approved_places: Optional[Mapping[str, Mapping[str, Any]]] = None,
     ) -> Optional[Dict[str, str]]:
         if not isinstance(place, Mapping):
             return None
         place_id = str(place.get("id") or "")
-        registered = self.approved_places.get(place_id)
+        if approved_places is None:
+            _settings, approved_places = self._configuration()
+        registered = approved_places.get(place_id)
         if registered is None and place.get("kind") == "neighborhood":
             for result in self._published(generation):
                 listing = result.listing
@@ -738,22 +773,28 @@ class MonthlyPublicApp:
         }
 
     def _canonical_request(
-        self, request: Dict[str, Any], generation: Any
+        self,
+        request: Dict[str, Any],
+        generation: Any,
+        approved_places: Optional[Mapping[str, Mapping[str, Any]]] = None,
     ) -> Dict[str, Any]:
         result = dict(request)
         if "place" in result:
-            result["place"] = self._canonical_place(result["place"], generation)
+            result["place"] = self._canonical_place(
+                result["place"], generation, approved_places
+            )
         return result
 
     def config(self, lang: Any = "ar") -> Dict[str, Any]:
         try:
             language = _language(lang)
             current, generation = self._request_context()
+            settings, approved_places = self._configuration()
         except ContractError as error:
             return _contract_error(error)
         except Exception:
             return _internal_error()
-        blockers = [item.as_dict() for item in self.settings.blockers]
+        blockers = [item.as_dict() for item in settings.blockers]
         if generation is None:
             blockers.append(
                 {
@@ -782,7 +823,7 @@ class MonthlyPublicApp:
                 "label_ar": row["label_ar"],
                 "label_en": row["label_en"],
             }
-            for place_id, row in sorted(self.approved_places.items())
+            for place_id, row in sorted(approved_places.items())
         ]
         seen = {row["id"] for row in places if row["kind"] == "neighborhood"}
         neighborhoods = []
@@ -808,15 +849,18 @@ class MonthlyPublicApp:
             "eligible_count": len(self._published(generation)),
             "places": places,
             "neighborhoods": neighborhoods,
-            "response_window": response_window(self.settings, current),
-            "long_stay_route": self.settings.long_stay_route,
+            "response_window": response_window(settings, current),
+            "long_stay_route": settings.long_stay_route,
             "blockers": blockers,
         }
 
     def browse(self, value: Any) -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
-            request = self._canonical_request(parse_browse_query(value), generation)
+            _settings, approved_places = self._configuration()
+            request = self._canonical_request(
+                parse_browse_query(value), generation, approved_places
+            )
             language = _language(request.get("lang"))
             has_dates = _window(request) is not None
             if request.get("move_in") and not has_dates:
@@ -836,7 +880,9 @@ class MonthlyPublicApp:
                     continue
                 if request.get("neighborhood") and listing.get("neighborhood") != request["neighborhood"]:
                     continue
-                if not self._browse_place_matches(listing, request.get("place")):
+                if not self._browse_place_matches(
+                    listing, request.get("place"), approved_places
+                ):
                     continue
                 card = present_card(result, language)
                 if not has_dates:
@@ -872,12 +918,19 @@ class MonthlyPublicApp:
         except Exception:
             return _internal_error()
 
-    def _browse_place_matches(self, listing: Mapping[str, Any], place: Any) -> bool:
+    def _browse_place_matches(
+        self,
+        listing: Mapping[str, Any],
+        place: Any,
+        approved_places: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> bool:
         if not isinstance(place, Mapping):
             return True
         if place["kind"] == "neighborhood":
             return listing.get("neighborhood") == place["id"]
-        destination = self.approved_places.get(place["id"])
+        if approved_places is None:
+            _settings, approved_places = self._configuration()
+        destination = approved_places.get(place["id"])
         coordinates = listing.get("coordinates")
         if not destination or destination.get("verified") is not True or not destination.get("source"):
             return False
@@ -893,20 +946,23 @@ class MonthlyPublicApp:
     def match(self, value: Any, lang: Any = "ar") -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
+            _settings, approved_places = self._configuration()
             if generation is None:
                 return _error(
                     "snapshot_missing",
                     "لا توجد خيارات منشورة حاليًا.",
                     "No published homes are currently available.",
                 )
-            request = self._canonical_request(parse_match_request(value), generation)
+            request = self._canonical_request(
+                parse_match_request(value), generation, approved_places
+            )
             language = _language(lang)
             result = rank(
                 generation,
                 request,
                 language,
                 now=current,
-                places=self._place_registry(generation),
+                places=self._place_registry(generation, approved_places),
             )
             return {"ok": True, **result}
         except ContractError as error:
@@ -917,7 +973,10 @@ class MonthlyPublicApp:
     def listing(self, value: Any) -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
-            request = self._canonical_request(parse_listing_request(value), generation)
+            _settings, approved_places = self._configuration()
+            request = self._canonical_request(
+                parse_listing_request(value), generation, approved_places
+            )
             language = _language(request.get("lang"))
             result = self._find(request, generation)
             if result is None:
@@ -966,6 +1025,7 @@ class MonthlyPublicApp:
     def lead(self, value: Any) -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
+            settings, approved_places = self._configuration()
             if not isinstance(value, Mapping):
                 raise ContractError(
                     "request",
@@ -993,12 +1053,12 @@ class MonthlyPublicApp:
                     ),
                 },
                 session_secret=self.session_secret,
-                allowed_place_ids=self._place_registry(generation),
+                allowed_place_ids=self._place_registry(generation, approved_places),
             )
             session_id = session_event["session_id"]
             journey_id = session_event["context"].get("journey_id")
             request = self._canonical_request(
-                parse_match_request(value.get("request")), generation
+                parse_match_request(value.get("request")), generation, approved_places
             )
             request["lang"] = language
             if value.get("general_help") is True:
@@ -1022,7 +1082,7 @@ class MonthlyPublicApp:
                     match_request,
                     language,
                     now=current,
-                    places=self._place_registry(generation),
+                    places=self._place_registry(generation, approved_places),
                 )
                 if ranked.get("pending_count"):
                     return _error(
@@ -1038,11 +1098,11 @@ class MonthlyPublicApp:
                     )
                 handoff = build_general_whatsapp_handoff(
                     self.lead_store,
-                    self.settings,
+                    settings,
                     session_id,
                     request,
                     analytics=self.analytics_store,
-                    approved_places=self._place_registry(generation),
+                    approved_places=self._place_registry(generation, approved_places),
                     journey_id=journey_id,
                     now=current,
                 )
@@ -1095,13 +1155,13 @@ class MonthlyPublicApp:
                 )
             handoff = build_whatsapp_handoff(
                 self.lead_store,
-                self.settings,
+                settings,
                 session_id,
                 result.listing,
                 request,
                 quote,
                 analytics=self.analytics_store,
-                approved_places=self._place_registry(generation),
+                approved_places=self._place_registry(generation, approved_places),
                 journey_id=journey_id,
                 now=current,
             )
@@ -1129,7 +1189,8 @@ class MonthlyPublicApp:
     def event(self, value: Any) -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
-            places = self._place_registry(generation)
+            _settings, approved_places = self._configuration()
+            places = self._place_registry(generation, approved_places)
             event = parse_event(
                 value,
                 session_secret=self.session_secret,

@@ -136,6 +136,37 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
             result["session_id"],
         )
 
+    def test_replace_configuration_updates_settings_and_places_together(self):
+        replacement = {
+            "hospital": {
+                "kind": "destination",
+                "label_ar": "مستشفى معتمد",
+                "label_en": "Approved Hospital",
+                "lat": 24.71,
+                "lng": 46.68,
+                "verified": True,
+                "source": "approved_catalog",
+            }
+        }
+        new_settings = replace(valid_settings(), whatsapp_number="966500000001")
+
+        self.app.replace_configuration(new_settings, replacement)
+        result = self.app.config("ar")
+
+        self.assertEqual([row["id"] for row in result["places"]], ["hospital"])
+        made = self.app.lead(
+            {
+                "session_id": result["session_id"],
+                "listing_id": "1001",
+                "request": match_request(
+                    place={"kind": "destination", "id": "hospital", "label": "x"}
+                ),
+                "lang": "ar",
+            }
+        )
+        self.assertTrue(made["ok"])
+        self.assertTrue(made["url"].startswith("https://wa.me/966500000001?text="))
+
     def test_config_without_secret_is_explicitly_blocked_and_issues_no_session(self):
         app = MonthlyPublicApp(
             snapshot_store=self.snapshot,
