@@ -178,10 +178,14 @@ except Exception as _ml_err:            # pragma: no cover
 try:
     from monthly_public.analytics import AnalyticsStore as _MonthlyAnalyticsStore
     from monthly_public.catalog_profiles import (
+        CatalogContractError as _CatalogContractError,
         apply_approved_profile as _monthly_catalog_apply_approved_profile,
     )
     from monthly_public.catalog_service import CatalogService as _MonthlyCatalogService
-    from monthly_public.catalog_store import CatalogStore as _MonthlyCatalogStore
+    from monthly_public.catalog_store import (
+        CatalogStore as _MonthlyCatalogStore,
+        RevisionConflict as _CatalogRevisionConflict,
+    )
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
     from monthly_public.page import (
         ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
@@ -205,6 +209,7 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
     _monthly_public_load_settings = _MonthlySnapshotStore = None
     _MonthlyCatalogService = _MonthlyCatalogStore = None
+    _CatalogContractError = _CatalogRevisionConflict = None
     _monthly_catalog_apply_approved_profile = None
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
@@ -59122,6 +59127,214 @@ def _monthly_ops_gate(request):
     return None
 
 
+def _monthly_catalog_gate(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    denied = _monthly_ops_gate(request)
+    if denied is not None:
+        return denied
+    if _monthly_catalog_service is None:
+        return _json({
+            "error": "catalog_unavailable",
+            "message_ar": "خدمة تجهيز بيانات الشقق غير متاحة حاليًا.",
+            "message_en": "The listing-readiness service is currently unavailable.",
+        }, 503)
+    return None
+
+
+def _monthly_catalog_body(value, allowed, required):
+    if not isinstance(value, dict):
+        raise _CatalogContractError(
+            "request", "invalid_type", "صيغة الطلب غير صحيحة.",
+            "The request format is invalid."
+        )
+    unknown = sorted(str(key) for key in value if key not in allowed)
+    if unknown:
+        raise _CatalogContractError(
+            unknown[0], "unknown_field", "الحقل غير معتمد.",
+            "The field is not supported."
+        )
+    missing = sorted(str(key) for key in required if key not in value)
+    if missing:
+        raise _CatalogContractError(
+            missing[0], "required", "هذا الحقل مطلوب.",
+            "This field is required."
+        )
+    return value
+
+
+async def _monthly_catalog_response(call, *args):
+    try:
+        result = await asyncio.to_thread(call, *args)
+        return _json({"ok": True, "result": result})
+    except _CatalogRevisionConflict as error:
+        return _json({
+            "error": "revision_conflict",
+            "current_revision": error.current,
+            "message_ar": "حُفظ تعديل أحدث. أعد تحميل البيانات قبل الحفظ.",
+            "message_en": "A newer revision was saved. Reload before saving.",
+        }, 409)
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    except ValueError:
+        return _json({
+            "error": "invalid_request",
+            "issue": {
+                "field": "request",
+                "code": "invalid_value",
+                "message_ar": "قيمة الطلب غير صحيحة.",
+                "message_en": "The request value is invalid.",
+            },
+        }, 400)
+    except Exception:
+        return _json({
+            "error": "catalog_unavailable",
+            "message_ar": "تعذر تحميل بيانات تجهيز الشقق حاليًا.",
+            "message_en": "Listing-readiness data is currently unavailable.",
+        }, 503)
+
+
+async def _api_monthly_catalog_listings(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_catalog_response(_monthly_catalog_service.portfolio)
+
+
+async def _api_monthly_catalog_listing(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.listing, request.match_info.get("id")
+    )
+
+
+async def _api_monthly_catalog_profile_draft(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"revision", "profile"}, {"revision", "profile"}
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.save_profile_draft,
+        request.match_info.get("id"), body["profile"], body["revision"],
+        _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_profile_approve(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"revision"}, {"revision"}
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.approve_profile,
+        request.match_info.get("id"), body["revision"], _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_settings(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_catalog_response(_monthly_catalog_service.settings)
+
+
+async def _api_monthly_catalog_settings_draft(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"revision", "settings"},
+            {"revision", "settings"},
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.save_settings_draft,
+        body["settings"], body["revision"], _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_settings_approve(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"revision"}, {"revision"}
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.approve_settings,
+        body["revision"], _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_places(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_catalog_response(_monthly_catalog_service.places)
+
+
+async def _api_monthly_catalog_place_draft(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"place_id", "revision", "place"},
+            {"place_id", "revision", "place"},
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.save_place_draft,
+        body["place_id"], body["place"], body["revision"], _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_place_approve(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"place_id", "revision", "active"},
+            {"place_id", "revision", "active"},
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(
+        _monthly_catalog_service.approve_place,
+        body["place_id"], body["revision"], body["active"], _req_actor(request),
+    )
+
+
+async def _api_monthly_catalog_refresh(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        _monthly_catalog_body(await _read_body(request), set(), set())
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_catalog_response(_monthly_catalog_service.refresh)
+
+
 async def _handle_monthly_ops(request):
     if not _monthly_public_v2_enabled():
         return _monthly_off()
@@ -59259,6 +59472,17 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/ops/action", _api_monthly_v2_ops_action)
     router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
     router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
+    router.add_get("/api/monthly/ops/listings", _api_monthly_catalog_listings)
+    router.add_get("/api/monthly/ops/listing/{id}", _api_monthly_catalog_listing)
+    router.add_post("/api/monthly/ops/listing/{id}/draft", _api_monthly_catalog_profile_draft)
+    router.add_post("/api/monthly/ops/listing/{id}/approve", _api_monthly_catalog_profile_approve)
+    router.add_get("/api/monthly/ops/settings", _api_monthly_catalog_settings)
+    router.add_post("/api/monthly/ops/settings/draft", _api_monthly_catalog_settings_draft)
+    router.add_post("/api/monthly/ops/settings/approve", _api_monthly_catalog_settings_approve)
+    router.add_get("/api/monthly/ops/places", _api_monthly_catalog_places)
+    router.add_post("/api/monthly/ops/places/draft", _api_monthly_catalog_place_draft)
+    router.add_post("/api/monthly/ops/places/approve", _api_monthly_catalog_place_approve)
+    router.add_post("/api/monthly/ops/refresh", _api_monthly_catalog_refresh)
 
 
 async def _api_monthly_admin(request):

@@ -202,6 +202,17 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             ("POST", "/api/monthly/ops/outcome"),
             ("POST", "/api/monthly/ops/lead"),
             ("POST", "/api/monthly/ops/action"),
+            ("GET", "/api/monthly/ops/listings"),
+            ("GET", "/api/monthly/ops/listing/{id}"),
+            ("POST", "/api/monthly/ops/listing/{id}/draft"),
+            ("POST", "/api/monthly/ops/listing/{id}/approve"),
+            ("GET", "/api/monthly/ops/settings"),
+            ("POST", "/api/monthly/ops/settings/draft"),
+            ("POST", "/api/monthly/ops/settings/approve"),
+            ("GET", "/api/monthly/ops/places"),
+            ("POST", "/api/monthly/ops/places/draft"),
+            ("POST", "/api/monthly/ops/places/approve"),
+            ("POST", "/api/monthly/ops/refresh"),
         }
         saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
         try:
@@ -235,6 +246,17 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             self.bot._api_monthly_v2_ops_outcome,
             self.bot._api_monthly_v2_ops_lead,
             self.bot._api_monthly_v2_ops_action,
+            self.bot._api_monthly_catalog_listings,
+            self.bot._api_monthly_catalog_listing,
+            self.bot._api_monthly_catalog_profile_draft,
+            self.bot._api_monthly_catalog_profile_approve,
+            self.bot._api_monthly_catalog_settings,
+            self.bot._api_monthly_catalog_settings_draft,
+            self.bot._api_monthly_catalog_settings_approve,
+            self.bot._api_monthly_catalog_places,
+            self.bot._api_monthly_catalog_place_draft,
+            self.bot._api_monthly_catalog_place_approve,
+            self.bot._api_monthly_catalog_refresh,
         )
         saved = (
             self.bot.MONTHLY_ENABLED,
