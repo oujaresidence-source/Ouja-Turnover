@@ -30,6 +30,20 @@ class FakeRequest:
 
 
 class MonthlyCatalogPageContractTest(unittest.TestCase):
+    def _javascript_result(self, expression):
+        script = "const api=require(%s); process.stdout.write(JSON.stringify(%s));" % (
+            json.dumps(str(JS_FILE)),
+            expression,
+        )
+        checked = subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        return json.loads(checked.stdout)
+
     def test_page_is_arabic_first_semantic_and_data_free(self):
         from monthly_public.catalog_page import render_monthly_catalog_page
 
@@ -98,6 +112,65 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_javascript_exports_safe_payload_helpers(self):
+        result = self._javascript_result("({"
+            "auth:api.authPath('/api/monthly/ops/listings','?token=secret&ignored=1'),"
+            "facts:['yes','no','unknown',''].map(api.buildFactValue),"
+            "coords:[api.parseCoordinatePair('24.7136, 46.6753'),api.parseCoordinatePair('not a map')],"
+            "percent:api.completionPercent({name_ar:'عوجا',name_en:'Ouja',short_ar:'وصف',short_en:'Description'})"
+            "})")
+        self.assertEqual(result["auth"], "/api/monthly/ops/listings?token=secret")
+        self.assertEqual(result["facts"], [True, False, None, None])
+        self.assertEqual(result["coords"][0], {"lat": 24.7136, "lng": 46.6753})
+        self.assertIsNone(result["coords"][1])
+        self.assertEqual(result["percent"], 31)
+
+    def test_javascript_builds_only_approved_contract_fields(self):
+        result = self._javascript_result("({"
+            "profile:api.buildProfilePayload({active:true,name_ar:'عوجا',name_en:'Ouja',short_ar:'وصف',short_en:'Description',content_verified:true,neighborhood:'malqa',neighborhood_ar:'الملقا',neighborhood_en:'Al Malqa',neighborhood_verified:true,bedrooms:'2',beds_count:'3',baths:'2',capacity:'4',floor_area_sqm:'110.5',images:['https://images.example/1.jpg'],facts:{parking:'yes',pool:'unknown'},licence:{licence_no:'LIC-1',expires:'2027-01-01'},commercial_terms:{utilities:{mode:'included',label_ar:'مشمولة',label_en:'Included'},cleaning:{mode:'optional',amount_sar:'150',label_ar:'اختياري',label_en:'Optional'}},coordinates:'24.7136,46.6753',structured:{tagline_ar:'سكن هادئ',tagline_en:'Quiet stay',sections:[{title_ar:'المعيشة',title_en:'Living',body_ar:'مساحة مريحة',body_en:'Comfortable space'}]},official_prices:{'2026-09':9000},door_code:'1234'}),"
+            "settings:api.buildSettingsPayload({whatsapp_number:'966500000000',timezone:'Asia/Riyadh',schedule:{monday:{enabled:true,start:'13:00',end:'21:00'},friday:{enabled:false,start:'13:00',end:'21:00'}},deposit_amount_sar:'1000',deposit_refund_ar:'يعاد بعد الفحص',deposit_refund_en:'Returned after inspection',payment_methods:[{ar:'تحويل بنكي',en:'Bank transfer'}],long_stay_route:'team_confirmation'}),"
+            "place:api.buildPlacePayload({label_ar:'مستشفى الملك فيصل',label_en:'King Faisal Hospital',purposes:['treatment','work','treatment'],coordinates:'24.7136,46.6753',source_note:'تم التحقق من الدبوس'})"
+            "})")
+        profile = result["profile"]
+        self.assertNotIn("official_prices", profile)
+        self.assertNotIn("door_code", profile)
+        self.assertEqual(profile["bedrooms"], 2)
+        self.assertEqual(profile["floor_area_sqm"], 110.5)
+        self.assertEqual(profile["facts"], {"parking": True, "pool": None})
+        self.assertEqual(profile["coordinates"]["source"], "staff_maps_pin")
+        self.assertEqual(profile["commercial_terms"]["cleaning"]["amount_sar"], 150)
+        self.assertEqual(result["settings"]["commercial_terms"]["included"], ["internet", "maintenance"])
+        self.assertEqual(result["settings"]["working_hours"]["schedule"], {"monday": [["13:00", "21:00"]]})
+        self.assertEqual(result["place"]["purposes"], ["treatment", "work"])
+        self.assertEqual(result["place"]["coordinates"]["verified"], True)
+
+    def test_javascript_filters_truthful_inventory_without_duplicate_rows(self):
+        result = self._javascript_result("api.filterListings(["
+            "{id:'101',source_title:'Ouja | Malqa',status:'needs_review',staff_blockers:['licence_missing'],background_blockers:[]},"
+            "{id:'101',source_title:'duplicate',status:'published',staff_blockers:[],background_blockers:[]},"
+            "{id:'202',source_title:'Ouja | Olaya',status:'source_blocked',staff_blockers:[],background_blockers:['price_missing']}"
+            "],{search:'malqa',status:'needs_review',blocker:'licence'})")
+        self.assertEqual([row["id"] for row in result], ["101"])
+
+    def test_javascript_contains_seven_step_survey_and_clear_failure_states(self):
+        js = JS_FILE.read_text("utf-8")
+        for required in (
+            "identity",
+            "space",
+            "location",
+            "content",
+            "terms",
+            "sources",
+            "approval",
+            "revision_conflict",
+            "401",
+            "403",
+            "409",
+            "503",
+            "api/monthly/ops/listings",
+        ):
+            self.assertIn(required, js)
 
     def test_operations_page_links_to_listing_readiness_with_token_helper(self):
         from monthly_public.ops_page import render_monthly_ops_page
