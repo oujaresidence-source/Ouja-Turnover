@@ -259,6 +259,43 @@ class CatalogProfileContractTest(unittest.TestCase):
         self.assertEqual(place["purposes"], ["treatment", "visit"])
         self.assertNotIn("lat", json.dumps({"public": place["label_ar"]}))
 
+    def test_destination_accepts_strict_staff_verification_metadata(self):
+        from monthly_public.catalog_profiles import parse_place
+
+        place = parse_place(
+            {
+                "label_ar": "مركز الملك عبدالله المالي",
+                "label_en": "King Abdullah Financial District",
+                "purposes": ["work"],
+                "coordinates": {
+                    "lat": 24.7656964,
+                    "lng": 46.6407087,
+                    "source": "priority_places_2026_08_25",
+                    "verified": True,
+                },
+                "source_note": "موقع رسمي + OpenStreetMap",
+                "category_id": "business_hubs",
+                "category_ar": "مراكز الأعمال والتوظيف",
+                "category_en": "Business & employment hubs",
+                "priority": 1,
+                "address_ar": "العقيق، الرياض",
+                "address_en": "Al Aqiq, Riyadh",
+                "district_ar": "العقيق",
+                "district_en": "Al Aqiq",
+                "map_url": "https://www.google.com/maps/search/?api=1&query=24.7656964%2C46.6407087",
+                "official_source_url": "https://www.kafd.sa/en/faq/",
+                "coordinate_source_url": "https://www.openstreetmap.org/way/1220645868",
+                "verified_at": "2026-08-25",
+                "review_interval_ar": "سنوي",
+                "reason_ar": "مركز أعمال رئيسي.",
+                "operations_note_ar": "نقطة مركزية موثقة.",
+            }
+        )
+
+        self.assertEqual(place["category_id"], "business_hubs")
+        self.assertEqual(place["priority"], 1)
+        self.assertEqual(place["verified_at"], "2026-08-25")
+
     def test_completion_separates_required_fields_from_non_blocking_proof(self):
         ready = completion(parse_profile(valid_profile()))
         self.assertTrue(ready["ready_for_approval"])

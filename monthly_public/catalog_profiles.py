@@ -501,7 +501,29 @@ def settings_form_values(settings: Any) -> Dict[str, Any]:
 
 def parse_place(value: Any) -> Dict[str, Any]:
     raw = _mapping(value, "place")
-    _reject_unknown(raw, {"label_ar", "label_en", "purposes", "coordinates", "source_note"})
+    metadata_fields = {
+        "category_id",
+        "category_ar",
+        "category_en",
+        "priority",
+        "address_ar",
+        "address_en",
+        "district_ar",
+        "district_en",
+        "map_url",
+        "official_source_url",
+        "coordinate_source_url",
+        "verified_at",
+        "review_interval_ar",
+        "review_interval_en",
+        "reason_ar",
+        "operations_note_ar",
+    }
+    _reject_unknown(
+        raw,
+        {"label_ar", "label_en", "purposes", "coordinates", "source_note"}
+        | metadata_fields,
+    )
     purposes = raw.get("purposes")
     if not isinstance(purposes, (list, tuple)) or not purposes:
         raise _error("purposes", "required", "اختر غرضًا واحدًا على الأقل.", "Choose at least one purpose.")
@@ -514,7 +536,7 @@ def parse_place(value: Any) -> Dict[str, Any]:
     coordinates = parse_coordinates(raw.get("coordinates"))
     if not coordinates or coordinates.get("verified") is not True:
         raise _error("coordinates", "verification_required", "اعتمد إحداثيات المكان أولًا.", "Verify the place coordinates first.")
-    return {
+    result = {
         "kind": "destination",
         "label_ar": _language_text(raw.get("label_ar"), "label_ar", "ar", 160),
         "label_en": _language_text(raw.get("label_en"), "label_en", "en", 160),
@@ -525,6 +547,45 @@ def parse_place(value: Any) -> Dict[str, Any]:
         "verified": True,
         "source_note": _text(raw.get("source_note"), "source_note", 300),
     }
+    if "category_id" in raw:
+        category_id = _text(raw["category_id"], "category_id", 80)
+        if not _SAFE_ID_RE.fullmatch(category_id):
+            raise _error("category_id", "invalid_format", "معرّف الفئة غير صحيح.", "The category ID is invalid.")
+        result["category_id"] = category_id
+    for field, language, maximum in (
+        ("category_ar", "ar", 120),
+        ("category_en", "en", 120),
+        ("address_ar", "ar", 240),
+        ("address_en", "en", 240),
+        ("district_ar", "ar", 120),
+        ("district_en", "en", 120),
+        ("review_interval_ar", "ar", 120),
+        ("review_interval_en", "en", 120),
+        ("reason_ar", "ar", 500),
+        ("operations_note_ar", "ar", 500),
+    ):
+        if field in raw and str(raw.get(field) or "").strip():
+            result[field] = _language_text(raw[field], field, language, maximum)
+    if "priority" in raw:
+        result["priority"] = _integer(raw["priority"], "priority", 1, 100)
+    for field in ("map_url", "official_source_url", "coordinate_source_url"):
+        if field not in raw:
+            continue
+        url = _text(raw[field], field, 500)
+        parsed_url = urlsplit(url)
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            raise _error(field, "invalid_url", "استخدم رابط HTTPS موثوقًا.", "Use a trusted HTTPS URL.")
+        result[field] = url
+    if "verified_at" in raw:
+        verified_at = _text(raw["verified_at"], "verified_at", 10)
+        if not _DATE_RE.fullmatch(verified_at):
+            raise _error("verified_at", "invalid_date", "تاريخ التحقق غير صحيح.", "The verification date is invalid.")
+        try:
+            dt.date.fromisoformat(verified_at)
+        except ValueError as error:
+            raise _error("verified_at", "invalid_date", "تاريخ التحقق غير صحيح.", "The verification date is invalid.") from error
+        result["verified_at"] = verified_at
+    return result
 
 
 def _source_images(value: Any) -> list[str]:
