@@ -177,6 +177,13 @@ except Exception as _ml_err:            # pragma: no cover
 try:
     from monthly_public.analytics import AnalyticsStore as _MonthlyAnalyticsStore
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
+    from monthly_public.page import (
+        ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
+        CSS_PATH as _MONTHLY_PUBLIC_CSS_PATH,
+        JS_PATH as _MONTHLY_PUBLIC_JS_PATH,
+        PAGE_ROUTES as _MONTHLY_PUBLIC_PAGE_ROUTES,
+        render_monthly_page as _render_monthly_public_page,
+    )
     from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
     from monthly_public.settings import load_settings as _monthly_public_load_settings
     from monthly_public.snapshot import SnapshotStore as _MonthlySnapshotStore
@@ -185,6 +192,9 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     print("[monthly-public] import failed (v2 routes disabled):", _mpub_err)
     _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
     _monthly_public_load_settings = _MonthlySnapshotStore = None
+    _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
+    _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
+    _render_monthly_public_page = None
     _HAS_MONTHLY_PUBLIC = False
 
 # Accountability «نظام الالتزام» — weekly-report ladder + warnings. The system accuses,
@@ -57237,9 +57247,9 @@ async def _handle_elite_geo(request):
 # apply the visible default discount = the "after" (always shown), and tease "up to 30%". The real
 # max discount is unlocked only by contacting the team on WhatsApp. WhatsApp-only conversion.
 MONTHLY_ENABLED = os.environ.get("MONTHLY_ENABLED", "1") != "0"
-# Staged locally until the v2 page renderer lands (Task 7). Setting 0 is the
-# explicit rollback to the untouched handlers below; it never changes live data.
-MONTHLY_PUBLIC_V2 = os.environ.get("MONTHLY_PUBLIC_V2", "0") == "1"
+# Enabled by default; setting an explicit 0 rolls back to the untouched legacy
+# handlers below. This switch changes presentation only and never changes live data.
+MONTHLY_PUBLIC_V2 = os.environ.get("MONTHLY_PUBLIC_V2", "1") != "0"
 
 
 def _monthly_public_v2_enabled():
@@ -58664,20 +58674,93 @@ def _monthly_render(route="home", listing=None, base=""):
 def _monthly_off():
     return web.Response(status=404, text="not found")
 
+
+def _monthly_public_v2_page_routes():
+    return dict(_MONTHLY_PUBLIC_PAGE_ROUTES)
+
+
+def _monthly_public_v2_asset_routes():
+    return dict(_MONTHLY_PUBLIC_ASSET_ROUTES)
+
+
+def _monthly_public_page_html(route, request, *, slug=None, listing_id=None):
+    if _render_monthly_public_page is None:
+        raise RuntimeError("monthly public page renderer is unavailable")
+    return _render_monthly_public_page(route, slug=slug, listing_id=listing_id)
+
+
+async def _handle_monthly_v2_css(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(os.path.dirname(__file__), "monthly_public", "static", "monthly.css")
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="text/css",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+async def _handle_monthly_v2_js(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = os.path.join(os.path.dirname(__file__), "monthly_public", "static", "monthly.js")
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="application/javascript",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
 async def _handle_monthly(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
+    if MONTHLY_PUBLIC_V2:
+        return web.Response(
+            text=_monthly_public_page_html("home", request),
+            content_type="text/html",
+        )
     return web.Response(text=_monthly_render("home", base=str(request.url.origin())), content_type="text/html")
 
 async def _handle_monthly_search(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
+    if MONTHLY_PUBLIC_V2:
+        return web.Response(
+            text=_monthly_public_page_html("browse", request),
+            content_type="text/html",
+        )
     return web.Response(text=_monthly_render("search", base=str(request.url.origin())), content_type="text/html")
+
+
+async def _handle_monthly_match(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    return web.Response(
+        text=_monthly_public_page_html("match", request),
+        content_type="text/html",
+    )
 
 async def _handle_monthly_id(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
     lid = request.match_info.get("lid", "")
+    if MONTHLY_PUBLIC_V2:
+        try:
+            body = _monthly_public_page_html("listing", request, listing_id=lid)
+        except ValueError:
+            return _monthly_off()
+        return web.Response(text=body, content_type="text/html")
     snap, ov = _gw_find_by_slug_or_id(lid)
     if snap:
         q = ("?" + request.query_string) if request.query_string else ""
@@ -58688,6 +58771,12 @@ async def _handle_monthly_detail(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
     token = request.match_info.get("slug", "")
+    if MONTHLY_PUBLIC_V2:
+        try:
+            body = _monthly_public_page_html("listing", request, slug=token)
+        except ValueError:
+            return _monthly_off()
+        return web.Response(text=body, content_type="text/html")
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov, with_airbnb=False) if snap else None
     return web.Response(text=_monthly_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
@@ -58785,7 +58874,8 @@ def _monthly_v2_browse_query(request):
 
 def _monthly_v2_listing_query(request, listing_id):
     raw = dict(request.query)
-    out = {"listing_id": listing_id}
+    out = ({"slug": listing_id} if raw.get("lookup") == "slug"
+           else {"listing_id": listing_id})
     for key in ("move_in", "move_out", "duration_months", "residents", "purpose", "lang"):
         if raw.get(key) not in (None, ""):
             out[key] = raw[key]
@@ -59783,6 +59873,10 @@ async def start_web_server():
         app.router.add_get("/monthly", _handle_monthly)
         app.router.add_get("/monthly/", _handle_monthly)
         app.router.add_get("/monthly/search", _handle_monthly_search)
+        if MONTHLY_PUBLIC_V2:
+            app.router.add_get("/monthly/match", _handle_monthly_match)
+            app.router.add_get(_MONTHLY_PUBLIC_CSS_PATH, _handle_monthly_v2_css)
+            app.router.add_get(_MONTHLY_PUBLIC_JS_PATH, _handle_monthly_v2_js)
         app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)
         app.router.add_get("/monthly/img", (_handle_monthly_v2_img
                                              if MONTHLY_PUBLIC_V2 else _handle_elite_img))
