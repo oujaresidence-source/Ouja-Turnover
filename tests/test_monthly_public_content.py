@@ -371,6 +371,10 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
             self.assertIn(hook, self.js)
 
+    def test_customer_shell_stays_within_a_small_uncompressed_asset_budget(self):
+        self.assertLess(len(self.js.encode("utf-8")), 110_000)
+        self.assertLess(len(self.css.encode("utf-8")), 30_000)
+
     def test_ranked_clicks_do_not_duplicate_visible_impressions(self):
         self.assertIn("rankedImpressionIds", self.js)
         self.assertNotIn('if (rank) track("result_impression"', self.js)
