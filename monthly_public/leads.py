@@ -30,6 +30,9 @@ DEDUPE_MINUTES = 30
 _SESSION_RE = re.compile(r"^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$")
 _REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _LISTING_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+STAFF_ACTIONS = ("confirm_request", "request_information", "prepare_alternative")
+INFORMATION_REASONS = ("dates", "residents", "place", "contract_terms", "other")
+ALTERNATIVE_REASONS = ("lower_price", "dates", "location", "space", "contract_terms")
 
 
 class HandoffValidationError(ValueError):
@@ -277,6 +280,25 @@ class LeadStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_monthly_lead_dedupe ON monthly_public_leads(session_id, listing_id, request_key, created_at)"
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS monthly_public_lead_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lead_reference TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (
+                        action IN ('confirm_request', 'request_information', 'prepare_alternative')
+                    ),
+                    reason TEXT,
+                    alternative_listing_id TEXT,
+                    quote_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (lead_reference) REFERENCES monthly_public_leads(reference)
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_monthly_lead_actions_reference ON monthly_public_lead_actions(lead_reference, id)"
+            )
 
     @staticmethod
     def _row(row: sqlite3.Row) -> Dict[str, Any]:
@@ -356,6 +378,116 @@ class LeadStore:
             row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (str(reference).upper(),)).fetchone()
         return self._row(row) if row is not None else None
 
+    @staticmethod
+    def _action_row(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "reference": row["lead_reference"],
+            "action": row["action"],
+            "reason": row["reason"],
+            "alternative_listing_id": row["alternative_listing_id"],
+            "quote": json.loads(row["quote_json"]),
+            "created_at": row["created_at"],
+        }
+
+    def actions_for(self, reference: str) -> list[Dict[str, Any]]:
+        normalized = str(reference or "").strip().upper()
+        if not _REFERENCE_RE.fullmatch(normalized):
+            raise ValueError("invalid lead reference")
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM monthly_public_lead_actions WHERE lead_reference = ? ORDER BY id",
+                (normalized,),
+            ).fetchall()
+        return [self._action_row(row) for row in rows]
+
+    def add_action(
+        self,
+        reference: str,
+        action: str,
+        *,
+        reason: Optional[str] = None,
+        alternative_listing_id: Any = None,
+        quote: Any = None,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, Any]:
+        """Append one controlled staff action and start response time once."""
+
+        normalized = str(reference or "").strip().upper()
+        if not _REFERENCE_RE.fullmatch(normalized):
+            raise ValueError("invalid lead reference")
+        if action not in STAFF_ACTIONS:
+            raise ValueError("invalid staff action")
+        listing_id: Optional[str] = None
+        safe_quote: Dict[str, Any] = {}
+        if action == "confirm_request":
+            if reason is not None or alternative_listing_id is not None or quote is not None:
+                raise ValueError("confirm_request accepts no action detail")
+        elif action == "request_information":
+            if reason not in INFORMATION_REASONS:
+                raise ValueError("invalid information reason")
+            if alternative_listing_id is not None or quote is not None:
+                raise ValueError("request_information accepts no alternative")
+        else:
+            if reason not in ALTERNATIVE_REASONS:
+                raise ValueError("invalid alternative reason")
+            listing_id = str(alternative_listing_id or "").strip()
+            if not _LISTING_RE.fullmatch(listing_id):
+                raise ValueError("invalid alternative listing ID")
+            safe_quote = _approved_quote(quote)
+            if not all(
+                field in safe_quote
+                for field in ("monthly_rate_sar", "stay_total_sar", "currency", "move_in", "move_out")
+            ):
+                raise ValueError("alternative quote is incomplete")
+
+        current_time = _time(now if now is not None else self.clock())
+        current = current_time.isoformat()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            lead_row = connection.execute(
+                "SELECT * FROM monthly_public_leads WHERE reference = ?", (normalized,)
+            ).fetchone()
+            if lead_row is None:
+                raise KeyError("unknown lead reference")
+            created = dt.datetime.fromisoformat(lead_row["created_at"])
+            if current_time.astimezone(created.tzinfo) < created:
+                raise ValueError("staff action cannot precede lead creation")
+            response_started = lead_row["responded_at"] is None
+            if response_started:
+                connection.execute(
+                    "UPDATE monthly_public_leads SET responded_at = ?, updated_at = ? WHERE reference = ? AND responded_at IS NULL",
+                    (current, current, normalized),
+                )
+            cursor = connection.execute(
+                """
+                INSERT INTO monthly_public_lead_actions(
+                    lead_reference, action, reason, alternative_listing_id,
+                    quote_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    normalized,
+                    action,
+                    reason,
+                    listing_id,
+                    json.dumps(safe_quote, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+                    current,
+                ),
+            )
+            action_row = connection.execute(
+                "SELECT * FROM monthly_public_lead_actions WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+            lead_row = connection.execute(
+                "SELECT * FROM monthly_public_leads WHERE reference = ?", (normalized,)
+            ).fetchone()
+        return {
+            "action": self._action_row(action_row),
+            "lead": self._row(lead_row),
+            "response_started": response_started,
+        }
+
     def create_general(
         self,
         session_id: str,
@@ -429,6 +561,10 @@ class LeadStore:
                 connection.execute(
                     "INSERT INTO monthly_public_leads(reference, session_id, listing_id, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, ?, '{}', '{}', ?, ?)",
                     (reference, "anon_health_probe", "health_probe", "health_probe", occurred, occurred),
+                )
+                connection.execute(
+                    "INSERT INTO monthly_public_lead_actions(lead_reference, action, quote_json, created_at) VALUES (?, 'confirm_request', '{}', ?)",
+                    (reference, occurred),
                 )
                 connection.rollback()
             return {

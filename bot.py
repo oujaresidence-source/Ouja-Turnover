@@ -59043,6 +59043,32 @@ async def _api_monthly_v2_ops_funnel(request):
     return _json(await asyncio.to_thread(_monthly_public_app.ops.funnel))
 
 
+async def _api_monthly_v2_ops_lead(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    result = await asyncio.to_thread(
+        _monthly_public_app.ops.lead, await _read_body(request)
+    )
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_ops_action(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
+    denied = _monthly_ops_gate(request)
+    if denied:
+        return denied
+    result = await asyncio.to_thread(
+        _monthly_public_app.ops.action, await _read_body(request)
+    )
+    return _monthly_public_response(result)
+
+
 async def _api_monthly_v2_ops_response(request):
     blocked = _monthly_public_v2_gate()
     if blocked is not None:
@@ -59081,6 +59107,8 @@ def _register_monthly_v2_only_routes(router):
     router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
     router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
     router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
+    router.add_post("/api/monthly/ops/lead", _api_monthly_v2_ops_lead)
+    router.add_post("/api/monthly/ops/action", _api_monthly_v2_ops_action)
     router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
     router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
 

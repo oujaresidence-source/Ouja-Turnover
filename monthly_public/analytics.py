@@ -276,6 +276,87 @@ class AnalyticsStore:
             for row in rows
         ]
 
+    def lead_journey(self, session_id: str, lead_reference: str) -> list[Dict[str, Any]]:
+        """Return a narrow staff timeline without exposing its correlation key."""
+
+        reference = str(lead_reference or "").strip().upper()
+        if not _LEAD_REFERENCE.fullmatch(reference):
+            raise ValueError("invalid lead reference")
+        if not isinstance(session_id, str) or not session_id.startswith("anon_"):
+            raise ValueError("invalid anonymous session")
+        allowed = {
+            "entry_route_choice",
+            "matcher_completion",
+            "result_impression",
+            "listing_view",
+            "whatsapp_click",
+        }
+        with self._connection() as connection:
+            target = connection.execute(
+                """
+                SELECT id FROM monthly_public_events
+                WHERE session_id = ? AND lead_reference = ?
+                  AND event_name = 'lead_created' AND trusted = 1
+                ORDER BY id LIMIT 1
+                """,
+                (session_id, reference),
+            ).fetchone()
+            if target is None:
+                return []
+            previous = connection.execute(
+                """
+                SELECT MAX(id) FROM monthly_public_events
+                WHERE session_id = ? AND event_name = 'lead_created'
+                  AND trusted = 1 AND id < ?
+                """,
+                (session_id, target["id"]),
+            ).fetchone()[0]
+            rows = connection.execute(
+                """
+                SELECT event_name, context_json, occurred_at
+                FROM monthly_public_events
+                WHERE session_id = ?
+                  AND id > ? AND id <= ?
+                  AND (lead_reference IS NULL OR lead_reference = ?)
+                ORDER BY id
+                """,
+                (session_id, int(previous or 0), target["id"], reference),
+            ).fetchall()
+        journey = []
+        for row in rows:
+            event = row["event_name"]
+            if event not in allowed:
+                continue
+            try:
+                context = json.loads(row["context_json"])
+            except (TypeError, ValueError):
+                context = {}
+            item: Dict[str, Any] = {
+                "event": event,
+                "occurred_at": row["occurred_at"],
+            }
+            if event == "entry_route_choice" and context.get("entry_route") in ("guided", "browse"):
+                item["entry_route"] = context["entry_route"]
+            elif event == "matcher_completion":
+                if context.get("purpose") in PURPOSES:
+                    item["purpose"] = context["purpose"]
+                if isinstance(context.get("place_id"), str):
+                    item["place_id"] = context["place_id"]
+                if isinstance(context.get("duration_months"), int):
+                    item["duration_months"] = context["duration_months"]
+                if context.get("duration_band") in ("1_month", "2_3_months", "4_6_months"):
+                    item["duration_band"] = context["duration_band"]
+            elif event == "result_impression":
+                if isinstance(context.get("listing_id"), str):
+                    item["listing_id"] = context["listing_id"]
+                if isinstance(context.get("rank"), int):
+                    item["rank"] = context["rank"]
+            elif event in ("listing_view", "whatsapp_click"):
+                if isinstance(context.get("listing_id"), str):
+                    item["listing_id"] = context["listing_id"]
+            journey.append(item)
+        return journey
+
     def health(self) -> Dict[str, Any]:
         try:
             with self._connection() as connection:

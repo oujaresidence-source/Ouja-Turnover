@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-ASSET_VERSION = "v20260825"
+ASSET_VERSION = "v20260825b"
 CSS_PATH = "/monthly/static/monthly_ops.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_ops.%s.js" % ASSET_VERSION
 
@@ -23,10 +23,10 @@ def render_monthly_ops_page() -> str:
   <script src="%s" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#monthly-ops-main">انتقل إلى المحتوى</a>
+  <a class="skip-link" href="#monthly-ops-main" data-copy="skipLink">انتقل إلى المحتوى</a>
   <div class="ops-shell">
     <header class="ops-header">
-      <div class="ops-brand" aria-label="عوجا، تشغيل السكن الشهري">
+      <div class="ops-brand" aria-label="عوجا، تشغيل السكن الشهري" data-copy-aria="brandLabel">
         <span class="ops-brand-mark" aria-hidden="true">عوجا</span>
         <span data-copy="productName">تشغيل السكن الشهري</span>
       </div>
@@ -49,7 +49,7 @@ def render_monthly_ops_page() -> str:
         </div>
       </section>
 
-      <section id="loading-state" class="loading-state" aria-label="جاري تحميل بيانات التشغيل">
+      <section id="loading-state" class="loading-state" aria-label="جاري تحميل بيانات التشغيل" data-copy-aria="loadingLabel">
         <span></span><span></span><span></span><span></span>
       </section>
       <section id="ops-error" class="state-panel state-error" role="alert" hidden>
@@ -142,19 +142,88 @@ def render_monthly_ops_page() -> str:
         <section class="ops-section outcome-section" aria-labelledby="outcome-title">
           <div class="section-heading">
             <div>
-              <h2 id="outcome-title" data-copy="outcomeTitle">تحديث نتيجة طلب</h2>
-              <p data-copy="outcomeDetail">استخدم المرجع الكامل. التحديث يضيف مرحلة جديدة ولا يحذف السجل السابق.</p>
+              <h2 id="outcome-title" data-copy="outcomeTitle">مساحة متابعة الطلب</h2>
+              <p data-copy="outcomeDetail">ابحث بالمرجع الكامل قبل تسجيل أي إجراء. لا تُرسل هذه الصفحة رسائل للعملاء.</p>
             </div>
           </div>
-          <form id="lead-outcome-form" autocomplete="off" novalidate>
+
+          <form id="lead-lookup-form" class="lookup-form" autocomplete="off" novalidate>
+            <label>
+              <span data-copy="leadReference">مرجع الطلب</span>
+              <input name="lead_reference" id="lead-reference" required maxlength="64" inputmode="text" spellcheck="false" placeholder="OJM-YYYYMMDD-XXXX" aria-describedby="lead-reference-error">
+              <span id="lead-reference-error" class="field-error" role="alert"></span>
+            </label>
+            <button id="lead-lookup" class="button button-secondary" type="submit" data-copy="lookupLead">عرض الطلب</button>
+            <span id="lookup-status" role="status" aria-live="polite"></span>
+          </form>
+
+          <div id="lead-workspace" hidden>
+            <div class="lead-workspace-grid">
+              <section id="lead-detail" class="lead-panel" aria-labelledby="lead-detail-title">
+                <h3 id="lead-detail-title" data-copy="leadDetailTitle">ملخص الطلب المحفوظ</h3>
+                <dl id="lead-detail-list" class="lead-detail-list"></dl>
+              </section>
+              <section id="lead-journey" class="lead-panel" aria-labelledby="lead-journey-title">
+                <h3 id="lead-journey-title" data-copy="leadJourneyTitle">رحلة العميل المسجلة</h3>
+                <ol id="lead-journey-list" class="journey-list"></ol>
+              </section>
+              <section id="lead-actions" class="lead-panel" aria-labelledby="lead-actions-title">
+                <h3 id="lead-actions-title" data-copy="leadActionsTitle">إجراءات الفريق السابقة</h3>
+                <ol id="lead-actions-list" class="journey-list"></ol>
+              </section>
+            </div>
+
+            <form id="staff-action-form" class="workflow-form" autocomplete="off" novalidate>
+              <fieldset>
+                <legend data-copy="staffActionTitle">إجراء متابعة آمن</legend>
+                <p class="form-help" data-copy="staffActionDetail">يسجل الإجراء داخليًا فقط ولا يرسل رسالة أو يفتح واتساب.</p>
+                <div class="form-grid">
+                  <label>
+                    <span data-copy="staffActionLabel">الإجراء</span>
+                    <select name="staff_action" id="staff-action" required aria-describedby="staff-action-error" disabled>
+                      <option value="confirm_request" data-copy="confirm_request">تأكيد مراجعة الطلب</option>
+                      <option value="request_information" data-copy="request_information">طلب معلومات ناقصة</option>
+                      <option value="prepare_alternative" data-copy="prepare_alternative">تجهيز بديل</option>
+                    </select>
+                    <span id="staff-action-error" class="field-error" role="alert"></span>
+                  </label>
+                  <label id="information-reason-field" hidden>
+                    <span data-copy="informationReason">المعلومة المطلوبة</span>
+                    <select name="information_reason" id="information-reason" aria-describedby="information-reason-error" disabled></select>
+                    <span id="information-reason-error" class="field-error" role="alert"></span>
+                  </label>
+                  <label id="alternative-reason-field" hidden>
+                    <span data-copy="alternativeReason">سبب تجهيز البديل</span>
+                    <select name="alternative_reason" id="alternative-reason" aria-describedby="alternative-reason-error" disabled></select>
+                    <span id="alternative-reason-error" class="field-error" role="alert"></span>
+                  </label>
+                  <label id="alternative-listing-field" hidden>
+                    <span data-copy="alternativeListing">رقم الوحدة البديلة المنشورة</span>
+                    <input name="alternative_listing_id" id="alternative-listing-id" maxlength="80" spellcheck="false" aria-describedby="alternative-listing-error" disabled>
+                    <span id="alternative-listing-error" class="field-error" role="alert"></span>
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button id="submit-staff-action" class="button button-primary" type="submit" data-copy="recordAction" disabled>تسجيل الإجراء</button>
+                  <span id="staff-action-status" role="status" aria-live="polite"></span>
+                </div>
+              </fieldset>
+            </form>
+
+            <section id="prepared-alternative" class="prepared-alternative" aria-labelledby="prepared-title" hidden>
+              <h3 id="prepared-title" data-copy="preparedTitle">ملخص البديل المجهز</h3>
+              <p id="prepared-alternative-copy"></p>
+              <button id="copy-alternative" class="button button-secondary" type="button" data-copy="copyAlternative">نسخ الملخص</button>
+              <span id="copy-status" role="status" aria-live="polite"></span>
+            </section>
+
+            <form id="lead-outcome-form" class="workflow-form" autocomplete="off" novalidate>
+              <fieldset>
+                <legend data-copy="outcomeUpdateTitle">تسجيل رد أو نتيجة نهائية</legend>
             <div class="form-grid">
               <label>
-                <span data-copy="leadReference">مرجع الطلب</span>
-                <input name="lead_reference" id="lead-reference" required maxlength="64" inputmode="text" spellcheck="false" placeholder="OJM-YYYYMMDD-XXXX">
-              </label>
-              <label>
                 <span data-copy="actionLabel">التحديث المطلوب</span>
-                <select name="outcome" id="lead-action" required>
+                <select name="outcome" id="lead-action" required disabled>
                   <option value="response" data-copy="actionResponse">تسجيل رد الفريق</option>
                   <option value="booked" data-copy="actionBooked">تسجيل الحجز</option>
                   <option value="lost" data-copy="actionLost">تسجيل خسارة الطلب</option>
@@ -162,7 +231,7 @@ def render_monthly_ops_page() -> str:
               </label>
               <label id="discount-field">
                 <span data-copy="discountClassification">هل طلب العميل تخفيض السعر؟</span>
-                <select name="discount_requested" id="discount-requested">
+                <select name="discount_requested" id="discount-requested" disabled>
                   <option value="unknown" data-copy="unknown">غير مصنف</option>
                   <option value="yes" data-copy="yes">نعم</option>
                   <option value="no" data-copy="no">لا</option>
@@ -170,16 +239,19 @@ def render_monthly_ops_page() -> str:
               </label>
               <label id="lost-reason-field" hidden>
                 <span data-copy="lostReason">سبب خسارة الطلب</span>
-                <select name="lost_reason" id="lost-reason">
+                <select name="lost_reason" id="lost-reason" aria-describedby="lost-reason-error" disabled>
                   <option value="" data-copy="chooseReason">اختر سببًا</option>
                 </select>
+                <span id="lost-reason-error" class="field-error" role="alert"></span>
               </label>
             </div>
             <div class="form-actions">
-              <button id="submit-outcome" class="button button-primary" type="submit" data-copy="recordUpdate">تسجيل التحديث</button>
+              <button id="submit-outcome" class="button button-primary" type="submit" data-copy="recordUpdate" disabled>تسجيل التحديث</button>
               <span id="form-status" role="status" aria-live="polite"></span>
             </div>
+              </fieldset>
           </form>
+          </div>
         </section>
       </div>
     </main>

@@ -23,7 +23,10 @@ from .contracts import (
 )
 from .health import build_health
 from .leads import (
+    ALTERNATIVE_REASONS,
     HandoffValidationError,
+    INFORMATION_REASONS,
+    STAFF_ACTIONS,
     build_general_whatsapp_handoff,
     build_whatsapp_handoff,
 )
@@ -170,7 +173,22 @@ class MonthlyOpsApp:
 
     def funnel(self) -> Dict[str, Any]:
         try:
-            return funnel_summary(self._public.analytics_store, self._public.lead_store)
+            _current, generation = self._public._request_context()
+            summary = funnel_summary(self._public.analytics_store, self._public.lead_store)
+            registry = self._public._place_registry(generation)
+            places = []
+            for row in summary.get("requested_places") or ():
+                value = {
+                    "place_id": row.get("place_id"),
+                    "count": row.get("count"),
+                }
+                registered = registry.get(row.get("place_id"))
+                if isinstance(registered, Mapping):
+                    value["label_ar"] = registered.get("label_ar")
+                    value["label_en"] = registered.get("label_en")
+                places.append(value)
+            summary["requested_places"] = places
+            return summary
         except Exception:
             return {
                 "ok": False,
@@ -180,6 +198,250 @@ class MonthlyOpsApp:
                     "message_en": "The lead funnel is unavailable.",
                 },
             }
+
+    @staticmethod
+    def _reference(value: Any, *, allowed: set[str]) -> Optional[str]:
+        if not isinstance(value, Mapping) or set(value) != allowed:
+            return None
+        reference = str(value.get("lead_reference") or "").strip().upper()
+        return reference if _LEAD_REFERENCE_RE.fullmatch(reference) else None
+
+    @staticmethod
+    def _safe_request(lead: Mapping[str, Any]) -> Dict[str, Any]:
+        request = lead.get("request")
+        if not isinstance(request, Mapping):
+            return {}
+        out = {}
+        for field in (
+            "move_in", "move_out", "duration_months", "duration_days",
+            "residents", "purpose",
+        ):
+            if field in request:
+                out[field] = request[field]
+        place = request.get("place")
+        if isinstance(place, Mapping) and isinstance(place.get("id"), str):
+            out["place_id"] = place["id"]
+        return out
+
+    @staticmethod
+    def _safe_state(lead: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "reference": lead.get("reference"),
+            "responded_at": lead.get("responded_at"),
+            "discount_requested": lead.get("discount_requested"),
+            "outcome": lead.get("outcome"),
+            "outcome_at": lead.get("outcome_at"),
+            "lost_reason": lead.get("lost_reason"),
+        }
+
+    def lead(self, value: Any) -> Dict[str, Any]:
+        reference = self._reference(value, allowed={"lead_reference"})
+        if reference is None:
+            return _error(
+                "invalid_request",
+                "مرجع الطلب أو صيغة البحث غير صحيحة.",
+                "The lead reference or lookup request is invalid.",
+                field="lead_reference",
+            )
+        try:
+            _current, generation = self._public._request_context()
+            lead = self._public.lead_store.get(reference)
+            if lead is None:
+                return _error(
+                    "lead_not_found",
+                    "مرجع الطلب غير موجود.",
+                    "The lead reference was not found.",
+                    field="lead_reference",
+                )
+            listing_id = lead.get("listing_id") or None
+            result = (
+                self._public._find({"listing_id": listing_id}, generation)
+                if listing_id is not None
+                else None
+            )
+            title = None
+            if result is not None:
+                title = {
+                    "ar": result.listing.get("name_ar"),
+                    "en": result.listing.get("name_en"),
+                }
+            try:
+                journey = self._public.analytics_store.lead_journey(
+                    lead["session_id"], reference
+                )
+            except Exception:
+                journey = []
+            return {
+                "ok": True,
+                "lead": {
+                    "reference": reference,
+                    "listing_id": listing_id,
+                    "title": title,
+                    "request": self._safe_request(lead),
+                    "quote": dict(lead.get("quote") or {}),
+                    "created_at": lead.get("created_at"),
+                    "responded_at": lead.get("responded_at"),
+                    "discount_requested": lead.get("discount_requested"),
+                    "outcome": lead.get("outcome"),
+                    "outcome_at": lead.get("outcome_at"),
+                    "lost_reason": lead.get("lost_reason"),
+                    "actions": [
+                        {
+                            "action": row.get("action"),
+                            "reason": row.get("reason"),
+                            "alternative_listing_id": row.get("alternative_listing_id"),
+                            "quote": dict(row.get("quote") or {}),
+                            "created_at": row.get("created_at"),
+                        }
+                        for row in self._public.lead_store.actions_for(reference)
+                    ],
+                    "journey": journey,
+                },
+            }
+        except Exception:
+            return _internal_error()
+
+    @staticmethod
+    def _localized_amount(value: Any, language: str) -> str:
+        try:
+            formatted = format(float(value), ",.0f")
+        except (TypeError, ValueError):
+            return "—"
+        if language == "ar":
+            return formatted.translate(str.maketrans("0123456789,", "٠١٢٣٤٥٦٧٨٩٬"))
+        return formatted
+
+    def _prepared_alternative(
+        self,
+        reference: str,
+        result: Any,
+        reason: str,
+        quote: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        reason_labels = {
+            "lower_price": ("سعر أقل", "lower price"),
+            "dates": ("التواريخ", "dates"),
+            "location": ("الموقع", "location"),
+            "space": ("المساحة", "space"),
+            "contract_terms": ("شروط العقد", "contract terms"),
+        }
+        title_ar = result.listing["name_ar"]
+        title_en = result.listing["name_en"]
+        listing_id = result.listing["id"]
+        reason_ar, reason_en = reason_labels[reason]
+        monthly_ar = self._localized_amount(quote["monthly_rate_sar"], "ar")
+        total_ar = self._localized_amount(quote["stay_total_sar"], "ar")
+        monthly_en = self._localized_amount(quote["monthly_rate_sar"], "en")
+        total_en = self._localized_amount(quote["stay_total_sar"], "en")
+        return {
+            "listing_id": listing_id,
+            "title": {"ar": title_ar, "en": title_en},
+            "reason": reason,
+            "quote": dict(quote),
+            "message_ar": (
+                "بديل مجهز للطلب %s: %s (الوحدة %s). السعر الرسمي %s ر.س شهريًا، "
+                "والإجمالي %s ر.س للتواريخ المحفوظة. سبب التجهيز: %s. يلزم تأكيد "
+                "اختيار العميل قبل أي التزام."
+            ) % (reference, title_ar, listing_id, monthly_ar, total_ar, reason_ar),
+            "message_en": (
+                "Prepared alternative for %s: %s (listing %s). The official monthly "
+                "rate is SAR %s and the saved-date total is SAR %s. Preparation reason: "
+                "%s. Confirm the customer's choice before any commitment."
+            ) % (reference, title_en, listing_id, monthly_en, total_en, reason_en),
+        }
+
+    def action(self, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, Mapping):
+            return _error("invalid_request", "صيغة الإجراء غير صحيحة.", "The staff action is invalid.")
+        allowed = {"lead_reference", "action", "reason", "alternative_listing_id"}
+        if not set(value).issubset(allowed) or set(value).difference(allowed):
+            return _error("invalid_request", "صيغة الإجراء غير صحيحة.", "The staff action is invalid.")
+        reference = str(value.get("lead_reference") or "").strip().upper()
+        action = value.get("action")
+        if not _LEAD_REFERENCE_RE.fullmatch(reference) or action not in STAFF_ACTIONS:
+            return _error("invalid_request", "صيغة الإجراء غير صحيحة.", "The staff action is invalid.")
+        expected = {
+            "confirm_request": {"lead_reference", "action"},
+            "request_information": {"lead_reference", "action", "reason"},
+            "prepare_alternative": {"lead_reference", "action", "reason", "alternative_listing_id"},
+        }[action]
+        if set(value) != expected:
+            return _error("invalid_request", "حقول الإجراء غير مكتملة أو غير معتمدة.", "The staff action fields are incomplete or unsupported.")
+        reason = value.get("reason")
+        if action == "request_information" and reason not in INFORMATION_REASONS:
+            return _error("invalid_request", "سبب طلب المعلومات غير معتمد.", "The information reason is unsupported.", field="reason")
+        if action == "prepare_alternative" and reason not in ALTERNATIVE_REASONS:
+            return _error("invalid_request", "سبب تجهيز البديل غير معتمد.", "The alternative reason is unsupported.", field="reason")
+        try:
+            current, generation = self._public._request_context()
+            lead = self._public.lead_store.get(reference)
+            if lead is None:
+                return _error("lead_not_found", "مرجع الطلب غير موجود.", "The lead reference was not found.", field="lead_reference")
+            prepared = None
+            values: Dict[str, Any] = {"reason": reason, "now": current}
+            if action == "confirm_request":
+                values = {"now": current}
+            elif action == "prepare_alternative":
+                listing_id = str(value.get("alternative_listing_id") or "").strip()
+                if listing_id == (lead.get("listing_id") or None):
+                    return _error("alternative_same_listing", "اختر بيتًا مختلفًا كبديل.", "Choose a different home as the alternative.", field="alternative_listing_id")
+                result = self._public._find({"listing_id": listing_id}, generation)
+                if result is None:
+                    return _error("alternative_not_published", "البيت البديل غير منشور حاليًا.", "The alternative home is not currently published.", field="alternative_listing_id")
+                request = lead.get("request")
+                if not isinstance(request, Mapping) or not all(
+                    key in request for key in ("residents", "sleeping", "move_in")
+                ) or not any(key in request for key in ("duration_months", "move_out")):
+                    return _error("lead_request_incomplete", "بيانات الطلب المحفوظة غير مكتملة لتجهيز بديل.", "The saved request is incomplete for preparing an alternative.")
+                if not space_matches(result.listing, request):
+                    return _error("alternative_space_mismatch", "البيت البديل لا يطابق السعة أو ترتيب النوم.", "The alternative home does not match capacity or sleeping needs.", field="alternative_listing_id")
+                availability = _availability(result, request)
+                if availability == "pending":
+                    return _error("alternative_availability_pending", "توفر البيت البديل غير مؤكد حاليًا.", "The alternative home's availability is pending.", field="alternative_listing_id")
+                if availability != "available":
+                    return _error("alternative_unavailable", "البيت البديل غير متاح للتواريخ المحفوظة.", "The alternative home is unavailable for the saved dates.", field="alternative_listing_id")
+                quote = quote_for(result.listing, _pricing_request(request), current)
+                if quote is None:
+                    return _error("alternative_price_missing", "السعر الرسمي للبديل غير متاح للتواريخ المحفوظة.", "The alternative's official price is unavailable for the saved dates.", field="alternative_listing_id")
+                if reason == "lower_price":
+                    original_rate = (lead.get("quote") or {}).get("monthly_rate_sar")
+                    if (
+                        isinstance(original_rate, bool)
+                        or not isinstance(original_rate, (int, float))
+                        or quote["monthly_rate_sar"] >= original_rate
+                    ):
+                        return _error(
+                            "alternative_not_lower_price",
+                            "السعر الرسمي للبديل ليس أقل من السعر المحفوظ للطلب.",
+                            "The alternative's official rate is not lower than the saved lead rate.",
+                            field="alternative_listing_id",
+                        )
+                prepared = self._prepared_alternative(reference, result, reason, quote)
+                values.update({
+                    "alternative_listing_id": listing_id,
+                    "quote": quote,
+                })
+            stored = self._public.lead_store.add_action(reference, action, **values)
+            recorded = self._record_lifecycle("team_response", stored["lead"])
+            response = {
+                "ok": True,
+                "action": {
+                    "action": stored["action"].get("action"),
+                    "reason": stored["action"].get("reason"),
+                    "alternative_listing_id": stored["action"].get("alternative_listing_id"),
+                    "quote": dict(stored["action"].get("quote") or {}),
+                    "created_at": stored["action"].get("created_at"),
+                },
+                "lead": self._safe_state(stored["lead"]),
+                "analytics_recorded": recorded,
+            }
+            if prepared is not None:
+                response["prepared_alternative"] = prepared
+            return response
+        except KeyError:
+            return _error("lead_not_found", "مرجع الطلب غير موجود.", "The lead reference was not found.", field="lead_reference")
+        except Exception:
+            return _internal_error()
 
     def response(self, value: Any) -> Dict[str, Any]:
         if (
@@ -216,7 +478,7 @@ class MonthlyOpsApp:
         except Exception:
             return _internal_error()
         recorded = self._record_lifecycle("team_response", lead)
-        return {"ok": True, "lead": lead, "analytics_recorded": recorded}
+        return {"ok": True, "lead": self._safe_state(lead), "analytics_recorded": recorded}
 
     def outcome(self, value: Any) -> Dict[str, Any]:
         try:
@@ -234,7 +496,7 @@ class MonthlyOpsApp:
         except Exception:
             return _internal_error()
         recorded = self._record_lifecycle(parsed["outcome"], lead, parsed)
-        return {"ok": True, "lead": lead, "analytics_recorded": recorded}
+        return {"ok": True, "lead": self._safe_state(lead), "analytics_recorded": recorded}
 
     def _record_lifecycle(
         self,
