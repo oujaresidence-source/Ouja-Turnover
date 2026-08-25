@@ -14,15 +14,17 @@ The page will not replace Monthly Lab. Monthly Lab remains the source for verifi
 
 ## Problem and evidence
 
-The public monthly interface can render the approved customer journey, but the publication snapshot has no complete source to publish:
+The public monthly interface can render the approved customer journey, but the publication snapshot receives incomplete records:
 
-- `bot.py::_monthly_public_refresh_snapshot()` exists but no startup, background, or save workflow calls it.
+- The calendar and price loops call `bot.py::_monthly_public_refresh_snapshot()`, so background refresh wiring exists.
+- `bot.py::_monthly_public_source_adapter()` requires `content_verified=True`, but the current listing editor neither displays nor saves that field. Every unapproved record remains blocked even when its text exists.
 - `bot.py::_monthly_public_source_adapter()` reads required values from several independent stores.
 - Titles, structured content, neighborhoods, and owner-declared facts live in `guest_overrides.json`.
 - Advertising licence details live in the internal monthly database.
 - Utilities and cleaning rules come from `MONTHLY_COMMERCIAL_TERMS` JSON.
 - Approved destinations come from `MONTHLY_APPROVED_PLACES` JSON.
 - Prices and calendars come from background monthly caches.
+- Public prices remain empty unless Monthly Lab uses the verified engine source.
 - `/monthly/ops` reports the blockers but gives the team no way to resolve listing data.
 
 This split produces a functioning interface with an empty or heavily blocked catalog. Staff cannot see one apartment's full readiness or approve a complete record from one place.
