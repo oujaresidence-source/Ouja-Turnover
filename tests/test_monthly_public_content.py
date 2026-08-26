@@ -240,6 +240,18 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values["refreshes"], 1)
         self.assertEqual(values["rotated"], minted)
 
+    def test_preview_startup_retries_once_without_retrying_public_requests(self):
+        values = run_node_async(
+            "(async()=>{let previewCalls=0;let previewPauses=0;const preview=await ui.retryPreviewStartup(async()=>{previewCalls+=1;if(previewCalls===1)throw new Error('cold start');return 'ready';},true,async()=>{previewPauses+=1;});let publicCalls=0;let publicPauses=0;let publicError='';try{await ui.retryPreviewStartup(async()=>{publicCalls+=1;throw new Error('cold start');},false,async()=>{publicPauses+=1;});}catch(error){publicError=error.message;}return {preview:preview,preview_calls:previewCalls,preview_pauses:previewPauses,public_calls:publicCalls,public_pauses:publicPauses,public_error:publicError};})()"
+        )
+
+        self.assertEqual(values["preview"], "ready")
+        self.assertEqual(values["preview_calls"], 2)
+        self.assertEqual(values["preview_pauses"], 1)
+        self.assertEqual(values["public_calls"], 1)
+        self.assertEqual(values["public_pauses"], 0)
+        self.assertEqual(values["public_error"], "cold start")
+
 
 class MonthlyPublicStaticContentTests(unittest.TestCase):
     def setUp(self):

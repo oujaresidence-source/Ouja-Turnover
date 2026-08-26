@@ -580,6 +580,21 @@
     }
   }
 
+  async function retryPreviewStartup(load, preview, pause) {
+    try {
+      return await load();
+    } catch (error) {
+      if (!preview) throw error;
+      const wait = typeof pause === "function" ? pause : function () {
+        return new Promise(function (resolve) {
+          setTimeout(resolve, 750);
+        });
+      };
+      await wait();
+      return load();
+    }
+  }
+
   function boundedInteger(value, minimum, maximum) {
     if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
     const parsed = Number(value);
@@ -2304,7 +2319,7 @@
     runtime.booted = true;
     loadingView();
     try {
-      await loadConfig();
+      await retryPreviewStartup(loadConfig, runtime.preview);
       await loadRoute(false);
     } catch (error) {
       renderFailure(error);
@@ -2332,6 +2347,7 @@
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
     responseWindowMessage: responseWindowMessage,
+    retryPreviewStartup: retryPreviewStartup,
     retrySessionOperation: retrySessionOperation,
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
