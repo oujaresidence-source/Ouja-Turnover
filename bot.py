@@ -60809,8 +60809,11 @@ async def start_web_server():
         # ---- Company profile «/cp» — public; renders from cp_stats.json, never from Hostaway ----
         if _HAS_CP:
             try:
+                # Owner-supplied contacts (2026-08-26). Env overrides for a future
+                # change; the number the owner gave takes precedence over
+                # STAY_WHATSAPP so this page cannot silently inherit a different one.
                 _cp_wa = re.sub(r"\D", "", (os.environ.get("CP_WHATSAPP")
-                                            or os.environ.get("STAY_WHATSAPP") or ""))
+                                            or "+966533779297"))
                 _cp_base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
 
                 def _cp_listing_photos(listing_id, pinned=None):
@@ -60860,7 +60863,8 @@ async def start_web_server():
                     "save_json": _save_json, "load_json": _load_json,
                     "notify": _cp_notify,
                     "base_url": _cp_base,
-                    "links": {"wa": _cp_wa, "email": (os.environ.get("CP_EMAIL") or "").strip()},
+                    "links": {"wa": _cp_wa,
+                              "email": (os.environ.get("CP_EMAIL") or "Info@oujares.com").strip()},
                     "pdf_path": (os.environ.get("CP_PDF_PATH") or "").strip(),
                     "default_lang": (os.environ.get("CP_DEFAULT_LANG") or "ar").strip().lower(),
                     "english_ready": _as_bool(os.environ.get("CP_ENGLISH_READY"), False),
