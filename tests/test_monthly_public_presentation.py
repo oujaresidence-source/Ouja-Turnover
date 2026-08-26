@@ -59,6 +59,47 @@ class ListingPresentationTests(unittest.TestCase):
         self.assertNotIn("rating", unverified)
         self.assertNotIn("reviews_count", unverified)
 
+    def test_listing_exposes_only_the_safe_review_projection(self):
+        public = present_listing(
+            self._result(
+                public_reviews={
+                    "rating_value": 5.0,
+                    "rating_scale": 5,
+                    "rating_count": 2,
+                    "text_review_count": 1,
+                    "source_label": "approved_public_reviews",
+                    "topic_mentions": [
+                        {"key": "cleanliness", "count": 1, "total": 1}
+                    ],
+                    "category_scores": [
+                        {"key": "cleanliness", "rating": 4.9, "scale": 5}
+                    ],
+                    "latest_reviews": [
+                        {
+                            "id": "r1",
+                            "rating": 5,
+                            "guest_name": "Sara A.",
+                            "text": "نظيف",
+                            "language": "ar",
+                            "channel": "Airbnb",
+                            "date": "2026-05-01",
+                            "private_review": "must never render",
+                            "reservation_id": "secret",
+                        }
+                    ],
+                    "empty_state_ar": "لا توجد مراجعات عامة نصية لهذه الشقة حاليًا.",
+                    "empty_state_en": "No public written reviews are available for this home yet.",
+                }
+            ),
+            "ar",
+        )
+
+        self.assertEqual(public["reviews"]["latest_reviews"][0]["text"], "نظيف")
+        payload = json.dumps(public["reviews"], ensure_ascii=False)
+        self.assertNotIn("private_review", payload)
+        self.assertNotIn("reservation_id", payload)
+        self.assertNotIn("must never render", payload)
+
     def test_gallery_has_unique_urls_and_localized_nonblank_alt_text(self):
         images = valid_listing()["images"]
         public = present_listing(self._result(images=images + [images[0]]), "ar")

@@ -28,6 +28,8 @@ _TOPICS = {
     "accuracy": ("مطابق", "الصور", "accurate", "photos"),
     "value": ("سعر", "قيمة", "price", "value"),
 }
+_EMPTY_AR = "لا توجد مراجعات عامة نصية لهذه الشقة حاليًا."
+_EMPTY_EN = "No public written reviews are available for this home yet."
 
 
 def _clean_text(value: Any, maximum: int) -> str:
@@ -192,8 +194,8 @@ def _project(
         "topic_mentions": _topic_mentions(text_rows),
         "category_scores": _category_scores(listing_id, len(items), insights),
         "latest_reviews": public_latest,
-        "empty_state_ar": "لا توجد مراجعات عامة نصية لهذه الشقة حاليًا.",
-        "empty_state_en": "No public written reviews are available for this home yet.",
+        "empty_state_ar": _EMPTY_AR,
+        "empty_state_en": _EMPTY_EN,
     }
 
 
@@ -212,4 +214,134 @@ def build_review_projections(
     return {
         listing_id: _project(listing_id, items, indexed_insights)
         for listing_id, items in grouped.items()
+    }
+
+
+def _integer(value: Any, minimum: int = 0) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        return None
+    return value
+
+
+def sanitize_review_projection(value: Any) -> Dict[str, Any]:
+    """Revalidate an adapter-built projection before it enters a snapshot."""
+
+    empty = {
+        "rating_value": None,
+        "rating_scale": 5,
+        "rating_count": 0,
+        "text_review_count": 0,
+        "source_label": "approved_public_reviews",
+        "topic_mentions": (),
+        "category_scores": (),
+        "latest_reviews": (),
+        "empty_state_ar": _EMPTY_AR,
+        "empty_state_en": _EMPTY_EN,
+    }
+    if not isinstance(value, Mapping):
+        return empty
+    rating_count = _integer(value.get("rating_count"))
+    text_count = _integer(value.get("text_review_count"))
+    rating_value = _rating(value.get("rating_value"))
+    if (
+        rating_count is None
+        or text_count is None
+        or text_count > rating_count
+        or (rating_count and rating_value is None)
+        or (not rating_count and rating_value is not None)
+        or value.get("rating_scale") != 5
+        or value.get("source_label") != "approved_public_reviews"
+    ):
+        return empty
+
+    topics = []
+    seen_topics = set()
+    for row in value.get("topic_mentions") or ():
+        if not isinstance(row, Mapping):
+            continue
+        key = str(row.get("key") or "")
+        count = _integer(row.get("count"), minimum=1)
+        total = _integer(row.get("total"), minimum=1)
+        if (
+            key not in _TOPICS
+            or key in seen_topics
+            or count is None
+            or total is None
+            or count > total
+            or total != text_count
+        ):
+            continue
+        seen_topics.add(key)
+        topics.append({"key": key, "count": count, "total": total})
+
+    categories = []
+    seen_categories = set()
+    for row in value.get("category_scores") or ():
+        if not isinstance(row, Mapping):
+            continue
+        key = str(row.get("key") or "")
+        score = _rating(row.get("rating"))
+        if (
+            key not in _CATEGORY_ORDER
+            or key in seen_categories
+            or score is None
+            or row.get("scale") != 5
+        ):
+            continue
+        seen_categories.add(key)
+        categories.append({"key": key, "rating": score, "scale": 5})
+
+    latest = []
+    seen_reviews = set()
+    for row in value.get("latest_reviews") or ():
+        if len(latest) >= 10:
+            break
+        if not isinstance(row, Mapping):
+            continue
+        review_id = _clean_text(str(row.get("id") or ""), 128)
+        date = _iso_date(row.get("date"))
+        score = _rating(row.get("rating"))
+        text = _review_text(row.get("text"))
+        language = row.get("language")
+        if (
+            not review_id
+            or review_id in seen_reviews
+            or date is None
+            or score is None
+            or not text
+            or language not in ("ar", "en", "unknown")
+        ):
+            continue
+        clean = {
+            "id": review_id,
+            "rating": score,
+            "guest_name": _short_name(row.get("guest_name")),
+            "text": text,
+            "language": language,
+            "channel": _clean_text(row.get("channel"), 40),
+            "date": date,
+        }
+        translations = row.get("translations")
+        if isinstance(translations, Mapping):
+            clean_translations = {}
+            for language_key in ("ar", "en"):
+                translated = _review_text(translations.get(language_key))
+                if translated and translated != text:
+                    clean_translations[language_key] = translated
+            if clean_translations:
+                clean["translations"] = clean_translations
+        seen_reviews.add(review_id)
+        latest.append(clean)
+
+    return {
+        "rating_value": rating_value,
+        "rating_scale": 5,
+        "rating_count": rating_count,
+        "text_review_count": text_count,
+        "source_label": "approved_public_reviews",
+        "topic_mentions": tuple(topics),
+        "category_scores": tuple(categories),
+        "latest_reviews": tuple(latest),
+        "empty_state_ar": _EMPTY_AR,
+        "empty_state_en": _EMPTY_EN,
     }

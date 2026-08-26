@@ -397,6 +397,74 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             self.bot._mcal = saved["mcal"]
             self.bot._monthly_cfg = saved["monthly_cfg"]
 
+    def test_cached_public_reviews_are_projected_without_a_provider_call(self):
+        saved = {
+            "gw_cache": self.bot._gw_cache,
+            "gw_overrides": self.bot._gw_overrides,
+            "gw_ratings_cache": self.bot._gw_ratings_cache,
+            "reviews": self.bot._reviews,
+            "reviews_insights": self.bot._reviews_insights,
+            "reviews_last_fetch": self.bot._reviews_last_fetch,
+            "has_monthly": self.bot._HAS_MONTHLY,
+            "mcal": self.bot._mcal,
+            "monthly_cfg": self.bot._monthly_cfg,
+        }
+        self.bot._gw_cache = {
+            "listings": [{
+                "id": 1001,
+                "name": "Ouja | Cached review test",
+                "active": True,
+                "images": [],
+                "amenities": [],
+            }],
+            "synced_at": "2026-08-25T09:00:00+03:00",
+        }
+        self.bot._gw_overrides = {"1001": {}}
+        self.bot._gw_ratings_cache = {"t": 0.0, "map": {}}
+        self.bot._reviews = {
+            "r1": {
+                "id": "r1",
+                "listing_id": 1001,
+                "rating": 5,
+                "guest_name": "Faisal Nassar",
+                "public_review": "نظيف وواسع",
+                "private_review": "never expose this",
+                "channel": "Airbnb",
+                "date": "2026-08-25",
+                "is_public": True,
+                "reservation_id": "secret-reservation",
+            }
+        }
+        self.bot._reviews_insights = {}
+        self.bot._reviews_last_fetch = 1787629200
+        self.bot._HAS_MONTHLY = False
+        self.bot._mcal = {"units": {}, "unit_synced_at": {}}
+        self.bot._monthly_cfg = {"hidden": []}
+        try:
+            with mock.patch.object(
+                self.bot,
+                "fetch_reviews_from_hostaway",
+                side_effect=AssertionError("provider reached"),
+            ) as provider:
+                source = self.bot._monthly_public_source_adapter()
+            provider.assert_not_called()
+            projected = source["listings"][0]["public_reviews"]
+            self.assertEqual(projected["latest_reviews"][0]["guest_name"], "Faisal N.")
+            self.assertEqual(projected["rating_count"], 1)
+            self.assertNotIn("never expose this", str(projected))
+            self.assertNotIn("secret-reservation", str(projected))
+            self.assertTrue(source["source_timestamps"]["reviews"])
+        finally:
+            self.bot._gw_cache = saved["gw_cache"]
+            self.bot._gw_overrides = saved["gw_overrides"]
+            self.bot._gw_ratings_cache = saved["gw_ratings_cache"]
+            self.bot._reviews = saved["reviews"]
+            self.bot._reviews_insights = saved["reviews_insights"]
+            self.bot._reviews_last_fetch = saved["reviews_last_fetch"]
+            self.bot._HAS_MONTHLY = saved["has_monthly"]
+            self.bot._mcal = saved["mcal"]
+            self.bot._monthly_cfg = saved["monthly_cfg"]
+
     def test_v2_monthly_image_handler_is_closed_and_not_registered(self):
         url = "https://images.example.test/home.jpg"
         saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2

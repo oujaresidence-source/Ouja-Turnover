@@ -209,12 +209,14 @@ try:
     from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
     from monthly_public.settings import load_settings as _monthly_public_load_settings
     from monthly_public.snapshot import SnapshotStore as _MonthlySnapshotStore
+    from monthly_public.reviews import build_review_projections as _monthly_review_projections
     _HAS_MONTHLY_PUBLIC = True
 except Exception as _mpub_err:          # pragma: no cover - optional staged rollout
     print("[monthly-public] import failed (v2 routes disabled):", _mpub_err)
     _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
     _build_monthly_preview_app = None
     _monthly_public_load_settings = _MonthlySnapshotStore = None
+    _monthly_review_projections = None
     _MonthlyCatalogService = _MonthlyCatalogStore = None
     _CatalogContractError = _CatalogRevisionConflict = None
     _monthly_catalog_apply_approved_profile = None
@@ -58149,6 +58151,11 @@ def _monthly_public_source_adapter(include_approved=True):
     # Local-only: aggregates the in-memory _reviews store and warms a cold map;
     # _gw_ratings_map never pulls Hostaway or any external source.
     ratings = _gw_ratings_map()
+    review_projections = (
+        _monthly_review_projections(tuple(_reviews.values()), _reviews_insights)
+        if callable(_monthly_review_projections)
+        else {}
+    )
     hidden = _monthly_hidden_set()
     approved_profiles = {}
     if (include_approved
@@ -58202,6 +58209,7 @@ def _monthly_public_source_adapter(include_approved=True):
             "reviews_count": rating.get("count") if isinstance(rating, dict) else None,
             "rating_verified": isinstance(rating, dict),
             "rating_source": "approved_public_reviews" if isinstance(rating, dict) else None,
+            "public_reviews": copy.deepcopy(review_projections.get(lid)),
             "licence": dict(licence) if isinstance(licence, dict) else None,
             "official_prices": _monthly_public_engine_prices(lid),
             "calendar": _monthly_public_calendar(lid),
@@ -58220,6 +58228,11 @@ def _monthly_public_source_adapter(include_approved=True):
             "listings": _gw_cache.get("synced_at"),
             "calendar": _mcal.get("synced_at"),
             "engine": _mengine.get("at"),
+            "reviews": (
+                datetime.fromtimestamp(_reviews_last_fetch, TZ).isoformat(timespec="seconds")
+                if _reviews_last_fetch
+                else None
+            ),
         },
     }
 

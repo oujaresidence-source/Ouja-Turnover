@@ -2,7 +2,7 @@ import json
 import unittest
 
 
-from monthly_public.reviews import build_review_projections
+from monthly_public.reviews import build_review_projections, sanitize_review_projection
 
 
 def review(
@@ -155,6 +155,17 @@ class ReviewProjectionTests(unittest.TestCase):
             ),
         )
         self.assertEqual(rejected["category_scores"], ())
+
+    def test_sanitizer_skips_a_malformed_row_without_hiding_later_reviews(self):
+        projection = build_review_projections(
+            [review("r1", "1001", "2026-08-24", "نظيف جدًا")]
+        )["1001"]
+        projection["latest_reviews"] = ("malformed",) + projection["latest_reviews"]
+
+        sanitized = sanitize_review_projection(projection)
+
+        self.assertEqual([row["id"] for row in sanitized["latest_reviews"]], ["r1"])
+        self.assertNotIn("malformed", str(sanitized))
 
 
 if __name__ == "__main__":

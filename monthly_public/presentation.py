@@ -114,6 +114,24 @@ def _rating(listing: Mapping[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _reviews(listing: Mapping[str, Any]) -> Dict[str, Any]:
+    value = listing.get("public_reviews")
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        "rating_value": value.get("rating_value"),
+        "rating_scale": value.get("rating_scale"),
+        "rating_count": value.get("rating_count"),
+        "text_review_count": value.get("text_review_count"),
+        "source_label": value.get("source_label"),
+        "topic_mentions": tuple(dict(row) for row in value.get("topic_mentions") or ()),
+        "category_scores": tuple(dict(row) for row in value.get("category_scores") or ()),
+        "latest_reviews": tuple(dict(row) for row in value.get("latest_reviews") or ()),
+        "empty_state_ar": value.get("empty_state_ar") or "",
+        "empty_state_en": value.get("empty_state_en") or "",
+    }
+
+
 def present_card(result: Any, lang: str) -> Dict[str, Any]:
     """Produce the compact public card without raw provider fields."""
 
@@ -193,5 +211,6 @@ def present_listing(result: Any, lang: str) -> Dict[str, Any]:
             "neighborhood": listing.get("neighborhood_%s" % suffix) or "",
             "description": structured.get("neighborhood_%s" % suffix) or "",
         },
+        "reviews": _reviews(listing),
         "licence": dict(listing.get("licence") or {}),
     }

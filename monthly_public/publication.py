@@ -580,6 +580,7 @@ def validate_listing(
         warnings.append(_issue("coordinates_unverified", "coordinates", "لن تظهر ادعاءات قرب حتى تعتمد الإحداثيات.", "Proximity claims stay hidden until coordinates are verified."))
 
     from .presentation import map_amenities
+    from .reviews import sanitize_review_projection
 
     _groups, unknown_amenities = map_amenities(source.get("amenities") or ())
     if unknown_amenities:
@@ -616,6 +617,7 @@ def validate_listing(
         "calendar": clean_calendar,
         "commercial_terms": terms or {},
         "coordinates": clean_coordinates,
+        "public_reviews": sanitize_review_projection(source.get("public_reviews")),
     }
     if rating_ok:
         clean_listing.update({"rating": rating, "reviews_count": reviews, "rating_verified": True})
