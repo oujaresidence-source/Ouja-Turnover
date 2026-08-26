@@ -900,15 +900,17 @@ class MonthlyPublicApp:
         for result in self._published(generation):
             listing = result.listing
             key = listing.get("neighborhood")
-            if not key or key in seen:
+            label_ar = listing.get("neighborhood_ar")
+            label_en = listing.get("neighborhood_en")
+            if not key or key in seen or not label_ar or not label_en:
                 continue
             seen.add(key)
             neighborhoods.append(
                 {
                     "id": key,
                     "kind": "neighborhood",
-                    "label_ar": listing["neighborhood_ar"],
-                    "label_en": listing["neighborhood_en"],
+                    "label_ar": label_ar,
+                    "label_en": label_en,
                 }
             )
         return {

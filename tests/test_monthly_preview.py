@@ -98,7 +98,7 @@ class MonthlyPreviewAppTest(unittest.TestCase):
         incomplete["stay"].pop("structured")
         incomplete["licence"] = None
         incomplete["publication"]["licence"] = None
-        source = {
+        self.source = {
             "refresh_ok": True,
             "catalog_complete": True,
             "source_timestamps": {"listings": NOW.isoformat()},
@@ -106,7 +106,7 @@ class MonthlyPreviewAppTest(unittest.TestCase):
         }
         self.service = CatalogService(
             self.store,
-            source_provider=lambda: copy.deepcopy(source),
+            source_provider=lambda: copy.deepcopy(self.source),
             settings_fallback=valid_settings_values,
             snapshot_refresh=lambda: {"accepted": True},
             clock=lambda: NOW,
@@ -128,6 +128,35 @@ class MonthlyPreviewAppTest(unittest.TestCase):
             any(row["code"] == "whatsapp_missing" for row in config["blockers"])
         )
         self.assertIsNone(config["session_id"])
+
+    def test_preview_config_never_exposes_an_unlabelled_neighborhood_choice(self):
+        row = self.source["listings"][0]
+        row["stay"]["neighborhood"] = "source_only_neighborhood"
+        row["stay"]["neighborhood_ar"] = None
+        row["stay"]["neighborhood_en"] = None
+        row["stay"]["neighborhood_verified"] = False
+        app = build_preview_app(self.service, clock=lambda: NOW)
+
+        config = app.config("ar")
+
+        self.assertFalse(any(
+            place.get("id") == "source_only_neighborhood"
+            for place in config["neighborhoods"]
+        ))
+        self.assertTrue(all(
+            place.get("label_ar") and place.get("label_en")
+            for place in config["neighborhoods"]
+        ))
+
+    def test_preview_config_reports_the_next_window_after_ten_at_night(self):
+        late = NOW.replace(hour=23, minute=0)
+        app = build_preview_app(self.service, clock=lambda: late)
+
+        response = app.config("ar")["response_window"]
+
+        self.assertFalse(response["is_open"])
+        self.assertIsNone(response["response_minutes"])
+        self.assertIn("10:00", response["message_en"])
 
     def test_preview_match_keeps_every_home_in_complete_catalog(self):
         result = self.app.match(

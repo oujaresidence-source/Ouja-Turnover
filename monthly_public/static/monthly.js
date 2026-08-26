@@ -145,6 +145,7 @@
       quotePending: "التوفر قيد التأكيد لهذه التواريخ.",
       quoteUnavailable: "البيت غير متاح للتواريخ المحددة.",
       quoteMissing: "السعر الرسمي غير متاح للتواريخ المحددة.",
+      preliminaryFallback: "سعر مبدئي. يؤكد فريق عوجا نوع العقد والشروط قبل الالتزام.",
       monthlyRate: "السعر الشهري",
       stayTotal: "إجمالي الإقامة",
       included: "المشمول",
@@ -307,6 +308,7 @@
       quotePending: "Availability is being confirmed for these dates.",
       quoteUnavailable: "The home is unavailable for the selected dates.",
       quoteMissing: "The official price is unavailable for the selected dates.",
+      preliminaryFallback: "Preliminary price. Ouja confirms the contract route and terms before commitment.",
       monthlyRate: "Monthly rate",
       stayTotal: "Stay total",
       included: "Included",
@@ -1995,6 +1997,10 @@
       if (status === "unavailable") message = copy("quoteUnavailable");
       if (status === "price_missing") message = copy("quoteMissing");
       card.appendChild(element("p", "", message));
+      const requestedMonths = Number(runtime.listingRequest && runtime.listingRequest.duration_months);
+      if (requestedMonths >= 4 && requestedMonths <= 6) {
+        card.appendChild(element("p", "preliminary-note", copy("preliminaryFallback")));
+      }
       if (runtime.preview) card.appendChild(element("p", "preview-deposit-note", copy("previewDepositRange")));
       card.appendChild(stayDetailsForm(listing));
       return card;

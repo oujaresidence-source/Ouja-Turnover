@@ -294,6 +294,22 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertNotIn("window.open(handoff.url", self.js)
         self.assertIn("general_help: true", self.js)
 
+    def test_four_to_six_month_caveat_survives_a_missing_price(self):
+        self.assertIn(
+            "سعر مبدئي. يؤكد فريق عوجا نوع العقد والشروط قبل الالتزام.",
+            self.js,
+        )
+        self.assertIn(
+            "Preliminary price. Ouja confirms the contract route and terms before commitment.",
+            self.js,
+        )
+        no_quote = self.js[
+            self.js.index("if (!quote) {"):
+            self.js.index("const total = element", self.js.index("if (!quote) {"))
+        ]
+        self.assertIn("duration_months", no_quote)
+        self.assertIn('copy("preliminaryFallback")', no_quote)
+
     def test_empty_result_help_renders_a_visible_blocker_or_response_window(self):
         self.assertIn("contactState", self.js)
         self.assertIn('"contact-blocked"', self.js)
