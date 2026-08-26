@@ -3,6 +3,7 @@ import os
 import subprocess
 import unittest
 import re
+import gzip
 
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -44,7 +45,7 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
     def test_work_branch_adds_place_and_back_preserves_answers(self):
         state = run_node("(() => { let s=ui.initialMatcherState(); s=ui.answerStep(s,'purpose','work'); s=ui.answerStep(s,'place',{kind:'destination',id:'kafd',label:'KAFD'}); s=ui.answerStep(s,'residents',2); s=ui.goBack(s); return s; })()")
 
-        self.assertEqual(state["steps"], ["purpose", "place", "residents", "sleeping", "dates", "flexibility"])
+        self.assertEqual(state["steps"], ["purpose", "place", "residents", "sleeping", "price_priority", "dates", "flexibility"])
         self.assertEqual(state["current"], 2)
         self.assertEqual(state["answers"]["purpose"], "work")
         self.assertEqual(state["answers"]["place"]["id"], "kafd")
@@ -53,12 +54,12 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
     def test_changed_purpose_rebranches_and_removes_hidden_answers(self):
         state = run_node("(() => { let s=ui.initialMatcherState(); s=ui.answerStep(s,'purpose','work'); s=ui.answerStep(s,'place',{kind:'destination',id:'kafd',label:'KAFD'}); s=ui.goBack(s); s=ui.goBack(s); s=ui.answerStep(s,'purpose','family'); return s; })()")
 
-        self.assertEqual(state["steps"], ["purpose", "residents", "sleeping", "dates", "flexibility"])
+        self.assertEqual(state["steps"], ["purpose", "residents", "sleeping", "price_priority", "dates", "flexibility"])
         self.assertEqual(state["current"], 1)
         self.assertNotIn("place", state["answers"])
 
     def test_completed_matcher_state_survives_a_deep_link_reload(self):
-        state = run_node("ui.initialMatcherState({current:5,answers:{purpose:'family',residents:3,sleeping:'two_bedrooms',move_in:'2026-09-01',duration_months:2,date_mode:'duration',flexibility:'fixed'}})")
+        state = run_node("ui.initialMatcherState({current:6,answers:{purpose:'family',residents:3,sleeping:'two_bedrooms',price_priority:'value',move_in:'2026-09-01',duration_months:2,date_mode:'duration',flexibility:'fixed'}})")
 
         self.assertEqual(state["current"], len(state["steps"]))
 
@@ -68,7 +69,7 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
         self.assertEqual(values, ["internet", "maintenance"])
 
     def test_api_request_contains_only_approved_match_contract(self):
-        request = run_node("ui.buildMatchRequest({purpose:'family',residents:3,sleeping:'two_bedrooms',move_in:'2026-09-01',duration_months:2,flexibility:'plus_minus_7',date_mode:'duration',ui_note:'private'})")
+        request = run_node("ui.buildMatchRequest({purpose:'family',residents:3,sleeping:'two_bedrooms',price_priority:'lowest_suitable',move_in:'2026-09-01',duration_months:2,flexibility:'plus_minus_7',date_mode:'duration',ui_note:'private'})")
 
         self.assertEqual(
             request,
@@ -76,6 +77,7 @@ class MonthlyPublicMatcherReducerTests(unittest.TestCase):
                 "purpose": "family",
                 "residents": 3,
                 "sleeping": "two_bedrooms",
+                "price_priority": "lowest_suitable",
                 "move_in": "2026-09-01",
                 "duration_months": 2,
                 "flexibility": "plus_minus_7",
@@ -260,6 +262,22 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         with open(CSS_PATH, encoding="utf-8") as handle:
             self.css = handle.read()
 
+    def test_price_priority_and_review_ui_are_present(self):
+        for hook in (
+            'steps.concat(["residents", "sleeping", "price_priority", "dates", "flexibility"])',
+            'track("price_priority_selected"',
+            'track("review_section_view"',
+            'track("price_breakdown_open"',
+            "function renderReviews",
+        ):
+            self.assertIn(hook, self.js)
+        self.assertIn('pricePriorityTitle: "وش الأهم لك في ترتيب الخيارات؟"', self.js)
+        self.assertIn('reviewsTitle: "تجارب ضيوف هذه الشقة"', self.js)
+        self.assertNotIn(
+            "innerHTML",
+            self.js[self.js.index("function renderReviews"):self.js.index("function quoteLabel")],
+        )
+
     def test_every_interface_copy_has_arabic_and_english_locale_tables(self):
         self.assertIn("const COPY =", self.js)
         self.assertIn("ar:", self.js)
@@ -426,8 +444,9 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("min-height: 44px", self.css[self.css.index(".preview-edit-link"):])
 
     def test_customer_shell_stays_within_a_small_uncompressed_asset_budget(self):
-        self.assertLess(len(self.js.encode("utf-8")), 110_000)
+        self.assertLess(len(self.js.encode("utf-8")), 125_000)
         self.assertLess(len(self.css.encode("utf-8")), 30_000)
+        self.assertLess(len(gzip.compress(self.js.encode("utf-8"), compresslevel=9)), 30_000)
 
     def test_ranked_clicks_do_not_duplicate_visible_impressions(self):
         self.assertIn("rankedImpressionIds", self.js)

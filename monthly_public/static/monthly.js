@@ -52,10 +52,10 @@
       progress: "الخطوة {current} من {total}",
       purposeTitle: "وش سبب إقامتك في الرياض؟",
       purposeHint: "نستخدم إجابتك عشان نرتب البيوت حسب احتياجك الفعلي.",
-      work: "عمل أو انتقال وظيفي",
-      family: "سكن عائلي مؤقت",
-      treatment: "علاج",
-      visit: "زيارة أو مناسبة",
+      work: "💼 عمل أو انتقال وظيفي",
+      family: "🏡 سكن عائلي مؤقت",
+      treatment: "🏥 علاج",
+      visit: "📍 زيارة أو مناسبة",
       placeTitleWork: "وش المكان المهم لدوامك؟",
       placeTitleTreatment: "وش المستشفى أو الوجهة الطبية المهمة؟",
       placeTitleVisit: "وش مكان الزيارة أو المناسبة؟",
@@ -74,6 +74,11 @@
       fourBedrooms: "أربع غرف أو أكثر",
       separateBeds: "أسرة منفصلة للمقيمين",
       flexibleSleeping: "مرن",
+      pricePriorityTitle: "وش الأهم لك في ترتيب الخيارات؟",
+      pricePriorityHint: "هذا يغيّر ترتيب البيوت المناسبة فقط، ولا يغيّر السعر الرسمي.",
+      experiencePriority: "✨ تجربة ومساحة أفضل",
+      valuePriority: "⚖️ أفضل توازن بين الملاءمة والسعر",
+      lowestPriority: "💰 أقل سعر بين الخيارات المناسبة",
       datesTitle: "متى تبدأ الإقامة وكم مدتها؟",
       datesHint: "اختر مدة بالأشهر أو تاريخ خروج محدد، ثم اضغط متابعة.",
       moveIn: "تاريخ الدخول",
@@ -138,6 +143,25 @@
       story: "عن البيت",
       amenities: "المرافق الموثقة",
       location: "الموقع",
+      reviewsTitle: "تجارب ضيوف هذه الشقة",
+      reviewsProof: "مراجعات عامة مرتبطة بهذه الشقة فقط، بدون انتقاء الإيجابي منها.",
+      latestReviews: "أحدث المراجعات",
+      reviewAggregate: "{rating} من 5 من {count} مراجعة موثقة",
+      writtenReviews: "{count} مراجعة مكتوبة",
+      originalReviewAr: "النص الأصلي بالعربية",
+      originalReviewEn: "النص الأصلي بالإنجليزية",
+      translatedReview: "ترجمة للمساعدة في القراءة",
+      readMore: "اقرأ المزيد",
+      showLess: "عرض أقل",
+      topicCleanliness: "النظافة",
+      topicSpace: "المساحة",
+      topicService: "الخدمة",
+      topicLocation: "الموقع",
+      topicAccuracy: "مطابقة الوصف",
+      topicValue: "القيمة",
+      topicMentions: "ذُكرت في {count} من {total} مراجعات مكتوبة",
+      categoryCheckin: "تسجيل الدخول",
+      categoryCommunication: "التواصل",
       licence: "بيانات الإعلان",
       licenceNumber: "رقم الترخيص: {value}",
       licenceExpiry: "ساري حتى: {value}",
@@ -157,6 +181,8 @@
       cleaning: "التنظيف",
       deposit: "التأمين والاسترداد",
       paymentMethods: "طرق الدفع",
+      priceBreakdown: "وش يشمل هذا السعر؟",
+      priceReassurance: "راجع المشمول والبنود المتغيرة قبل تجهيز طلب التأكيد.",
       contactWhatsApp: "جهّز طلب واتساب",
       contactBlocked: "التواصل عبر واتساب غير جاهز حاليًا. تقدر تكمل تصفح البيوت والأسعار.",
       secureSessionBlocked: "تعذر تجهيز جلسة آمنة لطلب واتساب حاليًا. أعد تحميل الصفحة أو أكمل تصفح البيوت.",
@@ -218,10 +244,10 @@
       progress: "Step {current} of {total}",
       purposeTitle: "What brings you to Riyadh?",
       purposeHint: "Your answer helps us rank homes for your actual stay needs.",
-      work: "Work or relocation",
-      family: "Temporary family home",
-      treatment: "Treatment",
-      visit: "Visit or event",
+      work: "💼 Work or relocation",
+      family: "🏡 Temporary family home",
+      treatment: "🏥 Treatment",
+      visit: "📍 Visit or event",
       placeTitleWork: "Which place matters for your work?",
       placeTitleTreatment: "Which hospital or medical destination matters?",
       placeTitleVisit: "Which venue or place matters for your visit?",
@@ -240,6 +266,11 @@
       fourBedrooms: "Four or more bedrooms",
       separateBeds: "Separate beds for residents",
       flexibleSleeping: "Flexible",
+      pricePriorityTitle: "What matters most when we order the options?",
+      pricePriorityHint: "This changes the order of suitable homes, never the official price.",
+      experiencePriority: "✨ Better experience and space",
+      valuePriority: "⚖️ Best balance of fit and price",
+      lowestPriority: "💰 Lowest price among suitable options",
       datesTitle: "When will you arrive and how long will you stay?",
       datesHint: "Choose a month duration or an exact move-out date, then continue.",
       moveIn: "Move-in date",
@@ -304,6 +335,25 @@
       story: "About this home",
       amenities: "Verified amenities",
       location: "Location",
+      reviewsTitle: "What guests said about this home",
+      reviewsProof: "Public reviews linked only to this home, without selecting only positive feedback.",
+      latestReviews: "Latest reviews",
+      reviewAggregate: "{rating} out of 5 from {count} verified reviews",
+      writtenReviews: "{count} written reviews",
+      originalReviewAr: "Original review in Arabic",
+      originalReviewEn: "Original review in English",
+      translatedReview: "Translation provided for easier reading",
+      readMore: "Read more",
+      showLess: "Show less",
+      topicCleanliness: "Cleanliness",
+      topicSpace: "Space",
+      topicService: "Service",
+      topicLocation: "Location",
+      topicAccuracy: "Description accuracy",
+      topicValue: "Value",
+      topicMentions: "Mentioned in {count} of {total} written reviews",
+      categoryCheckin: "Check-in",
+      categoryCommunication: "Communication",
       licence: "Advertising information",
       licenceNumber: "Licence number: {value}",
       licenceExpiry: "Valid until: {value}",
@@ -323,6 +373,8 @@
       cleaning: "Cleaning",
       deposit: "Deposit and refund",
       paymentMethods: "Payment methods",
+      priceBreakdown: "What does this price cover?",
+      priceReassurance: "Review what is included and what can vary before preparing your confirmation request.",
       contactWhatsApp: "Prepare WhatsApp request",
       contactBlocked: "WhatsApp contact is not ready. You can still browse homes and prices.",
       secureSessionBlocked: "A secure request session is unavailable. Reload the page or continue browsing homes.",
@@ -426,6 +478,7 @@
   };
 
   const PURPOSE_KEYS = ["work", "family", "treatment", "visit"];
+  const PRICE_PRIORITIES = ["experience", "value", "lowest_suitable"];
   const SLEEPING = [
     ["studio", "studio"],
     ["one_bedroom", "oneBedroom"],
@@ -632,9 +685,11 @@
       const purpose = params.get("purpose");
       const sleeping = params.get("sleeping");
       const flexibility = params.get("flexibility");
+      const pricePriority = params.get("price_priority");
       if (PURPOSE_KEYS.indexOf(purpose) !== -1) values.purpose = purpose;
       if (SLEEPING.some(function (row) { return row[0] === sleeping; })) values.sleeping = sleeping;
       if (["fixed", "plus_minus_7"].indexOf(flexibility) !== -1) values.flexibility = flexibility;
+      if (PRICE_PRIORITIES.indexOf(pricePriority) !== -1) values.price_priority = pricePriority;
     }
     return values;
   }
@@ -679,7 +734,7 @@
     if (["work", "treatment", "visit"].indexOf(answers && answers.purpose) !== -1) {
       steps.push("place");
     }
-    return steps.concat(["residents", "sleeping", "dates", "flexibility"]);
+    return steps.concat(["residents", "sleeping", "price_priority", "dates", "flexibility"]);
   }
 
   function initialMatcherState(saved) {
@@ -730,6 +785,7 @@
       purpose: answers.purpose,
       residents: Number(answers.residents),
       sleeping: answers.sleeping,
+      price_priority: answers.price_priority,
       move_in: answers.move_in,
       flexibility: answers.flexibility
     };
@@ -1411,6 +1467,9 @@
     } else {
       recordAnswer(step, value);
     }
+    if (step === "price_priority") {
+      track("price_priority_selected", { price_priority: value });
+    }
     if (runtime.matcher.current >= runtime.matcher.steps.length) submitMatch();
     else renderMatcher();
   }
@@ -1592,6 +1651,17 @@
     panel.appendChild(choiceList(values, runtime.matcher.answers.flexibility, function (value) { applyMatcherAnswer("flexibility", value); }));
   }
 
+  function renderPricePriority(panel) {
+    const values = [
+      { value: "experience", label: copy("experiencePriority") },
+      { value: "value", label: copy("valuePriority") },
+      { value: "lowest_suitable", label: copy("lowestPriority") }
+    ];
+    panel.appendChild(choiceList(values, runtime.matcher.answers.price_priority, function (value) {
+      applyMatcherAnswer("price_priority", value);
+    }));
+  }
+
   function renderMatcher() {
     const target = clearMain();
     const wrap = element("div", "narrow-width matcher-page");
@@ -1611,6 +1681,9 @@
     } else if (step === "sleeping") {
       panel = questionShell(copy("sleepingTitle"), copy("sleepingHint"));
       renderSleeping(panel);
+    } else if (step === "price_priority") {
+      panel = questionShell(copy("pricePriorityTitle"), copy("pricePriorityHint"));
+      renderPricePriority(panel);
     } else if (step === "dates") {
       panel = questionShell(copy("datesTitle"), copy("datesHint"));
       renderDates(panel);
@@ -1649,6 +1722,7 @@
     if (request.duration_months) context.duration_months = request.duration_months;
     if (request.move_out) context.move_out = request.move_out;
     if (request.place) context.place_id = request.place.id;
+    if (request.price_priority) context.price_priority = request.price_priority;
     return context;
   }
 
@@ -1751,6 +1825,9 @@
     target.appendChild(wrap);
     const ids = rankedImpressionIds(result).slice(0, 100);
     track("results_view", Object.assign(eventContextFromRequest(runtime.request || {}), { listing_ids: ids }));
+    if (!(result.top && result.top.length)) {
+      track("no_match", eventContextFromRequest(runtime.request || {}));
+    }
     ids.forEach(function (id, index) {
       if (runtime.impressedListingIds.has(id)) return;
       runtime.impressedListingIds.add(id);
@@ -1874,7 +1951,7 @@
   function listingQuoteRequest(request) {
     const values = {};
     if (request) {
-      ["move_in", "move_out", "duration_months", "residents", "purpose"].forEach(function (key) {
+      ["move_in", "move_out", "duration_months", "residents", "purpose", "price_priority"].forEach(function (key) {
         if (request[key] !== undefined) values[key] = request[key];
       });
       if (request.place) values.place = request.place;
@@ -2015,7 +2092,105 @@
       if (listing.location.description) location.appendChild(element("p", "", listing.location.description));
       content.appendChild(location);
     }
+    content.appendChild(renderReviews(listing));
     return content;
+  }
+
+  function reviewLabel(key) {
+    const labels = {
+      cleanliness: "topicCleanliness", space: "topicSpace", service: "topicService",
+      location: "topicLocation", accuracy: "topicAccuracy", value: "topicValue",
+      checkin: "categoryCheckin", communication: "categoryCommunication"
+    };
+    return labels[key] ? copy(labels[key]) : "";
+  }
+
+  function reviewDisplay(row) {
+    const original = typeof row.text === "string" ? row.text : "";
+    const translated = row.translations && typeof row.translations[runtime.lang] === "string" ? row.translations[runtime.lang] : "";
+    if (translated && row.language !== runtime.lang) return { text: translated, label: copy("translatedReview") };
+    const label = row.language === "ar" ? copy("originalReviewAr") : row.language === "en" ? copy("originalReviewEn") : "";
+    return { text: original, label: label };
+  }
+
+  function renderReviews(listing) {
+    const reviews = listing.reviews && typeof listing.reviews === "object" ? listing.reviews : {};
+    const section = element("section", "reviews-section");
+    section.appendChild(element("h2", "", copy("reviewsTitle")));
+    section.appendChild(element("p", "reviews-proof", copy("reviewsProof")));
+    if (reviews.rating_count && reviews.rating_value) {
+      const summary = element("div", "review-summary");
+      const score = element("div", "review-score");
+      append(score,
+        element("strong", "", formatNumber(reviews.rating_value)),
+        element("span", "", copy("reviewAggregate", { rating: formatNumber(reviews.rating_value), count: formatNumber(reviews.rating_count) }))
+      );
+      summary.appendChild(score);
+      const evidence = element("div", "review-evidence");
+      const topics = element("ul", "review-topics");
+      (reviews.topic_mentions || []).forEach(function (item) {
+        const label = reviewLabel(item.key);
+        if (!label) return;
+        topics.appendChild(element("li", "", label + " · " + copy("topicMentions", { count: formatNumber(item.count), total: formatNumber(item.total) })));
+      });
+      if (topics.children.length) evidence.appendChild(topics);
+      const categories = element("ul", "review-categories");
+      (reviews.category_scores || []).forEach(function (item) {
+        const label = reviewLabel(item.key);
+        if (label) categories.appendChild(element("li", "", label + " " + formatNumber(item.rating) + "/5"));
+      });
+      if (categories.children.length) evidence.appendChild(categories);
+      summary.appendChild(evidence);
+      section.appendChild(summary);
+    }
+    const rows = Array.isArray(reviews.latest_reviews) ? reviews.latest_reviews.slice(0, 10) : [];
+    if (!rows.length) {
+      section.appendChild(element("p", "review-empty", runtime.lang === "ar" ? reviews.empty_state_ar : reviews.empty_state_en));
+    } else {
+      section.appendChild(element("h3", "", copy("latestReviews") + " · " + copy("writtenReviews", { count: formatNumber(reviews.text_review_count || rows.length) })));
+      const grid = element("div", "review-grid");
+      rows.forEach(function (row) {
+        const card = element("article", "review-card");
+        const header = element("div", "review-card-head");
+        append(header,
+          element("strong", "", row.guest_name || ""),
+          element("span", "", formatNumber(row.rating) + "/5 · " + (row.date || ""))
+        );
+        card.appendChild(header);
+        const display = reviewDisplay(row);
+        if (display.label) card.appendChild(element("p", "review-language", display.label));
+        const text = element("p", "review-text", display.text);
+        text.setAttribute("aria-expanded", "false");
+        card.appendChild(text);
+        if (display.text.length > 280) {
+          const more = button(copy("readMore"), "review-more", function () {
+            const expanded = text.getAttribute("aria-expanded") === "true";
+            text.setAttribute("aria-expanded", String(!expanded));
+            more.textContent = copy(expanded ? "readMore" : "showLess");
+          });
+          card.appendChild(more);
+        }
+        grid.appendChild(card);
+      });
+      section.appendChild(grid);
+    }
+    let reported = false;
+    function reportView() {
+      if (reported) return;
+      reported = true;
+      track("review_section_view", { listing_id: String(listing.id) });
+    }
+    section.addEventListener("focusin", reportView, { once: true });
+    if (typeof IntersectionObserver !== "undefined") {
+      const observer = new IntersectionObserver(function (entries) {
+        if (entries.some(function (entry) { return entry.isIntersecting; })) {
+          observer.disconnect();
+          reportView();
+        }
+      }, { threshold: 0.2 });
+      observer.observe(section);
+    }
+    return section;
   }
 
   function quoteLabel(item, key) {
@@ -2024,7 +2199,7 @@
   }
 
   function requestIsComplete(request) {
-    return Boolean(request && request.purpose && request.residents && request.sleeping && request.move_in && (request.duration_months || request.move_out) && request.flexibility && (request.purpose === "family" || request.place));
+    return Boolean(request && request.purpose && request.residents && request.sleeping && PRICE_PRIORITIES.indexOf(request.price_priority) !== -1 && request.move_in && (request.duration_months || request.move_out) && request.flexibility && (request.purpose === "family" || request.place));
   }
 
   function quoteCard(listing, quote, status) {
@@ -2041,6 +2216,7 @@
         card.appendChild(element("p", "preliminary-note", copy("preliminaryFallback")));
       }
       if (runtime.preview) card.appendChild(element("p", "preview-deposit-note", copy("previewDepositRange")));
+      card.appendChild(element("p", "price-reassurance", copy("priceReassurance")));
       card.appendChild(stayDetailsForm(listing));
       return card;
     }
@@ -2072,7 +2248,17 @@
       append(item, element("strong", "", row[0]), element("span", "", row[1]));
       terms.appendChild(item);
     });
-    card.appendChild(terms);
+    const breakdown = element("details", "price-breakdown");
+    breakdown.appendChild(element("summary", "", copy("priceBreakdown")));
+    breakdown.appendChild(terms);
+    let breakdownTracked = false;
+    breakdown.addEventListener("toggle", function () {
+      if (breakdown.open && !breakdownTracked) {
+        breakdownTracked = true;
+        track("price_breakdown_open", { listing_id: String(listing.id) });
+      }
+    });
+    append(card, element("p", "price-reassurance", copy("priceReassurance")), breakdown);
     const preliminary = quote[runtime.lang === "ar" ? "preliminary_label_ar" : "preliminary_label_en"];
     if (preliminary) card.appendChild(element("p", "preliminary-note", preliminary));
     const currentContact = contactState(runtime.config, runtime.lang);
@@ -2097,6 +2283,11 @@
     residents.input.min = "1";
     residents.input.max = "50";
     const sleeping = selectField("listing-sleeping", copy("selectSleeping"), SLEEPING.map(function (row) { return { value: row[0], label: copy(row[1]) }; }), saved.sleeping || "flexible");
+    const pricePriority = selectField("listing-price-priority", copy("pricePriorityTitle"), [
+      { value: "experience", label: copy("experiencePriority") },
+      { value: "value", label: copy("valuePriority") },
+      { value: "lowest_suitable", label: copy("lowestPriority") }
+    ], saved.price_priority || "value");
     const moveIn = formField("listing-move-in", copy("moveIn"), "date", saved.move_in);
     const usesMoveOut = validDate(saved.move_out) && validDate(saved.move_in) && saved.move_out > saved.move_in;
     const moveOut = usesMoveOut ? formField("listing-move-out", copy("moveOut"), "date", saved.move_out) : null;
@@ -2132,13 +2323,14 @@
     error.setAttribute("aria-live", "assertive");
     const submit = button(copy("getOfficialPrice"), "button button-primary");
     submit.type = "submit";
-    append(form, purpose.field, residents.field, sleeping.field, moveIn.field, moveOut ? moveOut.field : duration.field, flexibility.field, placeField, error, submit);
+    append(form, purpose.field, residents.field, sleeping.field, pricePriority.field, moveIn.field, moveOut ? moveOut.field : duration.field, flexibility.field, placeField, error, submit);
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       const request = {
         purpose: purpose.select.value,
         residents: Number(residents.input.value),
         sleeping: sleeping.select.value,
+        price_priority: pricePriority.select.value,
         move_in: moveIn.input.value,
         flexibility: flexibility.select.value
       };
