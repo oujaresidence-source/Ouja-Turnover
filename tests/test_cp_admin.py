@@ -330,3 +330,51 @@ class BotRegistration(unittest.TestCase):
         html = self.bot.DASHBOARD_HTML
         self.assertIn('"cp": "الملف التعريفي"', html)
         self.assertIn('"cp": "Company Profile"', html)
+
+
+class DashboardPanel(unittest.TestCase):
+    """The panel lives inside DASHBOARD_HTML, a NON-raw triple-quoted string.
+    Two named traps in CLAUDE.md apply and both are pinned here."""
+
+    @classmethod
+    def setUpClass(cls):
+        import bot
+        cls.html = bot.DASHBOARD_HTML
+
+    def test_panel_and_view_exist(self):
+        self.assertIn('id="view_cp"', self.html)
+        self.assertIn('id="cpTabs"', self.html)
+        self.assertIn('id="cpBody"', self.html)
+        self.assertIn("function loadCp()", self.html)
+
+    def test_all_nine_subtabs_are_wired(self):
+        for fn in ("cpOverview", "cpContact", "cpCopy", "cpNums", "cpUnits",
+                   "cpRevs", "cpShots", "cpLeads", "cpPub"):
+            with self.subTest(fn=fn):
+                self.assertIn("function " + fn + "(", self.html)
+
+    def test_router_reaches_the_tab(self):
+        self.assertIn("case 'cp':       return loadCp();", self.html)
+        self.assertIn("if(id==='cp') loadCp();", self.html)
+
+    def test_every_dashboard_script_block_parses(self):
+        """A single bad token kills the whole SPA — the login included."""
+        try:
+            import esprima
+        except ImportError:
+            self.skipTest("esprima not installed here")
+        import re
+        blocks = re.findall(r"<script>(.*?)</script>", self.html, re.S)
+        self.assertGreaterEqual(len(blocks), 1)
+        for js in blocks:
+            esprima.parseScript(js)
+
+    def test_the_panel_carries_no_backslash_escape(self):
+        """DASHBOARD_HTML is a normal triple-quoted string: Python eats a
+        backslash before the browser ever sees it."""
+        start = self.html.index("/* ===== Company Profile")
+        end = self.html.index("/* ===== Guest Website")
+        self.assertNotIn("\\", self.html[start:end])
+
+    def test_braces_balance(self):
+        self.assertEqual(self.html.count("{"), self.html.count("}"))

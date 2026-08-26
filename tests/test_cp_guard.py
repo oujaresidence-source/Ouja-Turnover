@@ -187,12 +187,18 @@ class RealDocumentsAreClean(unittest.TestCase):
     """The Arabic edition we are porting must itself pass the guard."""
 
     def test_arabic_edition_has_no_leak(self):
+        """The v1 source document lives outside the repo, so it may be absent
+        OR unreadable depending on how the suite is invoked — neither is a
+        guard failure. The in-repo v6 mock is the version this test suite
+        actually owns (see MockApprovedFiguresSurvive)."""
         import os
         path = os.path.expanduser("~/Downloads/ouja-cp-ar.html")
-        if not os.path.exists(path):
-            self.skipTest("source document not present on this machine")
-        with open(path, encoding="utf-8") as fh:
-            self.assertEqual(guard.scan(fh.read()), [])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                markup = fh.read()
+        except OSError:
+            self.skipTest("v1 source document not readable here")
+        self.assertEqual(guard.scan(markup), [])
 
 
 class IdentityDocumentsAreBlocked(unittest.TestCase):

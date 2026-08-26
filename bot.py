@@ -20225,6 +20225,22 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="gwBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ COMPANY PROFILE · الملف التعريفي ============ -->
+      <section class="view" id="view_cp">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_cp">الملف التعريفي</div>
+            <div class="page-sub" id="t_cp_sub"></div>
+          </div>
+          <div class="page-tools">
+            <a class="btn ghost sm" id="cpOpen" href="/cp/ar" target="_blank">↗</a>
+            <button class="btn ghost sm" onclick="cpGuardRun()" id="cpGuardBtn">✓</button>
+          </div>
+        </div>
+        <div id="cpTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="cpBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ REVENUE VIEW ============ -->
       <section class="view" id="view_rev">
         <div class="page-head">
@@ -23852,6 +23868,7 @@ function refreshView(id){
     case 'listings': return loadListings();
     case 'cleanteams': return loadCleanTeams();
     case 'gw':       return loadGw();
+    case 'cp':       return loadCp();
     case 'plab':     return loadPlab();
     case 'brain':    return loadBrain();
     case 'gaps':     return loadGaps();
@@ -23886,6 +23903,7 @@ function go(id){
   if(id==='pricing' && (!D.pr || D.pr.loading)) loadPricing();
   if(id==='plab') loadPlab();
   if(id==='gw') loadGw();
+  if(id==='cp') loadCp();
   if(id==='strat' && !D.strat) loadStrategies();
   if(id==='rev' && (!D.rev || D.rev.loading)) loadRevenue();
   if(id==='log') renderLog();
@@ -31515,6 +31533,224 @@ function fbCard(){ return 'background:var(--surface);border:1px solid var(--bord
 function fbChip(label,tone){ var c=(tone==='ok'?'#3e9665':(tone==='warn'?'var(--gold)':(tone==='bad'?'var(--down)':'#8a8270'))); return '<span style="font-size:10.5px;color:'+c+';border:1px solid '+c+';border-radius:99px;padding:1px 8px;white-space:nowrap">'+esc(label)+'</span>'; }
 function fbInp(){ return 'width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit'; }
 function fbStatCard(label,val,color){ return '<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:17px;font-weight:800;color:'+(color||'var(--text)')+'">'+val+'</div></div>'; }
+/* ===== Company Profile (الملف التعريفي) dashboard ===== */
+var _cp={tab:'ov',data:{},dirty:false};
+function cpAr(){ return L==='ar'; }
+function cpTabs(){ var el=document.getElementById('cpTabs'); if(!el) return; var ar=cpAr();
+  var tabs=[['ov','🧭',ar?'نظرة عامة':'Overview'],['contact','☎️',ar?'التواصل والحجز':'Contact'],['copy','✍️',ar?'النصوص':'Copy'],['nums','📊',ar?'الأرقام':'Figures'],['units','🏠',ar?'الوحدات':'Residences'],['revs','💬',ar?'المراجعات':'Reviews'],['shots','🖼️',ar?'الدليل':'Screenshots'],['leads','📥',ar?'الطلبات':'Leads'],['pub','🚀',ar?'النشر':'Publish']];
+  el.innerHTML=tabs.map(function(x){ var on=(_cp.tab===x[0]); return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="cpGo(&#39;'+x[0]+'&#39;)">'+x[1]+' '+esc(x[2])+'</button>'; }).join(''); }
+function cpGo(tab){ _cp.tab=tab; cpTabs(); var b=document.getElementById('cpBody'); if(b) b.innerHTML='<div class="empty sk">—</div>';
+  ({ov:cpOverview,contact:cpContact,copy:cpCopy,nums:cpNums,units:cpUnits,revs:cpRevs,shots:cpShots,leads:cpLeads,pub:cpPub}[tab]||cpOverview)(); }
+function loadCp(){ var ar=cpAr(); var e=document.getElementById('t_cp'); if(e) e.textContent='🏛️ '+(ar?'الملف التعريفي':'Company Profile');
+  var s=document.getElementById('t_cp_sub'); if(s) s.textContent=ar?'حرّر الصفحة العامة، عاين، ثم انشر.':'Edit the public profile, preview, then publish.';
+  cpTabs(); cpGo(_cp.tab); }
+function cpErr(b){ b.innerHTML='<div class="empty">⚠ '+(cpAr()?'تعذّر التحميل':'Load failed')+'</div>'; }
+function cpGuardChip(g){ if(!g) return ''; return g.clean?fbChip(cpAr()?'الفحص نظيف':'guard clean','ok'):fbChip((cpAr()?'أرقام ممنوعة: ':'blocked: ')+(g.hits||[]).map(function(h){return h.figure;}).slice(0,4).join('، '),'bad'); }
+async function cpSave(path,body,okMsg){ var ar=cpAr(); var r; try{ r=await post('/api/cp/admin/'+path,body); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(okMsg||(ar?'حُفظ ✓':'Saved ✓')); return r; }
+  toast((r&&r.error)||(ar?'تعذّر الحفظ':'Save failed')); return null; }
+async function cpGuardRun(){ var ar=cpAr(); toast(ar?'⏳ فحص…':'⏳ Checking…'); var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; }
+  if(!d){ toast('⚠'); return; } toast(d.guard&&d.guard.clean?(ar?'الفحص نظيف ✓':'Guard clean ✓'):(ar?'⚠ أرقام ممنوعة في الصفحة':'⚠ blocked figures on the page')); }
+
+async function cpOverview(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  _cp.data.ov=d;
+  var live=(d.published_version==='v2');
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏛️ '+(ar?'حالة الصفحة':'Page status')+'</b>'+(live?fbChip(ar?'النسخة الجديدة منشورة':'v2 live','ok'):fbChip(ar?'النسخة القديمة منشورة':'v1 live','warn'))+cpGuardChip(d.guard)+'</div>'
+   +'<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.6">'+(ar?'آخر تعديل: ':'Last edit: ')+esc(d.updated_at||'—')+(d.updated_by?(' · '+esc(d.updated_by)):'')+'</div>'
+   +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px">'
+   +fbStatCard(ar?'طلبات ٧ أيام':'Leads 7d',(d.leads_7d||0))
+   +fbStatCard(ar?'طلبات ٣٠ يوم':'Leads 30d',(d.leads_30d||0))
+   +fbStatCard(ar?'تحديث الأرقام':'Figures',(d.stamp&&d.stamp.live)?(ar?'ليلي':'nightly'):(ar?'ثابتة':'static'))
+   +'</div>'
+   +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:12px">'
+   +'<a class="btn ghost sm" href="/cp/ar?v=2&token='+encodeURIComponent(tok())+'" target="_blank" rel="noopener">👁 '+(ar?'معاينة الجديدة':'Preview v2')+'</a>'
+   +'<a class="btn ghost sm" href="/cp/ar" target="_blank" rel="noopener">↗ '+(ar?'الصفحة العامة':'Public page')+'</a>'
+   +'<button class="btn ghost sm" onclick="cpGuardRun()">✓ '+(ar?'شغّل الفحص':'Run guard')+'</button>'
+   +'<button class="btn ghost sm" onclick="cpSnapshot()">⟳ '+(ar?'حدّث الأرقام الآن':'Refresh figures')+'</button>'
+   +'<button class="btn ghost sm" onclick="cpGo(&#39;pub&#39;)">🚀 '+(ar?'النشر':'Publish')+'</button></div></div>';
+  b.innerHTML=h; }
+async function cpSnapshot(){ var ar=cpAr(); toast(ar?'⏳ تحديث الأرقام…':'⏳ Refreshing…'); var r; try{ r=await post('/api/cp/admin/snapshot-now',{}); }catch(_){ r=null; }
+  toast(r&&r.ok?(ar?'تم تحديث الأرقام ✓':'Figures refreshed ✓'):(ar?'تعذّر التحديث':'Refresh failed')); cpGo('ov'); }
+
+async function cpContact(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/contacts'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  var c=d.contacts||{}; _cp.data.contacts=c; var m=c.booking_modes||{};
+  function fld(lbl,id,val,ph){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph||'')+'" style="'+fbInp()+'">'; }
+  function chk(id,on,lbl){ return '<label style="display:inline-flex;align-items:center;gap:6px;margin-inline-end:14px;font-size:12.5px"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'> '+esc(lbl)+'</label>'; }
+  b.innerHTML='<div style="'+fbCard()+'"><b>☎️ '+(ar?'التواصل والحجز':'Contact and booking')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'هذي الأرقام تظهر على الصفحة العامة مباشرة بعد النشر.':'These appear on the public page after publishing.')+'</div>'
+   +fld(ar?'رقم الواتساب':'WhatsApp','cpWa',c.whatsapp,'966533779297')
+   +fld(ar?'البريد':'Email','cpMail',c.email,'Info@oujares.com')
+   +fld(ar?'رابط التقويم (اختياري)':'Booking link (optional)','cpBook',c.booking_link,'https://…')
+   +'<div style="margin:6px 0 12px">'+chk('cpMOn',m.online!==false,ar?'لقاء عن بُعد':'Online meeting')+chk('cpMOff',m.office!==false,ar?'لقاء في المكتب':'Office meeting')+'</div>'
+   +fld(ar?'وصف المكتب':'Office label','cpOff',c.office_label_ar)
+   +'<div style="margin:6px 0 12px">'+chk('cpSam',(c.slots||[]).indexOf('am')>=0,ar?'صباحاً':'Morning')+chk('cpSpm',(c.slots||[]).indexOf('pm')>=0,ar?'بعد الظهر':'Afternoon')+chk('cpSev',(c.slots||[]).indexOf('eve')>=0,ar?'مساءً':'Evening')+'</div>'
+   +fld(ar?'قناة الطلبات في ديسكورد':'Discord lead channel id','cpChan',c.lead_channel_id)
+   +fld(ar?'مسار ملف PDF':'PDF path','cpPdf',c.pdf_path)
+   +'<div style="margin:6px 0">'+chk('cpEn',!!c.english_ready,ar?'النسخة الإنجليزية جاهزة':'English ready')+'</div>'
+   +'<button class="btn primary sm" onclick="cpContactSave()">'+(ar?'حفظ':'Save')+'</button></div>'; }
+async function cpContactSave(){ function val(id){ var e=document.getElementById(id); return e?e.value:''; } function on(id){ var e=document.getElementById(id); return !!(e&&e.checked); }
+  var slots=[]; if(on('cpSam'))slots.push('am'); if(on('cpSpm'))slots.push('pm'); if(on('cpSev'))slots.push('eve');
+  await cpSave('contacts',{whatsapp:val('cpWa'),email:val('cpMail'),booking_link:val('cpBook'),booking_modes:{online:on('cpMOn'),office:on('cpMOff')},office_label_ar:val('cpOff'),slots:slots,lead_channel_id:val('cpChan'),pdf_path:val('cpPdf'),english_ready:on('cpEn')}); cpContact(); }
+
+async function cpCopy(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/copy'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  _cp.data.copy={defaults:d.defaults||{},overlay:d.overlay||{}};
+  var keys=Object.keys(d.defaults||{}); var h='<div style="'+fbCard()+'"><b>✍️ '+(ar?'نصوص الصفحة':'Page copy')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'أي نص تعدّله يُفحص قبل الحفظ. رقم ممنوع يوقف الحفظ ويُعرض لك.':'Every edit is scanned before saving. A blocked figure stops the save.')+'</div>';
+  h+=keys.map(function(k){ var cur=(d.overlay[k]!=null?d.overlay[k]:d.defaults[k]); var edited=(d.overlay[k]!=null&&d.overlay[k]!==d.defaults[k]);
+    return '<div style="margin-bottom:12px"><label class="muted" style="font-size:11px;display:flex;justify-content:space-between"><span>'+esc(k)+(edited?' ✎':'')+'</span><span id="cpc_'+esc(k)+'_n">'+String(cur||'').length+'</span></label>'
+      +'<textarea id="cpc_'+esc(k)+'" rows="2" oninput="cpCount(&#39;'+esc(k)+'&#39;)" style="'+fbInp()+';min-height:52px">'+esc(cur||'')+'</textarea>'
+      +'<button class="btn ghost sm" onclick="cpCopyReset(&#39;'+esc(k)+'&#39;)">'+(ar?'رجّع الأصل':'Reset')+'</button></div>'; }).join('');
+  h+='<button class="btn primary sm" onclick="cpCopySave()">'+(ar?'حفظ كل النصوص':'Save all copy')+'</button></div>'; b.innerHTML=h; }
+function cpCount(k){ var t=document.getElementById('cpc_'+k),n=document.getElementById('cpc_'+k+'_n'); if(t&&n) n.textContent=String(t.value.length); }
+function cpCopyReset(k){ var t=document.getElementById('cpc_'+k); if(t){ t.value=(_cp.data.copy.defaults[k]||''); cpCount(k); } }
+async function cpCopySave(){ var out={},defs=_cp.data.copy.defaults||{};
+  Object.keys(defs).forEach(function(k){ var t=document.getElementById('cpc_'+k); if(t) out[k]=t.value; });
+  var r=await cpSave('copy',out); if(r) cpCopy(); }
+
+async function cpNums(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/figures'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  _cp.data.nums=d;
+  function trio(pfx,k,e){ e=e||{}; return '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:6px;margin-bottom:8px">'
+    +'<input id="'+pfx+'v_'+esc(k)+'" value="'+esc(e.value!=null?e.value:'')+'" placeholder="'+(ar?'القيمة':'value')+'" style="'+fbInp()+'">'
+    +'<input id="'+pfx+'d_'+esc(k)+'" value="'+esc(e.as_of||'')+'" placeholder="'+(ar?'التاريخ':'date')+'" style="'+fbInp()+'">'
+    +'<input id="'+pfx+'s_'+esc(k)+'" value="'+esc(e.source||'')+'" placeholder="'+(ar?'المصدر':'source')+'" style="'+fbInp()+'"></div>'; }
+  var h='<div style="'+fbCard()+'"><b>📊 '+(ar?'أرقام يدوية':'Manual figures')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'كل رقم يحتاج قيمة وتاريخاً ومصدراً — وإلا لا يُنشر.':'Each figure needs a value, a date and a source, or it is not published.')+'</div>';
+  h+=Object.keys(d.manual||{}).map(function(k){ return '<label class="muted" style="font-size:11px">'+esc(k)+'</label>'+trio('cpm',k,d.manual[k]); }).join('');
+  h+='<button class="btn primary sm" onclick="cpNumsSave(&#39;figures&#39;,&#39;cpm&#39;)">'+(ar?'حفظ الأرقام':'Save figures')+'</button></div>';
+  h+='<div style="'+fbCard()+';margin-top:8px"><b>🌍 '+(ar?'مقارنات السوق':'Benchmarks')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'AirDNA ووزارة السياحة ونايت فرانك — بالمصدر والتاريخ.':'AirDNA, Ministry of Tourism, Knight Frank — with source and date.')+'</div>';
+  var bk=d.benchmarks||{}; var bkeys=['mot_occupancy','mot_adr','kf_occupancy','kf_adr','kf_revpar','airdna_yoy_occupancy','airdna_yoy_adr','airdna_yoy_supply'];
+  h+=bkeys.map(function(k){ return '<label class="muted" style="font-size:11px">'+esc(k)+'</label>'+trio('cpb',k,bk[k]); }).join('');
+  h+='<button class="btn primary sm" onclick="cpNumsSave(&#39;benchmarks&#39;,&#39;cpb&#39;)">'+(ar?'حفظ المقارنات':'Save benchmarks')+'</button></div>';
+  var ha=d.hostaway||{}; var hk=Object.keys(ha);
+  h+='<div style="'+fbCard()+';margin-top:8px"><b>🔒 '+(ar?'أرقام من النظام (للقراءة)':'From the system (read-only)')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 8px">'+(ar?'تتحدث ليلياً ولا تُعدّل هنا.':'Refreshed nightly; not editable here.')+'</div>'
+   +(hk.length?hk.map(function(k){ return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)"><span class="muted">'+esc(k)+'</span><span>'+esc(String(ha[k].value))+' · '+esc(ha[k].as_of||'')+'</span></div>'; }).join(''):'<div class="muted" style="font-size:12px">'+(ar?'لا توجد أرقام حيّة بعد — تظهر بعد أول تحديث ليلي.':'None yet — they appear after the first nightly refresh.')+'</div>')
+   +'<div style="margin-top:10px"><a class="btn ghost sm" href="/api/cp/stats?token='+encodeURIComponent(tok())+'" target="_blank" rel="noopener">'+(ar?'كل الأرقام ومصادرها':'All figures and sources')+'</a></div></div>';
+  b.innerHTML=h; }
+async function cpNumsSave(section,pfx){ var src=(section==='figures'?_cp.data.nums.manual:_cp.data.nums.benchmarks)||{}; var keys=Object.keys(src);
+  if(section==='benchmarks') keys=['mot_occupancy','mot_adr','kf_occupancy','kf_adr','kf_revpar','airdna_yoy_occupancy','airdna_yoy_adr','airdna_yoy_supply'];
+  var out={}; keys.forEach(function(k){ function g(x){ var e=document.getElementById(pfx+x+'_'+k); return e?e.value:''; }
+    var v=g('v'); if(v!==''||g('d')||g('s')) out[k]={value:v,as_of:g('d'),source:g('s')}; });
+  var r=await cpSave(section,out); if(r) cpNums(); }
+
+async function cpUnits(){ var b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/showcase'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  _cp.data.showcase=d; _cp.data.byId={}; (d.cache||[]).forEach(function(x){ _cp.data.byId[String(x.id)]=x; });
+  _cp.units=((d.showcase||{}).units||[]).map(function(u){ return {listing_id:String(u.listing_id),name_ar:u.name_ar||'',bedrooms_label_ar:u.bedrooms_label_ar||'',line_ar:u.line_ar||'',cover_url:u.cover_url||'',hidden:!!u.hidden}; });
+  cpUnitsDraw(); }
+/* Draw from LOCAL state, never a refetch: reordering or picking a cover must
+   not silently discard the name/line the owner just typed. cpSync() is the
+   only path that goes back to the server. */
+function cpUnitsDraw(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return;
+  var d=_cp.data.showcase||{}, list=_cp.units||[], byId=_cp.data.byId||{}, max=((d.showcase||{}).max)||6;
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏠 '+(ar?'الوحدات المعروضة':'Showcased residences')+'</b><span class="muted" style="font-size:11px">'+(ar?'آخر مزامنة: ':'Synced: ')+esc(d.synced_at||'—')+'</span></div>'
+   +'<div class="muted" style="font-size:11.5px;margin:6px 0 10px;line-height:1.6">'+(ar?('اختر حتى '+max+' وحدات، رتّبها، واختر صورة الغلاف من صور الوحدة نفسها. لا تختر صورة فيها شاشة تعرض محتوى، ولا أغراض ضيوف.'):('Pick up to '+max+' units, order them, and choose a cover from that unit’s own photos. No screens showing content, no guest belongings.'))+'</div>'
+   +'<button class="btn ghost sm" onclick="cpSync()">⟳ '+(ar?'مزامنة من Hostaway':'Sync from Hostaway')+'</button></div>';
+  h+='<div style="'+fbCard()+';margin-top:8px"><b>'+(ar?'المختارة':'Selected')+' ('+list.length+'/'+max+')</b><div style="margin-top:8px">';
+  h+=list.map(function(u,i){ var c=byId[String(u.listing_id)]||{}; var warn=(c.active===false)?fbChip(ar?'متوقفة في Hostaway — لن تظهر':'inactive — hidden','bad'):'';
+    return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">'
+     +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:12.5px">'+esc(c.name||u.listing_id)+'</b><span>'+warn
+     +' <button class="btn ghost sm" onclick="cpMove('+i+',-1)">↑</button><button class="btn ghost sm" onclick="cpMove('+i+',1)">↓</button><button class="btn ghost sm" onclick="cpDrop('+i+')">✕</button></span></div>'
+     +'<input value="'+esc(u.name_ar)+'" oninput="cpField('+i+',&#39;name_ar&#39;,this.value)" placeholder="'+(ar?'الاسم بالعربية':'Arabic name')+'" style="'+fbInp()+'">'
+     +'<input value="'+esc(u.bedrooms_label_ar)+'" oninput="cpField('+i+',&#39;bedrooms_label_ar&#39;,this.value)" placeholder="'+(ar?'الغرف':'bedrooms')+'" style="'+fbInp()+'">'
+     +'<input value="'+esc(u.line_ar)+'" oninput="cpField('+i+',&#39;line_ar&#39;,this.value)" placeholder="'+(ar?'سطر التمييز':'one line')+'" style="'+fbInp()+'">'
+     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+((c.image_urls||[]).slice(0,12).map(function(url){ var on=(u.cover_url===url);
+        return '<img src="/elite/img?u='+encodeURIComponent(url)+'&w=320" onclick="cpCover('+i+',&#39;'+encodeURIComponent(url)+'&#39;)" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid '+(on?'var(--gold)':'transparent')+'">'; }).join(''))+'</div></div>'; }).join('')
+   ||('<div class="muted" style="font-size:12px">'+(ar?'لم تختر وحدات بعد — الصفحة تعرض الأماكن الفارغة.':'None selected — the page shows placeholder tiles.')+'</div>');
+  h+='</div><button class="btn primary sm" onclick="cpUnitsSave()">'+(ar?'حفظ الوحدات':'Save residences')+'</button></div>';
+  h+='<div style="'+fbCard()+';margin-top:8px"><b>'+(ar?'كل الوحدات':'All units')+'</b><div style="margin-top:8px">'
+   +((d.cache||[]).map(function(c){ var already=list.some(function(u){return String(u.listing_id)===String(c.id);});
+      return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span>'+esc(c.name||c.id)+(c.active===false?(' <span class="muted">('+(ar?'متوقفة':'inactive')+')</span>'):'')+'</span>'
+       +(already?('<span class="muted" style="font-size:11px">'+(ar?'مختارة':'selected')+'</span>'):('<button class="btn ghost sm" onclick="cpAdd(&#39;'+esc(String(c.id))+'&#39;)">+</button>'))+'</div>'; }).join('')
+     ||('<div class="muted" style="font-size:12px">'+(ar?'لا توجد وحدات في الذاكرة — اضغط مزامنة.':'Cache empty — press sync.')+'</div>'))+'</div></div>';
+  b.innerHTML=h; }
+function cpField(i,key,val){ if(_cp.units&&_cp.units[i]) _cp.units[i][key]=val; }
+function cpMove(i,dir){ var j=i+dir, l=_cp.units||[]; if(j<0||j>=l.length) return; var t=l[i]; l[i]=l[j]; l[j]=t; cpUnitsDraw(); }
+function cpDrop(i){ (_cp.units||[]).splice(i,1); cpUnitsDraw(); }
+function cpCover(i,enc){ if(_cp.units&&_cp.units[i]) _cp.units[i].cover_url=decodeURIComponent(enc); cpUnitsDraw(); }
+function cpAdd(id){ var ar=cpAr(); var max=((_cp.data.showcase||{}).showcase||{}).max||6; _cp.units=_cp.units||[];
+  if(_cp.units.length>=max){ toast(ar?('الحد '+max+' وحدات'):('Max '+max)); return; }
+  var c=(_cp.data.byId||{})[String(id)]||{}; _cp.units.push({listing_id:String(id),name_ar:(c.name||''),bedrooms_label_ar:'',line_ar:'',cover_url:'',hidden:false}); cpUnitsDraw(); }
+async function cpUnitsSave(){ var r=await cpSave('showcase',{units:_cp.units||[]}); if(r) cpUnits(); }
+async function cpSync(){ var ar=cpAr(); toast(ar?'⏳ مزامنة…':'⏳ Syncing…'); var r; try{ r=await post('/api/cp/admin/sync-listings',{}); }catch(_){ r=null; }
+  toast(r&&r.ok?(ar?'تمت المزامنة ✓':'Synced ✓'):(ar?'تعذّرت المزامنة':'Sync failed')); cpUnits(); }
+
+async function cpRevs(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/reviews'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  _cp.data.revs=d; var chosen=d.chosen||[];
+  var h='<div style="'+fbCard()+'"><b>💬 '+(ar?'المراجعات المعروضة':'Featured reviews')+' ('+chosen.length+'/6)</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'تُنشر كما كتبها الضيف، دون تعديل. اختر مراجعة ناقدة أيضاً — هذا مقصود.':'Published exactly as written. Include a critical one — that is deliberate.')+'</div>'
+   +'<input id="cpRevQ" oninput="cpRevFilter()" placeholder="'+(ar?'ابحث في النص أو الاسم…':'Search text or name…')+'" style="'+fbInp()+'">'
+   +'<div id="cpRevList" style="max-height:460px;overflow:auto"></div>'
+   +'<button class="btn primary sm" onclick="cpRevsSave()" style="margin-top:8px">'+(ar?'حفظ الاختيار':'Save selection')+'</button></div>';
+  b.innerHTML=h; cpRevFilter(); }
+function cpRevFilter(){ var ar=cpAr(); var q=(document.getElementById('cpRevQ')||{}).value||''; var d=_cp.data.revs||{}; var chosen=d.chosen||[];
+  var rows=(d.store||[]).filter(function(r){ if(!q) return true; var s=(r.text||'')+' '+(r.name||'')+' '+(r.listing||''); return s.indexOf(q)>=0; });
+  var el=document.getElementById('cpRevList'); if(!el) return;
+  el.innerHTML=rows.slice(0,120).map(function(r){ var on=chosen.indexOf(r.id)>=0;
+    return '<label style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer">'
+     +'<input type="checkbox" '+(on?'checked ':'')+'onchange="cpRevToggle('+r.id+',this.checked)">'
+     +'<span><b>'+esc(r.name||'')+'</b> <span class="muted">'+esc(r.date||'')+' · '+esc(r.listing||'')+'</span><br>'+esc((r.text||'').slice(0,150))+'</span></label>'; }).join('')
+   ||('<div class="muted" style="font-size:12px;padding:8px 0">'+(ar?'لا نتائج':'No matches')+'</div>'); }
+function cpRevToggle(id,on){ var d=_cp.data.revs; d.chosen=d.chosen||[]; var i=d.chosen.indexOf(id);
+  if(on&&i<0){ if(d.chosen.length>=6){ toast(cpAr()?'الحد ٦ مراجعات':'Max 6'); cpRevFilter(); return; } d.chosen.push(id); }
+  else if(!on&&i>=0) d.chosen.splice(i,1); cpRevFilter(); }
+async function cpRevsSave(){ var r=await cpSave('reviews',{ids:(_cp.data.revs||{}).chosen||[]}); if(r) cpRevs(); }
+
+async function cpShots(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; }
+  b.innerHTML='<div style="'+fbCard()+'"><b>🖼️ '+(ar?'لقطات النظام':'Platform screenshots')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'+(ar?'ثلاث لقطات من النظام تظهر في قسم «الدليل». كل لقطة تُقرأ آلياً وتُفحص — أي رقم ممنوع يرفض الرفع.':'Three screenshots for the «proof» section. Each is OCR’d and scanned — a blocked figure refuses the upload.')+'</div>'
+   +'<label class="muted" style="font-size:11px">'+(ar?'الوصف':'Caption')+'</label><input id="cpShotCap" style="'+fbInp()+'">'
+   +'<label class="btn ghost sm" style="cursor:pointer">'+(ar?'اختر صورة':'Choose image')+'<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="cpShotUpload(event)"></label>'
+   +' <span class="muted" style="font-size:11px">PNG/JPG/WebP · '+(ar?'حتى 4MB':'up to 4MB')+'</span></div>'; }
+async function cpShotUpload(ev){ var ar=cpAr(); var f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  if(f.size>4*1024*1024){ toast(ar?'الصورة كبيرة (الحد 4MB)':'Too large (4MB)'); return; }
+  var fd=new FormData(); fd.append('file',f); fd.append('caption_ar',(document.getElementById('cpShotCap')||{}).value||'');
+  toast(ar?'⏳ رفع وفحص…':'⏳ Uploading…'); var r; try{ var rs=await fetch('/api/cp/admin/shot-upload?token='+encodeURIComponent(tok()),{method:'POST',body:fd}); r=await rs.json(); }catch(_){ r=null; }
+  toast(r&&r.ok?(ar?'تم الرفع ✓':'Uploaded ✓'):((r&&r.error)||'⚠')); cpShots(); }
+
+async function cpLeads(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/leads'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
+  var AUD={owner:ar?'مالك':'owner',investor:ar?'مستثمر':'investor',corporate:ar?'شركة':'corporate',platform:ar?'منصة':'platform',supplier:ar?'مورّد':'supplier'};
+  var MODE={online:ar?'عن بُعد':'online',office:ar?'المكتب':'office'}; var SLOT={am:ar?'صباحاً':'am',pm:ar?'ظهراً':'pm',eve:ar?'مساءً':'eve'};
+  var rows=(d.leads||[]).slice().reverse();
+  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📥 '+(ar?'طلبات اللقاء':'Meeting requests')+' ('+rows.length+')</b>'
+   +'<a class="btn ghost sm" href="/api/cp/admin/leads.csv?token='+encodeURIComponent(tok())+'">⤓ CSV</a></div>';
+  h+=rows.map(function(l){ var f=l.fields||{}; var wa=(f.phone||'').replace(/[^0-9]/g,'');
+    return '<div style="border-bottom:1px solid var(--border);padding:8px 0;font-size:12px">'
+     +'<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>'+esc(f.name||'—')+'</b>'
+     +'<span class="muted">'+esc(AUD[l.audience]||l.audience||'')+' · '+esc(MODE[f.mode]||'')+' · '+esc(SLOT[f.slot]||'')+'</span></div>'
+     +'<div style="margin-top:3px">'+(wa?('<a href="https://wa.me/'+esc(wa)+'" target="_blank" rel="noopener">'+esc(f.phone)+'</a>'):'<span class="muted">—</span>')
+     +(f.message?(' · '+esc(f.message)):'')+'</div>'
+     +'<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap">'+['new','contacted','booked','closed'].map(function(st){ var on=((l.status||'new')===st);
+        return '<button class="btn '+(on?'primary':'ghost')+' sm" onclick="cpLeadStatus('+l.at+',&#39;'+st+'&#39;)">'+esc(({'new':ar?'جديد':'new','contacted':ar?'تواصلنا':'contacted','booked':ar?'محجوز':'booked','closed':ar?'مغلق':'closed'})[st])+'</button>'; }).join('')+'</div></div>'; }).join('')
+   ||('<div class="muted" style="font-size:12px;padding:10px 0">'+(ar?'لا توجد طلبات بعد.':'No requests yet.')+'</div>');
+  b.innerHTML=h+'</div>'; }
+async function cpLeadStatus(at,st){ var r=await cpSave('lead-status',{at:at,status:st}); if(r) cpLeads(); }
+
+async function cpPub(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return;
+  var d,hs; try{ d=await api('/api/cp/admin/overview'); hs=await api('/api/cp/admin/history'); }catch(_){ d=null; }
+  if(!d){ cpErr(b); return; }
+  var canPub=!!d.can_publish;
+  var h='<div style="'+fbCard()+'"><b>🚀 '+(ar?'النشر':'Publish')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'+(ar?'المعاينة تعرض تعديلاتك الحالية. النشر يجعلها هي الصفحة العامة، بعد فحص أخير.':'Preview shows your working edits. Publishing makes them public after a final scan.')+'</div>'
+   +'<div style="margin-bottom:10px">'+cpGuardChip(d.guard)+' '+(d.published_version==='v2'?fbChip(ar?'المنشور: الجديدة':'live: v2','ok'):fbChip(ar?'المنشور: القديمة':'live: v1','warn'))+'</div>'
+   +(canPub?('<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn primary sm" onclick="cpPublish(&#39;v2&#39;)">'+(ar?'انشر النسخة الجديدة':'Publish v2')+'</button>'
+     +'<button class="btn ghost sm" onclick="cpPublish(&#39;v1&#39;)">'+(ar?'ارجع إلى القديمة':'Back to v1')+'</button></div>')
+     :('<div class="muted" style="font-size:12px">'+(ar?'النشر يحتاج صلاحية «إنشاء» على هذه الصفحة.':'Publishing needs create permission on this tab.')+'</div>'))
+   +'</div>';
+  var hist=(hs&&hs.history)||[];
+  h+='<div style="'+fbCard()+';margin-top:8px"><b>'+(ar?'النسخ السابقة':'Published history')+'</b>'
+   +(hist.length?hist.slice().reverse().map(function(e){ return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">'
+      +'<span>'+esc(e.at)+' <span class="muted">'+esc(e.version)+' · '+esc(e.by||'')+'</span></span>'
+      +(canPub?('<button class="btn ghost sm" onclick="cpRollback(&#39;'+esc(e.at)+'&#39;)">'+(ar?'ارجع لهذه':'Restore')+'</button>'):'')+'</div>'; }).join('')
+     :('<div class="muted" style="font-size:12px;padding:8px 0">'+(ar?'لم يُنشر شيء بعد.':'Nothing published yet.')+'</div>'))+'</div>';
+  b.innerHTML=h; }
+async function cpPublish(v){ var ar=cpAr(); var m=await fbModal({title:(ar?'تأكيد النشر':'Confirm publish'),msg:(ar?'ستصبح هذه هي الصفحة العامة لكل من يفتح الرابط.':'This becomes the public page for everyone.'),confirm:(ar?'انشر':'Publish')}); if(!m.ok) return;
+  var r; try{ r=await post('/api/cp/admin/publish',{version:v}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'نُشرت ✓':'Published ✓'); cpPub(); } else toast((r&&r.error)||(ar?'تعذّر النشر':'Publish failed')); }
+async function cpRollback(at){ var ar=cpAr(); var m=await fbModal({title:(ar?'استعادة نسخة':'Restore version'),msg:(ar?'نرجع الصفحة العامة إلى هذه النسخة.':'Restore the public page to this snapshot.'),confirm:(ar?'استعد':'Restore')}); if(!m.ok) return;
+  var r; try{ r=await post('/api/cp/admin/rollback',{at:at}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast('✓'); cpPub(); } else toast((r&&r.error)||'⚠'); }
+
 /* ===== Guest Website (موقع الضيوف) dashboard ===== */
 var _gw={tab:'ov',byId:{},tagById:{}};
 function gwTabs(){ var el=document.getElementById('gwTabs'); if(!el) return; var t_=t();
