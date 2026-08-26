@@ -205,3 +205,20 @@ class Leads(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrandAssets(_Base):
+    def test_share_card_and_icons_serve(self):
+        for name in ("icon.png", "icon-192.png", "icon-512.png", "share.png"):
+            r = self.get("/cp/" + name)
+            self.assertEqual(r.status, 200, name)
+            self.assertIn("max-age", r.headers.get("Cache-Control", ""))
+
+    def test_unknown_asset_404s(self):
+        r = self.get("/cp/evil.png")
+        self.assertEqual(r.status, 404)
+
+    def test_page_head_carries_icon_and_share(self):
+        html = self.body(self.get("/cp/ar"))
+        self.assertIn('rel="icon" href="/cp/icon.png"', html)
+        self.assertIn('og:image" content="https://oujares.com/cp/share.png', html)

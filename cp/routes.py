@@ -154,6 +154,21 @@ async def handle_pdf(request):
         "Content-Disposition": 'inline; filename="Ouja-Residence-Company-Profile.pdf"'})
 
 
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_ASSET_NAMES = ("icon.png", "icon-192.png", "icon-512.png", "share.png")
+
+
+async def handle_asset(request):
+    """Brand assets (favicon, share card) — generated from the owner's logo,
+    immutable-cached; the filename changes if the logo ever does."""
+    name = request.match_info.get("name", "")
+    if name not in _ASSET_NAMES:
+        raise HOST.web.HTTPNotFound()
+    return HOST.web.FileResponse(
+        os.path.join(_ASSETS, name),
+        headers={"Cache-Control": "public, max-age=604800"})
+
+
 async def handle_business_redirect(request):
     raise HOST.web.HTTPMovedPermanently("/cp")
 
@@ -275,6 +290,7 @@ def register(app):
     g("/cp/ar", _safe_public(handle_ar))
     g("/cp/en", _safe_public(handle_en))
     g("/cp.pdf", _safe_public(handle_pdf))
+    g("/cp/{name:(?:icon|icon-192|icon-512|share)[.]png}", _safe_public(handle_asset))
     g("/api/cp/stats", _safe_public(api_stats))
     g("/api/cp/reviews", _safe_public(api_reviews))
     p("/api/cp/lead", _safe_public(api_lead))

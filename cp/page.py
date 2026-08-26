@@ -250,10 +250,14 @@ def build_head_extra(base, lang="ar"):
         '<meta name="twitter:card" content="summary_large_image">',
         '<meta name="robots" content="index,follow">',
     ]
+    bits.append('<link rel="icon" href="/cp/icon.png" type="image/png" sizes="64x64">')
+    bits.append('<link rel="icon" href="/cp/icon-192.png" type="image/png" sizes="192x192">')
+    bits.append('<link rel="apple-touch-icon" href="/cp/icon-192.png">')
     if b:
         bits.append('<meta property="og:image" content="%s/cp/share.png">' % _e(b))
+        bits.append('<meta property="og:image:width" content="1200">')
+        bits.append('<meta property="og:image:height" content="630">')
         bits.append('<meta name="twitter:image" content="%s/cp/share.png">' % _e(b))
-        bits.append('<link rel="icon" href="%s/cp/icon.png" type="image/png">' % _e(b))
     return "\n".join(bits)
 
 
