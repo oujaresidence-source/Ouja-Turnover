@@ -237,6 +237,11 @@ def build_head_extra(base, lang="ar"):
         "border-inline-start:2px solid var(--ochre-text);color:var(--ink-soft);"
         "font-size:.92em}"
         ".voice .src bdi{unicode-bidi:isolate}"
+        # the approved document only styles the dashed .ph placeholder — a real
+        # photo is renderer-emitted markup, so its constraint ships from here
+        # (an unconstrained 1024px <img> measured 495px of horizontal overflow)
+        ".unit img{display:block;width:100%;height:auto;aspect-ratio:4/3;"
+        "object-fit:cover;background:var(--paper-deep)}"
         "</style>",
         '<link rel="canonical" href="%s/cp/%s">' % (_e(b), lang),
         '<link rel="alternate" hreflang="x-default" href="%s/cp/ar">' % _e(b),

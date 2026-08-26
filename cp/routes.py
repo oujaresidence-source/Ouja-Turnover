@@ -61,9 +61,14 @@ def _units():
     for u in units:
         u = dict(u)
         lid = str(u.get("listing_id") or "").strip()
+        # "photo" may pin one gallery image by URL — used when the listing's
+        # cover fails the photo rules (e.g. a TV screen showing third-party
+        # content) and a clean shot from the same gallery replaces it.
+        pinned = str(u.get("photo") or "").strip()
+        pinned = pinned if pinned.lower().startswith("http") else ""
         if lid and HOST.listing_photos:
             try:
-                shot = HOST.listing_photos(lid) or {}
+                shot = HOST.listing_photos(lid, pinned or None) or {}
                 u["photo"] = shot.get("photo") or ""
                 u["photo_srcset"] = shot.get("srcset") or ""
             except Exception:

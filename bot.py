@@ -60813,16 +60813,19 @@ async def start_web_server():
                                             or os.environ.get("STAY_WHATSAPP") or ""))
                 _cp_base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
 
-                def _cp_listing_photos(listing_id):
+                def _cp_listing_photos(listing_id, pinned=None):
                     """Photography for the portfolio section — through the EXISTING /stay
                     pipeline and the existing /elite/img WebP proxy. There is deliberately
                     no second image system: a unit we cannot resolve renders the dashed
-                    placeholder, never a broken image."""
-                    snap = _gw_find_by_slug_or_id(str(listing_id))
-                    if not snap:
-                        return {}
-                    pub = _gw_listing_public(snap, with_airbnb=False) or {}
-                    url = pub.get("cover") or (pub.get("images") or [""])[0]
+                    placeholder, never a broken image. `pinned` is a specific gallery URL
+                    chosen in cp_units.json when the cover fails the photo rules."""
+                    url = (pinned or "").strip()
+                    if not url:
+                        snap = _gw_find_by_slug_or_id(str(listing_id))
+                        if not snap:
+                            return {}
+                        pub = _gw_listing_public(snap, with_airbnb=False) or {}
+                        url = pub.get("cover") or (pub.get("images") or [""])[0]
                     if not url:
                         return {}
                     def _sized(width):
