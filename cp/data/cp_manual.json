@@ -1,0 +1,37 @@
+{
+  "_note": "The «what the system cannot answer» layer. Seeds §8 financial control: any manually entered figure requires a value, a date and a source, or it is not reported. cp.stats enforces that — an entry missing any of the three is dropped, not rendered.",
+  "_why_these": "Owner decision 2026-08-26: response time, message volume, maintenance-in-SLA and headcount have no instrumented source in the platform today. Rather than wire them to a pipe that only looks live, they travel hand-sourced and dated. If any of them is instrumented later, move it to PROVENANCE 'hostaway' and delete it here.",
+
+  "median_response_minutes": {
+    "value": 2.3, "as_of": "2026-08-26", "source": "internal — Hostaway conversation sample",
+    "label_en": "Median first response", "label_ar": "وسيط زمن أول رد"
+  },
+  "messages_total": {
+    "value": 152177, "as_of": "2026-08-26", "source": "internal — Hostaway inbox",
+    "label_en": "Guest messages handled", "label_ar": "رسالة ضيف تمت معالجتها"
+  },
+  "messages_monthly_start": {
+    "value": 2900, "as_of": "2026-08-26", "source": "internal — Hostaway inbox",
+    "label_en": "Messages per month at start", "label_ar": "رسائل شهرياً في البداية"
+  },
+  "messages_monthly_now": {
+    "value": 23000, "as_of": "2026-08-26", "source": "internal — Hostaway inbox",
+    "label_en": "Messages per month now", "label_ar": "رسائل شهرياً اليوم"
+  },
+  "maintenance_closed_in_sla": {
+    "value": 1000, "as_of": "2026-08-26", "source": "internal — ticketing",
+    "label_en": "Maintenance tickets closed within deadline", "label_ar": "تذكرة صيانة أُغلقت ضمن المهلة"
+  },
+  "team_headcount": {
+    "value": 22, "as_of": "2026-08-26", "source": "internal — payroll",
+    "label_en": "People", "label_ar": "موظفاً"
+  },
+  "residences_per_person_per_day": {
+    "value": 4.0, "as_of": "2026-08-26", "source": "internal — field model",
+    "label_en": "Residences per person per day", "label_ar": "وحدة لكل موظف يومياً"
+  },
+  "residences_per_custodian": {
+    "value": 12, "as_of": "2026-08-26", "source": "internal — field model",
+    "label_en": "Residences per permanent custodian", "label_ar": "وحدة لكل أمين دائم"
+  }
+}

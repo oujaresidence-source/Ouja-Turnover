@@ -1,0 +1,59 @@
+{
+  "_note": "Seeds §2, transcribed verbatim. This is the FALLBACK, not a cache: if the nightly job fails, these figures render. They are correct as of the canonical export (8,114 reservations, 23 Jul 2024 -> 25 Aug 2026, compiled 26 Aug 2026). Do not round, 'improve' or refresh by hand — change the seeds file and this together.",
+  "_residence_count_note": "Seeds §2 flagged 74 (published) against 72 (25 Aug export). Owner resolved to 74 on 2026-08-26. 74 is used everywhere.",
+
+  "reservations_total": 8114,
+  "nights_total": 13093,
+
+  "occupancy_pct": 76.9,
+  "occupancy_active_pct": 76.0,
+  "occupancy_by_type": {"1br": 80.9, "2br": 74.0, "3br": 70.9, "4br_plus": 78.0, "portfolio": 76.9},
+
+  "adr_sar": 582,
+  "adr_90d_sar": 654,
+  "revpar_sar": 451,
+  "revpar_active_sar": 485,
+
+  "rating_avg": 4.77,
+  "reviews_total": 2633,
+  "perfect_ten_pct": 87.6,
+  "category_scores": {"communication": 9.77, "check_in": 9.74, "accuracy": 9.66, "location": 9.64, "cleanliness": 9.57, "value": 9.38},
+
+  "repeat_booking_pct": 37,
+  "repeat_guests": 933,
+  "repeat_guest_share_pct": 17,
+  "top_guest_stays": 49,
+
+  "saudi_guest_pct": 94,
+  "gcc_guest_pct": 3.2,
+  "solo_guest_pct": 58,
+  "couple_guest_pct": 28,
+
+  "same_day_booking_pct": 42,
+  "within_24h_pct": 67,
+  "median_lead_time_days": 1,
+  "avg_stay_nights": 1.62,
+  "one_night_booking_pct": 73,
+  "long_stay_booking_pct": 6,
+  "long_stay_revenue_pct": 26,
+  "thu_fri_arrival_pct": 35,
+  "weekend_adr_premium_pct": 16,
+  "direct_stay_nights": 3.68,
+
+  "residences_total": 74,
+
+  "median_response_minutes": 2.3,
+  "messages_total": 152177,
+  "messages_monthly_start": 2900,
+  "messages_monthly_now": 23000,
+  "maintenance_closed_in_sla": 1000,
+
+  "residences_per_person_per_day": 4.0,
+  "residences_per_custodian": 12,
+  "team_headcount": 22,
+  "designed_capacity_residences": 200,
+  "platform_lines_of_code": 66000,
+
+  "days_to_live_furnished": 5,
+  "days_to_live_unfurnished": 28
+}

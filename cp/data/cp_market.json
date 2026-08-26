@@ -1,0 +1,21 @@
+{
+  "_note": "Seeds §4. STATIC config, deliberately not live — it is a third-party market read, and it renders with its source and date visible. Refresh when AirDNA updates, and move source_date with it.",
+  "_withheld": "The 7.6x revenue-per-listing multiple is NOT here on purpose (seeds §4): it lets a reader reverse-engineer per-residence revenue.",
+
+  "source": "AirDNA Riyadh market snapshot",
+  "source_date": "July 2026",
+  "active_listings": 21812,
+  "occupancy_pct": 38,
+  "adr_usd": 91,
+  "adr_sar": 341,
+  "revpar_usd": 33,
+  "revpar_sar": 124,
+  "fx_sar_per_usd": 3.75,
+  "cross_check": {
+    "source": "AirROI Riyadh",
+    "occupancy_pct": 26.9,
+    "adr_usd": 163,
+    "note": "Less favourable basis; still places Ouja at 3.1x market RevPAR"
+  },
+  "multiples": {"occupancy": "2.0x", "adr": "1.7x", "revpar": "3.6x"}
+}
