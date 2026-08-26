@@ -243,17 +243,71 @@ async def _body(request):
             return {}
 
 
+MODES = ("online", "office")
+SLOTS = ("am", "pm", "eve")
+
+_AR_INDIC = {ord(c): str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}
+_AR_INDIC.update({ord(c): str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")})
+
+_MODE_AR = {"online": "عن بُعد · اتصال مرئي", "office": "في مكتبنا · الرياض"}
+_SLOT_AR = {"am": "صباحاً", "pm": "بعد الظهر", "eve": "مساءً"}
+_AUD_AR = {"owner": "تملك عقاراً", "investor": "تدرس الاستثمار",
+           "corporate": "تسكن موظفيك", "platform": "منصة حجز",
+           "supplier": "مورّد"}
+
+
+def normalize_phone(raw):
+    """What a Saudi guest actually types — ٠٥٥…, ۰۵۵…, +966, or bare — into a
+    single storable shape: digits, 966-prefixed. Too short/long returns ''."""
+    digits = "".join(ch for ch in str(raw or "").translate(_AR_INDIC)
+                     if ch.isdigit())
+    if not 9 <= len(digits) <= 15:
+        return ""
+    if digits.startswith("00966"):
+        digits = digits[2:]
+    if digits.startswith("05") and len(digits) == 10:
+        digits = "966" + digits[1:]
+    elif digits.startswith("0") and len(digits) >= 9:
+        digits = "966" + digits.lstrip("0")
+    elif len(digits) == 9:
+        digits = "966" + digits
+    return digits if 11 <= len(digits) <= 15 else ""
+
+
 def clean_lead(raw):
     """Field-limited on purpose: this endpoint is public, so it accepts exactly
-    the five things the form offers and nothing a caller invents."""
+    what the reservation card offers and nothing a caller invents."""
     out = {}
-    for key in ("name", "company", "phone", "message"):
+    for key in ("name", "company", "message"):
         value = str(raw.get(key) or "").strip()
         if value:
             out[key] = value[:_MAX_FIELD]
+    phone = normalize_phone(raw.get("phone"))
+    if phone:
+        out["phone"] = phone
     audience = str(raw.get("audience") or "").strip().lower()
     out["audience"] = audience if audience in AUDIENCES else "owner"
+    mode = str(raw.get("mode") or "").strip().lower()
+    out["mode"] = mode if mode in MODES else "online"
+    slot = str(raw.get("slot") or "").strip().lower()
+    out["slot"] = slot if slot in SLOTS else "am"
     return out
+
+
+def lead_embed_text(record):
+    """The Discord line the team reads — mode, slot and audience in Arabic."""
+    f = record.get("fields") or {}
+    lines = ["**طلب لقاء — %s**" % _AUD_AR.get(record.get("audience") or
+                                               f.get("audience"), "؟"),
+             "الطريقة: %s" % _MODE_AR.get(f.get("mode"), f.get("mode") or "—"),
+             "الوقت: %s" % _SLOT_AR.get(f.get("slot"), f.get("slot") or "—")]
+    for key, label in (("name", "الاسم"), ("phone", "الجوال"),
+                       ("company", "الجهة"), ("message", "الرسالة")):
+        if f.get(key):
+            lines.append("%s: %s" % (label, f[key]))
+    lines.append("_%s · %s_" % (record.get("lang", "ar"),
+                                record.get("referrer") or "no referrer"))
+    return chr(10).join(lines)
 
 
 async def api_lead(request):
@@ -261,12 +315,18 @@ async def api_lead(request):
     if _rate_limited(ip):
         return HOST.json_response({"ok": False, "error": "rate_limited"}, 429)
 
-    data = clean_lead(await _body(request))
+    raw = await _body(request)
+    # honeypot: humans never see company_url; a filled one gets a quiet
+    # pretend-success so the bot learns nothing, and nothing is stored.
+    if str(raw.get("company_url") or "").strip():
+        return HOST.json_response({"ok": True, "notified": False})
+    data = clean_lead(raw)
     if not data.get("phone") and not data.get("name"):
         return HOST.json_response({"ok": False, "error": "contact_required"}, 400)
 
     record = {
         "at": int(time.time()),
+        "status": "new",
         "audience": data["audience"],
         "fields": data,
         "lang": (request.match_info.get("lang") or "ar"),

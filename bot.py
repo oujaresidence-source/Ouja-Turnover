@@ -60889,12 +60889,7 @@ async def start_web_server():
                         channel = None
                     if not channel:
                         return
-                    fields = record.get("fields") or {}
-                    lines = ["**%s**: %s" % (k, v) for k, v in fields.items() if v]
-                    lines.append("_%s · %s_" % (record.get("lang", "ar"),
-                                                record.get("referrer") or "no referrer"))
-                    body = "**طلب اجتماع — %s**\n%s" % (fields.get("audience", "?"),
-                                                        "\n".join(lines))
+                    body = _cp.routes.lead_embed_text(record)
                     asyncio.run_coroutine_threadsafe(channel.send(body), bot.loop)
 
                 _cp.wire({
