@@ -403,17 +403,18 @@ def _more_shell(key):
     body = frag[m.end():] if m else frag
     style = _STYLE_RE.search(TEMPLATE)
     return (
+        '<!doctype html>\n<html lang="ar" dir="rtl">\n<head>\n'
         '<title>%s — عوجا للأملاك</title>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '__HEAD_EXTRA__\n'
-        '%s\n'
+        '%s\n</head>\n'
         '<body style="background:var(--white)">\n'
         '<main id="main" class="wrap" style="max-width:640px;padding:40px 0 80px">\n'
         '<p class="eyebrow"><a href="/cp/ar" style="text-decoration:none">← عوجا للأملاك</a></p>\n'
         '<h2 style="margin-bottom:20px">%s</h2>\n'
         '<div class="db"><div class="dsec on">%s</div></div>\n'
-        '</main>\n'
+        '</main>\n</body>\n</html>\n'
         % (title, style.group(0) if style else "", title, body))
 
 

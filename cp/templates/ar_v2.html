@@ -1,3 +1,6 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
 <title>عوجا للأملاك</title>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -5,7 +8,7 @@ __HEAD_EXTRA__
 <style>
 :root{
   --beige:#EFE9DE; --beige2:#E4DCCB; --beige3:#D6CCB8; --white:#FFFFFF; --black:#141312; --black2:#221F1C;
-  --ink:#141312; --ink2:#4A453E; --mute:#7A7267; --faint:#A39B8E; --mkt:#8F877A; --line:#DCD4C5; --line-dark:#3A3631;
+  --ink:#141312; --ink2:#4A453E; --mute:#676057; --faint:#A39B8E; --mkt:#6F685D; --line:#DCD4C5; --line-dark:#3A3631;
   --serif:"Noto Naskh Arabic","Naskh Fallback",serif; --sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;
   --ease:cubic-bezier(.16,1,.3,1);
 }
@@ -184,6 +187,7 @@ h1 .w{color:var(--mute)}
 .ph::after{content:"";position:absolute;inset:14px;border:1px solid rgba(20,19,18,.12);border-radius:6px}
 .ph .lab{position:absolute;bottom:22px;inset-inline-start:24px;font-size:12px;color:var(--mute)}
 .ph.dk{background:var(--black2)}.ph.dk::after{border-color:rgba(255,255,255,.14)}.ph.dk .lab{color:#A39B8E}
+.unit .ph img{display:block;width:100%;height:100%;object-fit:cover}
 .unit .b{padding:16px 20px 18px}
 .unit h3{font-size:20px}
 .unit .sp{font-size:13px;color:var(--mute);margin-top:2px}
@@ -248,11 +252,11 @@ form{display:grid;gap:16px;margin-top:24px}
 footer{padding:52px 0 36px;border-top:1px solid var(--line)}
 .fgrid{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.4fr;gap:32px}
 @media(max-width:900px){.fgrid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.fgrid{grid-template-columns:1fr}}
-footer h4{font-size:12px;letter-spacing:.04em;color:var(--faint);margin:0 0 10px;font-weight:400}
+footer h4{font-size:12px;letter-spacing:.04em;color:var(--mute);margin:0 0 10px;font-weight:400}
 footer p,footer li{font-size:14px;color:var(--mute);line-height:1.7}
 footer ul{list-style:none;margin:0;padding:0}
 footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line)}
-.fbot{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--faint)}
+.fbot{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--mute)}
 .skip{position:absolute;inset-inline-start:12px;top:-60px;background:var(--black);color:var(--white);padding:10px 16px;z-index:100;text-decoration:none}
 .skip:focus{top:12px}
 .reveal{opacity:0;transform:translateY(14px);transition:opacity .8s var(--ease),transform .8s var(--ease)}
@@ -292,6 +296,8 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 /* FONT AUDIT SWITCHER (remove before launch) */
 @media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important}.reveal{opacity:1;transform:none}}
 </style>
+</head>
+<body>
 
 <a class="skip" href="#main">تجاوز إلى المحتوى</a>
 <a class="skip" href="#main">تخطَّ إلى المحتوى</a>
@@ -345,7 +351,7 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 <section class="bg-beige" id="compare">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">السوق مقابل عوجا</p><h2>المؤشر نفسه. رقمان.</h2><p class="lede">سوق الرياض بحسب AirDNA (يوليو 2026، على __MKT_LISTINGS__ وحدة)، وعوجا بحسب نظامنا (حتى أغسطس 2026، على كامل المحفظة).</p></div><a class="more" href="/cp/ar/more/compare" data-drawer="compare">اعرف المزيد عن الأرقام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">السوق مقابل عوجا</p><h2>المؤشر نفسه. رقمان.</h2><p class="lede">سوق الرياض بحسب AirDNA (يوليو 2026، على __MKT_LISTINGS__ وحدة)، وعوجا بحسب نظامنا (حتى أغسطس 2026، على كامل المحفظة).</p></div><a class="more" href="/cp/ar/more/compare" data-drawer="compare">اعرف المزيد عن الأرقام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     <div class="duel reveal" data-observe>
       <div class="row hd"><div class="m"><b>سوق الرياض</b><small>AirDNA · يوليو 2026 · __MKT_LISTINGS__ وحدة</small></div><div class="mid">المؤشر</div><div class="o"><b>عوجا</b><small>__RESIDENCES__ وحدة · حتى أغسطس 2026</small></div></div>
       <div class="row r"><div class="m"><div class="v num">__MKT_OCC__%</div><div class="u">فارغ ليلتين من كل ثلاث</div></div><div class="mid"><div class="k">الإشغال</div><div class="bars"><i class="mb" style="--w:__W_OCC_M__%"></i><i class="ob" style="--w:100%"></i></div></div><div class="o"><div class="v num">__OCC__%</div><div class="u">كامل المحفظة</div></div></div>
@@ -364,7 +370,7 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 <section class="bg-white" id="proof">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">الدليل</p><h2>نظام نديره كل صباح، وضيوف يقيّمونه كل ليلة.</h2></div><a class="more" href="/cp/ar/more/system" data-drawer="system">اعرف المزيد عن النظام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">الدليل</p><h2>نظام نديره كل صباح، وضيوف يقيّمونه كل ليلة.</h2></div><a class="more" href="/cp/ar/more/system" data-drawer="system">اعرف المزيد عن النظام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     __SHOTS__
     <p class="eyebrow" style="margin-top:44px;margin-bottom:0">تقييم الضيوف بحسب الفئة · من 10 · عبر __REVIEWS__ مراجعة منشورة</p>
     <div class="scores reveal" data-observe>
@@ -380,7 +386,7 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 <section class="bg-beige" id="stay">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">إقامة واحدة في عوجا</p><h2>إقامة كاملة، بلا مكالمة واحدة.</h2></div><a class="more" href="/cp/ar/more/stay" data-drawer="stay">اعرف المزيد عن الإقامة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">إقامة واحدة في عوجا</p><h2>إقامة كاملة، بلا مكالمة واحدة.</h2></div><a class="more" href="/cp/ar/more/stay" data-drawer="stay">اعرف المزيد عن الإقامة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     <div class="four">
       <div class="fc"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/><circle cx="18" cy="16" r="3"/></svg><b>مطابقة، لا قائمة</b><span>نسأل عن سبب الإقامة، ثم نشرح بالعربية أي وحدة تناسبك.</span></div>
       <div class="fc"><div class="n num">__RESPONSE__</div><b>دقيقة، متوسط الرد</b><span>بالعربية، في أي ساعة. الطوارئ تذهب إلى موظف بتذكرة وموعد.</span></div>
@@ -392,21 +398,21 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 <section class="bg-white" id="guests" style="padding-top:64px">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">بكلماتهم · منشورة كما كُتبت</p><h2><span class="num">__REVIEWS__</span> ضيفاً قيّمونا. هؤلاء ثلاثة منهم.</h2></div><a class="more" href="/cp/ar/more/guests" data-drawer="guests">اعرف المزيد عن الضيوف <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">بكلماتهم · منشورة كما كُتبت</p><h2><span class="num">__REVIEWS__</span> ضيفاً قيّمونا. هؤلاء ثلاثة منهم.</h2></div><a class="more" href="/cp/ar/more/guests" data-drawer="guests">اعرف المزيد عن الضيوف <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     __PAGE_QUOTES__
   </div>
 </section>
 
 <section class="bg-beige" id="residences">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">المحفظة</p><h2>بعض وحداتنا</h2><p class="lede">من الاستوديو إلى أربع غرف، داخل مجمعات مُدارة في شمال الرياض. كل صورة هي للوحدة نفسها.</p></div><a class="more" href="/cp/ar/more/units" data-drawer="units">اعرف المزيد عن الوحدات <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">المحفظة</p><h2>بعض وحداتنا</h2><p class="lede">من الاستوديو إلى أربع غرف، داخل مجمعات مُدارة في شمال الرياض. كل صورة هي للوحدة نفسها.</p></div><a class="more" href="/cp/ar/more/units" data-drawer="units">اعرف المزيد عن الوحدات <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     __UNITS_GRID__
   </div>
 </section>
 
 <section class="bg-white" id="owners">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">للمُلّاك</p><h2>من مفتاحك إلى أول حجز</h2><p class="lede">حصة من الإيراد، بلا دفعة مقدمة، وبلا رسوم على الليالي الفارغة. عقد سنة، إشعار شهر، وتستعيد عقارك.</p></div><a class="more" href="/cp/ar/more/owners" data-drawer="owners">اعرف المزيد للمُلّاك <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">للمُلّاك</p><h2>من مفتاحك إلى أول حجز</h2><p class="lede">حصة من الإيراد، بلا دفعة مقدمة، وبلا رسوم على الليالي الفارغة. عقد سنة، إشعار شهر، وتستعيد عقارك.</p></div><a class="more" href="/cp/ar/more/owners" data-drawer="owners">اعرف المزيد للمُلّاك <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     <div class="fork">
       <div class="fk"><div class="t">عقارك مفروش</div><h3>يبدأ دخلك خلال</h3><div class="d num">__DAYS_FURN__ <small>أيام تقريباً</small></div>
         <ol><li><div><b>معاينة ورفع إلى معيارنا</b><span>نختبر الإنترنت ونغلق كل خلل، بعرض سعر واحد لا يُطلب قبل موافقتك.</span></div></li><li><div><b>تنظيف عميق وتصوير احترافي</b><span>كل صورة تُنشر هي للوحدة نفسها.</span></div></li><li><div><b>تصريح باسمك، وأول حجز</b><span>على المعيار نفسه الذي تعمل به المحفظة كلها.</span></div></li></ol></div>
@@ -419,7 +425,7 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 <section class="bg-beige" id="governance" style="padding-top:64px">
   <div class="wrap">
-    <div class="head"><div><p class="eyebrow">بوضوح</p><h2>أين نقف، وأين لا نقف</h2></div><a class="more" href="/cp/ar/more/gov" data-drawer="gov">اعرف المزيد عن الحوكمة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="head"><div><p class="eyebrow">بوضوح</p><h2>أين نقف، وأين لا نقف</h2></div><a class="more" href="/cp/ar/more/gov" data-drawer="gov">اعرف المزيد عن الحوكمة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></a></div>
     <div class="gov">
       <div class="gv"><b>التصاريح</b><span>لكل وحدة على حدة، وتجديدها متابَع في النظام. لا تُشغَّل وحدة بلا تصريح ساري.</span></div>
       <div class="gv"><b>التأمين</b><span>اليوم عبر حماية المضيف في منصة الحجز. التغطية التجارية مُسعَّرة وهي البند التالي — نقولها لأنك ستسأل.</span></div>
@@ -467,7 +473,7 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
     <div class="fgrid">
       <div><div class="logo" style="font-size:22px"><svg viewBox="0 0 34 22" aria-hidden="true"><path d="M1 21 L17 3 L33 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/><path d="M8 21 L17 11 L26 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/></svg>عوجا للأملاك</div><p style="margin-top:10px">الرياض، المملكة العربية السعودية<br>رابحة ومموّلة ذاتياً منذ التأسيس.</p></div>
       <div><h4>الشراكات والمُلّاك</h4><ul><li><a href="__WA_PLAIN__" target="_blank" rel="noopener">واتساب</a></li><li style="margin-top:6px"><a href="__MAIL_PLAIN__">__EMAIL_TEXT__</a></li></ul></div>
-      <div><h4>هذا الملف</h4><ul><li><a href="#hero">oujares.com/cp</a></li><li style="margin-top:6px"><span style="color:var(--faint)">النسخة الإنجليزية — قريباً</span></li></ul></div>
+      <div><h4>هذا الملف</h4><ul><li><a href="#hero">oujares.com/cp</a></li><li style="margin-top:6px"><span style="color:var(--mute)">النسخة الإنجليزية — قريباً</span></li></ul></div>
       <div><h4>عن الأرقام</h4><p>أرقام التشغيل حتى أغسطس 2026 من نظامنا على كامل المحفظة. مقارنات السوق من AirDNA الرياض، يوليو 2026. التقييمات متوسط المراجعات المنشورة، بما فيها المنخفضة.</p></div>
     </div>
     <div class="fbot"><span>© 2026 عوجا للأملاك</span><span>كل رقم في هذه الصفحة له مصدر وتاريخ.</span></div>
@@ -591,3 +597,5 @@ footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--lin
 
 
 __SCRIPT__
+</body>
+</html>

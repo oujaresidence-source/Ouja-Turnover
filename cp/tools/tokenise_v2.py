@@ -143,22 +143,45 @@ RULES = [
      '[data-font="d"]{--serif:"Amiri",serif;--sans:"Noto Sans Arabic",Tahoma,sans-serif}\n',
      "", 1),
 
-    # PORT FIX — the mock's "اعرف المزيد" and unit tiles are <button>s; the
-    # production page needs real crawlable routes (§2.2), so they become
-    # anchors and JS intercepts the click. data-drawer survives as the hook.
-    ('<button class="more" data-drawer="compare">', '<a class="more" href="/cp/ar/more/compare" data-drawer="compare">', 1),
-    ('<button class="more" data-drawer="system">', '<a class="more" href="/cp/ar/more/system" data-drawer="system">', 1),
-    ('<button class="more" data-drawer="stay">', '<a class="more" href="/cp/ar/more/stay" data-drawer="stay">', 1),
-    ('<button class="more" data-drawer="guests">', '<a class="more" href="/cp/ar/more/guests" data-drawer="guests">', 1),
-    ('<button class="more" data-drawer="units">', '<a class="more" href="/cp/ar/more/units" data-drawer="units">', 1),
-    ('<button class="more" data-drawer="owners">', '<a class="more" href="/cp/ar/more/owners" data-drawer="owners">', 1),
-    ('<button class="more" data-drawer="gov">', '<a class="more" href="/cp/ar/more/gov" data-drawer="gov">', 1),
 
     # PORT FIX — the font stacks use the self-hosted faces with metric-matched
     # local fallbacks (§2.4); Amiri/Readex never shipped, they were switcher
     # options.
     ('--serif:"Noto Naskh Arabic","Amiri",serif; --sans:"Almarai","Readex Pro",Tahoma,sans-serif;',
      '--serif:"Noto Naskh Arabic","Naskh Fallback",serif; --sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', 1),
+
+    # PORT FIX — the page must be a document. The mock has NO <html> element at
+    # all (it was authored to sit inside a preview wrapper), so the live page
+    # had no lang and no dir — Lighthouse a11y 92, and a screen reader with no
+    # language to announce. Same shell v1 ships.
+    ("<title>عوجا للأملاك</title>",
+     '<!doctype html>\n<html lang="ar" dir="rtl">\n<head>\n'
+     "<title>عوجا للأملاك</title>", 1),
+    ("</style>\n", "</style>\n</head>\n<body>\n", 1),
+
+    # PORT FIX — contrast. --mute #7A7267 on the beige ground measures 3.92:1
+    # at 13px (door lines, eyebrows, review attributions) and --mkt #8F877A
+    # measures 3.55:1 on white — both under the 4.5 floor the brief sets. Same
+    # hue, darkened to the first passing step: 5.13:1 and 5.51:1. This is the
+    # correction the v1 seeds file already made for its own faint neutral, not
+    # a reinterpretation of the design.
+    ("--mute:#7A7267;", "--mute:#676057;", 1),
+    ("--mkt:#8F877A;", "--mkt:#6F685D;", 1),
+    # --faint does double duty: correct as light-on-dark inside the dark band,
+    # but 2.27:1 where the footer puts it on beige. The dark-band usage keeps
+    # the token; the two light-ground usages move to --mute (5.13:1).
+    ("footer h4{font-size:12px;letter-spacing:.04em;color:var(--faint);",
+     "footer h4{font-size:12px;letter-spacing:.04em;color:var(--mute);", 1),
+    ('<span style="color:var(--faint)">النسخة الإنجليزية — قريباً</span>',
+     '<span style="color:var(--mute)">النسخة الإنجليزية — قريباً</span>', 1),
+    ("gap:10px;font-size:13px;color:var(--faint)}",
+     "gap:10px;font-size:13px;color:var(--mute)}", 1),
+
+    # PORT FIX — a real <img> inside .ph is unconstrained in the mock (it only
+    # ever holds a placeholder span), so a 1024px photo overflowed a 390px
+    # phone. Measured before/after.
+    ('.unit .b{', '.unit .ph img{display:block;width:100%;height:100%;'
+                  'object-fit:cover}\n.unit .b{', 1),
 
     # PORT FIX — a skip link (§2.7); the mock has none.
     ('<header class="top">',
@@ -174,6 +197,18 @@ RULES = [
     ('<div class="fa"><button class="btn" type="submit">احجز اللقاء</button>',
      '__BOOKING_BUTTON__<div class="fa"><button class="btn" type="submit">احجز اللقاء</button>', 1),
 ]
+
+# PORT FIX — the mock's «اعرف المزيد» controls are <button>s; production needs
+# real crawlable routes (§2.2), so each becomes an <a> to /cp/ar/more/<key> with
+# JS intercepting the click. The WHOLE element is rewritten, close tag included:
+# an earlier version swapped only the opening tag and left </button> behind, so
+# the anchor never closed and swallowed the rest of the document — the form's
+# submit button ended up inside it and a real click did nothing. Caught by
+# driving a browser, invisible to every unit test.
+MORE_LINK_RX = re.compile(
+    r'<button class="more" data-drawer="(?P<k>[a-z]+)">(?P<inner>.*?)</button>', re.S)
+MORE_LINK_EXPECTED = 7
+
 
 # --------------------------------------------------------------------------- #
 # blocks rebuilt from data at render time
@@ -196,7 +231,7 @@ BLOCKS = [
      r"\1\n      __DRAWER_UNITS__", 1),
     # the whole mock script (fake submit + font switcher) is replaced by the
     # production script, kept as its own FILE so no Python string ever holds JS
-    (r'<script>.*?</script>', "__SCRIPT__", 1),
+    (r'<script>.*?</script>', "__SCRIPT__\n</body>\n</html>", 1),
     # the switcher panel itself, and its now-orphaned CSS rules
     (r'<div class="fontsw"[^>]*>.*?</div>', "", 1),
     (r'\.fontsw\{[^}]*\}\n\.fontsw b\{[^}]*\}\n\.fontsw button\{[^}]*\}\n\.fontsw button\.on\{[^}]*\}\n', "", 1),
@@ -254,6 +289,14 @@ def port(src, defaults_out=None):
         if expected:
             out = out.replace(lit, repl)
 
+    hits = len(MORE_LINK_RX.findall(out))
+    if hits != MORE_LINK_EXPECTED:
+        raise PortError("«اعرف المزيد» controls: expected %d, found %d"
+                        % (MORE_LINK_EXPECTED, hits))
+    out = MORE_LINK_RX.sub(
+        lambda m: '<a class="more" href="/cp/ar/more/%s" data-drawer="%s">%s</a>'
+        % (m.group("k"), m.group("k"), m.group("inner")), out)
+
     for pattern, repl, expected in BLOCKS:
         rx = re.compile(pattern, re.S)
         found = rx.findall(out)
@@ -308,6 +351,9 @@ def main(argv):
             raise PortError("rule %r expected %d, found %d" % (lit[:70], expected,
                                                                inter.count(lit)))
         inter = inter.replace(lit, repl)
+    inter = MORE_LINK_RX.sub(
+        lambda m: '<a class="more" href="/cp/ar/more/%s" data-drawer="%s">%s</a>'
+        % (m.group("k"), m.group("k"), m.group("inner")), inter)
     drawers = extract_drawers(inter)
 
     defaults = {}

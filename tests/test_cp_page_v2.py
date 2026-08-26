@@ -184,3 +184,76 @@ class VersionRouting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DocumentShellAndContrast(unittest.TestCase):
+    """Findings from driving a real browser, locked so they cannot regress.
+
+    The approved mock was authored to sit inside a preview wrapper: it has no
+    <html> element, so the live page had no lang and no dir. And three neutral
+    tokens measured below 4.5:1 on their own grounds at 13-14px.
+    """
+
+    def test_the_page_is_a_document(self):
+        html = render()
+        self.assertTrue(html.startswith("<!doctype html>"))
+        self.assertIn('<html lang="ar" dir="rtl">', html)
+        for tag in ("head", "body", "html"):
+            with self.subTest(tag=tag):
+                self.assertIn("</%s>" % tag, html)
+
+    def test_more_pages_are_documents_too(self):
+        for key in page_v2.DRAWER_KEYS:
+            with self.subTest(key=key):
+                html = render(more_key=key)
+                self.assertIn('<html lang="ar" dir="rtl">', html)
+                self.assertIn("</html>", html)
+
+    def test_tags_balance(self):
+        import re
+        html = render()
+        for tag in ("html", "head", "body", "a", "button", "div", "section", "form"):
+            with self.subTest(tag=tag):
+                self.assertEqual(len(re.findall(r"<%s\b" % tag, html)),
+                                 len(re.findall(r"</%s>" % tag, html)),
+                                 "unbalanced <%s> — an unclosed tag swallows the "
+                                 "rest of the document" % tag)
+
+    def test_more_controls_are_closed_anchors(self):
+        """They were <button>s; swapping only the opening tag left </button>
+        behind and the anchor never closed — the submit button ended up inside
+        it and a real click did nothing."""
+        html = render()
+        self.assertEqual(html.count('<a class="more"'), 7)
+        self.assertEqual(html.count('class="more"'), 7)
+
+    def test_contrast_tokens_meet_the_floor(self):
+        def lum(h):
+            h = h.lstrip("#")
+            c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+            c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4
+                 for x in c]
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+        def ratio(a, b):
+            la, lb = lum(a), lum(b)
+            return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+        html = render()
+        self.assertIn("--mute:#676057;", html)
+        self.assertIn("--mkt:#6F685D;", html)
+        self.assertGreaterEqual(ratio("#676057", "#EFE9DE"), 4.5)
+        self.assertGreaterEqual(ratio("#676057", "#E4DCCB"), 4.5)
+        self.assertGreaterEqual(ratio("#6F685D", "#FFFFFF"), 4.5)
+
+    def test_faint_is_not_used_on_a_light_ground(self):
+        """--faint is a light-on-dark token; on beige it measures 2.27:1."""
+        html = render()
+        self.assertNotIn("footer h4{font-size:12px;letter-spacing:.04em;color:var(--faint)", html)
+        self.assertNotIn('<span style="color:var(--faint)">النسخة', html)
+        self.assertNotIn("gap:10px;font-size:13px;color:var(--faint)}", html)
+
+    def test_unit_photos_are_constrained(self):
+        """A real 1024px <img> inside .ph overflowed a 390px phone by 14px."""
+        self.assertIn(".unit .ph img{display:block;width:100%;height:100%;"
+                      "object-fit:cover}", render())
