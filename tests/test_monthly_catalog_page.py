@@ -73,10 +73,10 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, html.lower())
 
-    def test_catalog_asset_version_changes_for_the_empty_section_fix(self):
+    def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260826b")
+        self.assertEqual(ASSET_VERSION, "v20260826c")
 
     def test_styles_preserve_operations_tokens_and_accessibility(self):
         css = CSS_FILE.read_text("utf-8")
@@ -381,6 +381,25 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertIn('id="preview-customer-journey"', html)
         self.assertIn("يعرض كل الشقق داخليًا ولا ينشر أي شقة", html)
         self.assertIn('authPath("/monthly/ops/preview"', js)
+
+    def test_save_and_preview_opens_the_same_apartment_without_approving_it(self):
+        from monthly_public.catalog_page import render_monthly_catalog_page
+
+        html = render_monthly_catalog_page()
+        js = JS_FILE.read_text("utf-8")
+        self.assertIn("حفظ ومشاهدة كتجربة عميل", html)
+        self.assertIn('data-copy="saveAndPreview"', html)
+        self.assertIn('saveAndPreview: "حفظ ومشاهدة كتجربة عميل"', js)
+        self.assertIn('saveAndPreview: "Save and view as a customer"', js)
+        save_profile = js[
+            js.index("async function saveProfile") : js.index(
+                "async function approveProfile"
+            )
+        ]
+        self.assertIn('"/monthly/ops/preview/id/"', save_profile)
+        self.assertIn("encodeURIComponent(refreshed.id)", save_profile)
+        self.assertIn("window.location.assign(authPath(", save_profile)
+        self.assertNotIn('"/approve"', save_profile)
 
 
 class MonthlyCatalogPageBotBoundaryTest(unittest.TestCase):

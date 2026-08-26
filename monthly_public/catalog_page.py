@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-ASSET_VERSION = "v20260826b"
+ASSET_VERSION = "v20260826c"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 
@@ -140,7 +140,7 @@ def render_monthly_catalog_page() -> str:
               <span id="survey-save-status" class="status-text" role="status" aria-live="polite"></span>
               <div>
                 <button id="save-profile" class="button button-secondary" type="submit" data-copy="saveDraft">حفظ المسودة</button>
-                <button id="preview-profile" class="button button-secondary" type="button" data-copy="previewReadiness">معاينة الجاهزية</button>
+                <button id="preview-profile" class="button button-secondary" type="button" data-copy="saveAndPreview">حفظ ومشاهدة كتجربة عميل</button>
                 <button id="approve-profile" class="button button-primary" type="button" data-copy="approveAndRefresh">اعتماد وتحديث الموقع</button>
               </div>
             </footer>
