@@ -33,10 +33,14 @@ PUBLIC_EVENT_NAMES = (
     "entry_route_choice",
     "matcher_start",
     "matcher_answer",
+    "price_priority_selected",
     "matcher_completion",
     "results_view",
+    "no_match",
     "result_impression",
     "listing_view",
+    "review_section_view",
+    "price_breakdown_open",
     "whatsapp_click",
 )
 TRUSTED_LIFECYCLE_EVENT_NAMES = (
@@ -480,6 +484,7 @@ def parse_match_request(value: Any) -> Dict[str, Any]:
         data,
         {
             "purpose",
+            "price_priority",
             "place",
             "residents",
             "sleeping",
@@ -584,6 +589,7 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
             "duration_months",
             "residents",
             "purpose",
+            "price_priority",
             "place",
             "lang",
         },
@@ -614,6 +620,10 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
         )
     if data.get("purpose") not in (None, ""):
         result["purpose"] = _choice(data["purpose"], "purpose", PURPOSES)
+    if data.get("price_priority") not in (None, ""):
+        result["price_priority"] = _choice(
+            data["price_priority"], "price_priority", PRICE_PRIORITIES
+        )
     if data.get("place") is not None:
         result["place"] = _place(data["place"])
     if data.get("lang") not in (None, ""):
@@ -741,6 +751,10 @@ def _event_context(
         safe["duration_band"] = derived_band
     if data.get("purpose") not in (None, ""):
         safe["purpose"] = _choice(data["purpose"], "context.purpose", PURPOSES)
+    if data.get("price_priority") not in (None, ""):
+        safe["price_priority"] = _choice(
+            data["price_priority"], "context.price_priority", PRICE_PRIORITIES
+        )
     if data.get("place_id") not in (None, ""):
         safe["place_id"] = _allowlisted_place_id(
             data["place_id"], "context.place_id", allowed_place_ids
@@ -760,6 +774,8 @@ def _event_context(
             parsed_answer = _choice(answer, "context.answer", SLEEPING_OPTIONS)
         elif question == "flexibility":
             parsed_answer = _choice(answer, "context.answer", FLEXIBILITY_OPTIONS)
+        elif question == "price_priority":
+            parsed_answer = _choice(answer, "context.answer", PRICE_PRIORITIES)
         elif question == "residents":
             parsed_answer = _integer(
                 answer,

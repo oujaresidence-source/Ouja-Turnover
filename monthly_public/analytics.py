@@ -12,6 +12,7 @@ from typing import Any, Collection, Dict, Mapping, Optional
 
 from .contracts import (
     LOST_REASONS,
+    PRICE_PRIORITIES,
     PUBLIC_EVENT_NAMES,
     PURPOSES,
     TRUSTED_LIFECYCLE_EVENT_NAMES,
@@ -302,9 +303,13 @@ class AnalyticsStore:
             raise ValueError("invalid anonymous session")
         allowed = {
             "entry_route_choice",
+            "price_priority_selected",
             "matcher_completion",
+            "no_match",
             "result_impression",
             "listing_view",
+            "review_section_view",
+            "price_breakdown_open",
             "whatsapp_click",
         }
         with self._connection() as connection:
@@ -369,12 +374,19 @@ class AnalyticsStore:
                     item["duration_months"] = context["duration_months"]
                 if context.get("duration_band") in ("1_month", "2_3_months", "4_6_months"):
                     item["duration_band"] = context["duration_band"]
+                if context.get("price_priority") in PRICE_PRIORITIES:
+                    item["price_priority"] = context["price_priority"]
+            elif event == "price_priority_selected":
+                if context.get("price_priority") in PRICE_PRIORITIES:
+                    item["price_priority"] = context["price_priority"]
             elif event == "result_impression":
                 if isinstance(context.get("listing_id"), str):
                     item["listing_id"] = context["listing_id"]
                 if isinstance(context.get("rank"), int):
                     item["rank"] = context["rank"]
-            elif event in ("listing_view", "whatsapp_click"):
+            elif event in (
+                "listing_view", "review_section_view", "price_breakdown_open", "whatsapp_click"
+            ):
                 if isinstance(context.get("listing_id"), str):
                     item["listing_id"] = context["listing_id"]
             journey.append(item)
@@ -456,6 +468,8 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
             profile = profiles.setdefault(event["session_id"], {})
             if context.get("purpose") in PURPOSES:
                 profile["purpose"] = context["purpose"]
+            if context.get("price_priority") in PRICE_PRIORITIES:
+                profile["price_priority"] = context["price_priority"]
             if isinstance(context.get("place_id"), str) and context["place_id"]:
                 profile["place_id"] = context["place_id"]
             band = _duration_band(context)
@@ -463,6 +477,8 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
                 profile["duration_band"] = band
             if context.get("question") == "purpose" and context.get("answer") in PURPOSES:
                 profile["purpose"] = context["answer"]
+            if context.get("question") == "price_priority" and context.get("answer") in PRICE_PRIORITIES:
+                profile["price_priority"] = context["answer"]
             if context.get("question") == "place" and isinstance(context.get("answer"), str):
                 profile["place_id"] = context["answer"]
     for name, keys in stage_keys.items():
@@ -480,6 +496,8 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
             profile = profiles.setdefault(row["session_id"], {})
             if request.get("purpose") in PURPOSES:
                 profile["purpose"] = request["purpose"]
+            if request.get("price_priority") in PRICE_PRIORITIES:
+                profile["price_priority"] = request["price_priority"]
             place = request.get("place")
             if isinstance(place, Mapping) and isinstance(place.get("id"), str):
                 profile["place_id"] = place["id"]
@@ -499,6 +517,7 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
     purpose_counts = {purpose: 0 for purpose in PURPOSES}
     place_counts: Dict[str, int] = {}
     duration_bands = {band: 0 for band in ("1_month", "2_3_months", "4_6_months")}
+    price_priorities = {priority: 0 for priority in PRICE_PRIORITIES}
     for profile in profiles.values():
         purpose = profile.get("purpose")
         if purpose in purpose_counts:
@@ -509,6 +528,9 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
         band = profile.get("duration_band")
         if band in duration_bands:
             duration_bands[band] += 1
+        priority = profile.get("price_priority")
+        if priority in price_priorities:
+            price_priorities[priority] += 1
     common_purposes = [
         {"purpose": purpose, "count": count}
         for purpose, count in sorted(
@@ -548,6 +570,7 @@ def funnel_summary(analytics: AnalyticsStore, leads: Any) -> Dict[str, Any]:
         "common_purposes": common_purposes,
         "requested_places": requested_places,
         "duration_bands": duration_bands,
+        "price_priorities": price_priorities,
         "conversion_rates": {
             "matcher_to_lead": _conversion(
                 len(lead_sessions.intersection(stage_keys["matcher_completion"])),

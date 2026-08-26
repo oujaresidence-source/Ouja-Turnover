@@ -50,8 +50,9 @@ class AnalyticsStoreTests(unittest.TestCase):
     def test_every_public_funnel_event_can_be_recorded(self):
         names = (
             "landing_view", "entry_route_choice", "matcher_start", "matcher_answer",
-            "matcher_completion", "results_view", "result_impression", "listing_view",
-            "whatsapp_click",
+            "price_priority_selected", "matcher_completion", "results_view", "no_match",
+            "result_impression", "listing_view", "review_section_view",
+            "price_breakdown_open", "whatsapp_click",
         )
         for name in names:
             with self.subTest(name=name):
@@ -124,6 +125,7 @@ class AnalyticsStoreTests(unittest.TestCase):
                     "place_id": "kafd",
                     "move_in": "2026-09-01",
                     "duration_months": 2,
+                    "price_priority": "experience",
                     "discount_requested": True,
                 },
             ),
@@ -133,6 +135,7 @@ class AnalyticsStoreTests(unittest.TestCase):
                     "purpose": "family",
                     "move_in": "2026-09-01",
                     "duration_months": 1,
+                    "price_priority": "lowest_suitable",
                 },
             ),
         ):
@@ -185,6 +188,10 @@ class AnalyticsStoreTests(unittest.TestCase):
         self.assertEqual(
             summary["duration_bands"],
             {"1_month": 1, "2_3_months": 1, "4_6_months": 0},
+        )
+        self.assertEqual(
+            summary["price_priorities"],
+            {"experience": 1, "value": 0, "lowest_suitable": 1},
         )
         self.assertEqual(summary["conversion_rates"]["matcher_to_lead"], 1.0)
         self.assertEqual(summary["conversion_rates"]["lead_to_response"], 0.5)

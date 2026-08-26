@@ -246,6 +246,17 @@ class OtherPublicContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.field, "session_id")
         self.assertEqual(caught.exception.code, "unknown_field")
 
+    def test_listing_context_accepts_only_an_approved_price_priority(self):
+        parsed = parse_listing_request(
+            {"listing_id": "536998", "price_priority": "lowest_suitable"}
+        )
+        self.assertEqual(parsed["price_priority"], "lowest_suitable")
+        with self.assertRaises(ContractError) as caught:
+            parse_listing_request(
+                {"listing_id": "536998", "price_priority": "highest_revenue"}
+            )
+        self.assertEqual(caught.exception.field, "price_priority")
+
     def test_event_keeps_only_minimal_anonymous_utm_free_context(self):
         parsed = parse_event(
             {
@@ -279,6 +290,49 @@ class OtherPublicContractTests(unittest.TestCase):
             parse_event({"event": "raw_message", "session_id": ANON_SESSION})
         self.assertEqual(caught.exception.field, "event")
         self.assertEqual(caught.exception.code, "unsupported")
+
+    def test_trust_events_keep_only_safe_listing_and_price_priority_context(self):
+        for name in (
+            "price_priority_selected",
+            "no_match",
+            "review_section_view",
+            "price_breakdown_open",
+        ):
+            with self.subTest(name=name):
+                parsed = parse_event(
+                    {
+                        "event": name,
+                        "session_id": ANON_SESSION,
+                        "context": {
+                            "listing_id": "1001",
+                            "price_priority": "value",
+                            "review_text": "must not be stored",
+                            "guest_name": "must not be stored",
+                        },
+                    }
+                )
+                self.assertEqual(
+                    parsed["context"],
+                    {"listing_id": "1001", "price_priority": "value"},
+                )
+
+    def test_matcher_price_priority_answer_uses_the_controlled_allowlist(self):
+        parsed = parse_event(
+            {
+                "event": "matcher_answer",
+                "session_id": ANON_SESSION,
+                "context": {"question": "price_priority", "answer": "experience"},
+            }
+        )
+        self.assertEqual(parsed["context"]["answer"], "experience")
+        with self.assertRaises(ContractError):
+            parse_event(
+                {
+                    "event": "matcher_answer",
+                    "session_id": ANON_SESSION,
+                    "context": {"question": "price_priority", "answer": "premium"},
+                }
+            )
 
     def test_public_event_rejects_server_and_staff_lifecycle_names(self):
         for event in ("lead_created", "team_response", "booked", "lost"):
