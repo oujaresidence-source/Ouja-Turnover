@@ -239,7 +239,9 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertEqual(result["results"][0]["quote"]["stay_total_sar"], 12000)
 
     def test_match_listing_and_quote_use_only_published_generation(self):
-        matched = self.app.match(match_request(), lang="en")
+        matched = self.app.match(
+            match_request(price_priority="experience"), lang="en"
+        )
         self.assertTrue(matched["ok"])
         self.assertEqual(matched["top"][0]["id"], "1001")
         detail = self.app.listing(
