@@ -265,4 +265,3 @@ git commit -m "docs(monthly): report team review flow"
 - [ ] **Step 6: Merge and push once**
 
 Fast-forward local `main`, rerun the full monthly test command on the merged result, fetch `origin/main`, confirm it has not advanced, and push `main` once. Confirm Railway reports success, `/monthly` returns `200`, and anonymous `/monthly/ops/preview` returns `401`.
-
