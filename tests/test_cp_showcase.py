@@ -115,3 +115,32 @@ class PublicRender(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhotoResolverContract(unittest.TestCase):
+    """The bug that shipped: bot.py's photo resolver took the result of
+    _gw_find_by_slug_or_id as ONE value when it returns TWO. Every unit without
+    a hand-picked cover raised inside the try/except and fell back to a
+    placeholder — silently, because the fallback IS the designed behaviour for
+    a unit we cannot resolve. Only the one unit with a manually chosen cover
+    showed a photo, which is exactly what the owner saw."""
+
+    @classmethod
+    def setUpClass(cls):
+        import bot
+        cls.bot = bot
+
+    def test_the_lookup_returns_a_pair(self):
+        result = self.bot._gw_find_by_slug_or_id("definitely-not-a-listing")
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+    def test_the_cp_resolver_unpacks_both_values(self):
+        import inspect
+        src = inspect.getsource(self.bot)
+        start = src.index("def _cp_listing_photos(")
+        body = src[start:start + 1400]
+        self.assertIn("snap, ov = _gw_find_by_slug_or_id(", body,
+                      "the resolver must unpack (snapshot, overrides)")
+        self.assertIn("_gw_listing_public(snap, ov,", body,
+                      "the overrides must be passed through, not dropped")

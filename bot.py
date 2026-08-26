@@ -61146,10 +61146,13 @@ async def start_web_server():
                     chosen in cp_units.json when the cover fails the photo rules."""
                     url = (pinned or "").strip()
                     if not url:
-                        snap = _gw_find_by_slug_or_id(str(listing_id))
+                        # _gw_find_by_slug_or_id returns (snapshot, overrides) —
+                        # taking it as one value made every unit without a
+                        # hand-picked cover fail silently into a placeholder.
+                        snap, ov = _gw_find_by_slug_or_id(str(listing_id))
                         if not snap:
                             return {}
-                        pub = _gw_listing_public(snap, with_airbnb=False) or {}
+                        pub = _gw_listing_public(snap, ov, with_airbnb=False) or {}
                         url = pub.get("cover") or (pub.get("images") or [""])[0]
                     if not url:
                         return {}
