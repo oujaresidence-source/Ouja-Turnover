@@ -45,6 +45,8 @@
       serviceUnavailable: "تعذر تحميل خدمة السكن الشهري حاليًا.",
       serviceUnavailableHelp: "جرّب مرة ثانية بعد قليل. ما راح نعرض توفرًا أو سعرًا غير مؤكد.",
       partialService: "بعض خدمات التواصل غير جاهزة حاليًا، ويظل تصفح البيوت متاحًا.",
+      staffReviewHint: "أنت تشاهد نسخة العملاء المعتمدة.",
+      staffReviewAction: "وضع المراجعة: عرض كل الشقق",
       startOver: "ابدأ من جديد",
       back: "رجوع",
       progress: "الخطوة {current} من {total}",
@@ -166,6 +168,7 @@
       previewImageMissing: "الصورة تحتاج إضافة",
       previewLicenceMissing: "بيانات الإعلان تحتاج إكمال",
       previewDepositRange: "التأمين المبدئي من ٥٠٠ إلى ٢٬٥٠٠ ر.س، ويُحدد المبلغ النهائي وشروط الاسترداد قبل الالتزام.",
+      editPreviewListing: "تعديل بيانات هذه الشقة",
       completeDetails: "أكمل تفاصيل الإقامة لتجهيز طلب واتساب.",
       preparingWhatsApp: "جاري تجهيز مرجع الطلب ورسالة واتساب.",
       openingWhatsApp: "تم إنشاء المرجع {reference}. جاري فتح واتساب، والرسالة لن تُرسل إلا باختيارك.",
@@ -208,6 +211,8 @@
       serviceUnavailable: "The monthly-stay service could not load right now.",
       serviceUnavailableHelp: "Try again shortly. We will not show unconfirmed availability or pricing.",
       partialService: "Some contact services are not ready, but browsing remains available.",
+      staffReviewHint: "You are viewing the approved customer version.",
+      staffReviewAction: "Review mode: show every apartment",
       startOver: "Start again",
       back: "Back",
       progress: "Step {current} of {total}",
@@ -329,6 +334,7 @@
       previewImageMissing: "Photo needs to be added",
       previewLicenceMissing: "Advertising details need completion",
       previewDepositRange: "Indicative deposit: SAR 500–2,500. The final amount and refund terms are confirmed before commitment.",
+      editPreviewListing: "Edit this apartment's data",
       completeDetails: "Complete the stay details to prepare a WhatsApp request.",
       preparingWhatsApp: "Creating your lead reference and WhatsApp message.",
       openingWhatsApp: "Reference {reference} created. Opening WhatsApp; the message is sent only if you choose to send it.",
@@ -757,6 +763,14 @@
     return node;
   }
 
+  function previewEditorLink(item) {
+    const href = previewEditorPath(item && item.id);
+    if (!href) return null;
+    const node = element("a", "button button-outline preview-edit-link", copy("editPreviewListing"));
+    node.href = href;
+    return node;
+  }
+
   function announce(message, error) {
     const node = document.getElementById(error ? "monthly-errors" : "monthly-status");
     if (node) node.textContent = message || "";
@@ -875,6 +889,12 @@
     if (token) params.set("token", token);
     const search = params.toString();
     return base + (search ? "?" + search : "");
+  }
+
+  function previewEditorPath(listingId) {
+    const value = String(listingId == null ? "" : listingId);
+    if (!runtime.preview || !SAFE_ID_RE.test(value)) return "";
+    return requestPath("/monthly/ops/listings", { id: value });
   }
 
   async function requestJSON(path, options) {
@@ -1255,6 +1275,8 @@
     append(body, heading);
     const evidence = previewEvidence(item);
     if (evidence) body.appendChild(evidence);
+    const editLink = previewEditorLink(item);
+    if (editLink) body.appendChild(editLink);
     if (item.neighborhood) body.appendChild(element("p", "listing-location", item.neighborhood));
     body.appendChild(factsList(item));
     if (item.summary) body.appendChild(element("p", "listing-summary", item.summary));
@@ -1889,6 +1911,8 @@
     append(title, element("h1", "", listing.title));
     const evidence = previewEvidence(listing);
     if (evidence) title.appendChild(evidence);
+    const editLink = previewEditorLink(listing);
+    if (editLink) title.appendChild(editLink);
     if (listing.neighborhood) title.appendChild(element("p", "listing-location", listing.neighborhood));
     title.appendChild(factsList(listing));
     if (listing.rating !== undefined && listing.reviews_count) title.appendChild(element("p", "rating-line", copy("rating", { rating: formatNumber(listing.rating), count: formatNumber(listing.reviews_count) })));
@@ -2304,6 +2328,7 @@
     listingQuoteRequest: listingQuoteRequest,
     optionIsSelected: optionIsSelected,
     parseLocationSearch: parseLocationSearch,
+    previewEditorPath: previewEditorPath,
     publicAvailabilityStatus: publicAvailabilityStatus,
     rankedImpressionIds: rankedImpressionIds,
     responseWindowMessage: responseWindowMessage,

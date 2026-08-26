@@ -203,6 +203,22 @@ p {
   color: var(--warning);
 }
 
+.staff-review-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--bronze-500) 26%, transparent);
+  background: var(--stone-100);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+
+.staff-review-entry .button {
+  flex: none;
+}
+
 .preview-mode .site-header {
   position: relative;
 }
@@ -296,6 +312,13 @@ p {
 
 .preview-evidence.incomplete .preview-evidence-label {
   color: var(--warning);
+}
+
+.preview-edit-link {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 44px;
+  margin-block: 4px 8px;
 }
 
 .preview-issue-list {

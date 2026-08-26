@@ -387,6 +387,32 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         for hook in ("story-photo", "listing.highlights", "sticky-mobile-action", "sizes"):
             self.assertIn(hook, self.js)
 
+    def test_staff_preview_links_each_apartment_back_to_its_editor(self):
+        self.assertIn('editPreviewListing: "تعديل بيانات هذه الشقة"', self.js)
+        self.assertIn('editPreviewListing: "Edit this apartment\'s data"', self.js)
+        self.assertIn("function previewEditorPath", self.js)
+        helper = self.js[
+            self.js.index("function previewEditorPath") : self.js.index(
+                "async function requestJSON"
+            )
+        ]
+        self.assertIn("runtime.preview", helper)
+        self.assertIn('requestPath("/monthly/ops/listings"', helper)
+        self.assertIn("SAFE_ID_RE", helper)
+        card = self.js[
+            self.js.index("function createCard") : self.js.index(
+                "function catalogGrid"
+            )
+        ]
+        listing = self.js[
+            self.js.index("function listingContent") : self.js.index(
+                "function quoteLabel"
+            )
+        ]
+        self.assertIn("previewEditorLink", card)
+        self.assertIn("previewEditorLink", listing)
+        self.assertIn("min-height: 44px", self.css[self.css.index(".preview-edit-link"):])
+
     def test_customer_shell_stays_within_a_small_uncompressed_asset_budget(self):
         self.assertLess(len(self.js.encode("utf-8")), 110_000)
         self.assertLess(len(self.css.encode("utf-8")), 30_000)
