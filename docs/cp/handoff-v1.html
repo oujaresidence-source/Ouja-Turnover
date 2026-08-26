@@ -1,0 +1,355 @@
+<title>Ouja /cp Handoff</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#FBF8F1; --paper-deep:#F1EBDC; --ink:#17140F; --ink-soft:#514A3E;
+  --ink-faint:#7A7165; --rule:#DDD5C2; --wadi:#234F3E; --ochre:#976927;
+  --bad:#B0553C; --card:#FFFFFF; --code-bg:#F1EBDC;
+  --display:"Noto Serif",Georgia,serif;
+  --body:"IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --ar:"IBM Plex Sans Arabic",var(--body);
+}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#1B1813; --paper-deep:#241F18; --ink:#F3EEE1; --ink-soft:#C9C0AD;
+    --ink-faint:#948A75; --rule:#3A342A; --wadi:#7FB39A; --ochre:#C89A55;
+    --bad:#D08468; --card:#221D16; --code-bg:#2A241B;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#1B1813; --paper-deep:#241F18; --ink:#F3EEE1; --ink-soft:#C9C0AD;
+  --ink-faint:#948A75; --rule:#3A342A; --wadi:#7FB39A; --ochre:#C89A55;
+  --bad:#D08468; --card:#221D16; --code-bg:#2A241B;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);
+  font-size:15.5px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 22px 90px}
+header.doc{padding:58px 0 30px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ochre);margin:0 0 14px}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(30px,5vw,44px);
+  letter-spacing:-.015em;margin:0 0 12px;text-wrap:balance}
+.lede{color:var(--ink-soft);font-size:17px;max-width:64ch;margin:0}
+.meta{font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-top:18px}
+section{margin-top:54px}
+h2{font-family:var(--display);font-weight:600;font-size:24px;margin:0 0 6px;
+  padding-top:16px;border-top:1px solid var(--rule)}
+h2 .n{font-family:var(--mono);font-size:13px;color:var(--ochre);margin-inline-end:10px}
+h3{font-size:15.5px;font-weight:600;margin:26px 0 8px;color:var(--ink)}
+p{max-width:70ch;margin:10px 0;color:var(--ink-soft)}
+p b, li b{color:var(--ink)}
+ul,ol{margin:10px 0;padding-inline-start:22px;color:var(--ink-soft);max-width:72ch}
+li{margin:5px 0}
+code{font-family:var(--mono);font-size:.86em;background:var(--code-bg);
+  padding:1.5px 6px;border-radius:4px;color:var(--ink)}
+.tablewrap{overflow-x:auto;margin:14px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:560px}
+caption{text-align:start;font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-faint);padding-bottom:8px}
+th{text-align:start;font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-faint);border-bottom:2px solid var(--ink);
+  padding:7px 12px 7px 0;font-weight:500}
+td{border-bottom:1px solid var(--rule);padding:8px 12px 8px 0;vertical-align:top;color:var(--ink-soft)}
+td:first-child{color:var(--ink)}
+.num{font-variant-numeric:tabular-nums}
+.chip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  padding:2px 9px;border-radius:999px;white-space:nowrap}
+.ok{background:color-mix(in srgb,var(--wadi) 14%,transparent);color:var(--wadi);border:1px solid color-mix(in srgb,var(--wadi) 40%,transparent)}
+.warn{background:color-mix(in srgb,var(--ochre) 13%,transparent);color:var(--ochre);border:1px solid color-mix(in srgb,var(--ochre) 40%,transparent)}
+.open{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad);border:1px solid color-mix(in srgb,var(--bad) 40%,transparent)}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;margin:14px 0}
+.card h3{margin-top:0}
+blockquote.ar{font-family:var(--ar);direction:rtl;text-align:right;background:var(--paper-deep);
+  border-inline-start:3px solid var(--ochre);padding:10px 16px;margin:10px 0;border-radius:6px;
+  color:var(--ink);font-size:14.5px;max-width:none}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:14px}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--mono);font-size:12px;margin:12px 0}
+.flow .step{background:var(--card);border:1px solid var(--rule);border-radius:7px;padding:7px 12px;color:var(--ink)}
+.flow .arr{color:var(--ink-faint)}
+.kbd{font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+a{color:var(--wadi);text-decoration-thickness:1px;text-underline-offset:2px}
+.toc{columns:2;column-gap:34px;font-size:14px;margin-top:16px}
+.toc a{display:block;padding:3px 0;color:var(--ink-soft);text-decoration:none;border-bottom:1px dashed var(--rule)}
+.toc a:hover{color:var(--wadi)}
+@media(max-width:620px){.toc{columns:1}}
+.tag{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--paper);
+  background:var(--ink);border-radius:4px;padding:2px 7px;vertical-align:2px}
+footer.doc{margin-top:70px;border-top:2px solid var(--ink);padding-top:16px;
+  font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+</style>
+
+<div class="wrap">
+<header class="doc">
+  <p class="eyebrow">Handoff &amp; audit brief · Ouja Residence</p>
+  <h1>The /cp build, end to end</h1>
+  <p class="lede">Everything that was built, decided, fixed, and deliberately left open in shipping the public company profile at <b>/cp</b> — written for a fresh session to audit the work and the customer journey without needing the original conversation.</p>
+  <p class="meta">Live since 2026-08-26 · branch <code>feat/cp-profile</code> → <code>main</code> (3 pushes, final <code>14742fa</code>) · 3,435 tests green at ship</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <a href="#tldr">0 · TL;DR + live URLs</a>
+  <a href="#truth">1 · The three sources of truth</a>
+  <a href="#built">2 · What was built (module map)</a>
+  <a href="#routes">3 · Routes, live-verified</a>
+  <a href="#data">4 · Data files &amp; who edits them</a>
+  <a href="#env">5 · Environment variables</a>
+  <a href="#figures">6 · Figures &amp; provenance</a>
+  <a href="#guard">7 · The disclosure guard</a>
+  <a href="#content">8 · Content decisions log</a>
+  <a href="#journey">9 · The customer journey</a>
+  <a href="#fixed">10 · Defects fixed</a>
+  <a href="#live-finds">11 · Found only on live</a>
+  <a href="#open">12 · Open items &amp; honest gaps</a>
+  <a href="#audit">13 · Audit checklist for the next session</a>
+  <a href="#commits">14 · Commit log</a>
+</nav>
+
+<section id="tldr">
+<h2><span class="n">0</span>TL;DR</h2>
+<p>A new <code>cp/</code> Python package inside the Ouja-Turnover bot serves a public, Arabic-first company profile. The copy is the owner-approved document ported <b>byte-for-byte by script</b> (never retyped); every figure carries a source and date; a <b>disclosure guard runs on the render path</b> and kills any page carrying a withheld or retired figure; the numbers refresh nightly behind sanity gates. The English edition does not exist yet and honestly redirects. The old <code>/business</code> page is untouched.</p>
+<div class="tablewrap"><table>
+<caption>Live endpoints (verified by request after the final deploy)</caption>
+<tr><th scope="col">URL</th><th scope="col">Result</th></tr>
+<tr><td><code>/cp</code></td><td>302 → <code>/cp/ar</code></td></tr>
+<tr><td><code>/cp/ar</code></td><td>200 — the full Arabic edition, ~65&nbsp;KB</td></tr>
+<tr><td><code>/cp/en</code></td><td>302 → <code>/cp/ar</code> (temporary on purpose; English not built)</td></tr>
+<tr><td><code>/cp.pdf</code></td><td>404 honestly (no file yet); the page shows no PDF link</td></tr>
+<tr><td><code>/cp/share.png</code>, <code>/cp/icon.png</code> ( +192/512)</td><td>200 — logo assets, week-cached</td></tr>
+<tr><td><code>/api/cp/stats</code>, <code>/api/cp/reviews</code></td><td>200 — JSON with per-figure provenance</td></tr>
+<tr><td><code>POST /api/cp/lead</code></td><td>400 on empty body (validates); rate-limited 8/hr/IP</td></tr>
+<tr><td><code>/business</code></td><td>200 — <b>unchanged</b>, redirect waits behind a flag</td></tr>
+</table></div>
+<p>Base URL: <code>https://worker-production-5d63.up.railway.app</code> (Railway auto-deploys from <code>main</code> only).</p>
+</section>
+
+<section id="truth">
+<h2><span class="n">1</span>The three sources of truth</h2>
+<p>The build was governed by a strict precedence. An auditor should check violations of it before anything else.</p>
+<div class="tablewrap"><table>
+<tr><th scope="col">Authority</th><th scope="col">Owns</th><th scope="col">Rule</th></tr>
+<tr><td><code>ouja-cp-DATA-SEEDS.md</code> <span class="kbd">(owner's Downloads)</span></td><td>Every fact, figure, disclosure tag (🟢🔴🟡⬜)</td><td>Outranks the codebase. A figure not in it does not render.</td></tr>
+<tr><td><code>ouja-cp-ar.html</code> <span class="kbd">(owner's Downloads)</span></td><td>All Arabic copy, structure, section order</td><td>Never paraphrased, never retyped — ported by script (§2).</td></tr>
+<tr><td>The <code>/business</code> page in <code>bot.py</code></td><td>Design language, live-data framing</td><td>The approved document already carried the design, so this mostly informed conventions (placeholder substitution, no f-strings, no backslashes).</td></tr>
+</table></div>
+<p><b>Owner decisions taken during the build</b> (each is logged in a commit message): 74 residences everywhere, resolving the seeds' 74-vs-72 conflict · Arabic ships first, English later · the four figures with no data source travel through a value+date+source manual layer · reviews come verbatim from the /business store · the investor ask stays vague · contacts are +966533779297 and Info@oujares.com · compound names corrected to <span lang="ar" dir="rtl">جاده 33، رواح | هيو ريزيدنس، العجلان ريفيا، مبنى خاص</span>.</p>
+</section>
+
+<section id="built">
+<h2><span class="n">2</span>What was built — module map</h2>
+<div class="grid2">
+<div class="card"><h3><code>cp/guard.py</code> — disclosure guard</h3>
+<p>Scans rendered HTML (visible text + <code>meta</code>/<code>alt</code>/<code>aria</code> attributes, styles and scripts stripped, Arabic-Indic digits folded to ASCII) and raises <code>DisclosureError</code> on any withheld (seeds §3) or retired (seeds §11) figure. Runs <b>inside <code>render_ar()</code></b>, not only in CI. Distinctive numbers match bare; ambiguous small ones (945, 606, 455, 278, 1,859) match only in their leaking context — because live metrics can innocently reach them. ADR 582/654 and RevPAR 451/485 whitelisted per seeds.</p></div>
+<div class="card"><h3><code>cp/stats.py</code> — figure layer</h3>
+<p>Every figure is a cell <code>{value, source, as_of}</code> with source ∈ <code>hostaway</code> / <code>manual</code> / <code>seeds</code>. All 45 fields have permanent fallbacks equal to the seeds values. Only <code>hostaway</code>-provenance fields can be overlaid by the nightly snapshot, only when non-empty. <code>sync_stamp()</code> makes the page structurally unable to claim a nightly refresh that didn't happen.</p></div>
+<div class="card"><h3><code>cp/tools/tokenise_source.py</code> — the port</h3>
+<p>Converts the approved Arabic document into <code>cp/templates/ar.html</code> by ~91 literal substitutions, <b>each with an exact expected occurrence count</b>; a mismatch aborts. Three rule classes, labelled in-file: figure/link tokens, <b>PORT FIX</b> (layout only: the RTL skip-link overflow, the .cols-2 grid), and <b>OWNER CORRECTION</b> (dated: the compound names). Re-running against a re-approved document re-applies everything.</p></div>
+<div class="card"><h3><code>cp/page.py</code> — renderer</h3>
+<p>Fills tokens via <code>.replace()</code> (never f-strings; zero backslashes). Rebuilds from data: the five audience doors, the occupancy-by-type table (vs-market column <i>computed</i>), all bar widths, six review slots, six unit tiles, the ask, the head tags. Empty inputs degrade to the document's own coloured blanks. Missing WhatsApp → disabled button; missing email → no <code>mailto</code> at all.</p></div>
+<div class="card"><h3><code>cp/routes.py</code> — HTTP</h3>
+<p>All public; errors return clean JSON, never a stack trace. Leads: validate → write to <code>cp_leads.json</code> on disk <i>first</i> → then Discord notify (survives Discord being down) → rate limit 8/hour/IP → field whitelist (name, company, phone, message, audience∈5). The /business 301 exists but is gated behind <code>CP_REDIRECT_BUSINESS=1</code>.</p></div>
+<div class="card"><h3><code>cp/snapshot.py</code> — nightly refresh</h3>
+<p>03:20 Riyadh loop in bot.py, one Hostaway sweep behind the existing token-bucket throttle. Deliberately narrow: refreshes counts, nights, stay shape, repeat rates, Thu/Fri share, review scores. <b>Does not compute occupancy / ADR / RevPAR</b> (methodology not reconciled — see §12). Sanity gates: totals monotonic vs seeds, shares in band, unowned fields dropped, nothing-survived → nothing written. Half-up rounding (Python's banker's rounding printed 4.62 for 4.625).</p></div>
+</div>
+<p>Plus <code>cp/assets/</code> (favicon 64/192/512 + 1200×630 share card generated from the owner's <code>logo.PNG</code>, composed on the logo's own ground <code>rgb(226,226,222)</code>), and <b>five test files</b>: <code>test_cp_guard</code>, <code>test_cp_stats</code>, <code>test_cp_page</code>, <code>test_cp_routes</code>, <code>test_cp_snapshot</code> — ~120 cp tests inside the repo's 3,435.</p>
+<p><b>bot.py footprint</b> (kept minimal): an import guard (<code>_HAS_CP</code>), one wiring block (<code>cp.wire({...})</code> + <code>register_routes</code>), the nightly loop, one line in <code>_ROLE_EXEMPT_WRITES</code>. Photos resolve through the <i>existing</i> <code>/stay</code> pipeline (<code>_gw_find_by_slug_or_id</code> → <code>_gw_listing_public</code>) and the existing <code>/elite/img</code> WebP proxy — no second image system exists.</p>
+</section>
+
+<section id="routes">
+<h2><span class="n">3</span>Routes, live-verified</h2>
+<p>See the table in §0 — every row was verified against the live deployment after the final push, including the disclosure-guard scan run <i>on the fetched live HTML</i> (clean) and a check that no template placeholder leaked (none).</p>
+</section>
+
+<section id="data">
+<h2><span class="n">4</span>Data files &amp; who edits them</h2>
+<div class="tablewrap"><table>
+<tr><th scope="col">File</th><th scope="col">Holds</th><th scope="col">Edited by</th></tr>
+<tr><td><code>cp/data/cp_stats_fallback.json</code></td><td>Seeds §2 verbatim — permanent fallbacks</td><td>Only together with the seeds file</td></tr>
+<tr><td><code>cp/data/cp_market.json</code></td><td>AirDNA July 2026 benchmark, static with visible source; the 7.6× multiple deliberately absent</td><td>Manually when AirDNA updates</td></tr>
+<tr><td><code>cp/data/cp_manual.json</code></td><td>The unbacked figures (2.3&nbsp;min, 152,177, 1,000, 22…) each with value+as_of+source; incomplete entries are dropped, not rendered</td><td>Owner/dev, dated</td></tr>
+<tr><td><code>cp/data/cp_reviews.json</code></td><td>Six review slots, verbatim texts + slot briefs + <code>review_id</code> back-references</td><td>Only by copying from the /business store (a test byte-compares)</td></tr>
+<tr><td><code>cp/data/cp_units.json</code></td><td>Six residences: listing_id, authored Arabic names/lines, optional pinned photo URL</td><td>Owner-approved</td></tr>
+<tr><td><code>cp/data/cp_routes_ar.json</code></td><td>Five audience doors — 3 extracted verbatim, 2 <code>authored: true</code></td><td>The authored two await explicit sign-off</td></tr>
+<tr><td><code>cp/data/cp_ask.json</code></td><td>The vague investor ask (3 lines)</td><td>Owner</td></tr>
+<tr><td><code>cp/data/cp_copy_ar.json</code></td><td><b>Every string authored by Claude</b>, in one reviewable place</td><td>Review target</td></tr>
+<tr><td><code>$STATE_DIR/cp_stats.json</code> <span class="kbd">(Railway /data)</span></td><td>Nightly snapshot output</td><td>The 03:20 job only</td></tr>
+<tr><td><code>$STATE_DIR/cp_leads.json</code></td><td>Last 500 leads, durable</td><td>The lead endpoint only</td></tr>
+</table></div>
+</section>
+
+<section id="env">
+<h2><span class="n">5</span>Environment variables</h2>
+<div class="tablewrap"><table>
+<tr><th scope="col">Var</th><th scope="col">Default</th><th scope="col">Effect</th></tr>
+<tr><td><code>CP_WHATSAPP</code></td><td class="num">+966533779297 (hardwired)</td><td>The wa.me target. Deliberately does <b>not</b> fall back to <code>STAY_WHATSAPP</code>. The seeds placeholder 966500000000 is treated as unset.</td></tr>
+<tr><td><code>CP_EMAIL</code></td><td>Info@oujares.com (hardwired)</td><td>Both mailto buttons. Empty ⇒ no mailto renders at all.</td></tr>
+<tr><td><code>CP_LEAD_CHANNEL_ID</code></td><td><span class="chip open">unset</span></td><td>Discord channel for lead embeds. <b>Currently unset ⇒ leads reach disk only.</b></td></tr>
+<tr><td><code>CP_PDF_PATH</code></td><td>unset</td><td>Enables /cp.pdf and its links.</td></tr>
+<tr><td><code>CP_DEFAULT_LANG</code></td><td>ar</td><td>Where /cp redirects.</td></tr>
+<tr><td><code>CP_ENGLISH_READY</code></td><td>0</td><td>Flips /cp/en from 302 to a real page, restores English links + hreflang.</td></tr>
+<tr><td><code>CP_REDIRECT_BUSINESS</code></td><td>0</td><td>When 1: /business and /business/ar → 301 → /cp.</td></tr>
+<tr><td><code>PUBLIC_BASE_URL</code></td><td>unset on Railway</td><td>Not required anymore — base resolves per request via the bot's auto-captured host (see §11).</td></tr>
+</table></div>
+</section>
+
+<section id="figures">
+<h2><span class="n">6</span>Figures &amp; provenance</h2>
+<ul>
+<li><b>hostaway</b> (nightly-refreshable): reservations, nights, stay shape, repeat metrics, Thu/Fri share, review count/average/perfect-share/category scores. First real overlay appears after the first 03:20 run.</li>
+<li><b>hostaway-tagged but not yet computed</b> (render seeds values with an honest date): occupancy (total/active/by-type), ADR &amp; 90-day ADR, RevPAR both bases, residences_total (owner-decided 74), Saudi/GCC/solo/couple splits, lead-time stats, weekend premium, direct-stay nights.</li>
+<li><b>manual</b> (value+date+source gate, seeds §8): median response 2.3&nbsp;min, 152,177 messages, monthly message ramp, 1,000 maintenance-in-SLA, 22 headcount, field-model ratios.</li>
+<li><b>seeds constants</b>: 200 designed capacity, ~66,000 lines, 5/28 days-to-live, the two published ratios (22% ADR growth, 78.6% released-occupancy).</li>
+</ul>
+<p>The page's sync line renders <span lang="ar" dir="rtl">«تُحدَّث كل ليلة»</span> <b>only</b> when a live snapshot exists; today it says "as of أغسطس 2026" — true. <code>/api/cp/stats</code> exposes the full per-figure provenance for any checker.</p>
+</section>
+
+<section id="guard">
+<h2><span class="n">7</span>The disclosure guard — what can never render</h2>
+<p>Blocked everywhere (page + meta + alt, both digit systems): all revenue totals and per-type/per-channel revenue, fee and payout percentages, the 53/19 active-stopped split, avg/median booking values, the 455 unsigned agreements, named best/worst residences (H8 VLG, 11B Royal), the CR number 7050158810 and فال licence number 1200050611 (page-level; PDF may carry them later), any mention of the tourism facility-management licence, the 7.6× revenue multiple, and every retired figure (7,311 · 11,307 · 14,000 turnovers · 100+/70+/72/71/67/60 unit counts · 49,000/45,000/57,600 lines · 4.8 rating).</p>
+<p>Explicitly allowed and regression-locked: ADR 582/654, RevPAR 451/485, the seeds §3 publishable ratios (e.g. "6% of bookings, 26% of revenue"), per-residence tourism permits, the soft فال wording, and innocent numeric collisions ("945 ضيفاً عادوا" passes; "متوسط قيمة الحجز 945 ريال" fails).</p>
+<p><b>Historical note for the auditor:</b> pointed at the still-live /business, this guard finds 5 unique violations per edition (the stale 7,311 / 11,307 / 14,000 / 100+ / 49,000). That page also renders "100M+ views", "70,000+ followers" and "~14,000 turnovers" — figures absent from the seeds file.</p>
+</section>
+
+<section id="content">
+<h2><span class="n">8</span>Content decisions log</h2>
+<h3>The six reviews <span class="tag">verbatim, byte-compared by test</span></h3>
+<div class="tablewrap"><table>
+<tr><th scope="col">Slot brief</th><th scope="col">Chosen</th><th scope="col">Why</th></tr>
+<tr><td>Names a staff member</td><td>Ghalia · يونيو 2026 · id 86</td><td>Thanks five team members by name (نورا، ناصر، فيصل، أسيل، ماثر)</td></tr>
+<tr><td>Check-in / door code</td><td>Joe · ديسمبر 2025 · id 117 <span class="kbd">(EN)</span></td><td>Last-minute booking + clear arrival instructions — mirrors the 42% same-day stat. Original kept LTR; a labelled Arabic translation (authored) beneath.</td></tr>
+<tr><td>Problem fixed fast</td><td>Ghazi · أبريل 2026 · id 97</td><td><span lang="ar" dir="rtl">«حصل معي مشكله بسيطه وحلها لي في دقائق»</span></td></tr>
+<tr><td>Returning guest</td><td>Abdullah · أبريل 2026 · id 186</td><td><span lang="ar" dir="rtl">«ثاني مرة ازورهم»</span></td></tr>
+<tr><td>Driver / concierge</td><td>Sab · يوليو 2026 · id 198</td><td>Names the سائق and celebration services directly</td></tr>
+<tr><td><b>Critical, kept in</b></td><td>Nadeen · أبريل 2026 · id 98</td><td><span lang="ar" dir="rtl">«بس العزل ضعيف، اسمع الي حولي»</span> — real, unspun. <b>No host reply renders</b>: the store holds none and none was written after the fact.</td></tr>
+</table></div>
+<p>Notes: two of the six are from the same unit (the pool &amp; cinema 2BR) — flagged, owner did not object. The store has no star ratings, so cards show name · unit · month only.</p>
+<h3>The six residences</h3>
+<p>One per confirmed compound, chosen from the live public /stay data (71 listings): جاباندي C3 (الماجدية 135) · the Dyar 20 2BR · the جاده 33 full-floor "biggest 2BR" · رواح (هيو ريزيدنس) · العجلان ريفيا 2BR+cinema · the Grand 4BR (<span lang="ar" dir="rtl">مبنى خاص</span>). <b>جاده 44 has no identifiable listing</b> in public data; the 4BR fills that sixth slot with owner acquiescence. The 4BR's original cover was <b>rejected</b> — its cinema screen showed a TV series (third-party content, against the photo rules) — and a clean gallery shot was pinned via <code>cp_units.json</code>.</p>
+<h3>Everything Claude authored (the full inventory)</h3>
+<ul>
+<li>Two audience-door cards (<span lang="ar" dir="rtl">تدير منصة حجز · تبيع لنا أو تورّد</span>) — marked <code>authored:true</code>, <b>not yet explicitly approved by the owner</b>.</li>
+<li>The heading «خمسة أسباب…» (was «ثلاثة» in the document).</li>
+<li>Arabic display names + one-line differentiators for the six units (no figures in them — per-unit ratings aren't in the seeds).</li>
+<li>The Arabic translation under Joe's English review, labelled الترجمة.</li>
+<li>The three vague ask lines.</li>
+<li>Chrome strings in <code>cp_copy_ar.json</code> (sync lines, disabled-button title, labels).</li>
+</ul>
+</section>
+
+<section id="journey">
+<h2><span class="n">9</span>The customer journey — as shipped</h2>
+<p>The page routes five audiences; the seeds' channel logic (owners → WhatsApp; investors/government → email-first) is expressed in which buttons lead where.</p>
+<h3>Entry</h3>
+<div class="flow">
+  <span class="step">WhatsApp forward</span><span class="arr">→</span>
+  <span class="step">OG card (logo, 1200×630)</span><span class="arr">→</span>
+  <span class="step">/cp → /cp/ar</span><span class="arr">→</span>
+  <span class="step">Hero: 5 figures + date stamp</span><span class="arr">→</span>
+  <span class="step">«ابدأ من هنا» — five doors</span>
+</div>
+<div class="tablewrap"><table>
+<tr><th scope="col">Audience</th><th scope="col">Door copy promises</th><th scope="col">Lands on</th><th scope="col">Terminal CTA</th></tr>
+<tr><td>Property owner</td><td>Revenue share, no upfront, exit anytime</td><td><code>#owners</code> — the furnished/unfurnished fork (interactive tabs)</td><td>«احجز اجتماع الـ45 دقيقة» → <code>#meet</code></td></tr>
+<tr><td>Capital partner</td><td>2× occupancy, self-funded, owned platform</td><td><code>#market</code> — comparison bars</td><td><code>#meet</code>: email-first, WhatsApp secondary</td></tr>
+<tr><td>Corporate housing</td><td>Monthly units, VAT invoicing, one account manager</td><td><code>#meet</code> directly</td><td>Email / WhatsApp</td></tr>
+<tr><td>Booking platform <span class="kbd">(authored)</span></td><td>74 units, one standard, per-unit permits</td><td><code>#meet</code></td><td>Email / WhatsApp</td></tr>
+<tr><td>Supplier <span class="kbd">(authored)</span></td><td>Annual contracts, portfolio-wide orders, documented payout</td><td><code>#meet</code></td><td>Email / WhatsApp</td></tr>
+</table></div>
+<h3>Conversion surfaces</h3>
+<ul>
+<li>Sticky top bar: «احجز اجتماعاً» → <code>#meet</code> (always visible).</li>
+<li><code>#meet</code> dark band: «راسلنا للحجز» (mailto, subject pre-filled) + «واتساب» (wa.me, message pre-filled: <span lang="ar" dir="rtl">«أرغب بحجز اجتماع مع عوجا»</span>).</li>
+<li>Footer: WhatsApp + email + TikTok.</li>
+</ul>
+<h3>⚠ The journey gap an auditor should weigh first</h3>
+<p><b>The approved document contains no lead form</b> — its CTAs are mailto/wa.me links, and that is exactly what shipped. The backend <code>POST /api/cp/lead</code> (validation, disk persistence, rate limit, Discord embed) was built to the superprompt's spec and works — <b>but nothing on the page calls it yet</b>. Consequences: leads currently depend on the visitor's mail app or WhatsApp actually opening (desktop mailto is notoriously lossy for institutional readers); there is no inline-success flow; nothing lands in <code>cp_leads.json</code>; and <code>CP_LEAD_CHANNEL_ID</code> is unset anyway. Deciding whether to add an on-page form (3 fields + audience) wired to the existing endpoint — with the wa.me fallback the superprompt describes — is probably the single highest-leverage improvement available.</p>
+</section>
+
+<section id="fixed">
+<h2><span class="n">10</span>Defects fixed (the superprompt's §8 list)</h2>
+<div class="tablewrap"><table>
+<tr><th scope="col">#</th><th scope="col">Defect on /business</th><th scope="col">Status on /cp</th></tr>
+<tr><td class="num">1</td><td>Gmail mailto; WhatsApp button opened email</td><td><span class="chip ok">fixed</span> real address + real wa.me; no Gmail anywhere; empty config renders disabled/no button, never a dead link</td></tr>
+<tr><td class="num">2</td><td>Stale 7,311 / 11,307</td><td><span class="chip ok">fixed</span> 8,114 / 13,093 from the stats layer, guard-blocked forever</td></tr>
+<tr><td class="num">3</td><td>"100+ listings"</td><td><span class="chip ok">fixed</span> 74, everywhere, retired figures blocked</td></tr>
+<tr><td class="num">4</td><td>"14,000+ turnovers" &gt; total nights</td><td><span class="chip ok">fixed</span> removed; blocked</td></tr>
+<tr><td class="num">5</td><td>"Refreshed nightly" with a stale stamp</td><td><span class="chip ok">fixed structurally</span> the claim only renders when a snapshot exists</td></tr>
+<tr><td class="num">6</td><td>No logo / favicon / share card / PDF</td><td><span class="chip ok">3 of 4</span> logo, favicon, share card live; PDF honestly pending</td></tr>
+<tr><td class="num">7</td><td>Contrast failures</td><td><span class="chip ok">inherited</span> the approved document ships the corrected tokens (7A7165 / 976927 / 686258); not independently re-measured</td></tr>
+<tr><td class="num">8</td><td>Comparison table dies on mobile</td><td><span class="chip ok">verified</span> stacked bars + a 3-column table; 0px horizontal overflow measured at 320–1440px</td></tr>
+</table></div>
+</section>
+
+<section id="live-finds">
+<h2><span class="n">11</span>Found only on the live deploy</h2>
+<p>Both were invisible to local tests because those build a bare aiohttp app without bot.py's middlewares. Both are now regression-locked.</p>
+<ol>
+<li><b>The lead endpoint returned 401.</b> bot.py's global role middleware blocks any POST not in <code>_ROLE_EXEMPT_WRITES</code>. <code>/api/cp/lead</code> was added beside <code>/api/decor/inquire</code>; a test now pins the exemption. <i>Lesson for any future public POST route in this repo.</i></li>
+<li><b>The og:image tag was silently absent.</b> <code>PUBLIC_BASE_URL</code> is unset on Railway and the wiring froze <code>base_url</code> at startup. <code>HOST.base_url</code> now accepts a callable; bot.py wires <code>_dispatch_base_url</code> (env → auto-captured public host → site default), resolved per render.</li>
+</ol>
+<p>Also observed live, <b>not</b> a defect: <code>/stay</code> returns 404 because the guest-site pause switch (24 Aug work) is active; its <code>/api/stay/*</code> endpoints still serve.</p>
+</section>
+
+<section id="open">
+<h2><span class="n">12</span>Open items &amp; honest gaps</h2>
+<div class="tablewrap"><table>
+<tr><th scope="col">Item</th><th scope="col">State</th><th scope="col">Notes</th></tr>
+<tr><td>On-page lead form</td><td><span class="chip open">not built</span></td><td>See §9 — endpoint exists unused; the approved document has no form.</td></tr>
+<tr><td><code>CP_LEAD_CHANNEL_ID</code></td><td><span class="chip open">unset</span></td><td>Even with a form, no Discord ping until set.</td></tr>
+<tr><td>English edition</td><td><span class="chip open">no source copy</span></td><td>No true EN counterpart document exists; the v4 draft lacks the five doors, guest voices, and the owner fork. /cp/en 302s meanwhile.</td></tr>
+<tr><td>/cp.pdf</td><td><span class="chip open">no file</span></td><td>Honest 404; links hidden. Set <code>CP_PDF_PATH</code> when delivered.</td></tr>
+<tr><td>/business redirect</td><td><span class="chip warn">deliberately off</span></td><td>/business still publicly shows the retired figures the seeds ban. Flip <code>CP_REDIRECT_BUSINESS=1</code> once English exists (its default audience is English-reading).</td></tr>
+<tr><td>Occupancy / ADR / RevPAR live computation</td><td><span class="chip warn">deferred by design</span></td><td>Needs the owner's export methodology reconciled against 76.9 / 582 / 451 before any live number may replace the seeds values.</td></tr>
+<tr><td>Platform size figure</td><td><span class="chip warn">unresolved</span></td><td>Seeds says ~66,000 lines; the repo measures 135,768 Python lines (187k with JS/tests). Owner was asked; no answer yet. Page currently renders the seeds' 66,000.</td></tr>
+<tr><td>جاده 44 unit</td><td><span class="chip warn">substituted</span></td><td>The 4BR «مبنى خاص» fills slot six; the intro line still names جاده 44 as a compound in play (it is — just unrepresented in the grid).</td></tr>
+<tr><td>Authored copy sign-off</td><td><span class="chip warn">pending</span></td><td>The two authored doors + six unit lines + Joe translation were shown in screenshots; no explicit approval recorded.</td></tr>
+<tr><td>Critical review reply</td><td><span class="chip warn">absent by principle</span></td><td>Renders without a response; owner may supply their real reply text.</td></tr>
+<tr><td>Lighthouse ≥95 / full a11y audit</td><td><span class="chip open">not measured</span></td><td>Overflow, tab behavior, reduced-motion, focus states come from the approved document and were spot-checked, not scored.</td></tr>
+<tr><td>Real-device WhatsApp preview</td><td><span class="chip warn">unverified</span></td><td>og:image + dimensions are live and correct; an actual forward on a phone hasn't been confirmed.</td></tr>
+<tr><td>hreflang / canonical while EN is off</td><td><span class="chip ok">consistent</span></td><td>EN alternates are removed alongside the links; canonical + x-default point at /cp/ar.</td></tr>
+</table></div>
+</section>
+
+<section id="audit">
+<h2><span class="n">13</span>Audit checklist for the next session</h2>
+<ol>
+<li><b>Copy fidelity:</b> diff the live <code>/cp/ar</code> text against <code>~/Downloads/ouja-cp-ar.html</code>; every difference must trace to a figure token, a PORT FIX, an OWNER CORRECTION, or a data-rebuilt block (doors / voices / units / ask / occupancy tbody). Anything else is drift.</li>
+<li><b>Disclosure:</b> run <code>cp.guard.scan()</code> over the live HTML <i>and</i> over <code>/api/cp/stats</code> + <code>/api/cp/reviews</code> JSON; try Arabic-Indic smuggling and meta/alt placement.</li>
+<li><b>Journey:</b> walk all five doors on a phone; time-to-first-CTA; test mailto behavior on a desktop without a mail client (the institutional-reader case); decide the on-page form question (§9).</li>
+<li><b>First nightly run:</b> after 03:20 Riyadh, check <code>/api/cp/stats</code> for <code>source:"hostaway"</code> cells, confirm the page flips to «تُحدَّث كل ليلة», and verify the overlay numbers are ≥ the seeds values.</li>
+<li><b>Photos:</b> confirm all six unit images load through <code>/elite/img</code> (WebP), check srcset sizes actually differ, and re-review the two covers with TV screens showing ambient content (kept as borderline).</li>
+<li><b>Accessibility &amp; perf:</b> Lighthouse both scores at 380px and 1440px; keyboard-only pass over the fork tabs and skip link; <code>prefers-reduced-motion</code> honored.</li>
+<li><b>Share card:</b> forward the link in real WhatsApp; confirm card, title, description.</li>
+<li><b>Security posture:</b> hammer <code>POST /api/cp/lead</code> (rate limit 429 after 8, field whitelist, audience coercion); confirm every other <code>/api/cp/*</code> is read-only.</li>
+<li><b>Consistency with /business:</b> both pages are public and disagree on figures until the redirect flips — decide how long that is acceptable.</li>
+<li><b>The unresolved figures:</b> 66k-vs-135k lines; جاده 44; the authored-copy sign-off list in §8.</li>
+</ol>
+</section>
+
+<section id="commits">
+<h2><span class="n">14</span>Commit log (branch <code>feat/cp-profile</code>, oldest first)</h2>
+<div class="tablewrap"><table>
+<tr><th scope="col">Commit</th><th scope="col">What</th></tr>
+<tr><td><code>8f5a38c</code></td><td>Disclosure guard + provenance-stamped stats layer; 74 everywhere</td></tr>
+<tr><td><code>05c1966</code></td><td>/cp/ar: byte-for-byte port, renderer, routes, bot wiring; RTL skip-link + grid PORT FIXes</td></tr>
+<tr><td><code>5364295</code></td><td>Six guest voices, verbatim from the /business store, byte-compared by test</td></tr>
+<tr><td><code>13ebc46</code></td><td>Six residences via the /stay photo pipeline; Breaking-Bad cover rejected → pinned image support</td></tr>
+<tr><td><code>2be55ee</code></td><td>Owner place-name corrections (جاده 33، رواح، العجلان ريفيا، مبنى خاص)</td></tr>
+<tr><td><code>5ea394f</code></td><td>Real contacts hardwired with env overrides</td></tr>
+<tr><td><code>40d59dd</code></td><td>Logo assets + share card + the vague ask</td></tr>
+<tr><td><code>bb098c8</code></td><td>Nightly refresher + contextual guard fix for small withheld numbers</td></tr>
+<tr><td><code>97b07fb</code>→main</td><td><b>Launch push</b> (rebased over another session's monthly work)</td></tr>
+<tr><td><code>e88a3dd</code></td><td>Live fix 1: <code>_ROLE_EXEMPT_WRITES</code> for the lead endpoint</td></tr>
+<tr><td><code>14742fa</code></td><td>Live fix 2: callable base URL → og:image renders with zero config</td></tr>
+</table></div>
+</section>
+
+<footer class="doc">
+Prepared 2026-08-26 · worktree <code>/Users/faisalouja/ouja-wt-cp</code> · verification: py_compile + pyflakes + node --check + esprima on embedded JS + 3,435 unittest green + Chromium screenshots at 320–1440px + live-request sweep after each deploy
+</footer>
+</div>
