@@ -75,11 +75,11 @@ class WithheldFiguresTrip(unittest.TestCase):
         "2,528,801",              # 2025 revenue
         "4,865,456",              # 2026 revenue
         "2,001,914",              # last 90 days revenue
-        "1,859 reservations",     # 90-day reservation count paired with revenue
+        "1,859 reservations of revenue",  # only a leak in a revenue context
         "14,731 SAR",             # revenue per active residence
         "2,412,347",              # stopped-residence revenue
         "945 SAR",                # average booking value
-        "606",                    # median booking value
+        "median 606",             # median booking value
         "455 unsigned",           # unsigned rental agreements
         "53 active",              # active/stopped split
         "19 stopped",
@@ -131,6 +131,26 @@ class RetiredFiguresTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveMetricsCannotKillThePage(unittest.TestCase):
+    """A growing live figure must be able to pass through the withheld small
+    numbers without tripping the guard — repeat_guests is 933 today and will
+    innocently reach 945; a bare match here once meant the page dying the
+    night that happened."""
+
+    def test_bare_small_numbers_pass_without_their_context(self):
+        for ok in ("945 ضيفاً عادوا", "606 حجزاً هذا الشهر", "455 ليلة",
+                   "278 مراجعة جديدة", "1,859 حجز منفّذ"):
+            with self.subTest(ok=ok):
+                self.assertEqual(guard.scan("<p>%s</p>" % ok), [],
+                                 "guard killed an innocent live figure: %r" % ok)
+
+    def test_the_same_numbers_still_trip_in_context(self):
+        for bad in ("متوسط قيمة الحجز 945 ريال", "median booking 606 SAR",
+                    "455 عقداً غير موقّع", "278 حجزاً مباشراً"):
+            with self.subTest(bad=bad):
+                self.assertTrue(guard.scan("<p>%s</p>" % bad))
 
 
 class PublishedRatiosSurvive(unittest.TestCase):

@@ -82,14 +82,9 @@ BARE = {
     2528801: "2025 revenue (seeds §3)",
     4865456: "2026 revenue (seeds §3)",
     2001914: "last-90-days revenue (seeds §3)",
-    1859: "90-day reservation count paired with revenue (seeds §3)",
     14731: "revenue per active residence (seeds §3)",
     2412347: "stopped-residence revenue (seeds §3)",
-    945: "average booking value (seeds §3)",
-    606: "median booking value (seeds §3)",
-    455: "unsigned rental agreements — internal only (seeds §3)",
     7836: "Airbnb channel reservation count (seeds §3)",
-    278: "direct channel reservation count (seeds §3)",
     592000: "direct channel revenue (seeds §3)",
     7080000: "Airbnb gross (seeds §3)",
     5360000: "Airbnb payout (seeds §3)",
@@ -113,7 +108,31 @@ _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 # The number alone is innocent; the pairing is the leak.
 _UNIT_WORD = r"(?:residence|residences|listing|listings|unit|units|apartment|apartments|وحدة|وحدات|عقار|عقارات|شقة|شقق)"
+# Small numbers from the withheld table (945, 606, 455, 278, 1859) are NOT
+# matched bare: a live metric can innocently reach them — repeat_guests is 933
+# today and passes 945 within weeks, and a bare match would kill the page the
+# night it happens. They are leaks only in their own context: money for the
+# booking values, agreements for the 455, channel words for the counts.
+_MONEY = r"(?:SAR|ريال|ر\.س)"
 CONTEXTUAL = [
+    (re.compile(r"\b945\b[^.\n]{0,16}" + _MONEY, re.I),
+     "average booking value (seeds §3)"),
+    (re.compile(_MONEY + r"[^.\n]{0,16}\b945\b", re.I),
+     "average booking value (seeds §3)"),
+    (re.compile(r"\b606\b[^.\n]{0,16}" + _MONEY, re.I),
+     "median booking value (seeds §3)"),
+    (re.compile(r"(?:median|الوسيط|وسيط)[^.\n]{0,20}\b606\b", re.I),
+     "median booking value (seeds §3)"),
+    (re.compile(r"\b455\b[^.\n]{0,30}(?:unsigned|agreement|عقد|عقود|اتفاق)", re.I),
+     "unsigned rental agreements — internal only (seeds §3)"),
+    (re.compile(r"(?:unsigned|غير موقعة?)[^.\n]{0,30}\b455\b", re.I),
+     "unsigned rental agreements — internal only (seeds §3)"),
+    (re.compile(r"\b278\b[^.\n]{0,24}(?:direct|مباشر)", re.I),
+     "direct channel reservation count (seeds §3)"),
+    (re.compile(r"(?:direct|المباشر|مباشر)[^.\n]{0,24}\b278\b", re.I),
+     "direct channel reservation count (seeds §3)"),
+    (re.compile(r"\b1,?859\b[^.\n]{0,30}(?:revenue|إيراد|" + _MONEY + ")", re.I),
+     "90-day reservation count paired with revenue (seeds §3)"),
     (re.compile(r"\b(?:60|67|70|71|72|100)\s*\+?\s*" + _UNIT_WORD, re.I),
      "RETIRED residence count — the published figure is 74 (seeds §2, §11)"),
     (re.compile(r"\b53\b[^.\n]{0,24}\b(?:active|نشط|نشطة|تعمل)", re.I),

@@ -7748,6 +7748,23 @@ async def business_snapshot_loop():
     except Exception as e:
         print("[business] snapshot loop error:", e)
 
+@tasks.loop(time=dt_time(hour=3, minute=20, tzinfo=TZ))
+async def cp_snapshot_loop():
+    """Nightly 03:20 Riyadh (after the business snapshot): refresh /cp figures.
+    Deliberately narrow — counts, nights, repeat rates, review scores. A field
+    that fails its sanity band is not written, and the page keeps rendering the
+    seeds value with its honest date, so a bad night can only make /cp stale,
+    never wrong. Off-loop; one Hostaway sweep behind the token-bucket throttle."""
+    if not _HAS_CP:
+        return
+    await bot.wait_until_ready()
+    try:
+        rep = await asyncio.to_thread(_cp.snapshot.build_and_write)
+        print("[cp] nightly snapshot:", rep.get("ok"), "kept", rep.get("kept"),
+              "dropped", rep.get("dropped"), rep.get("error") or "")
+    except Exception as e:
+        print("[cp] snapshot loop error:", e)
+
 @tasks.loop(time=dt_time(hour=STUDIO_DIGEST_HOUR, minute=0, tzinfo=TZ))
 async def studio_digest_loop():
     """Ouja Studio morning run (v3): refresh the SIGNAL feed — Ouja's own live data
@@ -69231,6 +69248,7 @@ async def on_ready():
         _pending.append(studio_digest_loop)     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
     if _HAS_BUSINESS and not business_snapshot_loop.is_running():
         _pending.append(business_snapshot_loop)  # nightly 03:00 Riyadh: refresh /business snapshot
+        _pending.append(cp_snapshot_loop)        # nightly 03:20 Riyadh: refresh /cp figures
     if _HAS_STUDIO and STUDIO_ENABLED:
         try:
             await _studio_ensure_channel()

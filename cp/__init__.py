@@ -10,9 +10,9 @@ page passes through cp.guard, which fails on any figure the seeds file withholds
 bot.py calls cp.wire({...}) then cp.register_routes(app).
 """
 from .host import HOST, wire as _wire_host
-from . import guard, stats, page, routes  # noqa: F401
+from . import guard, stats, page, routes, snapshot  # noqa: F401
 
-__all__ = ["wire", "register_routes", "HOST", "guard", "stats", "page"]
+__all__ = ["wire", "register_routes", "HOST", "guard", "stats", "page", "snapshot"]
 
 
 def wire(caps):
