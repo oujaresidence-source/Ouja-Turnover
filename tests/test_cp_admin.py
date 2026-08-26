@@ -378,3 +378,33 @@ class DashboardPanel(unittest.TestCase):
 
     def test_braces_balance(self):
         self.assertEqual(self.html.count("{"), self.html.count("}"))
+
+
+class UnpublishedChangesSurface(_Base):
+    """The state the owner could not see: saved-but-not-published."""
+
+    def test_overview_reports_dirty_and_which_sections(self):
+        self.post("/api/cp/admin/publish", json={"version": "v2"})
+        self.post("/api/cp/admin/showcase",
+                  json={"units": [{"listing_id": "487708", "name_ar": "جاباندي"}]})
+        d = self.jbody(self.get("/api/cp/admin/overview"))
+        self.assertTrue(d["dirty"])
+        self.assertIn("showcase", d["dirty_sections"])
+
+    def test_a_save_tells_the_caller_it_is_still_a_draft(self):
+        self.post("/api/cp/admin/publish", json={"version": "v2"})
+        r = self.jbody(self.post("/api/cp/admin/copy", json={"hero_h1_tail": "جديد"}))
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["dirty"])
+
+    def test_publishing_clears_the_flag(self):
+        self.post("/api/cp/admin/showcase",
+                  json={"units": [{"listing_id": "487708", "name_ar": "جاباندي"}]})
+        self.post("/api/cp/admin/publish", json={"version": "v2"})
+        self.assertFalse(self.jbody(self.get("/api/cp/admin/overview"))["dirty"])
+
+    def test_the_banner_exists_in_the_panel(self):
+        import bot
+        self.assertIn("function cpDirtyBanner(", bot.DASHBOARD_HTML)
+        self.assertIn("لديك تعديلات لم تُنشر", bot.DASHBOARD_HTML)
+        self.assertIn("اضغط «انشر» ليظهر للعامة", bot.DASHBOARD_HTML)

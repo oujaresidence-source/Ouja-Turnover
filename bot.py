@@ -31546,8 +31546,25 @@ function loadCp(){ var ar=cpAr(); var e=document.getElementById('t_cp'); if(e) e
   cpTabs(); cpGo(_cp.tab); }
 function cpErr(b){ b.innerHTML='<div class="empty">⚠ '+(cpAr()?'تعذّر التحميل':'Load failed')+'</div>'; }
 function cpGuardChip(g){ if(!g) return ''; return g.clean?fbChip(cpAr()?'الفحص نظيف':'guard clean','ok'):fbChip((cpAr()?'أرقام ممنوعة: ':'blocked: ')+(g.hits||[]).map(function(h){return h.figure;}).slice(0,4).join('، '),'bad'); }
+/* The split that makes editing safe is also silent: a save writes the DRAFT,
+   and the public page only moves on publish. Say so, loudly, wherever the
+   owner is looking — an owner who picked six residences, saved, and reloaded
+   the public page reasonably concluded the save had failed. */
+var CP_SECT_AR={contacts:'التواصل',copy:'النصوص',figures_manual:'الأرقام',benchmarks:'المقارنات',showcase:'الوحدات',reviews:'المراجعات',shots:'الدليل'};
+function cpDirtyBanner(d){ if(!d||!d.dirty) return ''; var ar=cpAr();
+  var names=(d.dirty_sections||[]).map(function(k){ return ar?(CP_SECT_AR[k]||k):k; }).join('، ');
+  return '<div style="'+fbCard()+';border:1px solid var(--gold);margin-bottom:10px">'
+   +'<b>⏳ '+(ar?'لديك تعديلات لم تُنشر':'You have unpublished changes')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'
+   +(ar?('التعديلات محفوظة عندك لكن الصفحة العامة ما زالت تعرض آخر نسخة منشورة'
+         +(names?(' — '+names):'')+'. اضغط «انشر النسخة الجديدة» ليراها الناس.')
+       :('Saved to your draft; the public page still shows the last published version'
+         +(names?(' — '+names):'')+'. Press Publish to make it public.'))+'</div>'
+   +'<div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap">'
+   +'<button class="btn primary sm" onclick="cpGo(&#39;pub&#39;)">🚀 '+(ar?'اذهب للنشر':'Go to Publish')+'</button>'
+   +'<a class="btn ghost sm" href="/cp/ar?v=2&token='+encodeURIComponent(tok())+'" target="_blank" rel="noopener">👁 '+(ar?'عاين التعديلات':'Preview draft')+'</a></div></div>'; }
 async function cpSave(path,body,okMsg){ var ar=cpAr(); var r; try{ r=await post('/api/cp/admin/'+path,body); }catch(_){ r=null; }
-  if(r&&r.ok){ toast(okMsg||(ar?'حُفظ ✓':'Saved ✓')); return r; }
+  if(r&&r.ok){ toast(okMsg||(r.dirty?(ar?'حُفظ ✓ — اضغط «انشر» ليظهر للعامة':'Saved ✓ — press Publish to make it public'):(ar?'حُفظ ✓':'Saved ✓'))); return r; }
   toast((r&&r.error)||(ar?'تعذّر الحفظ':'Save failed')); return null; }
 async function cpGuardRun(){ var ar=cpAr(); toast(ar?'⏳ فحص…':'⏳ Checking…'); var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; }
   if(!d){ toast('⚠'); return; } toast(d.guard&&d.guard.clean?(ar?'الفحص نظيف ✓':'Guard clean ✓'):(ar?'⚠ أرقام ممنوعة في الصفحة':'⚠ blocked figures on the page')); }
@@ -31555,7 +31572,7 @@ async function cpGuardRun(){ var ar=cpAr(); toast(ar?'⏳ فحص…':'⏳ Checki
 async function cpOverview(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; } if(!d){ cpErr(b); return; }
   _cp.data.ov=d;
   var live=(d.published_version==='v2');
-  var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏛️ '+(ar?'حالة الصفحة':'Page status')+'</b>'+(live?fbChip(ar?'النسخة الجديدة منشورة':'v2 live','ok'):fbChip(ar?'النسخة القديمة منشورة':'v1 live','warn'))+cpGuardChip(d.guard)+'</div>'
+  var h=cpDirtyBanner(d)+'<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🏛️ '+(ar?'حالة الصفحة':'Page status')+'</b>'+(live?fbChip(ar?'النسخة الجديدة منشورة':'v2 live','ok'):fbChip(ar?'النسخة القديمة منشورة':'v1 live','warn'))+cpGuardChip(d.guard)+'</div>'
    +'<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.6">'+(ar?'آخر تعديل: ':'Last edit: ')+esc(d.updated_at||'—')+(d.updated_by?(' · '+esc(d.updated_by)):'')+'</div>'
    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px">'
    +fbStatCard(ar?'طلبات ٧ أيام':'Leads 7d',(d.leads_7d||0))
@@ -31730,7 +31747,7 @@ async function cpPub(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!
   var d,hs; try{ d=await api('/api/cp/admin/overview'); hs=await api('/api/cp/admin/history'); }catch(_){ d=null; }
   if(!d){ cpErr(b); return; }
   var canPub=!!d.can_publish;
-  var h='<div style="'+fbCard()+'"><b>🚀 '+(ar?'النشر':'Publish')+'</b>'
+  var h=cpDirtyBanner(d)+'<div style="'+fbCard()+'"><b>🚀 '+(ar?'النشر':'Publish')+'</b>'
    +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'+(ar?'المعاينة تعرض تعديلاتك الحالية. النشر يجعلها هي الصفحة العامة، بعد فحص أخير.':'Preview shows your working edits. Publishing makes them public after a final scan.')+'</div>'
    +'<div style="margin-bottom:10px">'+cpGuardChip(d.guard)+' '+(d.published_version==='v2'?fbChip(ar?'المنشور: الجديدة':'live: v2','ok'):fbChip(ar?'المنشور: القديمة':'live: v1','warn'))+'</div>'
    +(canPub?('<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn primary sm" onclick="cpPublish(&#39;v2&#39;)">'+(ar?'انشر النسخة الجديدة':'Publish v2')+'</button>'

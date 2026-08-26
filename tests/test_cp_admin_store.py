@@ -176,3 +176,51 @@ class PublishAndRollback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnpublishedChanges(unittest.TestCase):
+    """The owner selected six residences, saved, and the public page kept the
+    template defaults — because saving writes the WORKING overlay and only
+    publish copies it to the public one. Correct behaviour, invisible state.
+    The store now names it so the UI can."""
+
+    def setUp(self):
+        self.disk = _Disk()
+        self.s = store(self.disk)
+
+    def test_fresh_store_is_not_dirty(self):
+        self.assertFalse(self.s.is_dirty())
+
+    def test_an_edit_makes_it_dirty(self):
+        self.s.update_section("showcase", {"units": [
+            {"listing_id": "1", "name_ar": "جاباندي"}]}, by="u")
+        self.assertTrue(self.s.is_dirty())
+
+    def test_publishing_clears_it(self):
+        self.s.update_section("showcase", {"units": [
+            {"listing_id": "1", "name_ar": "جاباندي"}]}, by="u")
+        self.s.publish("v2", by="admin")
+        self.assertFalse(self.s.is_dirty())
+
+    def test_editing_after_publish_makes_it_dirty_again(self):
+        self.s.publish("v2", by="admin")
+        self.s.update_section("copy", {"hero_h1_tail": "جديد"}, by="u")
+        self.assertTrue(self.s.is_dirty())
+
+    def test_it_names_which_sections_differ(self):
+        self.s.publish("v2", by="admin")
+        self.s.update_section("showcase", {"units": [
+            {"listing_id": "1", "name_ar": "جاباندي"}]}, by="u")
+        self.s.update_section("copy", {"hero_h1_tail": "جديد"}, by="u")
+        self.assertEqual(set(self.s.dirty_sections()), {"showcase", "copy"})
+
+    def test_rollback_leaves_the_working_copy_alone(self):
+        """Rollback restores what the PUBLIC sees; the draft is the owner's and
+        is not silently thrown away."""
+        self.s.update_section("copy", {"hero_h1_tail": "أول"}, by="u")
+        self.s.publish("v2", by="admin")
+        at = self.s.overlay()["history"][0]["at"]
+        self.s.update_section("copy", {"hero_h1_tail": "مسودة"}, by="u")
+        self.s.rollback(at, by="admin")
+        self.assertEqual(self.s.overlay()["copy"]["hero_h1_tail"], "مسودة")
+        self.assertEqual(self.s.published_overlay()["copy"]["hero_h1_tail"], "أول")

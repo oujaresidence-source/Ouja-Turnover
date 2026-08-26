@@ -258,6 +258,32 @@ class Store:
         out["published_version"] = ov.get("published_version", "v1")
         return out
 
+    def dirty_sections(self):
+        """Which sections the owner has edited since the last publish.
+
+        This exists because the split that makes the tab safe also makes it
+        silent: an owner who picks six residences, saves, and reloads the
+        public page sees the template defaults and concludes the save failed.
+        Nothing is broken — the edit is in the working copy — but the UI has to
+        SAY so, and it cannot say what the store does not expose.
+        """
+        ov = self.overlay()
+        pub = ov.get("published_overlay") or {}
+        if not pub:
+            # nothing published yet: the baseline is the untouched defaults, so
+            # a fresh install is quiet but a first edit still reads as pending
+            pub = {k: default_overlay()[k] for k in _SECTIONS}
+        out = []
+        for key in _SECTIONS:
+            if json.dumps(ov.get(key), ensure_ascii=False, sort_keys=True) != \
+               json.dumps(pub.get(key), ensure_ascii=False, sort_keys=True):
+                out.append(key)
+        return out
+
+    def is_dirty(self):
+        """True when the public page does not reflect the working copy."""
+        return bool(self.dirty_sections())
+
     def merged_manual(self, defaults):
         """defaults (repo cp_manual.json shape) ← overlay figures_manual."""
         merged = dict(defaults or {})

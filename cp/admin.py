@@ -191,6 +191,8 @@ async def api_overview(request):
         "leads_30d": sum(1 for l in leads if now - l.get("at", 0) < 30 * 86400),
         "preview_url": "/cp/ar?v=2",
         "can_publish": _perm(request, "create"),
+        "dirty": store.is_dirty(),
+        "dirty_sections": store.dirty_sections(),
     })
 
 
@@ -275,8 +277,10 @@ async def api_history_get(request):
 def _section_writer(section):
     async def _handler(request):
         patch = await _body(request)
-        saved, verdict = _check_then(_store(), section, patch, _user(request))
-        return HOST.json_response({"ok": True, "saved": saved, "guard": verdict})
+        store = _store()
+        saved, verdict = _check_then(store, section, patch, _user(request))
+        return HOST.json_response({"ok": True, "saved": saved, "guard": verdict,
+                                   "dirty": store.is_dirty()})
     _handler.__name__ = "api_%s_post" % section
     return _handler
 
