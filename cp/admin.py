@@ -18,8 +18,10 @@ show green/red without a second round trip.
 import csv
 import io
 import json
+import os
 import time
 import traceback
+import uuid
 
 from . import admin_store, guard, page, stats
 from .host import HOST
@@ -315,6 +317,109 @@ async def api_snapshot_now(request):
     return HOST.json_response({"ok": bool((rep or {}).get("ok")), "report": rep})
 
 
+# --------------------------------------------------------------------------- #
+# platform screenshots — sniffed, capped, OCR'd, guarded (plan §2.5)
+# --------------------------------------------------------------------------- #
+_SHOT_TYPES = (
+    (b"\xff\xd8\xff", "jpg", "image/jpeg"),
+    (b"\x89PNG", "png", "image/png"),
+)
+
+
+def _sniff(data):
+    for magic, ext, ct in _SHOT_TYPES:
+        if data[:len(magic)] == magic:
+            return ext, ct
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp", "image/webp"
+    return None, None
+
+
+def _tesseract_available():
+    try:
+        import pytesseract  # noqa: F401
+        import shutil as _sh
+        return bool(_sh.which("tesseract"))
+    except ImportError:
+        return False
+
+
+def ocr_text(data):
+    """(text, engine). A missing engine SKIPS with a logged warning — an owner's
+    upload must never fail because CI lacks a binary (§7). Tests monkeypatch
+    this to exercise both paths without tesseract."""
+    if not _tesseract_available():
+        print("[cp] tesseract absent — screenshot uploaded WITHOUT the OCR guard")
+        return None, "skipped"
+    try:
+        import pytesseract
+        from PIL import Image
+        text = pytesseract.image_to_string(Image.open(io.BytesIO(data)),
+                                           lang="ara+eng")
+        return text, "tesseract"
+    except Exception as e:
+        print("[cp] ocr failed (upload continues unguarded):", repr(e))
+        return None, "error"
+
+
+async def api_shot_upload(request):
+    store = _store()
+    shots = store.overlay().get("shots") or []
+    if len(shots) >= admin_store.SHOTS_MAX:
+        return HOST.json_response(
+            {"ok": False, "error": "الحد %d لقطات — احذف واحدة أولاً"
+             % admin_store.SHOTS_MAX}, 400)
+    post = await request.post()
+    field = post.get("file")
+    caption = str(post.get("caption_ar") or "")[:300]
+    data = field.file.read() if hasattr(field, "file") else (
+        field if isinstance(field, (bytes, bytearray)) else b"")
+    if not data:
+        return HOST.json_response({"ok": False, "error": "no_file"}, 400)
+    if len(data) > 4 * 1024 * 1024:
+        return HOST.json_response(
+            {"ok": False, "error": "اللقطة كبيرة (الحد 4MB)"}, 400)
+    ext, ct = _sniff(bytes(data[:16]))
+    if not ext:
+        return HOST.json_response(
+            {"ok": False, "error": "نوع غير مدعوم (PNG/JPG/WebP)"}, 400)
+
+    # the OCR guard: a screenshot that leaks a withheld figure never lands
+    text, engine = ocr_text(bytes(data))
+    if text:
+        hits = guard.scan("<p>%s</p>" % text)
+        if hits:
+            return HOST.json_response(
+                {"ok": False,
+                 "error": "اللقطة مرفوضة — أرقام لا يجوز نشرها: "
+                          + "، ".join(h["figure"] for h in hits[:6]),
+                 "hits": hits[:10]}, 400)
+
+    sid = uuid.uuid4().hex[:16] + "." + ext
+    os.makedirs(HOST.upload_dir, exist_ok=True)
+    with open(os.path.join(HOST.upload_dir, sid), "wb") as fh:
+        fh.write(data)
+    shot = {"id": sid, "caption_ar": caption, "path": sid}
+    store.update_section("shots", shots + [shot], by=_user(request))
+    return HOST.json_response({"ok": True, "shot": shot, "ocr": engine})
+
+
+_SHOT_CT = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
+async def serve_shot(request):
+    """PUBLIC: the page's «الدليل» images. Week-cached; the id is unguessable."""
+    sid = request.match_info.get("id", "")
+    if not (sid and "/" not in sid and ".." not in sid):
+        raise HOST.web.HTTPNotFound()
+    path = os.path.join(HOST.upload_dir or "", sid)
+    if not (HOST.upload_dir and os.path.exists(path)):
+        raise HOST.web.HTTPNotFound()
+    return HOST.web.FileResponse(path, headers={
+        "Cache-Control": "public, max-age=604800",
+        "Content-Type": _SHOT_CT.get(sid.rsplit(".", 1)[-1], "image/png")})
+
+
 async def api_lead_status(request):
     b = await _body(request)
     status = str(b.get("status") or "")
@@ -353,3 +458,5 @@ def register(app):
     p("/api/cp/admin/sync-listings", _guarded(api_sync_listings))
     p("/api/cp/admin/snapshot-now", _guarded(api_snapshot_now))
     p("/api/cp/admin/lead-status", _guarded(api_lead_status))
+    p("/api/cp/admin/shot-upload", _guarded(api_shot_upload))
+    g("/cp/shot/{id}", serve_shot)

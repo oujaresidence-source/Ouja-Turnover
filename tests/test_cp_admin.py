@@ -90,7 +90,9 @@ def make_client(loop, disk=None, authed=True, user="admin1", perms=None,
         "upload_dir": "/tmp/cp-test-uploads",
     })
     routes._recent.clear()
-    app = web.Application()
+    # mirror bot.py's client_max_size so upload-size tests exercise OUR
+    # 4MB rule, not aiohttp's 1MB default 413
+    app = web.Application(client_max_size=25 * 1024 * 1024)
     routes.register(app)
     client = TestClient(TestServer(app), loop=loop)
     loop.run_until_complete(client.start_server())
