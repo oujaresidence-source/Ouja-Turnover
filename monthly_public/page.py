@@ -40,6 +40,7 @@ def page_state(
     slug: Any = None,
     listing_id: Any = None,
     preview: bool = False,
+    staff_review_available: bool = False,
 ) -> Dict[str, Any]:
     """Return the only server-authored state embedded in the public shell."""
 
@@ -57,6 +58,7 @@ def page_state(
         "listing_id": safe_listing_id,
         "default_lang": "ar",
         "preview": bool(preview),
+        "staff_review_available": bool(staff_review_available),
     }
 
 
@@ -75,11 +77,18 @@ def render_monthly_page(
     slug: Any = None,
     listing_id: Any = None,
     preview: bool = False,
+    staff_review_available: bool = False,
 ) -> str:
     """Render one CSP-friendly shell; listing content is loaded from local APIs."""
 
     state = _json_script(
-        page_state(route, slug=slug, listing_id=listing_id, preview=preview)
+        page_state(
+            route,
+            slug=slug,
+            listing_id=listing_id,
+            preview=preview,
+            staff_review_available=staff_review_available,
+        )
     )
     robots = (
         '  <meta name="robots" content="noindex,nofollow,noarchive">\n'
@@ -94,6 +103,15 @@ def render_monthly_page(
   </aside>
 '''
         if preview
+        else ""
+    )
+    staff_review_entry = (
+        '''  <aside id="staff-review-entry" class="staff-review-entry" role="note">
+    <span data-copy="staffReviewHint">أنت تشاهد نسخة العملاء المعتمدة.</span>
+    <a class="button button-primary" href="/monthly/ops/preview" data-copy="staffReviewAction">وضع المراجعة: عرض كل الشقق</a>
+  </aside>
+'''
+        if staff_review_available and not preview
         else ""
     )
     return """<!doctype html>
@@ -121,7 +139,7 @@ def render_monthly_page(
     <symbol id="icon-message" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-9 8 9 9 0 0 1-4-.9L3 21l1.8-4A9 9 0 1 1 21 12Z"/></symbol>
     <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Zm0 6v5m0 3v.1"/></symbol>
   </svg>
-%s  <div class="site-shell">
+%s%s  <div class="site-shell">
     <header class="site-header">
       <a class="brand" href="/monthly" aria-label="عوجا بالشهر، الرئيسية">
         <span class="brand-mark" aria-hidden="true">عوجا</span>
@@ -149,7 +167,15 @@ def render_monthly_page(
   <div id="monthly-errors" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
   <script id="monthly-page-state" type="application/json">%s</script>
 </body>
-</html>""" % (robots, CSS_PATH, JS_PATH, body_class, preview_banner, state)
+</html>""" % (
+        robots,
+        CSS_PATH,
+        JS_PATH,
+        body_class,
+        preview_banner,
+        staff_review_entry,
+        state,
+    )
 
 
 __all__ = [

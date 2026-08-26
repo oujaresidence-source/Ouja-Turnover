@@ -141,6 +141,18 @@ class MonthlyPublicPageTests(unittest.TestCase):
         self.assertNotIn('"preview":true', page)
         self.assertNotIn('content="noindex,nofollow,noarchive"', page)
 
+    def test_staff_review_entry_is_rendered_only_when_server_authorizes_it(self):
+        from monthly_public.page import page_state, render_monthly_page
+
+        authorized = render_monthly_page("home", staff_review_available=True)
+        public = render_monthly_page("home", staff_review_available=False)
+
+        self.assertTrue(page_state("home", staff_review_available=True)["staff_review_available"])
+        self.assertIn('id="staff-review-entry"', authorized)
+        self.assertIn('href="/monthly/ops/preview"', authorized)
+        self.assertNotIn('id="staff-review-entry"', public)
+        self.assertNotIn('/monthly/ops/preview', public)
+
     def test_preview_javascript_uses_gated_endpoints_and_url_only_token(self):
         path = os.path.join(ROOT, "monthly_public", "static", "monthly.js")
         with open(path, encoding="utf-8") as handle:
@@ -186,6 +198,31 @@ class MonthlyPublicPageBotBoundaryTests(unittest.TestCase):
             self.bot._monthly_public_v2_asset_routes(),
             {CSS_PATH: "css", JS_PATH: "js"},
         )
+
+    def test_public_shell_authors_staff_review_access_for_admin_and_ops_only(self):
+        class Request:
+            pass
+
+        cases = (
+            (False, "admin", False),
+            (True, "viewer", False),
+            (True, "admin", True),
+            (True, "ops", True),
+        )
+        for authenticated, role, expected in cases:
+            with self.subTest(authenticated=authenticated, role=role), mock.patch.object(
+                self.bot, "_dash_auth", return_value=authenticated
+            ), mock.patch.object(
+                self.bot, "_req_role", return_value=role
+            ), mock.patch.object(
+                self.bot, "_render_monthly_public_page", return_value="PAGE"
+            ) as renderer:
+                self.assertEqual(
+                    self.bot._monthly_public_page_html("home", Request()), "PAGE"
+                )
+                self.assertEqual(
+                    renderer.call_args.kwargs["staff_review_available"], expected
+                )
 
     def test_page_handlers_use_v2_shell_and_explicit_rollback_uses_legacy(self):
         class Request:

@@ -58906,7 +58906,15 @@ def _monthly_public_v2_asset_routes():
 def _monthly_public_page_html(route, request, *, slug=None, listing_id=None):
     if _render_monthly_public_page is None:
         raise RuntimeError("monthly public page renderer is unavailable")
-    return _render_monthly_public_page(route, slug=slug, listing_id=listing_id)
+    staff_review_available = (
+        _dash_auth(request) and _req_role(request) in ("admin", "ops")
+    )
+    return _render_monthly_public_page(
+        route,
+        slug=slug,
+        listing_id=listing_id,
+        staff_review_available=staff_review_available,
+    )
 
 
 async def _handle_monthly_v2_css(request):
