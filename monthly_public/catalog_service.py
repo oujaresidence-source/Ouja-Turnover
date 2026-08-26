@@ -316,6 +316,51 @@ class CatalogService:
             "source_timestamps": source["source_timestamps"],
         }
 
+    def preview_inventory(self) -> Dict[str, Any]:
+        """Return a copied, allowlisted staff-preview source without writing state."""
+
+        source = self._source()
+        listings = []
+        for listing_id in sorted(
+            source["rows"],
+            key=lambda item: (0, int(item)) if item.isdigit() else (1, item),
+        ):
+            prepared = self._prepared_listing(listing_id, source)
+            row = self._row(listing_id, source)
+            _hostaway, _stay, _licence, _rating, publication = self._parts(row)
+            prefill = {
+                key: copy.deepcopy(value)
+                for key, value in prepared["prefill"].items()
+                if key not in ("sources", "source_readiness")
+            }
+            prefill["id"] = listing_id
+            prefill["slug"] = copy.deepcopy(publication.get("slug") or listing_id)
+            for field in (
+                "amenities",
+                "official_prices",
+                "official_request_quotes",
+                "calendar",
+            ):
+                if field in publication:
+                    prefill[field] = copy.deepcopy(publication.get(field))
+            readiness = prepared["prefill"].get("source_readiness")
+            if isinstance(readiness, Mapping) and readiness.get("rating_source"):
+                prefill.update(
+                    {
+                        "rating": readiness.get("rating"),
+                        "reviews_count": readiness.get("reviews_count"),
+                        "rating_verified": True,
+                        "rating_source": readiness.get("rating_source"),
+                    }
+                )
+            listings.append(prefill)
+        return {
+            "refresh_ok": source["refresh_ok"],
+            "catalog_complete": source["catalog_complete"],
+            "listings": listings,
+            "source_timestamps": copy.deepcopy(source["source_timestamps"]),
+        }
+
     def listing(self, listing_id: str) -> Dict[str, Any]:
         prepared = self._prepared_listing(listing_id)
         record = prepared["record"]
