@@ -274,6 +274,17 @@ except Exception as _business_err:      # pragma: no cover
     _business = None
     _HAS_BUSINESS = False
 
+# Company profile «/cp» — the public profile that supersedes /business. Arabic first;
+# copy ported byte-for-byte from the approved edition, figures source-stamped, and every
+# rendered page passes a disclosure guard before it is served.
+try:
+    import cp as _cp
+    _HAS_CP = True
+except Exception as _cp_err:            # pragma: no cover
+    print("[cp] import failed (profile disabled, bot unaffected):", _cp_err)
+    _cp = None
+    _HAS_CP = False
+
 # Owner Performance Report — additive, isolated, read-only against Hostaway. Renders the
 # frozen 17-page bilingual PDF via headless Chromium (see nixpacks.toml). Never edits bot.py
 # logic; wired like schedule/studio. Import guarded so a missing dep never takes down the bot.
@@ -60794,6 +60805,69 @@ async def start_web_server():
                     print("[business] initial snapshot skipped:", _b1)
             except Exception as _be:
                 print("[business] wiring failed (business page disabled, bot unaffected):", _be)
+
+        # ---- Company profile «/cp» — public; renders from cp_stats.json, never from Hostaway ----
+        if _HAS_CP:
+            try:
+                _cp_wa = re.sub(r"\D", "", (os.environ.get("CP_WHATSAPP")
+                                            or os.environ.get("STAY_WHATSAPP") or ""))
+                _cp_base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+
+                def _cp_listing_photos(listing_id):
+                    """Photography for the portfolio section — through the EXISTING /stay
+                    pipeline and the existing /elite/img WebP proxy. There is deliberately
+                    no second image system: a unit we cannot resolve renders the dashed
+                    placeholder, never a broken image."""
+                    snap = _gw_find_by_slug_or_id(str(listing_id))
+                    if not snap:
+                        return {}
+                    pub = _gw_listing_public(snap, with_airbnb=False) or {}
+                    url = pub.get("cover") or (pub.get("images") or [""])[0]
+                    if not url:
+                        return {}
+                    def _sized(width):
+                        return "/elite/img?u=" + urllib.parse.quote(url, safe="") + "&w=" + str(width)
+                    return {
+                        "photo": _sized(1024),
+                        "srcset": ", ".join(_sized(w) + " " + str(w) + "w"
+                                            for w in (640, 1024, 1600)),
+                    }
+
+                def _cp_notify(record):
+                    """One Discord embed per lead, into CP_LEAD_CHANNEL_ID."""
+                    chan_id = (os.environ.get("CP_LEAD_CHANNEL_ID") or "").strip()
+                    if not chan_id:
+                        return
+                    try:
+                        channel = bot.get_channel(int(chan_id))
+                    except (TypeError, ValueError):
+                        channel = None
+                    if not channel:
+                        return
+                    fields = record.get("fields") or {}
+                    lines = ["**%s**: %s" % (k, v) for k, v in fields.items() if v]
+                    lines.append("_%s · %s_" % (record.get("lang", "ar"),
+                                                record.get("referrer") or "no referrer"))
+                    body = "**طلب اجتماع — %s**\n%s" % (fields.get("audience", "?"),
+                                                        "\n".join(lines))
+                    asyncio.run_coroutine_threadsafe(channel.send(body), bot.loop)
+
+                _cp.wire({
+                    "web": web, "json_response": _json,
+                    "save_json": _save_json, "load_json": _load_json,
+                    "notify": _cp_notify,
+                    "base_url": _cp_base,
+                    "links": {"wa": _cp_wa, "email": (os.environ.get("CP_EMAIL") or "").strip()},
+                    "pdf_path": (os.environ.get("CP_PDF_PATH") or "").strip(),
+                    "default_lang": (os.environ.get("CP_DEFAULT_LANG") or "ar").strip().lower(),
+                    "english_ready": _as_bool(os.environ.get("CP_ENGLISH_READY"), False),
+                    "redirect_business": _as_bool(os.environ.get("CP_REDIRECT_BUSINESS"), False),
+                    "listing_photos": _cp_listing_photos,
+                })
+                _cp.register_routes(app)
+                print("[cp] wired + routes registered (/cp, /cp/ar, /cp/en, /cp.pdf, /api/cp/*)")
+            except Exception as _cpe:
+                print("[cp] wiring failed (profile disabled, bot unaffected):", _cpe)
 
         # ---- Owner Performance Report — additive; READ-ONLY Hostaway; frozen PDF renderer ----
         if _HAS_OWNER_REPORT:

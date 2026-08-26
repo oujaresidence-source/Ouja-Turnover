@@ -1,0 +1,12 @@
+{
+  "_note": "Strings AUTHORED for /cp, i.e. NOT taken from the approved document. Kept in one file so the owner can review everything that is ours in one place. Anything not here came from ouja-cp-ar.html unchanged.",
+  "routes_heading": "خمسة أسباب لوجودك في هذه الصفحة",
+  "voices_note_pending": "الحقول الملوّنة تُملأ بمراجعات منشورة حقيقية قبل نشر الصفحة. لا شيء في هذا القسم من كتابتنا.",
+  "voices_note_live": "كل مراجعة أعلاه منشورة كما كتبها صاحبها، دون تحرير. لا شيء في هذا القسم من كتابتنا.",
+  "unit_photo_placeholder": "صورة",
+  "wa_unavailable": "رقم الواتساب غير مُعدّ بعد",
+  "review_translation_label": "الترجمة",
+  "our_response_label": "ردّنا",
+  "sync_live": "أرقام التشغيل حتى __AS_OF_AR__، مصدرها نظام إدارة الأملاك لدينا، وتُحدَّث كل ليلة.",
+  "sync_static": "أرقام التشغيل حتى __AS_OF_AR__، مصدرها نظام إدارة الأملاك لدينا."
+}

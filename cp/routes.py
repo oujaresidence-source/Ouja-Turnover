@@ -1,0 +1,281 @@
+# -*- coding: utf-8 -*-
+"""
+cp.routes — aiohttp handlers for /cp.
+
+The page itself is public and indexable: it is a profile, and gating it would
+defeat the point. The lead endpoint is public too, and therefore rate-limited
+and strictly field-limited.
+
+Nothing here calls Hostaway. The page renders from a snapshot; a request never
+waits on the PMS. Handlers that must touch the disk do so through HOST.load_json,
+which is the bot's own cached store.
+"""
+import json
+import os
+import time
+import traceback
+
+from . import page, stats
+from .host import HOST
+
+_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+# Words that identify who is writing, so the lead lands in front of the right
+# person. Seeds §12: owners come through WhatsApp, capital partners and
+# government reviewers do not — one button for all five would lose that.
+AUDIENCES = ("owner", "investor", "corporate", "platform", "supplier")
+
+_MAX_FIELD = 2000
+_RATE_WINDOW_SEC = 3600
+_RATE_MAX = 8
+_recent = {}   # ip -> [timestamps]
+
+
+def _read_json(name, default):
+    try:
+        with open(os.path.join(_DATA, name), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return default
+    if isinstance(data, dict):
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    return data
+
+
+def _links():
+    return HOST.links or {}
+
+
+def _reviews():
+    return _read_json("cp_reviews.json", [])
+
+
+def _units():
+    """Six residences, each resolved through the existing /stay photo pipeline.
+
+    HOST.listing_photos is injected by bot.py and is the ONLY way an image gets
+    onto this page — there is deliberately no second image system (superprompt §6).
+    """
+    units = _read_json("cp_units.json", [])
+    resolved = []
+    for u in units:
+        u = dict(u)
+        lid = str(u.get("listing_id") or "").strip()
+        if lid and HOST.listing_photos:
+            try:
+                shot = HOST.listing_photos(lid) or {}
+                u["photo"] = shot.get("photo") or ""
+                u["photo_srcset"] = shot.get("srcset") or ""
+            except Exception:
+                traceback.print_exc()
+                u["photo"] = u["photo_srcset"] = ""
+        resolved.append(u)
+    return resolved
+
+
+def _snapshot():
+    try:
+        if HOST.load_json:
+            return HOST.load_json("cp_stats.json", None)
+    except Exception:
+        traceback.print_exc()
+    return None
+
+
+def _safe_public(fn):
+    """Public wrapper: a prospect must never see a stack trace, and a broken
+    figure must never take the page down — the fallbacks exist for that."""
+    async def _w(request):
+        try:
+            return await fn(request)
+        except Exception as e:
+            if isinstance(e, HOST.web.HTTPException):
+                raise
+            traceback.print_exc()
+            return HOST.json_response({"ok": False, "error": type(e).__name__}, 200)
+    _w.__name__ = getattr(fn, "__name__", "w")
+    return _w
+
+
+# --------------------------------------------------------------------------- #
+# pages
+# --------------------------------------------------------------------------- #
+def _render_ar():
+    return page.render_ar(
+        snapshot=_snapshot(),
+        base=HOST.base_url or "",
+        links=_links(),
+        reviews=_reviews(),
+        units=_units(),
+        ask=_read_json("cp_ask.json", {}),
+        english=bool(HOST.english_ready),
+        pdf=bool(_pdf_path()),
+    )
+
+
+async def handle_root(request):
+    lang = (HOST.default_lang or "ar").lower()
+    raise HOST.web.HTTPFound("/cp/" + ("en" if lang == "en" and HOST.english_ready else "ar"))
+
+
+async def handle_ar(request):
+    return HOST.web.Response(text=_render_ar(), content_type="text/html", charset="utf-8")
+
+
+async def handle_en(request):
+    """The English edition is not built yet (owner decision, 2026-08-26: Arabic
+    first). Until it is, this is a TEMPORARY redirect — a 302, so no cache or
+    search engine records it as the permanent home of the English page."""
+    if HOST.english_ready:
+        return HOST.web.Response(text=page.render_en(), content_type="text/html",
+                                 charset="utf-8")
+    raise HOST.web.HTTPFound("/cp/ar")
+
+
+def _pdf_path():
+    p = (HOST.pdf_path or "").strip()
+    if not p:
+        return ""
+    if not os.path.isabs(p):
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), p)
+    return p if os.path.exists(p) else ""
+
+
+async def handle_pdf(request):
+    path = _pdf_path()
+    if not path:
+        raise HOST.web.HTTPNotFound(text="The PDF profile is not published yet.")
+    return HOST.web.FileResponse(path, headers={
+        "Content-Disposition": 'inline; filename="Ouja-Residence-Company-Profile.pdf"'})
+
+
+async def handle_business_redirect(request):
+    raise HOST.web.HTTPMovedPermanently("/cp")
+
+
+# --------------------------------------------------------------------------- #
+# json
+# --------------------------------------------------------------------------- #
+async def api_stats(request):
+    cells = stats.load(snapshot=_snapshot())
+    return HOST.json_response({
+        "ok": True,
+        "stamp": stats.sync_stamp(snapshot=_snapshot()),
+        "market": stats.MARKET,
+        "figures": cells,
+    })
+
+
+async def api_reviews(request):
+    """Only what is published on the page: verbatim text, first name plus last
+    initial, month and year. No reservation id, no listing id, no full date."""
+    out = []
+    for r in _reviews():
+        if not (r.get("text_original") or "").strip():
+            continue
+        out.append({k: r.get(k) for k in
+                    ("slot", "guest_name", "listing_name", "date", "rating",
+                     "language", "text_original", "translation_ar", "translation_en",
+                     "our_response")})
+    return HOST.json_response({"ok": True, "reviews": out, "count": len(out)})
+
+
+# --------------------------------------------------------------------------- #
+# leads
+# --------------------------------------------------------------------------- #
+def _client_ip(request):
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    peer = request.transport.get_extra_info("peername") if request.transport else None
+    return (peer[0] if peer else "") or "unknown"
+
+
+def _rate_limited(ip, now=None):
+    now = now or time.time()
+    hits = [t for t in _recent.get(ip, []) if now - t < _RATE_WINDOW_SEC]
+    _recent[ip] = hits
+    if len(hits) >= _RATE_MAX:
+        return True
+    hits.append(now)
+    return False
+
+
+async def _body(request):
+    try:
+        return await request.json()
+    except Exception:
+        try:
+            return dict(await request.post())
+        except Exception:
+            return {}
+
+
+def clean_lead(raw):
+    """Field-limited on purpose: this endpoint is public, so it accepts exactly
+    the five things the form offers and nothing a caller invents."""
+    out = {}
+    for key in ("name", "company", "phone", "message"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            out[key] = value[:_MAX_FIELD]
+    audience = str(raw.get("audience") or "").strip().lower()
+    out["audience"] = audience if audience in AUDIENCES else "owner"
+    return out
+
+
+async def api_lead(request):
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        return HOST.json_response({"ok": False, "error": "rate_limited"}, 429)
+
+    data = clean_lead(await _body(request))
+    if not data.get("phone") and not data.get("name"):
+        return HOST.json_response({"ok": False, "error": "contact_required"}, 400)
+
+    record = {
+        "at": int(time.time()),
+        "audience": data["audience"],
+        "fields": data,
+        "lang": (request.match_info.get("lang") or "ar"),
+        "referrer": request.headers.get("Referer", "")[:400],
+        "ip": ip,
+    }
+
+    # Durable first, notify second: a lead that reaches the disk is never lost
+    # even if Discord is down, which is the failure this ordering exists for.
+    try:
+        if HOST.save_json and HOST.load_json:
+            store = HOST.load_json("cp_leads.json", {"leads": []}) or {"leads": []}
+            store.setdefault("leads", []).append(record)
+            store["leads"] = store["leads"][-500:]
+            HOST.save_json("cp_leads.json", store)
+    except Exception:
+        traceback.print_exc()
+
+    notified = False
+    try:
+        if HOST.notify:
+            HOST.notify(record)
+            notified = True
+    except Exception:
+        traceback.print_exc()
+
+    return HOST.json_response({"ok": True, "notified": notified})
+
+
+def register(app):
+    g, p = app.router.add_get, app.router.add_post
+    g("/cp", _safe_public(handle_root))
+    g("/cp/ar", _safe_public(handle_ar))
+    g("/cp/en", _safe_public(handle_en))
+    g("/cp.pdf", _safe_public(handle_pdf))
+    g("/api/cp/stats", _safe_public(api_stats))
+    g("/api/cp/reviews", _safe_public(api_reviews))
+    p("/api/cp/lead", _safe_public(api_lead))
+    # Held behind a flag until the English edition exists: /business currently
+    # serves English by default, and redirecting it to an Arabic-only page would
+    # be a regression for exactly the readers most likely to hold the old link.
+    if HOST.redirect_business:
+        g("/business", _safe_public(handle_business_redirect))
+        g("/business/ar", _safe_public(handle_business_redirect))

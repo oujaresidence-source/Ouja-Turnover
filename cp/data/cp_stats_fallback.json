@@ -42,6 +42,10 @@
 
   "residences_total": 74,
 
+  "_ratios_note": "Seeds §3 «The ratios that ARE publishable»: derived from withheld revenue figures but cleared for publication. They are figures on the page, so they live here rather than being typed into a sentence where nothing could check them.",
+  "adr_growth_pct": 22,
+  "released_occupancy_pct": 78.6,
+
   "median_response_minutes": 2.3,
   "messages_total": 152177,
   "messages_monthly_start": 2900,

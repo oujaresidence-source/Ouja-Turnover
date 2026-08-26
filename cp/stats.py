@@ -75,6 +75,10 @@ PROVENANCE = {
     "long_stay_revenue_pct": "hostaway", "thu_fri_arrival_pct": "hostaway",
     "weekend_adr_premium_pct": "hostaway", "direct_stay_nights": "hostaway",
     "residences_total": "hostaway",
+    # Publishable ratios (seeds §3). Derived from figures we withhold, so they
+    # are `seeds` until the revenue-side computation exists and is reconciled —
+    # at which point they become `hostaway` like everything else measured.
+    "adr_growth_pct": "seeds", "released_occupancy_pct": "seeds",
 
     "median_response_minutes": "manual", "messages_total": "manual",
     "messages_monthly_start": "manual", "messages_monthly_now": "manual",
@@ -116,6 +120,7 @@ MANUAL = valid_manual()
 DECIMALS = {
     "occupancy_pct": 1, "occupancy_active_pct": 1, "perfect_ten_pct": 1,
     "gcc_guest_pct": 1, "median_response_minutes": 1,
+    "released_occupancy_pct": 1,
     "residences_per_person_per_day": 1,
     "rating_avg": 2, "avg_stay_nights": 2, "direct_stay_nights": 2,
 }
