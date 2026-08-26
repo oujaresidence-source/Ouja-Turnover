@@ -85,6 +85,11 @@ BARE = {
     14731: "revenue per active residence (seeds §3)",
     2412347: "stopped-residence revenue (seeds §3)",
     7836: "Airbnb channel reservation count (seeds §3)",
+    # 2026 monthly revenue table (data-seed-2026-08 — internal only)
+    583867: "January 2026 revenue (data-seed)", 494330: "February 2026 revenue (data-seed)",
+    480434: "March 2026 revenue (data-seed)", 712470: "April 2026 revenue (data-seed)",
+    674651: "May 2026 revenue (data-seed)", 592635: "June 2026 revenue (data-seed)",
+    762810: "July 2026 revenue (data-seed)", 564259: "August 2026 revenue (data-seed)",
     592000: "direct channel revenue (seeds §3)",
     7080000: "Airbnb gross (seeds §3)",
     5360000: "Airbnb payout (seeds §3)",
@@ -133,6 +138,40 @@ CONTEXTUAL = [
      "direct channel reservation count (seeds §3)"),
     (re.compile(r"\b1,?859\b[^.\n]{0,30}(?:revenue|إيراد|" + _MONEY + ")", re.I),
      "90-day reservation count paired with revenue (seeds §3)"),
+
+    # ---- data-seed-2026-08 additions (v2) --------------------------------- #
+    # the management fee percentage, any phrasing
+    (re.compile(r"(?:fee|رسوم|أتعاب|نسبة الإدارة|الإدارة)[^.\n]{0,30}\b20\s*%", re.I),
+     "management fee percentage (data-seed)"),
+    (re.compile(r"\b20\s*%[^.\n]{0,30}(?:fee|رسوم|أتعاب|management|إدارة)", re.I),
+     "management fee percentage (data-seed)"),
+    # the Airbnb take rate
+    (re.compile(r"(?:airbnb|المنصة|منصة الحجز)[^.\n]{0,30}\b~?24\s*%", re.I),
+     "Airbnb take rate (data-seed)"),
+    (re.compile(r"\b~?24\s*%[^.\n]{0,30}(?:take|عمولة|تأخذ|يأخذ)", re.I),
+     "Airbnb take rate (data-seed)"),
+    # per-type ADR / RevPAR — the numbers are only leaks beside a unit-type or
+    # rate word (426 alone could be an innocent live figure one day)
+    (re.compile(r"\b(?:426|765|675|1,?170|682|345|574|483|963|533)\b[^.\n]{0,40}"
+                r"(?:BR|غرف|غرفة|نوم|type|نوع)", re.I),
+     "per-type ADR/RevPAR (data-seed)"),
+    (re.compile(r"(?:BR|غرف|غرفة|نوم|ADR|RevPAR|سعر الليلة|العائد)[^.\n]{0,40}"
+                r"\b(?:426|765|675|1,?170|682|345|574|483|963|533)\b", re.I),
+     "per-type ADR/RevPAR (data-seed)"),
+    # unit counts per type
+    (re.compile(r"\b(?:23|29|17)\b[^.\n]{0,24}(?:units?|وحدة|وحدات)[^.\n]{0,16}"
+                r"(?:BR|غرف|غرفة|نوم)", re.I),
+     "unit count per type (data-seed)"),
+    (re.compile(r"\b(?:23|29|17)\s*(?:units? of|وحدة من)", re.I),
+     "unit count per type (data-seed)"),
+    # per-unit revenues in K
+    (re.compile(r"\b(?:404|346|276|271|211)\s*K\b", re.I),
+     "named-unit revenue (data-seed)"),
+    # unknown/off-system payments
+    (re.compile(r"\b284\b[^.\n]{0,40}(?:unknown|مجهول|خارج النظام|payments?|دفع)", re.I),
+     "off-system payment count (data-seed — internal only)"),
+    (re.compile(r"(?:unknown|مجهول|خارج النظام)[^.\n]{0,30}\b284\b", re.I),
+     "off-system payment count (data-seed — internal only)"),
     (re.compile(r"\b(?:60|67|70|71|72|100)\s*\+?\s*" + _UNIT_WORD, re.I),
      "RETIRED residence count — the published figure is 74 (seeds §2, §11)"),
     (re.compile(r"\b53\b[^.\n]{0,24}\b(?:active|نشط|نشطة|تعمل)", re.I),
@@ -147,7 +186,7 @@ CONTEXTUAL = [
      "revenue by unit type / channel revenue (seeds §3)"),
     (re.compile(r"\b(?:11\.4|17\.1|15\.3|29\.3|16\.2)\s*K\b", re.I),
      "per-unit monthly revenue (seeds §3)"),
-    (re.compile(r"\b7\.6\s*[x×]", re.I),
+    (re.compile(r"\b7\.[56]\s*[x×]", re.I),
      "revenue-per-listing multiple — reverse-engineers per-residence revenue (seeds §4)"),
     (re.compile(r"(?:management fee|رسوم الإدارة|نسبة الإدارة)[^.\n]{0,40}\d{1,2}(?:\.\d+)?\s*%", re.I),
      "management fee percentage (seeds §3, §7)"),
@@ -169,6 +208,18 @@ CONTEXTUAL = [
      "named best/worst residence — internal only (seeds §3)"),
     (re.compile(r"\b11B\s+Royal\b", re.I),
      "named best/worst residence — internal only (seeds §3)"),
+    # data-seed named units. Long codes match bare; SHORT codes (F2, D7, 201a,
+    # 202B, FD1, C204, 3BMJ) only beside unit/occupancy/revenue words so an id
+    # in a hash can never trip them.
+    (re.compile(r"\b(?:HUE\s*9|C2\s*NFL|9B\s*HTN|103\s*NRJS|E5MLQ|13\s*JOOD|"
+                r"101-?Narjs|TWN\s*13B|4511)\b", re.I),
+     "named best/worst residence (data-seed — internal only)"),
+    (re.compile(r"القيروان-?\s?D7", re.I),
+     "named residence (data-seed — internal only)"),
+    (re.compile(r"(?:وحدة|unit|شقة)[^.\n]{0,12}\b(?:F2|D7|201a|202B|FD1|C204|3BMJ)\b"
+                r"|\b(?:F2|D7|201a|202B|FD1|C204|3BMJ)\b[^\n]{0,24}?"
+                r"(?:occupancy|إشغال|revenue|إيراد|churn|left|خرجت|وحدة|K\b|%)", re.I),
+     "named residence (data-seed — internal only)"),
 ]
 
 

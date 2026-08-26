@@ -217,3 +217,101 @@ class IdentityDocumentsAreBlocked(unittest.TestCase):
                    "تصريح سياحي لكل وحدة، باسم المالك"):
             with self.subTest(ok=ok):
                 self.assertEqual(guard.scan("<p>%s</p>" % ok), [])
+
+
+class DataSeedFiguresTrip(unittest.TestCase):
+    """v2 (seeds-2026-08): docs/cp/data-seed-2026-08.md is internal-only; every
+    figure in it that is not explicitly mock-approved must fail the build."""
+
+    BARE = [
+        "762,810",            # July 2026 revenue
+        "583,867", "494,330", "480,434", "712,470",
+        "674,651", "592,635", "564,259",             # 2026 monthly revenues
+    ]
+
+    CONTEXTUAL = [
+        "رسوم الإدارة 20%",                     # the management fee
+        "a 20% management fee",
+        "Airbnb takes ~24%",                     # channel take
+        "تأخذ المنصة 24%",
+        "1BR ADR 426",                           # per-type ADR
+        "متوسط سعر الليلة لغرفتين 765",
+        "RevPAR for 3BR is 483",
+        "4BR revenue 963 per available night",   # per-type RevPAR
+        "23 units of 1BR",                       # unit counts per type
+        "17 وحدة من ثلاث غرف",
+        "top unit made 404K", "F2 346K",         # unit revenues
+        "284 دفعة خارج النظام",                  # unknown payments
+        "284 payments show Unknown",
+        "a 7.5x revenue multiple",
+    ]
+
+    NAMED_UNITS = ["H8 VLG", "11B Royal", "HUE 9", "C2 NFL", "9B HTN", "4511",
+                   "103 NRJS", "E5MLQ", "13 JOOD", "101-Narjs", "TWN 13B",
+                   "القيروان-D7"]
+
+    def test_bare_figures_trip(self):
+        for bad in self.BARE:
+            with self.subTest(bad=bad):
+                self.assertTrue(guard.scan("<p>%s</p>" % bad),
+                                "seed figure passed: %r" % bad)
+
+    def test_contextual_figures_trip(self):
+        for bad in self.CONTEXTUAL:
+            with self.subTest(bad=bad):
+                self.assertTrue(guard.scan("<p>%s</p>" % bad),
+                                "seed figure passed: %r" % bad)
+
+    def test_named_units_trip(self):
+        for bad in self.NAMED_UNITS:
+            with self.subTest(bad=bad):
+                self.assertTrue(guard.scan("<p>%s</p>" % bad),
+                                "named unit passed: %r" % bad)
+
+    def test_short_unit_codes_trip_with_word_context(self):
+        # deliberately narrow: bare F2/D7/201a/202B/FD1/C204/3BMJ only leak
+        # beside unit/occupancy/revenue words — a hex hash must not trip them
+        for bad in ("وحدة F2", "unit D7", "201a occupancy", "202B 58.6%",
+                    "FD1 left in July", "C204 churned", "3BMJ وحدة"):
+            with self.subTest(bad=bad):
+                self.assertTrue(guard.scan("<p>%s</p>" % bad))
+
+    def test_the_seed_document_itself_lights_up(self):
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "docs", "cp", "data-seed-2026-08.md")
+        with open(path, encoding="utf-8") as fh:
+            hits = guard.scan("<p>" + fh.read() + "</p>")
+        self.assertGreater(len(hits), 15,
+                           "the internal seed should trip the guard massively")
+
+
+class MockApprovedFiguresSurvive(unittest.TestCase):
+    """Everything on the approved v6 mock is publishable and regression-locked."""
+
+    LINES = [
+        "الشقق المخدومة في الرياض 59.3%",         # MoT benchmark
+        "فنادق المملكة 63.4% · العائد لكل ليلة متاحة 478 ريال",  # Knight Frank
+        "متوسط سعر الليلة 754 · 206",
+        "سعر الليلة في نهاية الأسبوع مقابل وسطه 644 · 554",
+        "الإشغال +24.1%، والسعر −11.8%، وعدد الوحدات −8%",
+        "من 2,900 إلى 23,000 شهرياً",
+        "تراوح بين 53.8% (يونيو) و82.6% (يناير)",
+        "إقامة مباشرة · متوسط الليالي 3.7",
+        "أعلى ضيف عائد 49",
+        "22 موظفاً · قرابة 200 وحدة · 66,000 سطر",
+        "152,177 رسالة · 2.3 دقيقة · ~1,000 تذكرة",
+    ]
+
+    def test_approved_lines_pass(self):
+        for line in self.LINES:
+            with self.subTest(line=line[:40]):
+                self.assertEqual(guard.scan("<p>%s</p>" % line), [],
+                                 "guard rejected mock-approved copy: %r" % line)
+
+    def test_the_whole_v6_mock_is_clean(self):
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "docs", "cp", "v6-mock.html")
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(guard.scan(fh.read()), [])
