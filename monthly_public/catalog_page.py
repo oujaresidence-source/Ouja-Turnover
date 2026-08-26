@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-ASSET_VERSION = "v20260826a"
+ASSET_VERSION = "v20260826b"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 
@@ -43,7 +43,11 @@ def render_monthly_catalog_page() -> str:
           <h1 data-copy="pageTitle">جهّز كل شقة للنشر من مكان واحد</h1>
           <p data-copy="pageDetail">راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.</p>
         </div>
-        <button id="refresh-catalog" class="button button-secondary" type="button" data-copy="refreshData">تحديث البيانات</button>
+        <div class="page-heading-actions">
+          <p data-copy="previewCustomerDetail">يعرض كل الشقق داخليًا ولا ينشر أي شقة</p>
+          <a id="preview-customer-journey" class="button button-primary" href="/monthly/ops/preview" data-copy="previewCustomerJourney">معاينة رحلة العميل</a>
+          <button id="refresh-catalog" class="button button-secondary" type="button" data-copy="refreshData">تحديث البيانات</button>
+        </div>
       </header>
 
       <section id="catalog-summary" class="catalog-summary" aria-live="polite" aria-busy="true">

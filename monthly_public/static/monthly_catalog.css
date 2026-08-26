@@ -126,6 +126,9 @@ p { text-wrap: pretty; }
 .page-heading h1 { max-width: 26ch; margin-block-end: 8px; font-size: 1.9rem; }
 .page-heading p:last-child, .section-heading p { max-width: 68ch; margin-block-end: 0; color: var(--ink-soft); }
 .context-label { margin-block-end: 4px; color: var(--bronze-700); font-size: .82rem; font-weight: 750; }
+.page-heading-actions { display: grid; justify-items: stretch; gap: 8px; min-width: min(100%, 240px); }
+.page-heading-actions p { margin: 0; color: var(--ink-soft); font-size: .78rem; text-align: center; }
+.page-heading-actions .button { width: 100%; text-decoration: none; }
 
 .button {
   display: inline-flex;
@@ -386,6 +389,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--focus); }
   .catalog-brand > span:last-child, .catalog-nav a { display: none; }
   .catalog-main { width: min(calc(100% - 28px), var(--page)); padding-block-start: 20px; }
   .page-heading, .section-heading, .survey-header { align-items: stretch; flex-direction: column; gap: 12px; }
+  .page-heading-actions { width: 100%; }
   .page-heading .button, .section-heading .button { width: 100%; }
   .summary-skeleton, .summary-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-bar, .form-grid, .places-layout { grid-template-columns: 1fr; }

@@ -76,7 +76,7 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_empty_section_fix(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260826a")
+        self.assertEqual(ASSET_VERSION, "v20260826b")
 
     def test_styles_preserve_operations_tokens_and_accessibility(self):
         css = CSS_FILE.read_text("utf-8")
@@ -371,6 +371,16 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertIn('href="/monthly/ops/listings"', html)
         self.assertIn("monthly-catalog-link", js)
         self.assertIn('authPath("/monthly/ops/listings"', js)
+
+    def test_readiness_page_links_to_safe_customer_preview(self):
+        from monthly_public.catalog_page import render_monthly_catalog_page
+
+        html = render_monthly_catalog_page()
+        js = JS_FILE.read_text("utf-8")
+
+        self.assertIn('id="preview-customer-journey"', html)
+        self.assertIn("يعرض كل الشقق داخليًا ولا ينشر أي شقة", html)
+        self.assertIn('authPath("/monthly/ops/preview"', js)
 
 
 class MonthlyCatalogPageBotBoundaryTest(unittest.TestCase):
