@@ -233,3 +233,11 @@ class MiddlewareExemption(unittest.TestCase):
     def test_lead_endpoint_is_exempt_from_role_writes(self):
         import bot
         self.assertIn("/api/cp/lead", bot._ROLE_EXEMPT_WRITES)
+
+
+class BaseResolution(_Base):
+    caps = {"base_url": lambda: "https://captured.example.com"}
+
+    def test_callable_base_reaches_the_share_card(self):
+        html = self.body(self.get("/cp/ar"))
+        self.assertIn('og:image" content="https://captured.example.com/cp/share.png', html)

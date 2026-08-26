@@ -60832,7 +60832,10 @@ async def start_web_server():
                 # STAY_WHATSAPP so this page cannot silently inherit a different one.
                 _cp_wa = re.sub(r"\D", "", (os.environ.get("CP_WHATSAPP")
                                             or "+966533779297"))
-                _cp_base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+                # resolved per request: PUBLIC_BASE_URL -> auto-captured host ->
+                # GUIDE_PUBLIC_BASE. Without it the og:image tag was silently
+                # absent on live (no env set), so forwarded links had no card.
+                _cp_base = _dispatch_base_url
 
                 def _cp_listing_photos(listing_id, pinned=None):
                     """Photography for the portfolio section — through the EXISTING /stay

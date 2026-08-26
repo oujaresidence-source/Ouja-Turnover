@@ -105,10 +105,22 @@ def _safe_public(fn):
 # --------------------------------------------------------------------------- #
 # pages
 # --------------------------------------------------------------------------- #
+def _base():
+    """HOST.base_url may be a static string or a callable — bot.py wires the
+    callable so the share-card URL works with zero env setup: it resolves
+    PUBLIC_BASE_URL, else the host auto-captured from real traffic."""
+    b = HOST.base_url
+    try:
+        b = b() if callable(b) else b
+    except Exception:
+        b = ""
+    return (b or "").rstrip("/")
+
+
 def _render_ar():
     return page.render_ar(
         snapshot=_snapshot(),
-        base=HOST.base_url or "",
+        base=_base(),
         links=_links(),
         reviews=_reviews(),
         units=_units(),
