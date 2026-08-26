@@ -18359,7 +18359,7 @@ _USER_TABS = [
     "promises", "pricing", "plab", "strat", "clean", "cleanteams", "listings",
     "tickets", "schedule", "reviews", "users", "quote", "studio", "weekly", "ownrep",
     "design", "pmo", "expenses", "finance", "erp", "fb", "guests", "gw", "guide",
-    "quality", "rev", "learn", "log",
+    "quality", "rev", "learn", "log", "cp",
 ]
 
 def _default_perms(role):
@@ -42177,7 +42177,7 @@ NAV_DEF = {
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
-        {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "guide", "reviews"]},
+        {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "cp", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["kb", "users", "learn", "train", "log"]},
     ],
     "items": [
@@ -42216,6 +42216,7 @@ NAV_DEF = {
         {"id": "guests", "ic": "guests", "tk": "guests"},
         {"id": "rec", "ic": "tickets", "tk": "rec"},
         {"id": "gw", "ic": "gw", "tk": "gw"},
+        {"id": "cp", "ic": "gw", "tk": "cp"},
         {"id": "guide", "ic": "gw", "tk": "guide"},
         {"id": "quality", "ic": "quality", "tk": "quality"},
         {"id": "rev", "ic": "rev", "tk": "rev"},
@@ -42245,6 +42246,7 @@ NAV_DEF = {
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
             "cat_content": "المحتوى والتسويق",
+            "cp": "الملف التعريفي",
             "cat_finance": "المالية والمحاسبة", "cat_guests": "الضيوف", "cat_system": "النظام",
         },
         "en": {
@@ -42265,6 +42267,7 @@ NAV_DEF = {
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
             "cat_content": "Content & Marketing",
+            "cp": "Company Profile",
             "cat_finance": "Finance & Accounting", "cat_guests": "Guests", "cat_system": "System",
         },
     },
@@ -60226,6 +60229,7 @@ _ROLE_WRITE_RULES = [
     ("/api/design/", "design"),
     ("/api/pmo/", "pmo"),
     ("/api/gw/", "gw"),
+    ("/api/cp/admin/", "cp"),                # الملف التعريفي — /api/cp/lead stays exempt above
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
     ("/api/recovery/", "rec"),
@@ -60256,6 +60260,7 @@ _ROLE_READ_RULES = [
     ("/api/design/", "design"),
     ("/api/pmo/", "pmo"),
     ("/api/gw/", "gw"),
+    ("/api/cp/admin/", "cp"),
     ("/api/promises", "promises"),
     ("/api/decor/", "decor"),
     ("/api/inbox", "inbox"),
@@ -60904,6 +60909,35 @@ async def start_web_server():
                     "english_ready": _as_bool(os.environ.get("CP_ENGLISH_READY"), False),
                     "redirect_business": _as_bool(os.environ.get("CP_REDIRECT_BUSINESS"), False),
                     "listing_photos": _cp_listing_photos,
+                    # v2 admin capabilities — everything the «الملف التعريفي» tab
+                    # needs, reusing what already exists: the gw listing cache and
+                    # sync (never a second Hostaway client), the /business verbatim
+                    # review store, and the nightly snapshot job run on demand.
+                    "dash_auth": _dash_auth,
+                    "dash_perms": (lambda request: {
+                        "user": ((_auth_session(request) or {}).get("id")
+                                 or ((_auth_session(request) or {}).get("username"))
+                                 or "token-admin"),
+                        "cp": {"read": _user_can(request, "cp", "read"),
+                               "write": _user_can(request, "cp", "write"),
+                               "create": _user_can(request, "cp", "create")},
+                    }),
+                    "listings_cache": (lambda: {
+                        "listings": [{
+                            "id": l.get("id"), "name": l.get("name"),
+                            "internal": l.get("internal"),
+                            "active": bool(l.get("active")),
+                            "bedrooms": l.get("bedrooms"),
+                            "area": l.get("area") or "",
+                            "cover": l.get("cover") or "",
+                            "image_urls": [im["url"] for im in (l.get("images") or [])][:30],
+                        } for l in (_gw_cache.get("listings") or [])],
+                        "synced_at": _gw_cache.get("synced_at"),
+                    }),
+                    "sync_listings": (lambda: _gw_sync(True)),
+                    "reviews_store": (lambda: __import__("business").render.load_reviews()),
+                    "run_snapshot": (lambda: _cp.snapshot.build_and_write()),
+                    "upload_dir": os.path.join(STATE_DIR, "cp_uploads"),
                 })
                 _cp.register_routes(app)
                 print("[cp] wired + routes registered (/cp, /cp/ar, /cp/en, /cp.pdf, /api/cp/*)")

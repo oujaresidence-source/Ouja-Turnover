@@ -297,6 +297,8 @@ async def api_lead(request):
 
 
 def register(app):
+    from . import admin as _admin
+    _admin.register(app)
     g, p = app.router.add_get, app.router.add_post
     g("/cp", _safe_public(handle_root))
     g("/cp/ar", _safe_public(handle_ar))

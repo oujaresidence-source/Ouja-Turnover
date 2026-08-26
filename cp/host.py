@@ -19,7 +19,13 @@ class _Host:
     default_lang = "ar"       # CP_DEFAULT_LANG
     english_ready = False     # flip when the English edition exists
     redirect_business = False  # CP_REDIRECT_BUSINESS — /business 301 -> /cp
-    listing_photos = None     # (listing_id) -> {"photo":..., "srcset":...}
+    listing_photos = None     # (listing_id, pinned=None) -> {"photo":..., "srcset":...}
+    dash_perms = None         # (request) -> {"user": id, "cp": {read,write,create}}
+    listings_cache = None     # () -> {"listings":[...], "synced_at": iso}  (the _gw_cache)
+    sync_listings = None      # () -> report   (_gw_sync(True) in a thread)
+    reviews_store = None      # () -> the /business verbatim review rows
+    run_snapshot = None       # () -> cp.snapshot.build_and_write() report
+    upload_dir = None         # $STATE_DIR/cp_uploads
 
     _wired = False
 
