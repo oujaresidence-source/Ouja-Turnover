@@ -190,6 +190,20 @@ class MonthlyPreviewAppTest(unittest.TestCase):
         self.assertFalse(blocked["ok"])
         self.assertEqual(blocked["error"]["code"], "preview_contact_disabled")
 
+    def test_latest_draft_is_reflected_without_approval_or_source_refresh(self):
+        source_before = copy.deepcopy(self.source)
+        self.service.save_profile_draft(
+            "101", {"name_ar": "عوجا | اسم مسودة الفريق"}, 0, "ops"
+        )
+
+        preview = build_preview_app(self.service, clock=lambda: NOW)
+        detail = preview.listing({"listing_id": "101", "lang": "ar"})
+
+        self.assertTrue(detail["ok"])
+        self.assertEqual(detail["listing"]["title"], "عوجا | اسم مسودة الفريق")
+        self.assertIsNone(self.store.profile("101")["approved"])
+        self.assertEqual(self.source, source_before)
+
 
 if __name__ == "__main__":
     unittest.main()
