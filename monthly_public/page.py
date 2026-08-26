@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, Optional
 
 
-ASSET_VERSION = "v20260826f"
+ASSET_VERSION = "v20260826g"
 CSS_PATH = "/monthly/static/monthly.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly.%s.js" % ASSET_VERSION
 
