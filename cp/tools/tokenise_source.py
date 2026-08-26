@@ -133,6 +133,12 @@ RULES = [
     ("<h2>ثلاثة أسباب لوجودك في هذه الصفحة</h2>", "<h2>__ROUTES_HEADING__</h2>", 1),
     ("</head>", "__HEAD_EXTRA__\n</head>", 1),
 
+    # OWNER CORRECTION (2026-08-26), not a port fix: the compound names in the
+    # approved document's portfolio lede are wrong. The owner's spellings are
+    # «جاده 33 / جاده 44» (not قض) and «العجلان ريفيا» (not العجلان).
+    ("الماجدية، ديار 20، قض 33، قض 44، هيو ريزيدنس، العجلان.",
+     "الماجدية، ديار 20، جاده 33، جاده 44، هيو ريزيدنس، العجلان ريفيا.", 1),
+
     # PORT FIX (not a copy change). In the approved document the skip link is
     # parked at left:-9999px. In a right-to-left page that is the inline-END
     # side, so the browser treats it as real content and the page gains 9999px

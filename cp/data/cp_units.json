@@ -25,7 +25,7 @@
   },
   {
     "listing_id": "461328",
-    "compound_ar": "قض 33",
+    "compound_ar": "جاده 33",
     "compound_en": "Gadh 33",
     "name_ar": "أكبر شقة غرفتين في الرياض",
     "bedrooms": 2,
@@ -33,35 +33,38 @@
     "line_ar": "دور كامل بلا جيران جانبيين، بمكتبة كتب وسينما خاصة وأثاث مصمَّم.",
     "name_en": "Biggest 2BR in Riyadh with Private Cinema",
     "photo": "auto",
-    "_live_name": "Biggest 2BR in Riyadh with Private Cinema"
+    "_live_name": "Biggest 2BR in Riyadh with Private Cinema",
+    "_name_note": "owner correction 2026-08-26: the compound is جاده 33, not قض 33"
   },
   {
     "listing_id": "437215",
     "compound_ar": "هيو ريزيدنس",
     "compound_en": "Hue Residence",
-    "name_ar": "شقة واسعة بصالة كبيرة",
+    "name_ar": "رواح",
     "bedrooms": 2,
     "bedrooms_label_ar": "غرفتا نوم",
     "line_ar": "داخل هيو ريزيدنس بالملقا — خصوصية تامة ومواقف خاصة ومرافق مؤمّنة.",
     "name_en": "Spacious 2BR • Huge Living • Self - Entry",
     "photo": "auto",
-    "_live_name": "Spacious 2BR • Huge Living • Self - Entry"
+    "_live_name": "Spacious 2BR • Huge Living • Self - Entry",
+    "_name_note": "owner correction 2026-08-26: the unit is «رواح | هيو ريزيدنس»"
   },
   {
     "listing_id": "457287",
-    "compound_ar": "مجمع العجلان",
+    "compound_ar": "العجلان ريفيا",
     "compound_en": "Al Ajlan Compound",
     "name_ar": "شقة واسعة مع سينما",
     "bedrooms": 2,
     "bedrooms_label_ar": "غرفتا نوم",
-    "line_ar": "صالة كبيرة بطاولة طعام كاملة وسينما، داخل مجمع العجلان بالملقا.",
+    "line_ar": "صالة كبيرة بطاولة طعام كاملة وسينما، داخل العجلان ريفيا بالملقا.",
     "name_en": "Spacious 2BR + Cinema | AlAjlan Compound",
     "photo": "auto",
-    "_live_name": "Spacious 2BR + Cinema | AlAjlan Compound"
+    "_live_name": "Spacious 2BR + Cinema | AlAjlan Compound",
+    "_name_note": "owner correction 2026-08-26: the compound is العجلان ريفيا"
   },
   {
     "listing_id": "479967",
-    "compound_ar": "العليا",
+    "compound_ar": "مبنى خاص",
     "compound_en": "Al Olaya",
     "name_ar": "الدور الخاص الكبير",
     "bedrooms": 4,
@@ -71,6 +74,7 @@
     "name_en": "Grand 4BR | Private Floor & Home Theater",
     "photo": "https://hostaway-platform.s3.us-west-2.amazonaws.com/listing/147296-479967-DHOWGuLN4iXgsmSfOLBN-l-tMkywoQPrhtEJAo1XYxg-69765ac853bf0",
     "_live_name": "Grand 4BR | Private Floor & Home Theater",
-    "_photo_note": "cover REJECTED: the cinema screen shows third-party content (a TV series) — superprompt photo rules. Pinned the living-room shot from the same gallery instead."
+    "_photo_note": "cover REJECTED: the cinema screen shows third-party content (a TV series) — superprompt photo rules. Pinned the living-room shot from the same gallery instead.",
+    "_name_note": "owner correction 2026-08-26: described as «مبنى خاص» — a private building, not a compound. Stays as the sixth unit."
   }
 ]
