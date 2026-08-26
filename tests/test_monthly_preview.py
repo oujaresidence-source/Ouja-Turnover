@@ -6,7 +6,7 @@ import unittest
 
 from monthly_public.catalog_service import CatalogService
 from monthly_public.catalog_store import CatalogStore
-from monthly_public.preview import build_preview_generation
+from monthly_public.preview import build_preview_app, build_preview_generation
 from tests.monthly_public_fixtures import NOW, valid_settings
 from tests.test_monthly_catalog_profiles import valid_settings as valid_settings_values
 from tests.test_monthly_catalog_service import source_listing
@@ -82,6 +82,84 @@ class MonthlyPreviewGenerationTest(unittest.TestCase):
         self.assertEqual(listing["name_ar"], "شقة 202 · بيانات قيد الإكمال")
         self.assertEqual(listing["name_en"], "Ouja | Apartment 202")
         self.assertEqual(listing["licence"], {})
+
+
+class MonthlyPreviewAppTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = CatalogStore(
+            os.path.join(self.tmp.name, "catalog.sqlite3"), clock=lambda: NOW
+        )
+        incomplete = source_listing(202)
+        incomplete["stay"].pop("title_ar")
+        incomplete["stay"].pop("title_en")
+        incomplete["stay"].pop("short_ar")
+        incomplete["stay"].pop("structured")
+        incomplete["licence"] = None
+        incomplete["publication"]["licence"] = None
+        source = {
+            "refresh_ok": True,
+            "catalog_complete": True,
+            "source_timestamps": {"listings": NOW.isoformat()},
+            "listings": [source_listing(101), incomplete],
+        }
+        self.service = CatalogService(
+            self.store,
+            source_provider=lambda: copy.deepcopy(source),
+            settings_fallback=valid_settings_values,
+            snapshot_refresh=lambda: {"accepted": True},
+            clock=lambda: NOW,
+        )
+        self.app = build_preview_app(self.service, clock=lambda: NOW)
+
+    def test_preview_config_uses_daily_ten_to_ten_and_blocks_contact(self):
+        config = self.app.config("ar")
+
+        self.assertTrue(config["ok"])
+        self.assertTrue(config["preview"])
+        self.assertEqual(config["eligible_count"], 2)
+        self.assertEqual(
+            config["deposit_range_sar"], {"minimum": 500, "maximum": 2500}
+        )
+        self.assertTrue(config["response_window"]["is_open"])
+        self.assertEqual(config["response_window"]["response_minutes"], 30)
+        self.assertTrue(
+            any(row["code"] == "whatsapp_missing" for row in config["blockers"])
+        )
+        self.assertIsNone(config["session_id"])
+
+    def test_preview_match_keeps_every_home_in_complete_catalog(self):
+        result = self.app.match(
+            {
+                "purpose": "family",
+                "residents": 2,
+                "sleeping": "one_bedroom",
+                "move_in": "2026-09-01",
+                "duration_months": 1,
+                "flexibility": "fixed",
+            },
+            "ar",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("202", [row["id"] for row in result["top"]])
+        self.assertTrue(all(row["availability_status"] == "available" for row in result["top"]))
+        self.assertEqual(len(result["catalog"]), 2)
+        self.assertTrue(all(row["preview"] for row in result["catalog"]))
+        incomplete = next(row for row in result["catalog"] if row["id"] == "202")
+        self.assertIn("licence_missing", incomplete["preview_missing"])
+        self.assertFalse(incomplete["preview_complete"])
+
+    def test_preview_listing_labels_missing_evidence_and_disables_leads(self):
+        detail = self.app.listing({"listing_id": "202", "lang": "en"})
+
+        self.assertTrue(detail["ok"])
+        self.assertTrue(detail["listing"]["preview"])
+        self.assertIn("arabic_title_missing", detail["listing"]["preview_missing"])
+        blocked = self.app.lead({})
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(blocked["error"]["code"], "preview_contact_disabled")
 
 
 if __name__ == "__main__":
