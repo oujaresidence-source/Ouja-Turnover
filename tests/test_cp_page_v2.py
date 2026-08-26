@@ -70,6 +70,33 @@ class TokensAndGuard(unittest.TestCase):
     def test_no_google_fonts_on_the_live_page(self):
         self.assertNotIn("fonts.googleapis.com", render())
 
+    def test_headings_use_thmanyah_display_and_body_stays_almarai(self):
+        """Owner decision 2026-08-27: the family's DISPLAY cut for headings —
+        it is the one drawn for large sizes, and every var(--serif) usage here
+        is a heading, a big figure or the logo. Long Arabic paragraphs keep
+        Almarai, which is a text face."""
+        html = render()
+        self.assertIn('--serif:"Thmanyah Display","Display Fallback",serif;', html)
+        self.assertIn('--sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', html)
+
+    def test_the_three_weights_the_design_calls_for_are_declared(self):
+        html = render()
+        for weight in ("ThmanyahDisplay-400", "ThmanyahDisplay-500",
+                       "ThmanyahDisplay-700"):
+            with self.subTest(weight=weight):
+                self.assertIn(weight, html)
+        # 600 headings must resolve to the Medium cut, not synthesise a fake bold
+        self.assertIn("font-weight:500 600", html)
+
+    def test_the_replaced_face_is_gone(self):
+        html = render()
+        self.assertNotIn("Noto Naskh", html)
+        self.assertNotIn("NotoNaskhArabic", html)
+
+    def test_the_display_weight_is_preloaded(self):
+        self.assertIn('rel="preload" href="/cp/font/ThmanyahDisplay-500.woff2"',
+                      render())
+
     def test_the_form_posts_to_the_real_endpoint(self):
         html = render()
         self.assertIn('action="/api/cp/lead"', html)

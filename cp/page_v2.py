@@ -202,7 +202,7 @@ def build_head_extra(base):
         '<link rel="canonical" href="/cp/ar">',
         '<link rel="icon" href="/cp/icon.png" type="image/png" sizes="64x64">',
         '<link rel="apple-touch-icon" href="/cp/icon-192.png">',
-        '<link rel="preload" href="/cp/font/NotoNaskhArabic-600.woff2" as="font" type="font/woff2" crossorigin>',
+        '<link rel="preload" href="/cp/font/ThmanyahDisplay-500.woff2" as="font" type="font/woff2" crossorigin>',
         '<link rel="preload" href="/cp/font/Almarai-400.woff2" as="font" type="font/woff2" crossorigin>',
         "__FONT_FACES__",
     ]

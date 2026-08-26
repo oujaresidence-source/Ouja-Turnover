@@ -161,7 +161,7 @@ RULES = [
     # local fallbacks (§2.4); Amiri/Readex never shipped, they were switcher
     # options.
     ('--serif:"Noto Naskh Arabic","Amiri",serif; --sans:"Almarai","Readex Pro",Tahoma,sans-serif;',
-     '--serif:"Noto Naskh Arabic","Naskh Fallback",serif; --sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', 1),
+     '--serif:"Thmanyah Display","Display Fallback",serif; --sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', 1),
 
     # PORT FIX — the page must be a document. The mock has NO <html> element at
     # all (it was authored to sit inside a preview wrapper), so the live page

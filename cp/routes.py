@@ -292,8 +292,8 @@ async def handle_asset(request):
 
 _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "fonts")
-_FONT_NAMES = ("NotoNaskhArabic-500.woff2", "NotoNaskhArabic-600.woff2",
-               "NotoNaskhArabic-700.woff2", "Almarai-300.woff2",
+_FONT_NAMES = ("ThmanyahDisplay-400.woff2", "ThmanyahDisplay-500.woff2",
+               "ThmanyahDisplay-700.woff2", "Almarai-300.woff2",
                "Almarai-400.woff2", "Almarai-700.woff2")
 
 
