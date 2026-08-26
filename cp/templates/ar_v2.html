@@ -1,0 +1,593 @@
+<title>عوجا للأملاك</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+__HEAD_EXTRA__
+<style>
+:root{
+  --beige:#EFE9DE; --beige2:#E4DCCB; --beige3:#D6CCB8; --white:#FFFFFF; --black:#141312; --black2:#221F1C;
+  --ink:#141312; --ink2:#4A453E; --mute:#7A7267; --faint:#A39B8E; --mkt:#8F877A; --line:#DCD4C5; --line-dark:#3A3631;
+  --serif:"Noto Naskh Arabic","Amiri",serif; --sans:"Almarai","Readex Pro",Tahoma,sans-serif;
+  --ease:cubic-bezier(.16,1,.3,1);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--beige);color:var(--ink);font-family:var(--sans);font-weight:400;font-size:17px;line-height:1.8;direction:rtl;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{margin:0;font-family:var(--serif);font-weight:600;text-wrap:balance}
+p{margin:0}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+.wrap{width:min(1200px,100% - 56px);margin-inline:auto}
+@media(max-width:640px){.wrap{width:min(1200px,100% - 32px)}}
+section{padding:96px 0}
+@media(max-width:768px){section{padding:64px 0}}
+.bg-white{background:var(--white)}.bg-beige{background:var(--beige)}.bg-black{background:var(--black);color:var(--white)}
+.eyebrow{font-size:13px;letter-spacing:.06em;color:var(--mute);margin-bottom:16px}
+.bg-black .eyebrow{color:var(--faint)}
+h2{font-size:clamp(30px,3.6vw,48px);line-height:1.4;max-width:22ch}
+.lede{font-size:clamp(16px,1.25vw,19px);line-height:1.85;max-width:58ch;margin-top:16px;color:var(--ink2)}
+.bg-black .lede{color:#BDB5A8}
+.small{font-size:13px;color:var(--mute);line-height:1.7}
+:focus-visible{outline:2px solid var(--black);outline-offset:4px}
+.skip{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip:focus{width:auto;height:auto;margin:0;overflow:visible;clip:auto;inset-inline-start:12px;top:12px;z-index:99;background:var(--black);color:var(--white);padding:10px 16px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
+.more{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:var(--ink);text-decoration:none;border:0;background:none;cursor:pointer;padding:10px 0;border-bottom:1px solid var(--ink);font-family:inherit}
+.more:hover{color:var(--mute);border-color:var(--mute)}
+.bg-black .more{color:var(--white);border-color:var(--white)}
+.more svg{width:16px;height:16px}
+
+.btn{display:inline-flex;align-items:center;gap:10px;font-weight:700;font-size:15px;padding:16px 26px;border-radius:6px;text-decoration:none;cursor:pointer;border:1px solid var(--black);background:var(--black);color:var(--white);transition:transform .25s var(--ease),background .2s;font-family:inherit}
+.btn:hover{background:var(--black2);transform:translateY(-1px)}
+.btn-line{background:transparent;color:var(--black)}.btn-line:hover{background:var(--white)}
+.bg-black .btn{background:var(--white);color:var(--black);border-color:var(--white)}
+
+.top{position:sticky;top:0;z-index:50;background:rgba(239,233,222,.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.top .row{display:flex;align-items:center;gap:26px;height:70px}
+.logo{display:flex;align-items:center;gap:12px;text-decoration:none;font-family:var(--serif);font-weight:700;font-size:24px;color:var(--ink)}
+.logo svg{width:32px;height:21px;flex:none}
+.top nav{display:flex;gap:24px;margin-inline-start:auto}
+.top nav a{font-size:14px;color:var(--ink2);text-decoration:none}
+.top nav a:hover,.top nav a.is-active{color:var(--ink)}
+.top .book{font-size:14px;padding:12px 20px}
+@media(max-width:900px){.top nav{display:none}}
+
+/* hero */
+.hero{padding:72px 0 64px}
+.hero .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+@media(max-width:960px){.hero .grid{grid-template-columns:1fr;gap:40px}}
+h1{font-size:clamp(34px,4.6vw,64px);line-height:1.38;max-width:16ch}
+h1 .w{color:var(--mute)}
+.hero .sub{margin-top:22px;font-size:clamp(16px,1.3vw,19px);color:var(--ink2);max-width:46ch}
+.hero .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}
+.card{background:var(--white);border:1px solid var(--line);border-radius:14px}
+.inst{padding:32px 32px 26px}
+.inst .label{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--mute)}
+.inst .label b{font-weight:700;color:var(--ink)}
+.inst .who{font-size:12px;padding:5px 12px;border-radius:999px;background:var(--beige);color:var(--mute);transition:all .3s}
+.inst.is-us .who{background:var(--black);color:var(--white)}
+.inst .big{font-family:var(--serif);font-weight:700;font-size:clamp(76px,9vw,128px);line-height:1;color:var(--mkt);margin:12px 0 4px;direction:ltr;text-align:right;transition:color .5s;font-variant-numeric:tabular-nums}
+.inst.is-us .big{color:var(--ink)}
+.inst .src{font-size:13px;color:var(--faint)}
+.inst .rail{height:6px;background:var(--beige);border-radius:4px;margin:20px 0 24px;overflow:hidden;position:relative}
+.inst .rail i{position:absolute;inset-inline-end:0;top:0;bottom:0;width:__MKT_OCC__%;background:var(--beige3);border-radius:4px;transition:width .7s var(--ease),background .5s}
+.inst.is-us .rail i{width:__OCC__%;background:var(--black)}
+.inst .tick{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--faint);inset-inline-end:__MKT_OCC__%}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.stats div{padding-top:16px;border-inline-start:1px solid var(--line);padding-inline-start:14px}
+.stats div:first-child{border:0;padding-inline-start:0}
+.stats .v{font-weight:700;font-size:clamp(20px,2vw,26px);line-height:1.1}
+.stats .k{font-size:12px;color:var(--mute);margin-top:5px;line-height:1.4}
+@media(max-width:520px){.stats{grid-template-columns:1fr 1fr;row-gap:16px}.stats div:nth-child(3){border:0;padding-inline-start:0}}
+.trust{display:flex;flex-wrap:wrap;gap:10px;margin-top:40px}
+.trust span{display:inline-flex;align-items:center;gap:8px;font-size:14px;padding:10px 16px;border-radius:999px;background:var(--white);border:1px solid var(--line);color:var(--ink2)}
+.trust svg{width:15px;height:15px;flex:none}
+
+/* doors */
+.doors{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:36px}
+@media(max-width:1000px){.doors{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.doors{grid-template-columns:1fr 1fr}}
+.door{background:var(--beige);border:1px solid var(--line);border-radius:12px;padding:22px 20px;text-decoration:none;display:flex;flex-direction:column;gap:8px;transition:background .25s,transform .25s var(--ease)}
+.door:hover{background:var(--white);transform:translateY(-2px)}
+.door b{font-family:var(--serif);font-weight:600;font-size:19px;line-height:1.4}
+.door span{font-size:13px;color:var(--mute);line-height:1.6}
+.door em{font-style:normal;font-size:13px;font-weight:700;margin-top:auto;padding-top:10px}
+
+/* THE DUEL CARD */
+.duel{margin-top:40px;border-radius:18px;overflow:hidden;border:1px solid var(--line);background:var(--white);box-shadow:0 30px 60px -40px rgba(20,19,18,.35)}
+.duel .row{display:grid;grid-template-columns:1fr 200px 1fr}
+@media(max-width:700px){.duel .row{grid-template-columns:1fr 92px 1fr}}
+.duel .row>div{padding:22px 28px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+@media(max-width:700px){.duel .row>div{padding:16px 12px}}
+.duel .row>.o{background:var(--black);color:var(--white)}
+.duel .row>.mid{align-items:center;text-align:center;border-inline:1px solid var(--line)}
+.duel .hd>div{padding-top:26px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.duel .hd .o{border-bottom-color:var(--line-dark)}
+.duel .hd b{font-family:var(--serif);font-weight:700;font-size:clamp(20px,2.2vw,28px);line-height:1.3}
+.duel .hd .m b{color:var(--ink2)}
+.duel .hd small{display:block;font-size:12px;color:var(--mute);margin-top:4px}
+.duel .hd .o small{color:#BDB5A8}
+.duel .hd .mid{font-size:12px;color:var(--faint)}
+.duel .r>div{border-bottom:1px solid var(--line)}
+.duel .r>.o{border-bottom-color:var(--line-dark)}
+.duel .r:last-child>div{border-bottom:0}
+.duel .v{font-family:var(--serif);font-weight:700;font-size:clamp(28px,3.4vw,52px);line-height:1;direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
+.duel .m .v{color:var(--mkt);font-weight:600}
+.duel .u{font-size:12px;color:var(--mute);margin-top:6px}
+.duel .o .u{color:#BDB5A8}
+.duel .mid .k{font-size:14px;font-weight:700;color:var(--ink);line-height:1.4}
+.duel .mid .bars{width:100%;margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.duel .mid .bars i{display:block;height:5px;border-radius:3px;width:0;transition:width 1s var(--ease)}
+.duel .mid .bars i.mb{background:var(--beige3)}
+.duel .mid .bars i.ob{background:var(--black)}
+.duel.in .mid .bars i{width:var(--w)}
+.duel .t{font-size:clamp(14px,1.2vw,17px);line-height:1.55;display:flex;gap:10px;align-items:flex-start;font-weight:400}
+.duel .m .t{color:var(--mute)}
+.duel .t svg{width:18px;height:18px;flex:none;margin-top:3px}
+.duel .o .t{font-weight:700}
+.duel .foot{padding:14px 28px;font-size:12px;color:var(--faint);border-top:1px solid var(--line);background:var(--beige)}
+@media(max-width:700px){.duel .v{font-size:26px}.duel .mid .k{font-size:12px}.duel .t{font-size:13px}.duel .t svg{width:14px;height:14px}.duel .foot{padding:12px}}
+
+.bench{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+@media(max-width:760px){.bench{grid-template-columns:1fr}}
+.bc{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.bc.o{background:var(--black);color:var(--white);border-color:var(--black)}
+.bc .s{display:block;font-size:11px;color:var(--faint);letter-spacing:.04em}
+.bc b{display:block;font-family:var(--serif);font-weight:600;font-size:17px;margin-top:4px}
+.bc .n{font-family:var(--serif);font-weight:700;font-size:34px;line-height:1.1;margin-top:8px;color:var(--mkt)}
+.bc.o .n{color:var(--white)}
+.bc .u{display:block;font-size:12px;color:var(--mute);margin-top:2px;line-height:1.5}
+.bc.o .u{color:#BDB5A8}
+/* proof */
+.shots{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:36px}
+@media(max-width:760px){.shots{grid-template-columns:1fr}}
+.shot{aspect-ratio:16/11;border-radius:12px;background:var(--beige);border:1px solid var(--line);position:relative;overflow:hidden}
+.shot .ui{position:absolute;inset:14px;display:grid;grid-template-columns:96px 1fr;gap:10px}
+.shot .ui .s{background:var(--white);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.shot .ui .s b{height:7px;border-radius:3px;background:var(--beige2);display:block}
+.shot .ui .s b:first-child{background:var(--black);width:60%}
+.shot .ui .mn{display:flex;flex-direction:column;gap:7px}
+.shot .ui .mn .row{background:var(--white);border-radius:6px;height:20px;display:flex;align-items:center;gap:8px;padding:0 10px}
+.shot .ui .mn .row b{height:5px;border-radius:3px;background:var(--beige2);flex:1}
+.shot .ui .mn .row i{width:7px;height:7px;border-radius:50%;background:var(--black)}
+.shot .cap{position:absolute;bottom:10px;inset-inline-start:12px;font-size:12px;color:var(--mute);background:rgba(255,255,255,.92);padding:4px 10px;border-radius:999px;border:1px solid var(--line)}
+@media(max-width:520px){.shot .ui{grid-template-columns:1fr}.shot .ui .s{display:none}}
+.scores{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:16px}
+@media(max-width:900px){.scores{grid-template-columns:repeat(3,1fr)}}
+.score{background:var(--beige);border-radius:12px;padding:18px 18px 16px}
+.score .v{font-family:var(--serif);font-weight:700;font-size:clamp(26px,2.6vw,36px);line-height:1}
+.score .k{font-size:12px;color:var(--mute);margin-top:6px}
+.score .bar{height:4px;background:var(--white);border-radius:3px;margin-top:12px;overflow:hidden}
+.score .bar i{display:block;height:100%;width:0;background:var(--black);transition:width 1s var(--ease)}
+.in .score .bar i{width:var(--w)}
+
+.four{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:36px}
+@media(max-width:900px){.four{grid-template-columns:1fr 1fr}}@media(max-width:520px){.four{grid-template-columns:1fr}}
+.fc{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:26px 24px;min-height:210px;display:flex;flex-direction:column;gap:10px}
+.fc svg{width:32px;height:32px;stroke:var(--black);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.fc b{font-family:var(--serif);font-weight:600;font-size:21px;line-height:1.4;margin-top:auto}
+.fc span{font-size:14px;color:var(--ink2);line-height:1.6}
+.fc .n{font-weight:700;font-size:34px;line-height:1;direction:ltr;text-align:right}
+
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:36px}
+@media(max-width:860px){.quotes{grid-template-columns:1fr}}
+.q{background:var(--beige);border-radius:14px;padding:26px 26px 22px;display:flex;flex-direction:column}
+.q.crit{border-inline-start:3px solid var(--black)}
+.q q{quotes:"«" "»";font-family:var(--serif);font-size:19px;line-height:1.8;display:block;flex:1}
+.q .who{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--mute);display:flex;align-items:center;gap:10px}
+.q .who .av{width:32px;height:32px;border-radius:50%;background:var(--black);color:var(--white);display:grid;place-items:center;font-size:13px;font-weight:700;flex:none}
+.q .who b{color:var(--ink)}
+
+.units{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:36px}
+@media(max-width:900px){.units{grid-template-columns:1fr 1fr}}@media(max-width:560px){.units{grid-template-columns:1fr}}
+.unit{background:var(--white);border:1px solid var(--line);border-radius:14px;overflow:hidden;text-decoration:none;display:block;transition:transform .3s var(--ease);cursor:pointer;text-align:start;font:inherit;color:inherit;padding:0}
+.unit:hover{transform:translateY(-3px)}
+.ph{aspect-ratio:4/3;background:var(--beige2);position:relative}
+.ph::after{content:"";position:absolute;inset:14px;border:1px solid rgba(20,19,18,.12);border-radius:6px}
+.ph .lab{position:absolute;bottom:22px;inset-inline-start:24px;font-size:12px;color:var(--mute)}
+.ph.dk{background:var(--black2)}.ph.dk::after{border-color:rgba(255,255,255,.14)}.ph.dk .lab{color:#A39B8E}
+.unit .b{padding:16px 20px 18px}
+.unit h3{font-size:20px}
+.unit .sp{font-size:13px;color:var(--mute);margin-top:2px}
+
+.fork{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:36px}
+@media(max-width:760px){.fork{grid-template-columns:1fr}}
+.fk{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:30px}
+.fk.dark{background:var(--black);color:var(--white);border-color:var(--black)}
+.fk .t{font-size:13px;color:var(--mute)}.fk.dark .t{color:#BDB5A8}
+.fk h3{font-size:24px;margin-top:4px}
+.fk .d{font-family:var(--serif);font-weight:700;font-size:44px;line-height:1;margin:14px 0 4px}
+.fk .d small{font-family:var(--sans);font-weight:400;font-size:14px;margin-inline-start:8px;color:var(--mute)}
+.fk.dark .d small{color:#BDB5A8}
+.fk ol{margin:20px 0 0;padding:0;list-style:none;counter-reset:s}
+.fk li{counter-increment:s;display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px 0;border-top:1px solid var(--line);font-size:15px;align-items:baseline}
+.fk.dark li{border-color:var(--line-dark)}
+.fk li::before{content:counter(s,arabic-indic);font-family:var(--serif);font-weight:700;font-size:18px}
+.fk li b{font-weight:700;display:block}
+.fk li span{color:var(--mute);font-size:14px}.fk.dark li span{color:#BDB5A8}
+
+.gov{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:36px}
+@media(max-width:900px){.gov{grid-template-columns:1fr 1fr}}@media(max-width:520px){.gov{grid-template-columns:1fr}}
+.gv{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:22px}
+.gv b{font-family:var(--serif);font-weight:600;font-size:19px;display:block;margin-bottom:6px}
+.gv span{font-size:14px;color:var(--ink2);line-height:1.65}
+
+/* meet */
+.meet .grid{display:grid;grid-template-columns:1fr 1fr;gap:56px;margin-top:40px;align-items:start}
+@media(max-width:940px){.meet .grid{grid-template-columns:1fr;gap:40px}}
+.ways{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:28px}
+@media(max-width:520px){.ways{grid-template-columns:1fr}}
+.way{border:1px solid var(--line-dark);border-radius:12px;padding:20px}
+.way b{font-family:var(--serif);font-weight:600;font-size:20px;display:block}
+.way span{font-size:14px;color:#BDB5A8;line-height:1.6;display:block;margin-top:4px}
+.agenda{list-style:none;margin:28px 0 0;padding:0;counter-reset:a;columns:2;column-gap:32px}
+@media(max-width:600px){.agenda{columns:1}}
+.agenda li{counter-increment:a;padding:10px 0;border-top:1px solid var(--line-dark);display:grid;grid-template-columns:28px 1fr;gap:8px;font-size:15px;break-inside:avoid;color:#DDD6C8}
+.agenda li::before{content:counter(a,arabic-indic);font-family:var(--serif);color:var(--faint)}
+.resv{background:var(--white);color:var(--ink);border-radius:16px;padding:34px 32px}
+.resv h3{font-size:clamp(24px,2.4vw,32px);line-height:1.45}
+.resv .p{font-size:14px;color:var(--mute);margin-top:10px;line-height:1.7}
+form{display:grid;gap:16px;margin-top:24px}
+.f label,.f .l{display:block;font-size:12px;letter-spacing:.04em;color:var(--mute);margin-bottom:8px}
+.f input{width:100%;background:var(--beige);border:1px solid var(--line);border-radius:8px;padding:13px 14px;font:inherit;font-size:16px;color:var(--ink)}
+.f input:focus{outline:none;border-color:var(--black);background:var(--white)}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.seg label{cursor:pointer}.seg input{position:absolute;opacity:0;width:0;height:0}
+.seg span{display:inline-block;padding:9px 14px;border:1px solid var(--line);border-radius:999px;font-size:14px;color:var(--ink2)}
+.seg input:checked+span{background:var(--black);color:var(--white);border-color:var(--black)}
+.seg input:focus-visible+span{outline:2px solid var(--black);outline-offset:2px}
+.seg.big label{flex:1}
+.seg.big span{display:block;text-align:center;padding:14px;border-radius:10px;font-weight:700}
+.fa{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.fa .alt{font-size:14px;color:var(--mute)}
+.err{display:none;font-size:14px;color:#8E3B2A}
+.ok{display:none;padding-top:20px;border-top:1px solid var(--line);margin-top:20px}
+.ok b{font-family:var(--serif);font-size:24px;display:block;margin-bottom:4px}
+.ok p{font-size:14px;color:var(--mute)}
+.resv.sent form{display:none}.resv.sent .ok{display:block}
+.hp{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);opacity:0;pointer-events:none}
+
+footer{padding:52px 0 36px;border-top:1px solid var(--line)}
+.fgrid{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.4fr;gap:32px}
+@media(max-width:900px){.fgrid{grid-template-columns:1fr 1fr}}@media(max-width:560px){.fgrid{grid-template-columns:1fr}}
+footer h4{font-size:12px;letter-spacing:.04em;color:var(--faint);margin:0 0 10px;font-weight:400}
+footer p,footer li{font-size:14px;color:var(--mute);line-height:1.7}
+footer ul{list-style:none;margin:0;padding:0}
+footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line)}
+.fbot{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--faint)}
+.skip{position:absolute;inset-inline-start:12px;top:-60px;background:var(--black);color:var(--white);padding:10px 16px;z-index:100;text-decoration:none}
+.skip:focus{top:12px}
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .8s var(--ease),transform .8s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+
+/* DRAWER (learn more) */
+.scrim{position:fixed;inset:0;background:rgba(20,19,18,.45);z-index:80;opacity:0;pointer-events:none;transition:opacity .3s}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;bottom:0;inset-inline-start:0;width:min(600px,100%);background:var(--white);color:var(--ink);z-index:90;transform:translateX(-102%);transition:transform .45s var(--ease);overflow-y:auto;box-shadow:0 0 80px rgba(0,0,0,.25);visibility:hidden}
+.drawer.on{transform:none;visibility:visible}
+.drawer .dh{position:sticky;top:0;background:var(--white);border-bottom:1px solid var(--line);padding:18px 28px;display:flex;justify-content:space-between;align-items:center;z-index:2}
+.drawer .dh b{font-family:var(--serif);font-size:22px;font-weight:600}
+.drawer .dh button{background:var(--beige);border:0;width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:20px;color:var(--ink)}
+.drawer .db{padding:26px 28px 60px}
+.drawer .db>*{display:none}
+.drawer .db>.on{display:block}
+.dsec h4{font-family:var(--serif);font-weight:600;font-size:20px;margin:26px 0 8px}
+.dsec h4:first-child{margin-top:0}
+.dsec p{font-size:15px;color:var(--ink2);line-height:1.85;margin:0 0 10px}
+.dsec .kv{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:15px;align-items:baseline}
+.dsec .kv:last-of-type{border-bottom:1px solid var(--line)}
+.dsec .kv b{font-family:var(--serif);font-weight:700;font-size:20px;direction:ltr;text-align:left;font-variant-numeric:tabular-nums}
+.dsec .kv .g{color:var(--mkt);font-weight:600;font-size:16px}
+.dsec .kv .pair{display:inline-flex;gap:14px;align-items:baseline;direction:ltr}
+.dsec ol{padding:0;margin:0;list-style:none;counter-reset:d}
+.dsec ol li{counter-increment:d;padding:12px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:30px 1fr;gap:10px;font-size:15px}
+.dsec ol li::before{content:counter(d,arabic-indic);font-family:var(--serif);font-weight:700;font-size:18px}
+.dsec ol li b{display:block;font-weight:700}
+.dsec ol li span{color:var(--mute);font-size:14px;line-height:1.7}
+.dsec q{quotes:"«" "»";font-family:var(--serif);font-size:17px;line-height:1.8;display:block;background:var(--beige);padding:16px 18px;border-radius:10px;margin:0 0 6px}
+.dsec .who{font-size:13px;color:var(--mute);margin-bottom:16px}
+.dsec .chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
+.dsec .chips span{font-size:13px;padding:8px 14px;border:1px solid var(--line);border-radius:999px}
+.dsec .chips b{font-weight:700}
+.dsec .cta{margin-top:26px}
+
+/* FONT AUDIT SWITCHER (remove before launch) */
+@media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important}.reveal{opacity:1;transform:none}}
+</style>
+
+<a class="skip" href="#main">تجاوز إلى المحتوى</a>
+<a class="skip" href="#main">تخطَّ إلى المحتوى</a>
+<header class="top">
+  <div class="wrap row">
+    <a class="logo" href="#hero" aria-label="عوجا للأملاك" title="مكان الشعار الرسمي"><svg viewBox="0 0 34 22" aria-hidden="true"><path d="M1 21 L17 3 L33 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/><path d="M8 21 L17 11 L26 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/></svg>عوجا</a>
+    <nav id="nav" aria-label="الأقسام"><a href="#compare">السوق وعوجا</a><a href="#proof">الدليل</a><a href="#residences">الوحدات</a><a href="#owners">للمُلّاك</a><a href="#meet">اللقاء</a></nav>
+    <a class="btn book" href="#meet">احجز لقاءً</a>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero bg-beige" id="hero">
+  <div class="wrap">
+    <div class="grid">
+      <div>
+        <h1>في الرياض <span class="num">__MKT_ROUND__</span> وحدة للإيجار القصير. <span class="w">أغلبها فارغ ليلتين من كل ثلاث.</span> وحداتنا لا.</h1>
+        <p class="sub">نُشغّل __RESIDENCES__ وحدة مفروشة في الرياض على نظام بنيناه بأنفسنا — لأن ما يُباع في السوق لم يُصنع لهذا العمل.</p>
+        <div class="actions"><a class="btn" href="#meet">احجز لقاءً</a><a class="btn btn-line" href="#compare">السوق مقابل عوجا</a></div>
+      </div>
+      <div class="card inst" id="inst" aria-live="polite" data-occ="__OCC__" data-mkt="__MKT_OCC__" data-asof="__ASOF_LINE__">
+        <div class="label"><b id="instLabel">الإشغال · متوسط الرياض</b><span class="who" id="instWho">السوق</span></div>
+        <div class="big num" id="instBig">__MKT_OCC__%</div>
+        <div class="src" id="instSrc">AirDNA الرياض، يوليو 2026 · __MKT_LISTINGS__ وحدة</div>
+        <div class="rail"><i></i><span class="tick"></span></div>
+        <div class="stats">
+          <div><div class="v num" data-count="8114">__RESERVATIONS__</div><div class="k">حجزاً مكتملاً</div></div>
+          <div><div class="v num" data-count="13093">__NIGHTS__</div><div class="k">ليلة ضيافة</div></div>
+          <div><div class="v num">__RATING__</div><div class="k">من 5 · عبر __REVIEWS__ مراجعة</div></div>
+          <div><div class="v num">__SAUDI__%</div><div class="k">من ضيوفنا سعوديون</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="trust">
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>تصريح سياحي لكل وحدة</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>رابحة ومموّلة ذاتياً منذ 2024</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>__REPEAT_GUESTS__ ضيفاً عادوا إلينا</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>كل رقم هنا له مصدر وتاريخ</span>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white" id="start" style="padding-top:64px;padding-bottom:64px">
+  <div class="wrap">
+    <p class="eyebrow">ابدأ من هنا</p>
+    <h2>أنت هنا لأنك…</h2>
+    __DOORS__
+  </div>
+</section>
+
+<section class="bg-beige" id="compare">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">السوق مقابل عوجا</p><h2>المؤشر نفسه. رقمان.</h2><p class="lede">سوق الرياض بحسب AirDNA (يوليو 2026، على __MKT_LISTINGS__ وحدة)، وعوجا بحسب نظامنا (حتى أغسطس 2026، على كامل المحفظة).</p></div><a class="more" href="/cp/ar/more/compare" data-drawer="compare">اعرف المزيد عن الأرقام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="duel reveal" data-observe>
+      <div class="row hd"><div class="m"><b>سوق الرياض</b><small>AirDNA · يوليو 2026 · __MKT_LISTINGS__ وحدة</small></div><div class="mid">المؤشر</div><div class="o"><b>عوجا</b><small>__RESIDENCES__ وحدة · حتى أغسطس 2026</small></div></div>
+      <div class="row r"><div class="m"><div class="v num">__MKT_OCC__%</div><div class="u">فارغ ليلتين من كل ثلاث</div></div><div class="mid"><div class="k">الإشغال</div><div class="bars"><i class="mb" style="--w:__W_OCC_M__%"></i><i class="ob" style="--w:100%"></i></div></div><div class="o"><div class="v num">__OCC__%</div><div class="u">كامل المحفظة</div></div></div>
+      <div class="row r"><div class="m"><div class="v num">__MKT_ADR__</div><div class="u">ريال · متوسط المدينة</div></div><div class="mid"><div class="k">سعر الليلة</div><div class="bars"><i class="mb" style="--w:__W_ADR_M__%"></i><i class="ob" style="--w:100%"></i></div></div><div class="o"><div class="v num">__ADR__</div><div class="u">ريال · وآخر 90 يوماً: __ADR90__</div></div></div>
+      <div class="row r"><div class="m"><div class="v num">__MKT_REVPAR__</div><div class="u">ريال · متوسط المدينة</div></div><div class="mid"><div class="k">العائد لكل ليلة متاحة</div><div class="bars"><i class="mb" style="--w:__W_REVPAR_M__%"></i><i class="ob" style="--w:100%"></i></div></div><div class="o"><div class="v num">__REVPAR__</div><div class="u">ريال · الوحدات النشطة: __REVPAR_ACT__</div></div></div>
+      <div class="row r"><div class="m"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>غالباً بلا تصريح</div></div><div class="mid"><div class="k">التصريح السياحي</div></div><div class="o"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>لكل وحدة، من أول يوم</div></div></div>
+      <div class="row r"><div class="m"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>اتصل، وانتظر</div></div><div class="mid"><div class="k">الرد على الضيف</div></div><div class="o"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>بالعربية خلال __RESPONSE__ دقيقة، ليلاً ونهاراً</div></div></div>
+      <div class="row r"><div class="m"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>جدول إكسل ومجموعة واتساب</div></div><div class="mid"><div class="k">نظام التشغيل</div></div><div class="o"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>نظام خاص بنا، بنيناه لهذا العمل</div></div></div>
+      <div class="row r"><div class="m"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>عقد يقيّدك</div></div><div class="mid"><div class="k">عقد المالك</div></div><div class="o"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>إشعار شهر، وتستعيد عقارك</div></div></div>
+      <div class="row r"><div class="m"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>قد لا تكون للوحدة نفسها</div></div><div class="mid"><div class="k">الصور</div></div><div class="o"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>كل صورة هي للوحدة نفسها</div></div></div>
+      <div class="foot">العائد لكل ليلة متاحة يحسب كل ليلة كانت الوحدة فيها متاحة، بما فيها الفارغة — وهو الرقم الوحيد الذي لا يمكن تجميله. سعر الصرف __FX__ ريال للدولار.</div>
+    </div>
+    __BENCH__
+  </div>
+</section>
+
+<section class="bg-white" id="proof">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">الدليل</p><h2>نظام نديره كل صباح، وضيوف يقيّمونه كل ليلة.</h2></div><a class="more" href="/cp/ar/more/system" data-drawer="system">اعرف المزيد عن النظام <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    __SHOTS__
+    <p class="eyebrow" style="margin-top:44px;margin-bottom:0">تقييم الضيوف بحسب الفئة · من 10 · عبر __REVIEWS__ مراجعة منشورة</p>
+    <div class="scores reveal" data-observe>
+      <div class="score"><div class="v num">__CAT_COMM__</div><div class="k">التواصل</div><div class="bar"><i style="--w:__WC_COMM__%"></i></div></div>
+      <div class="score"><div class="v num">__CAT_CHECKIN__</div><div class="k">تسجيل الدخول</div><div class="bar"><i style="--w:__WC_CHECKIN__%"></i></div></div>
+      <div class="score"><div class="v num">__CAT_ACCURACY__</div><div class="k">مطابقة الوصف</div><div class="bar"><i style="--w:__WC_ACCURACY__%"></i></div></div>
+      <div class="score"><div class="v num">__CAT_LOCATION__</div><div class="k">الموقع</div><div class="bar"><i style="--w:__WC_LOCATION__%"></i></div></div>
+      <div class="score"><div class="v num">__CAT_CLEAN__</div><div class="k">النظافة</div><div class="bar"><i style="--w:__WC_CLEAN__%"></i></div></div>
+      <div class="score"><div class="v num">__CAT_VALUE__</div><div class="k">القيمة مقابل السعر</div><div class="bar"><i style="--w:__WC_VALUE__%"></i></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-beige" id="stay">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">إقامة واحدة في عوجا</p><h2>إقامة كاملة، بلا مكالمة واحدة.</h2></div><a class="more" href="/cp/ar/more/stay" data-drawer="stay">اعرف المزيد عن الإقامة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="four">
+      <div class="fc"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/><circle cx="18" cy="16" r="3"/></svg><b>مطابقة، لا قائمة</b><span>نسأل عن سبب الإقامة، ثم نشرح بالعربية أي وحدة تناسبك.</span></div>
+      <div class="fc"><div class="n num">__RESPONSE__</div><b>دقيقة، متوسط الرد</b><span>بالعربية، في أي ساعة. الطوارئ تذهب إلى موظف بتذكرة وموعد.</span></div>
+      <div class="fc"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="14" r="2"/><path d="M12 10v2"/></svg><b>رمز الباب هو رقمك</b><span>آخر أربعة أرقام من جوالك، وينتهي بمغادرتك. لا مفتاح، ولا رمز يبقى.</span></div>
+      <div class="fc"><div class="n num">__PER_PERSON__</div><b>وحدات لكل موظف يومياً</b><span>فريقنا وحده يفحص كل وحدة على قائمة ثابتة قبل وصولك.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-white" id="guests" style="padding-top:64px">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">بكلماتهم · منشورة كما كُتبت</p><h2><span class="num">__REVIEWS__</span> ضيفاً قيّمونا. هؤلاء ثلاثة منهم.</h2></div><a class="more" href="/cp/ar/more/guests" data-drawer="guests">اعرف المزيد عن الضيوف <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    __PAGE_QUOTES__
+  </div>
+</section>
+
+<section class="bg-beige" id="residences">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">المحفظة</p><h2>بعض وحداتنا</h2><p class="lede">من الاستوديو إلى أربع غرف، داخل مجمعات مُدارة في شمال الرياض. كل صورة هي للوحدة نفسها.</p></div><a class="more" href="/cp/ar/more/units" data-drawer="units">اعرف المزيد عن الوحدات <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    __UNITS_GRID__
+  </div>
+</section>
+
+<section class="bg-white" id="owners">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">للمُلّاك</p><h2>من مفتاحك إلى أول حجز</h2><p class="lede">حصة من الإيراد، بلا دفعة مقدمة، وبلا رسوم على الليالي الفارغة. عقد سنة، إشعار شهر، وتستعيد عقارك.</p></div><a class="more" href="/cp/ar/more/owners" data-drawer="owners">اعرف المزيد للمُلّاك <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="fork">
+      <div class="fk"><div class="t">عقارك مفروش</div><h3>يبدأ دخلك خلال</h3><div class="d num">__DAYS_FURN__ <small>أيام تقريباً</small></div>
+        <ol><li><div><b>معاينة ورفع إلى معيارنا</b><span>نختبر الإنترنت ونغلق كل خلل، بعرض سعر واحد لا يُطلب قبل موافقتك.</span></div></li><li><div><b>تنظيف عميق وتصوير احترافي</b><span>كل صورة تُنشر هي للوحدة نفسها.</span></div></li><li><div><b>تصريح باسمك، وأول حجز</b><span>على المعيار نفسه الذي تعمل به المحفظة كلها.</span></div></li></ol></div>
+      <div class="fk dark"><div class="t">عقارك غير مفروش</div><h3>يبدأ دخلك خلال</h3><div class="d num">__DAYS_UNFURN__ <small>يوماً تقريباً</small></div>
+        <ol><li><div><b>رفع مساحي وتصميم كامل</b><span>مبني على ما تعلمناه من __RESERVATIONS__ إقامة عن استخدام المساحة.</span></div></li><li><div><b>التصميم والسعر في جلسة واحدة</b><span>رقم واحد مفصّل بنداً بنداً. وإن انسحبت، فالتصميم لك.</span></div></li><li><div><b>التأثيث، ثم المعيار نفسه</b><span>توصيل وتركيب وفق جدول، ثم تصوير وتصريح باسمك.</span></div></li></ol></div>
+    </div>
+    <div style="margin-top:28px"><a class="btn" href="#meet">احجز لقاء الـ45 دقيقة</a></div>
+  </div>
+</section>
+
+<section class="bg-beige" id="governance" style="padding-top:64px">
+  <div class="wrap">
+    <div class="head"><div><p class="eyebrow">بوضوح</p><h2>أين نقف، وأين لا نقف</h2></div><a class="more" href="/cp/ar/more/gov" data-drawer="gov">اعرف المزيد عن الحوكمة <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button></div>
+    <div class="gov">
+      <div class="gv"><b>التصاريح</b><span>لكل وحدة على حدة، وتجديدها متابَع في النظام. لا تُشغَّل وحدة بلا تصريح ساري.</span></div>
+      <div class="gv"><b>التأمين</b><span>اليوم عبر حماية المضيف في منصة الحجز. التغطية التجارية مُسعَّرة وهي البند التالي — نقولها لأنك ستسأل.</span></div>
+      <div class="gv"><b>الضبط المالي</b><span>مرجع واحد لكل حجز وتحويل. أي رقم يُدخل يدوياً يحتاج قيمة وتاريخاً ومصدراً.</span></div>
+      <div class="gv"><b>ما نرفضه</b><span>لم نعرض وحدة بلا تصريح قط، لا نقيّد المُلّاك، وسلّمنا مُلّاكاً إلى صفقات أفضل من صفقتنا.</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="bg-black meet" id="meet">
+  <div class="wrap">
+    <div class="grid">
+      <div>
+        <p class="eyebrow">باتفاقية سرية</p>
+        <h2>أفضل الأرقام ليست هنا.</h2>
+        <p class="lede">ننشر الأداء العام لأنك تستطيع التحقق منه. أما الأتعاب والتكاليف وصافي عائد المالك، فنفتحها معك في غرفة البيانات خلال 45 دقيقة.</p>
+        <div class="ways">
+          <div class="way"><b>عن بُعد</b><span>اتصال مرئي، نشارك الشاشة ونستعرض النظام مباشرة.</span></div>
+          <div class="way"><b>في مكتبنا</b><span>في الرياض، نفتح غرفة البيانات ونجيب عن كل سؤال.</span></div>
+        </div>
+        <ol class="agenda"><li>هيكل الأتعاب</li><li>صافي ما يعود للمالك</li><li>الإيراد بحسب الوحدة والقناة</li><li>قاعدة التكلفة ونموذج الفرق</li><li>كشف مالك شهري كامل</li><li>القنوات والحجز المباشر</li><li>منطق التسعير</li><li>الطاقة والموظفون عند 200 وحدة</li><li>وثائق التراخيص والتصاريح</li><li>تعريفات كل مؤشر في الصفحة</li></ol>
+      </div>
+      <div class="resv" id="resv">
+        <h3>احجز اللقاء.</h3>
+        <p class="p">خمس وأربعون دقيقة. اختر الطريقة والوقت، ونؤكد الموعد على جوالك.</p>
+        <form id="lead" method="post" action="/api/cp/lead" novalidate>
+          <div class="f"><span class="l">طريقة اللقاء</span><div class="seg big" role="radiogroup" aria-label="طريقة اللقاء"><label><input type="radio" name="mode" value="online" checked><span>عن بُعد · اتصال مرئي</span></label><label><input type="radio" name="mode" value="office"><span>في مكتبنا · الرياض</span></label></div></div>
+          <div class="f"><label for="name">الاسم</label><input id="name" name="name" autocomplete="name" required></div>
+          <div class="f"><label for="phone">رقم الجوال</label><input id="phone" name="phone" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="05xxxxxxxx" required></div>
+          <div class="f"><span class="l">أنت هنا لأنك</span><div class="seg" role="radiogroup" aria-label="سبب الزيارة"><label><input type="radio" name="audience" value="owner" checked><span>تملك عقاراً</span></label><label><input type="radio" name="audience" value="investor"><span>تدرس الاستثمار</span></label><label><input type="radio" name="audience" value="corporate"><span>تسكن موظفيك</span></label><label><input type="radio" name="audience" value="platform"><span>منصة حجز</span></label><label><input type="radio" name="audience" value="supplier"><span>مورّد</span></label></div></div>
+          <div class="f"><span class="l">الوقت الأنسب</span><div class="seg" role="radiogroup" aria-label="الوقت"><label><input type="radio" name="slot" value="am" checked><span>صباحاً</span></label><label><input type="radio" name="slot" value="pm"><span>بعد الظهر</span></label><label><input type="radio" name="slot" value="eve"><span>مساءً</span></label></div></div>
+          <input class="hp" type="text" name="company_url" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <p class="err" id="err" role="alert"></p>
+          __BOOKING_BUTTON__<div class="fa"><button class="btn" type="submit">احجز اللقاء</button><span class="alt">أو <a href="__WA_HREF__" target="_blank" rel="noopener">واتساب</a> · <a href="__MAIL_HREF__">بريد</a></span></div>
+        </form>
+        <div class="ok" role="status"><b>تم الحجز.</b><p id="okText" data-tpl="__RESV_OK__">__RESV_OK__</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="bg-beige">
+  <div class="wrap">
+    <div class="fgrid">
+      <div><div class="logo" style="font-size:22px"><svg viewBox="0 0 34 22" aria-hidden="true"><path d="M1 21 L17 3 L33 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/><path d="M8 21 L17 11 L26 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/></svg>عوجا للأملاك</div><p style="margin-top:10px">الرياض، المملكة العربية السعودية<br>رابحة ومموّلة ذاتياً منذ التأسيس.</p></div>
+      <div><h4>الشراكات والمُلّاك</h4><ul><li><a href="__WA_PLAIN__" target="_blank" rel="noopener">واتساب</a></li><li style="margin-top:6px"><a href="__MAIL_PLAIN__">__EMAIL_TEXT__</a></li></ul></div>
+      <div><h4>هذا الملف</h4><ul><li><a href="#hero">oujares.com/cp</a></li><li style="margin-top:6px"><span style="color:var(--faint)">النسخة الإنجليزية — قريباً</span></li></ul></div>
+      <div><h4>عن الأرقام</h4><p>أرقام التشغيل حتى أغسطس 2026 من نظامنا على كامل المحفظة. مقارنات السوق من AirDNA الرياض، يوليو 2026. التقييمات متوسط المراجعات المنشورة، بما فيها المنخفضة.</p></div>
+    </div>
+    <div class="fbot"><span>© 2026 عوجا للأملاك</span><span>كل رقم في هذه الصفحة له مصدر وتاريخ.</span></div>
+  </div>
+</footer>
+
+<!-- ===== DRAWERS ===== -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-labelledby="dTitle">
+  <div class="dh"><b id="dTitle">المزيد</b><button id="dClose" aria-label="إغلاق">×</button></div>
+  <div class="db">
+    <div class="dsec" data-d="compare" data-title="الأرقام بالتفصيل">
+      <h4>الإشغال بحسب نوع الوحدة</h4>
+      <p>متوسط المدينة __MKT_OCC__% لكل الأنواع (AirDNA). الوحدات الأكبر تُقايض الإشغال بالسعر عن قصد.</p>
+      __OCC_TYPES__
+      <h4>السعر والعائد</h4>
+      <div class="kv"><span>متوسط سعر الليلة منذ البداية</span><b>__ADR__</b></div>
+      <div class="kv"><span>متوسط سعر الليلة · آخر 90 يوماً</span><b>__ADR90__</b></div>
+      <div class="kv"><span>العائد لكل ليلة متاحة · كامل المحفظة</span><b>__REVPAR__</b></div>
+      <div class="kv"><span>العائد لكل ليلة متاحة · الوحدات النشطة</span><b>__REVPAR_ACT__</b></div>
+      <p style="margin-top:12px">العائد لكل ليلة متاحة = الإيراد ÷ كل الليالي التي كانت الوحدة فيها متاحة، بما فيها الفارغة. لذلك لا يمكن تجميله بتقليل الليالي المعروضة.</p>
+      <h4>لماذا يتّسع الفارق</h4>
+      <p><b>الطلب على جدول معلن:</b> إكسبو 2030، وكأس العالم 2034، وموسم الرياض كل عام، ومقارّ إقليمية تنتقل إلى المدينة.</p>
+      <p><b>العرض كبير وهاوٍ:</b> __MKT_ROUND__ وحدة بإشغال __MKT_OCC__% هي سوق يملكه أفراد، لكل منهم وحدة أو وحدتان بلا نظام.</p>
+      <p><b>الإيجارات السنوية مثبّتة حتى 2030:</b> فالإقامة المفروشة القصيرة والشهرية هي المسار الوحيد الذي بقي فيه مجال للحركة.</p>
+      <p><b>الرقابة تشتدّ:</b> أغلب المعروض لا يصمد أمام تدقيق التصاريح. وكل وحدة لدينا تحمل تصريحها من أول يوم.</p>
+      <h4>مقارنات رسمية أخرى</h4>
+      <div class="kv"><span>الشقق المخدومة في الرياض · إشغال (وزارة السياحة، الربع الأول 2026)</span><b>__MOT_OCC__%</b></div>
+      <div class="kv"><span>الشقق المخدومة على مستوى المملكة · متوسط سعر الليلة</span><b>__MOT_ADR__</b></div>
+      <div class="kv"><span>فنادق المملكة · إشغال (نايت فرانك، يناير–أبريل 2026)</span><b>__KF_OCC__%</b></div>
+      <div class="kv"><span>فنادق المملكة · متوسط سعر الليلة · العائد لكل ليلة متاحة</span><b>__KF_ADR__ · __KF_REVPAR__</b></div>
+      <div class="kv"><span>عوجا · إشغال · سعر الليلة · العائد لكل ليلة متاحة</span><b>__OCC__% · __ADR__ · __REVPAR__</b></div>
+      <p style="margin-top:12px">سوق الرياض خلال سنة (AirDNA): الإشغال +__YOY_OCC__%، والسعر −__YOY_ADR__%، وعدد الوحدات المعروضة −__YOY_SUPPLY__%. السوق ينمو بالطلب لا بالسعر — ومن يشغّل جيداً يأخذ الاثنين.</p>
+      <h4>سلوك الطلب الذي نبني عليه</h4>
+      <div class="kv"><span>حجوزات لليوم نفسه</span><b>__SAMEDAY__%</b></div>
+      <div class="kv"><span>حجوزات خلال 24 ساعة من الوصول</span><b>__WITHIN24__%</b></div>
+      <div class="kv"><span>الخميس والجمعة من كل الوصول</span><b>__THUFRI__%</b></div>
+      <div class="kv"><span>سعر الليلة في نهاية الأسبوع مقابل وسطه</span><b>__WKND_HIGH__ · __WKND_LOW__</b></div>
+      <div class="kv"><span>إقامة مباشرة (بلا منصة) · متوسط الليالي</span><b>3.7</b></div>
+      <h4>النمو</h4>
+      <p>الأشهر الثمانية الأولى من 2026 حققت قرابة ضعف حجم 2025 كاملاً، مع ارتفاع السعر 22% دون تخفيضات، وبقي التقييم عند __RATING__. الإشغال الشهري في 2026 تراوح بين __OCC_LOW__% (يونيو، موسم الحج) و__OCC_HIGH__% (يناير).</p>
+      <p>الإقامات من أربع ليالٍ فأكثر: 6% من الحجوزات و26% من الإيراد — وهذا سبب اختيارنا للطلب الشركاتي والشهري مساراً للنمو.</p>
+      <div class="cta"><a class="btn" href="#meet" data-close>احجز لقاءً لرؤية غرفة البيانات</a></div>
+    </div>
+
+    <div class="dsec" data-d="system" data-title="النظام الذي بنيناه">
+      <p>بحثنا عن نظام يدير هذا العمل كما ينبغي. كل نظام جاد في السوق يفترض فندقاً: مبنى واحد، استقبال واحد، فريق واحد. ولا شيء من ذلك ينطبق على __RESIDENCES__ وحدة موزّعة على ستة مجمعات. فبنيناه.</p>
+      <h4>ماذا يدير</h4>
+      <div class="chips"><span><b>التسعير</b> · سبب مكتوب لكل تاريخ</span><span><b>التجهيز</b> · جدولة وإسناد</span><span><b>التغطية</b> · إسناد تلقائي عند الغياب</span><span><b>الصيانة</b> · تذاكر بمواعيد</span><span><b>التعويضات</b> · من العرض إلى الصرف</span><span><b>المطابقة</b> · كل ريال مُطابَق</span><span><b>تقارير المُلّاك</b> · شهرية ولحظية</span><span><b>التدقيق</b> · سجلات لا تُعدَّل</span><span><b>مساعد الضيوف</b> · رسائل محمية برمجياً</span></div>
+      <div class="kv"><span>سطر برمجي في التشغيل اليومي</span><b>__LOC__</b></div>
+      <div class="kv"><span>رسالة ضيوف مرّت عبر النظام</span><b>__MESSAGES__</b></div>
+      <div class="kv"><span>متوسط رد الموظف · دقيقة</span><b>__RESPONSE__</b></div>
+      <div class="kv"><span>تذكرة صيانة أُغلقت في موعدها</span><b>~__MAINT__</b></div>
+      <h4>ماذا استبدل</h4>
+      <p>جدول الإكسل ومجموعة الواتساب التي ما زال أغلب السوق يعمل بها. لا شيء عندنا ينتظر أن يتذكّر أحدهم قراءة محادثة.</p>
+      <h4>لماذا يصعب اللحاق</h4>
+      <p>كل حجز يزيد التسعير دقة، وكل تجهيز يضبط التوزيع أكثر. يمكن للمنافس شراء الأدوات نفسها غداً، لكنه لا يشتري سنتين من هذا السوق مكتوبة في الكود.</p>
+      <h4>مبنيّون لـ200 وحدة</h4>
+      <p>22 موظفاً منظّمون حول هيكل إداري صُمّم ليحمل قرابة 200 وحدة دون توظيف إداري إضافي. أربع وحدات لكل موظف يومياً، ومسؤول واحد لكل 12 وحدة. رسائل الضيوف تضاعفت ثمانية أضعاف في أقل من سنة — من __MSG_START__ إلى __MSG_NOW__ شهرياً — ولم يتحرك التقييم.</p>
+      <div class="cta"><a class="btn" href="#meet" data-close>شاهد النظام مباشرة في اللقاء</a></div>
+    </div>
+
+    <div class="dsec" data-d="stay" data-title="إقامة واحدة، خطوة بخطوة">
+      <p>__SAMEDAY__% من حجوزاتنا لليوم نفسه. الحجز الذي يصل الرابعة عصراً يُسعَّر ويُفحص ويُبرمج قفله ويُسند له فريق قبل المغرب.</p>
+      <ol>
+        <li><div><b>مطابقة، لا قائمة</b><span>نسأل عن سبب الإقامة — زيارة عائلية، رحلة علاجية، حدث في الأرينا — ثم نشرح بالعربية لماذا تناسبك كل وحدة أو لا.</span></div></li>
+        <li><div><b>إجابة بالعربية، في أي ساعة</b><span>الأسئلة المعتادة تُحلّ فوراً. رموز الأبواب والشكاوى والطوارئ لا تُحلّ آلياً أبداً، بل تذهب إلى موظف بتذكرة وموعد نهائي.</span></div></li>
+        <li><div><b>رمز الباب هو رقمك</b><span>آخر أربعة أرقام من جوالك تُكتب على القفل لحظة الحجز وتنتهي بمغادرتك. لا يُرسل آلياً أبداً.</span></div></li>
+        <li><div><b>مفحوصة قبل وصولك</b><span>التنظيف بفرقنا ومتعاقدين، أما الفحص فبفريقنا وحده، على قائمة ثابتة، قبل كل ضيف.</span></div></li>
+        <li><div><b>أثناء الإقامة</b><span>لكل وحدة رابط ضيف خاص: الطريق، ومعلومات المنزل، وخدمات كسائق خاص، وحلّاق إلى الباب، وتجهيز للمناسبة.</span></div></li>
+        <li><div><b>حين يتعطّل شيء</b><span>العطل يفتح تذكرة لها مسؤول وموعد. كل تذكرة بعرض سعر وموافقة وأثر صرف — لأن صيانة بلا أثر هي الطريقة التي يخسر بها المُلّاك أموالهم بهدوء.</span></div></li>
+        <li><div><b>المغادرة</b><span>ينتهي الرمز، ويُجدول التجهيز، ويُسند الفريق. وإذا غاب أحدهم، تُعاد وحداته تلقائياً إلى أقل الزملاء عبئاً.</span></div></li>
+      </ol>
+      <div class="cta"><a class="btn" href="#meet" data-close>احجز لقاءً</a></div>
+    </div>
+
+    <div class="dsec" data-d="guests" data-title="ماذا يقول الضيوف">
+      <div class="kv"><span>مراجعة منشورة</span><b>__REVIEWS__</b></div>
+      <div class="kv"><span>المتوسط · من 5</span><b>__RATING__</b></div>
+      <div class="kv"><span>مراجعات تعطي 10 من 10</span><b>__PERFECT__%</b></div>
+      <div class="kv"><span>ضيوف عادوا إلينا</span><b>__REPEAT_GUESTS__</b></div>
+      <div class="kv"><span>من الحجوزات من ضيوف عائدين</span><b>__REPEAT_PCT__%</b></div>
+      <div class="kv"><span>من ضيوفنا سعوديون</span><b>__SAUDI__%</b></div>
+      <div class="kv"><span>ضيوف بمفردهم · أزواج</span><b>__SOLO__% · __COUPLE__%</b></div>
+      <div class="kv"><span>أعلى ضيف عائد · عدد الإقامات</span><b>__TOP_GUEST__</b></div>
+      __DRAWER_REVIEWS__
+      <p>ننشر المجموعة كاملة، بما فيها المنخفضة. لا شيء في هذا القسم من كتابتنا.</p>
+    </div>
+
+    <div class="dsec" data-d="units" data-title="وحداتنا">
+      <p>__RESIDENCES__ وحدة مفروشة، من الاستوديو إلى أربع غرف، داخل مجمعات مُدارة في شمال الرياض: بوابة، وأمن، ومواقف. كل وحدة تحمل تصريحها السياحي، وكل صورة تُنشر هي للوحدة نفسها.</p>
+      __DRAWER_UNITS__
+      <div class="cta"><a class="btn" href="#meet" data-close>اطلب التوافر</a></div>
+    </div>
+
+    <div class="dsec" data-d="owners" data-title="للمُلّاك، بالتفصيل">
+      <h4>الشروط</h4>
+      <p>حصة من الإيراد، بلا دفعة مقدمة، وبلا رسوم على الليالي الفارغة. عقد اثني عشر شهراً، بإشعار شهر، ويُعاد العقار. وإن لم يكن الأداء سبب بقائك، فلا سبب أصلاً.</p>
+      <h4>عقار مفروش · 5 أيام تقريباً</h4>
+      <ol><li><div><b>معاينة ورفع إلى المعيار</b><span>اختبار الإنترنت وإغلاق كل خلل، بعرض سعر واحد لا يُطلب قبل موافقتك.</span></div></li><li><div><b>تنظيف عميق وتصوير احترافي</b></div></li><li><div><b>تصريح باسمك، وأول حجز</b></div></li></ol>
+      <h4>عقار غير مفروش · 28 يوماً تقريباً</h4>
+      <ol><li><div><b>رفع مساحي وتصميم (2–7 أيام)</b><span>التوزيع، والأثاث، والتشطيبات، والإضاءة — تصميم مبني على ما تعلمناه من __RESERVATIONS__ إقامة عن طريقة استخدام الضيوف للمساحة.</span></div></li><li><div><b>التصميم والسعر في جلسة واحدة</b><span>ترى الاثنين معاً، ومصممنا يجيبك مباشرة. نفضّل نقاشاً حول كنبة اليوم على مراجعة سيئة غداً.</span></div></li><li><div><b>القرار قرارك</b><span>رقم واحد مفصّل بنداً بنداً، دون زيادات لاحقة. وإن انسحبت هنا، فالتصميم لك.</span></div></li><li><div><b>التأثيث</b><span>التوصيل والتركيب والتشطيب وفق جدول. لن تلاحق نجاراً ولن تستقبل شاحنة.</span></div></li><li><div><b>تنظيف عميق، وتصوير، وتصريح</b><span>من هنا يتطابق المسار مع العقار المفروش.</span></div></li><li><div><b>عقار فارغ، صار يُدرّ دخلاً</b><span>قرابة 28 يوماً من الموافقة.</span></div></li></ol>
+      <h4>ما نرفضه</h4>
+      <p><b>لم نعرض وحدة قط دون تصريحها.</b> ولا مرة واحدة، حين كان كل من حولنا يفعلها.</p>
+      <p><b>لا نقيّد المُلّاك.</b> إشعار شهر، ويُعاد العقار.</p>
+      <p><b>سلّمنا مُلّاكاً إلى صفقات أفضل من صفقتنا.</b> وكانت وحداتهم تعمل بإشغال __CHURN_OCC__% يوم خرجت.</p>
+      <div class="cta"><a class="btn" href="#meet" data-close>احجز لقاء الـ45 دقيقة</a></div>
+    </div>
+
+    <div class="dsec" data-d="gov" data-title="الحوكمة، بالتفصيل">
+      <h4>التصاريح</h4><p>تُستخرج لكل وحدة على حدة لا على مستوى الشركة، وتواريخ تجديدها متابعة داخل النظام. لا تُفعَّل وحدة دون تصريح ساري مودَع في ملفها.</p>
+      <h4>التأمين</h4><p>التغطية اليوم عبر حماية المضيف في منصة الحجز، وتشمل حجوزات المنصة فقط — لا المباشرة ولا الشركاتية. التغطية التجارية سُعّرت ونُمذجت لكل فئة وحدات، وهي البند التالي الذي سنبرمه. نقولها صراحة لأنك ستسأل عنها.</p>
+      <h4>الضبط المالي</h4><p>نظام مرجعي واحد لكل حجز وكل تحويل. الكشوف تُطابق عليه، وتعريفات المؤشرات مثبتة باختبارات آلية حتى لا تنحرف الأرقام المنشورة. أي رقم يُدخل يدوياً يحتاج قيمة وتاريخاً ومصدراً، وإلا لم يُدرج.</p>
+      <h4>التركّز في شخص واحد</h4><p>المؤسس هو من بنى النظام، وهذا التركّز حقيقي. يقابله: أدلة عمل موثّقة، وقاعدة معرفة داخلية، وطبقة إدارية موجودة قبل الحاجة، ومنظومة اختبارات تحفظ سلوك النظام بمعزل عن أي فرد.</p>
+      <h4>ما لا ننشره هنا</h4><p>الأتعاب، وقاعدة التكلفة، والإيراد بحسب الوحدة والقناة، وصافي عائد المالك، ووثائق التراخيص. كلها تُفتح في غرفة البيانات، وجهاً لوجه أو عن بُعد، باتفاقية سرية.</p>
+      <div class="cta"><a class="btn" href="#meet" data-close>احجز لقاءً</a></div>
+    </div>
+  </div>
+</aside>
+
+
+
+__SCRIPT__

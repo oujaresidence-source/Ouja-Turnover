@@ -1,0 +1,11 @@
+{
+  "_note": "Official benchmark DEFAULTS for the v2 comparison sections, exactly as the approved mock states them. The dashboard's «الأرقام» tab overrides per key with {value, as_of, source}; the store enforces the three-field rule.",
+  "mot_occupancy": {"value": "59.3", "as_of": "2026-03-31", "source": "وزارة السياحة · الربع الأول 2026"},
+  "mot_adr": {"value": "206", "as_of": "2026-03-31", "source": "وزارة السياحة · الشقق المخدومة، المملكة"},
+  "kf_occupancy": {"value": "63.4", "as_of": "2026-04-30", "source": "نايت فرانك · يناير–أبريل 2026"},
+  "kf_adr": {"value": "754", "as_of": "2026-04-30", "source": "نايت فرانك · فنادق المملكة"},
+  "kf_revpar": {"value": "478", "as_of": "2026-04-30", "source": "نايت فرانك · فنادق المملكة"},
+  "airdna_yoy_occupancy": {"value": "24.1", "as_of": "2026-07-31", "source": "AirDNA الرياض · سنة إلى سنة"},
+  "airdna_yoy_adr": {"value": "11.8", "as_of": "2026-07-31", "source": "AirDNA الرياض · سنة إلى سنة"},
+  "airdna_yoy_supply": {"value": "8", "as_of": "2026-07-31", "source": "AirDNA الرياض · سنة إلى سنة"}
+}

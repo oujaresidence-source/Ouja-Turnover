@@ -15,7 +15,7 @@ import os
 import time
 import traceback
 
-from . import page, stats
+from . import admin_store, page, page_v2, stats
 from .host import HOST
 
 _DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -135,8 +135,114 @@ async def handle_root(request):
     raise HOST.web.HTTPFound("/cp/" + ("en" if lang == "en" and HOST.english_ready else "ar"))
 
 
+def _admin_store():
+    return admin_store.Store(load_json=HOST.load_json, save_json=HOST.save_json)
+
+
+def _v2_requested(request):
+    """v2 serves when: the dashboard PUBLISHED it; or a logged-in preview asks
+    with ?v=2; or CP_V2=1 forces it (the escape hatch). Anything else is v1."""
+    if os.environ.get("CP_V2") == "1":
+        return True, "env"
+    if request is not None and request.query.get("v") == "2":
+        try:
+            if HOST.dash_auth and HOST.dash_auth(request):
+                return True, "preview"
+        except Exception:
+            pass
+    try:
+        if _admin_store().overlay().get("published_version") == "v2":
+            return True, "published"
+    except Exception:
+        traceback.print_exc()
+    return False, "v1"
+
+
+def _resolve_photos(units):
+    photos = {}
+    for u in units or []:
+        lid = str(u.get("listing_id") or "")
+        if not lid or not HOST.listing_photos:
+            continue
+        try:
+            pinned = u.get("cover_url") or None
+            photos[lid] = HOST.listing_photos(lid, pinned) or {}
+        except Exception:
+            traceback.print_exc()
+    return photos
+
+
+def _mark_inactive(units):
+    """An inactive Hostaway listing is skipped on the public render (§4)."""
+    try:
+        cache = HOST.listings_cache() if HOST.listings_cache else {}
+        active = {str(l.get("id")): bool(l.get("active"))
+                  for l in (cache.get("listings") or [])}
+    except Exception:
+        active = {}
+    out = []
+    for u in units or []:
+        u = dict(u)
+        lid = str(u.get("listing_id") or "")
+        if lid in active and not active[lid]:
+            u["inactive"] = True
+        out.append(u)
+    return out
+
+
+def _resolve_reviews(sections):
+    ids = ((sections.get("reviews") or {}).get("ids")) or []
+    if not ids or not HOST.reviews_store:
+        return None
+    try:
+        rows = {r.get("id"): r for r in HOST.reviews_store()}
+    except Exception:
+        return None
+    out = []
+    for rid in ids:
+        r = rows.get(rid)
+        if not r:
+            continue
+        out.append({"name": r.get("name", ""), "date": r.get("date", ""),
+                    "label": r.get("listing", ""), "lang": r.get("lang", "ar"),
+                    "text": r.get("text", ""),
+                    "critical": "العزل" in (r.get("text") or "")})
+    return out or None
+
+
+def _render_v2(request, more_key=None):
+    store = _admin_store()
+    is_v2, why = _v2_requested(request)
+    sections = (store.overlay() if why in ("preview", "env")
+                else store.published_overlay())
+    units = _mark_inactive((sections.get("showcase") or {}).get("units"))
+    if units:
+        sections = dict(sections)
+        sections["showcase"] = {"units": units}
+    return page_v2.render_v2(
+        sections=sections,
+        snapshot=_snapshot(),
+        base=_base(),
+        photos=_resolve_photos(units),
+        reviews=_resolve_reviews(sections),
+        more_key=more_key,
+    )
+
+
 async def handle_ar(request):
+    is_v2, _why = _v2_requested(request)
+    if is_v2:
+        return HOST.web.Response(text=_render_v2(request),
+                                 content_type="text/html", charset="utf-8")
     return HOST.web.Response(text=_render_ar(), content_type="text/html", charset="utf-8")
+
+
+async def handle_more(request):
+    key = request.match_info.get("key", "")
+    if key not in page_v2.DRAWER_KEYS:
+        raise HOST.web.HTTPNotFound()
+    return HOST.web.Response(text=_render_v2(request, more_key=key),
+                             content_type="text/html", charset="utf-8")
 
 
 async def handle_en(request):
@@ -362,6 +468,7 @@ def register(app):
     g, p = app.router.add_get, app.router.add_post
     g("/cp", _safe_public(handle_root))
     g("/cp/ar", _safe_public(handle_ar))
+    g("/cp/ar/more/{key}", _safe_public(handle_more))
     g("/cp/en", _safe_public(handle_en))
     g("/cp.pdf", _safe_public(handle_pdf))
     g("/cp/{name:(?:icon|icon-192|icon-512|share)[.]png}", _safe_public(handle_asset))
