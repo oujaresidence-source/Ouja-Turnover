@@ -154,6 +154,12 @@ RULES = [
     ('<button class="more" data-drawer="owners">', '<a class="more" href="/cp/ar/more/owners" data-drawer="owners">', 1),
     ('<button class="more" data-drawer="gov">', '<a class="more" href="/cp/ar/more/gov" data-drawer="gov">', 1),
 
+    # PORT FIX — the font stacks use the self-hosted faces with metric-matched
+    # local fallbacks (§2.4); Amiri/Readex never shipped, they were switcher
+    # options.
+    ('--serif:"Noto Naskh Arabic","Amiri",serif; --sans:"Almarai","Readex Pro",Tahoma,sans-serif;',
+     '--serif:"Noto Naskh Arabic","Naskh Fallback",serif; --sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', 1),
+
     # PORT FIX — a skip link (§2.7); the mock has none.
     ('<header class="top">',
      '<a class="skip" href="#main">تخطَّ إلى المحتوى</a>\n<header class="top">', 1),

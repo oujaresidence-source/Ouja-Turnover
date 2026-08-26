@@ -287,6 +287,23 @@ async def handle_asset(request):
         headers={"Cache-Control": "public, max-age=604800"})
 
 
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "fonts")
+_FONT_NAMES = ("NotoNaskhArabic-500.woff2", "NotoNaskhArabic-600.woff2",
+               "NotoNaskhArabic-700.woff2", "Almarai-300.woff2",
+               "Almarai-400.woff2", "Almarai-700.woff2")
+
+
+async def handle_font(request):
+    name = request.match_info.get("name", "")
+    if name not in _FONT_NAMES:
+        raise HOST.web.HTTPNotFound()
+    return HOST.web.FileResponse(
+        os.path.join(_FONTS_DIR, name),
+        headers={"Cache-Control": "public, max-age=31536000, immutable",
+                 "Content-Type": "font/woff2"})
+
+
 async def handle_business_redirect(request):
     raise HOST.web.HTTPMovedPermanently("/cp")
 
@@ -469,6 +486,7 @@ def register(app):
     g("/cp", _safe_public(handle_root))
     g("/cp/ar", _safe_public(handle_ar))
     g("/cp/ar/more/{key}", _safe_public(handle_more))
+    g("/cp/font/{name}", _safe_public(handle_font))
     g("/cp/en", _safe_public(handle_en))
     g("/cp.pdf", _safe_public(handle_pdf))
     g("/cp/{name:(?:icon|icon-192|icon-512|share)[.]png}", _safe_public(handle_asset))

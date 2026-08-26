@@ -1,0 +1,11 @@
+/* Self-hosted, subset (Arabic+Latin+digits) — no external font host on the live
+   page (§2.4). size-adjust on the local fallbacks keeps metrics close so the
+   swap does not reflow the hero. */
+@font-face{font-family:"Noto Naskh Arabic";font-weight:500;font-style:normal;font-display:swap;src:url("/cp/font/NotoNaskhArabic-500.woff2") format("woff2")}
+@font-face{font-family:"Noto Naskh Arabic";font-weight:600;font-style:normal;font-display:swap;src:url("/cp/font/NotoNaskhArabic-600.woff2") format("woff2")}
+@font-face{font-family:"Noto Naskh Arabic";font-weight:700;font-style:normal;font-display:swap;src:url("/cp/font/NotoNaskhArabic-700.woff2") format("woff2")}
+@font-face{font-family:"Almarai";font-weight:300;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-300.woff2") format("woff2")}
+@font-face{font-family:"Almarai";font-weight:400;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-400.woff2") format("woff2")}
+@font-face{font-family:"Almarai";font-weight:700;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-700.woff2") format("woff2")}
+@font-face{font-family:"Naskh Fallback";src:local("Geeza Pro"),local("Times New Roman");size-adjust:108%;ascent-override:100%}
+@font-face{font-family:"Almarai Fallback";src:local("Tahoma"),local("Arial");size-adjust:102%}
