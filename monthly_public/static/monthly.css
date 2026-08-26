@@ -181,6 +181,32 @@ p {
   flex-direction: column;
 }
 
+.preview-banner {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: calc(var(--z-sticky) + 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
+  background: var(--warning-soft);
+  color: var(--ink);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.preview-banner strong {
+  flex: none;
+  color: var(--warning);
+}
+
+.preview-mode .site-header {
+  position: relative;
+}
+
 .site-header {
   position: sticky;
   top: 0;
@@ -246,6 +272,64 @@ p {
 .button:active,
 .choice:active {
   transform: scale(0.98);
+}
+
+.preview-evidence {
+  display: grid;
+  gap: 7px;
+  margin-block: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--stone-200);
+  border-radius: var(--radius-sm);
+  background: var(--stone-100);
+  font-size: 0.8125rem;
+}
+
+.preview-evidence.incomplete {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--stone-200));
+  background: var(--warning-soft);
+}
+
+.preview-evidence-label {
+  color: var(--palm-900);
+}
+
+.preview-evidence.incomplete .preview-evidence-label {
+  color: var(--warning);
+}
+
+.preview-issue-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview-issue {
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--stone-300));
+  border-radius: 999px;
+  background: var(--ivory);
+  color: var(--ink-soft);
+}
+
+.preview-image-missing {
+  display: grid;
+  width: 100%;
+  min-height: 180px;
+  place-items: center;
+  padding: 20px;
+  background: var(--stone-100);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.preview-deposit-note,
+.preview-missing-copy {
+  color: var(--warning);
 }
 
 #monthly-main {

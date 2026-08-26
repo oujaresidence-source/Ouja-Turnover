@@ -157,6 +157,14 @@
       contactWhatsApp: "جهّز طلب واتساب",
       contactBlocked: "التواصل عبر واتساب غير جاهز حاليًا. تقدر تكمل تصفح البيوت والأسعار.",
       secureSessionBlocked: "تعذر تجهيز جلسة آمنة لطلب واتساب حاليًا. أعد تحميل الصفحة أو أكمل تصفح البيوت.",
+      previewLabel: "تجربة داخلية",
+      previewBanner: "تعرض كل الشقق للتجربة، بما فيها البيانات الناقصة. لا تنشر ولا تحذف أي معلومة.",
+      previewIncomplete: "بيانات قيد الإكمال",
+      previewComplete: "بيانات المعاينة مكتملة",
+      previewMoreIssues: "و{count} حقول أخرى",
+      previewImageMissing: "الصورة تحتاج إضافة",
+      previewLicenceMissing: "بيانات الإعلان تحتاج إكمال",
+      previewDepositRange: "التأمين المبدئي من ٥٠٠ إلى ٢٬٥٠٠ ر.س، ويُحدد المبلغ النهائي وشروط الاسترداد قبل الالتزام.",
       completeDetails: "أكمل تفاصيل الإقامة لتجهيز طلب واتساب.",
       preparingWhatsApp: "جاري تجهيز مرجع الطلب ورسالة واتساب.",
       openingWhatsApp: "تم إنشاء المرجع {reference}. جاري فتح واتساب، والرسالة لن تُرسل إلا باختيارك.",
@@ -311,6 +319,14 @@
       contactWhatsApp: "Prepare WhatsApp request",
       contactBlocked: "WhatsApp contact is not ready. You can still browse homes and prices.",
       secureSessionBlocked: "A secure request session is unavailable. Reload the page or continue browsing homes.",
+      previewLabel: "Internal preview",
+      previewBanner: "Shows every real home for testing, including incomplete data. Nothing is published or deleted.",
+      previewIncomplete: "Details being completed",
+      previewComplete: "Preview details complete",
+      previewMoreIssues: "and {count} more fields",
+      previewImageMissing: "Photo needs to be added",
+      previewLicenceMissing: "Advertising details need completion",
+      previewDepositRange: "Indicative deposit: SAR 500–2,500. The final amount and refund terms are confirmed before commitment.",
       completeDetails: "Complete the stay details to prepare a WhatsApp request.",
       preparingWhatsApp: "Creating your lead reference and WhatsApp message.",
       openingWhatsApp: "Reference {reference} created. Opening WhatsApp; the message is sent only if you choose to send it.",
@@ -321,6 +337,83 @@
       selectPurpose: "Stay purpose",
       selectSleeping: "Sleeping arrangement",
       selectFlexibility: "Date flexibility"
+    }
+  };
+
+  const PREVIEW_COPY = {
+    ar: {
+      heroIntro: "معاينة داخلية لرحلة العميل على كل شقق المخزون الحقيقي. أي سعر أو توفر أو معلومة ناقصة تظهر بوضوح وتحتاج اعتماد قبل النشر.",
+      proofPrice: "الأسعار تحت المراجعة",
+      proofPriceText: "نعرض السعر الرسمي فقط إذا كان موجودًا؛ والباقي يظهر أنه يحتاج تأكيد.",
+      catalogPreview: "كل شقق المخزون الحقيقي",
+      catalogPreviewText: "المكتمل والناقص يظهران هنا للتجربة الداخلية فقط.",
+      partialService: "هذه معاينة داخلية. التواصل مقفول والبيانات الناقصة مميزة بوضوح.",
+      allAvailable: "كل شقق المعاينة",
+      browseTitle: "كل شقق المعاينة الداخلية",
+      browseIntro: "شقة واحدة لكل سجل حقيقي. ظهور الشقة هنا لا يعني أنها منشورة أو جاهزة للحجز.",
+      noBrowseResults: "ما فيه شقة تطابق هذي الفلاتر في المعاينة.",
+      listingNotFound: "هذه الشقة غير موجودة ضمن مخزون المعاينة الحالي.",
+      contactBlocked: "التواصل مقفول في المعاينة حتى يُضاف رقم واتساب عوجا.",
+      resultsTitle: "نتائج المعاينة لإقامتك",
+      bestThreeText: "لا يدخل هنا إلا تطابق موثق للسعة والسعر والتوفر."
+    },
+    en: {
+      heroIntro: "An internal customer-journey preview across every real inventory home. Missing price, availability, or content is clearly marked and must be approved before publication.",
+      proofPrice: "Pricing under review",
+      proofPriceText: "An official rate appears only when verified; every gap is labelled for confirmation.",
+      catalogPreview: "Every real inventory home",
+      catalogPreviewText: "Complete and incomplete homes appear here for internal testing only.",
+      partialService: "This is an internal preview. Contact is disabled and missing data is clearly labelled.",
+      allAvailable: "All preview homes",
+      browseTitle: "All internal preview homes",
+      browseIntro: "One home per real inventory record. Preview visibility does not mean the home is published or bookable.",
+      noBrowseResults: "No preview home matches these filters.",
+      listingNotFound: "This home is not in the current preview inventory.",
+      contactBlocked: "Contact is disabled in preview until Ouja's WhatsApp number is configured.",
+      resultsTitle: "Preview results for your stay",
+      bestThreeText: "Only homes with verified capacity, price, and availability appear here."
+    }
+  };
+  const PREVIEW_ISSUES = {
+    ar: {
+      arabic_title_missing: "الاسم العربي",
+      english_title_missing: "الاسم الإنجليزي",
+      arabic_content_missing: "المحتوى العربي",
+      english_content_missing: "المحتوى الإنجليزي",
+      content_unverified: "اعتماد المحتوى",
+      bedrooms_missing: "غرف النوم",
+      bathrooms_missing: "دورات المياه",
+      capacity_missing: "السعة",
+      neighborhood_missing: "الحي",
+      images_missing: "الصور",
+      licence_missing: "بيانات الإعلان",
+      licence_invalid: "صلاحية الإعلان",
+      licence_expired: "صلاحية الإعلان",
+      commercial_terms_missing: "الشروط الشهرية",
+      price_missing: "السعر الرسمي",
+      calendar_missing: "التوفر",
+      calendar_stale: "تحديث التوفر",
+      calendar_invalid: "بيانات التوفر"
+    },
+    en: {
+      arabic_title_missing: "Arabic name",
+      english_title_missing: "English name",
+      arabic_content_missing: "Arabic content",
+      english_content_missing: "English content",
+      content_unverified: "Content approval",
+      bedrooms_missing: "Bedrooms",
+      bathrooms_missing: "Bathrooms",
+      capacity_missing: "Capacity",
+      neighborhood_missing: "Neighborhood",
+      images_missing: "Photos",
+      licence_missing: "Advertising details",
+      licence_invalid: "Advertising validity",
+      licence_expired: "Advertising validity",
+      commercial_terms_missing: "Monthly terms",
+      price_missing: "Official price",
+      calendar_missing: "Availability",
+      calendar_stale: "Availability refresh",
+      calendar_invalid: "Availability data"
     }
   };
 
@@ -338,17 +431,28 @@
   const SESSION_TOKEN_RE = /^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/;
   const JOURNEY_ID_RE = /^journey_[A-Za-z0-9_-]{22,64}$/;
   const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
-  const ENDPOINTS = {
+  const PUBLIC_ENDPOINTS = {
     config: "/api/monthly/config",
     browse: "/api/monthly/search",
     match: "/api/monthly/match",
+    listing: "/api/monthly/listing/",
     lead: "/api/monthly/lead",
     event: "/api/monthly/event"
   };
+  const PREVIEW_ENDPOINTS = {
+    config: "/api/monthly/ops/preview/config",
+    browse: "/api/monthly/ops/preview/search",
+    match: "/api/monthly/ops/preview/match",
+    listing: "/api/monthly/ops/preview/listing/",
+    lead: null,
+    event: null
+  };
+  let ENDPOINTS = PUBLIC_ENDPOINTS;
 
   const runtime = {
     lang: "ar",
     page: { route: "home", slug: null, listing_id: null },
+    preview: false,
     config: null,
     journeyId: null,
     matcher: null,
@@ -364,7 +468,9 @@
   };
 
   function copy(key, values) {
-    let value = (COPY[runtime.lang] && COPY[runtime.lang][key]) || COPY.ar[key] || key;
+    let value = (
+      runtime.preview && PREVIEW_COPY[runtime.lang] && PREVIEW_COPY[runtime.lang][key]
+    ) || (COPY[runtime.lang] && COPY[runtime.lang][key]) || COPY.ar[key] || key;
     Object.keys(values || {}).forEach(function (name) {
       value = value.replace("{" + name + "}", String(values[name]));
     });
@@ -644,7 +750,7 @@
 
   function actionLink(label, href, className, handler) {
     const node = element("a", className, label);
-    node.href = href;
+    node.href = previewPath(href);
     if (handler) node.addEventListener("click", handler);
     return node;
   }
@@ -732,6 +838,43 @@
     return output ? "?" + output : "";
   }
 
+  function previewToken() {
+    if (!runtime.preview || typeof window === "undefined") return "";
+    const token = new URLSearchParams(window.location.search || "").get("token") || "";
+    return token.length <= 512 ? token : "";
+  }
+
+  function requestPath(path, values) {
+    const parts = String(path || "").split("?");
+    const params = new URLSearchParams(parts.slice(1).join("?"));
+    Object.keys(values || {}).forEach(function (key) {
+      const value = values[key];
+      if (value !== undefined && value !== null && value !== "") {
+        params.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+      }
+    });
+    const token = previewToken();
+    if (token) params.set("token", token);
+    const search = params.toString();
+    return parts[0] + (search ? "?" + search : "");
+  }
+
+  function previewPath(path) {
+    if (!runtime.preview) return path;
+    const parts = String(path || "/monthly").split("?");
+    let base = parts[0];
+    if (!base.startsWith("/monthly/ops/preview")) {
+      base = base === "/monthly" || base === "/monthly/"
+        ? "/monthly/ops/preview"
+        : "/monthly/ops/preview" + base.slice("/monthly".length);
+    }
+    const params = new URLSearchParams(parts.slice(1).join("?"));
+    const token = previewToken();
+    if (token) params.set("token", token);
+    const search = params.toString();
+    return base + (search ? "?" + search : "");
+  }
+
   async function requestJSON(path, options) {
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
@@ -758,11 +901,11 @@
   }
 
   function getJSON(path, values) {
-    return requestJSON(path + queryString(values));
+    return requestJSON(requestPath(path, values));
   }
 
   function postJSON(path, value) {
-    return requestJSON(path, {
+    return requestJSON(requestPath(path), {
       method: "POST",
       headers: { "Accept": "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(value)
@@ -794,6 +937,7 @@
   }
 
   function track(event, context) {
+    if (runtime.preview) return Promise.resolve(false);
     const sessionId = runtime.config && runtime.config.session_id;
     if (!validSessionToken(sessionId)) return Promise.resolve(false);
     return withSessionRetry(function (activeSessionId) {
@@ -815,7 +959,12 @@
     const skip = document.querySelector(".skip-link");
     if (skip) skip.textContent = copy("skip");
     const brand = document.querySelector(".brand");
-    if (brand) brand.setAttribute("aria-label", copy("brandHome"));
+    if (brand) {
+      brand.setAttribute("aria-label", copy("brandHome"));
+      brand.setAttribute("href", previewPath("/monthly"));
+    }
+    const browse = document.querySelector(".site-nav a");
+    if (browse) browse.setAttribute("href", previewPath("/monthly/search"));
     document.title = copy("pageTitle");
     const languageButton = document.getElementById("language-switch");
     if (languageButton) {
@@ -861,7 +1010,11 @@
   }
 
   function routeFromLocation() {
-    const path = window.location.pathname;
+    let path = window.location.pathname;
+    if (runtime.preview && path.startsWith("/monthly/ops/preview")) {
+      path = "/monthly" + path.slice("/monthly/ops/preview".length);
+      if (path === "/monthly/") path = "/monthly";
+    }
     if (path === "/monthly" || path === "/monthly/") return { route: "home", slug: null, listing_id: null };
     if (path === "/monthly/match") return { route: "match", slug: null, listing_id: null };
     if (path === "/monthly/search") return { route: "browse", slug: null, listing_id: null };
@@ -905,7 +1058,7 @@
       persistState();
     }
     runtime.page = page;
-    window.history.pushState(page, "", path);
+    window.history.pushState(page, "", previewPath(path));
     if (entryRoute) {
       startJourney();
       track("entry_route_choice", { entry_route: entryRoute });
@@ -1028,6 +1181,25 @@
     return copy("pending");
   }
 
+  function previewEvidence(item) {
+    if (!runtime.preview || !item || item.preview !== true) return null;
+    const block = element("div", "preview-evidence " + (item.preview_complete ? "complete" : "incomplete"));
+    block.appendChild(element("strong", "preview-evidence-label", copy(item.preview_complete ? "previewComplete" : "previewIncomplete")));
+    const missing = Array.isArray(item.preview_missing) ? item.preview_missing : [];
+    const labels = [];
+    missing.forEach(function (code) {
+      const label = PREVIEW_ISSUES[runtime.lang] && PREVIEW_ISSUES[runtime.lang][code];
+      if (label && labels.indexOf(label) === -1) labels.push(label);
+    });
+    if (labels.length) {
+      const chips = element("ul", "preview-issue-list");
+      labels.slice(0, 5).forEach(function (label) { chips.appendChild(element("li", "preview-issue", label)); });
+      if (labels.length > 5) chips.appendChild(element("li", "preview-issue more", copy("previewMoreIssues", { count: formatNumber(labels.length - 5) })));
+      block.appendChild(chips);
+    }
+    return block;
+  }
+
   function factsList(item) {
     const list = element("ul", "facts");
     const facts = item.facts || {};
@@ -1043,7 +1215,8 @@
 
   function listingPath(item) {
     const safeSlug = typeof item.slug === "string" && /^[A-Za-z0-9_-]+$/.test(item.slug) ? item.slug : null;
-    return safeSlug ? "/monthly/" + safeSlug : "/monthly/id/" + encodeURIComponent(item.id);
+    const path = safeSlug ? "/monthly/" + safeSlug : "/monthly/id/" + encodeURIComponent(item.id);
+    return previewPath(path);
   }
 
   function openListing(event, item) {
@@ -1071,11 +1244,15 @@
       image.loading = index > 2 ? "lazy" : "eager";
       image.decoding = "async";
       media.appendChild(image);
+    } else if (runtime.preview) {
+      media.appendChild(element("span", "preview-image-missing", copy("previewImageMissing")));
     }
     const body = element("div", "listing-card-body");
     const heading = element("h3");
     heading.appendChild(actionLink(item.title, path, "", function (event) { openListing(event, item); }));
     append(body, heading);
+    const evidence = previewEvidence(item);
+    if (evidence) body.appendChild(evidence);
     if (item.neighborhood) body.appendChild(element("p", "listing-location", item.neighborhood));
     body.appendChild(factsList(item));
     if (item.summary) body.appendChild(element("p", "listing-summary", item.summary));
@@ -1599,7 +1776,7 @@
     submit.type = "submit";
     const clear = button(copy("clearFilters"), "button button-outline", function () {
       runtime.browseQuery = {};
-      window.history.replaceState(runtime.page, "", "/monthly/search");
+      window.history.replaceState(runtime.page, "", previewPath("/monthly/search"));
       renderBrowse();
     });
     append(actions, submit, clear);
@@ -1623,7 +1800,7 @@
         return;
       }
       runtime.browseQuery = values;
-      window.history.replaceState(runtime.page, "", "/monthly/search" + queryString(values));
+      window.history.replaceState(runtime.page, "", previewPath("/monthly/search" + queryString(values)));
       renderBrowse();
     });
     shell.appendChild(form);
@@ -1669,7 +1846,7 @@
   function listingQuery(identifier, bySlug) {
     const values = Object.assign({ lang: runtime.lang }, listingQuoteRequest(runtime.listingRequest));
     if (bySlug) values.lookup = "slug";
-    return "/api/monthly/listing/" + encodeURIComponent(identifier) + queryString(values);
+    return requestPath(ENDPOINTS.listing + encodeURIComponent(identifier), values);
   }
 
   function licenceDetails(listing) {
@@ -1679,6 +1856,7 @@
     const list = element("ul", "facts");
     if (licence.number) list.appendChild(element("li", "", copy("licenceNumber", { value: licence.number })));
     if (licence.expires) list.appendChild(element("li", "", copy("licenceExpiry", { value: licence.expires })));
+    if (runtime.preview && !list.children.length) list.appendChild(element("li", "preview-missing-copy", copy("previewLicenceMissing")));
     section.appendChild(list);
     return section;
   }
@@ -1707,6 +1885,8 @@
     const content = element("div", "listing-content");
     const title = element("section", "listing-title");
     append(title, element("h1", "", listing.title));
+    const evidence = previewEvidence(listing);
+    if (evidence) title.appendChild(evidence);
     if (listing.neighborhood) title.appendChild(element("p", "listing-location", listing.neighborhood));
     title.appendChild(factsList(listing));
     if (listing.rating !== undefined && listing.reviews_count) title.appendChild(element("p", "rating-line", copy("rating", { rating: formatNumber(listing.rating), count: formatNumber(listing.reviews_count) })));
@@ -1815,6 +1995,7 @@
       if (status === "unavailable") message = copy("quoteUnavailable");
       if (status === "price_missing") message = copy("quoteMissing");
       card.appendChild(element("p", "", message));
+      if (runtime.preview) card.appendChild(element("p", "preview-deposit-note", copy("previewDepositRange")));
       card.appendChild(stayDetailsForm(listing));
       return card;
     }
@@ -1830,7 +2011,9 @@
     const utilities = quoteLabel(quote.utilities, "utilities");
     const deposit = quote.deposit || {};
     const refund = deposit[runtime.lang === "ar" ? "refund_ar" : "refund_en"] || "";
-    const depositText = deposit.amount_sar !== undefined ? formatNumber(deposit.amount_sar) + (runtime.lang === "ar" ? " ر.س. " : " SAR. ") + refund : refund;
+    const depositText = runtime.preview
+      ? copy("previewDepositRange")
+      : (deposit.amount_sar !== undefined ? formatNumber(deposit.amount_sar) + (runtime.lang === "ar" ? " ر.س. " : " SAR. ") + refund : refund);
     const payments = (quote.payment_methods || []).map(function (method) { return method[runtime.lang] || ""; }).filter(Boolean).join(runtime.lang === "ar" ? "، " : ", ");
     [
       [copy("included"), included],
@@ -1927,7 +2110,7 @@
       }
       runtime.listingRequest = request;
       persistState();
-      window.history.replaceState(runtime.page, "", listingPath(listing) + queryString(runtime.listingRequest));
+      window.history.replaceState(runtime.page, "", previewPath(listingPath(listing) + queryString(runtime.listingRequest)));
       loadListing(listing.id, false);
     });
     return form;
@@ -2065,7 +2248,10 @@
   }
 
   async function boot() {
-    runtime.page = Object.assign(routeFromLocation(), parsePageState());
+    const pageState = parsePageState();
+    runtime.preview = pageState.preview === true;
+    ENDPOINTS = runtime.preview ? PREVIEW_ENDPOINTS : PUBLIC_ENDPOINTS;
+    runtime.page = Object.assign(routeFromLocation(), pageState);
     const saved = sessionPayload();
     runtime.lang = saved.lang === "en" ? "en" : "ar";
     runtime.journeyId = JOURNEY_ID_RE.test(saved.journey_id || "") ? saved.journey_id : createJourneyId();

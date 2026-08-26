@@ -324,6 +324,26 @@ class MonthlyCatalogRouteTest(unittest.TestCase):
             )
         )
 
+    def test_preview_page_is_authenticated_and_never_indexed(self):
+        denied = self.bot._json({"error": "forbidden"}, 403)
+        with mock.patch.object(self.bot, "_monthly_ops_gate", return_value=denied):
+            blocked = run(
+                self.bot._handle_monthly_preview_home(FakeRequest(method="GET"))
+            )
+        self.assertEqual(blocked.status, 403)
+
+        with mock.patch.object(
+            self.bot, "_render_monthly_public_page", return_value="<html>preview</html>"
+        ) as renderer:
+            response = run(
+                self.bot._handle_monthly_preview_home(FakeRequest(method="GET"))
+            )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["X-Robots-Tag"], "noindex, nofollow")
+        renderer.assert_called_once_with(
+            "home", slug=None, listing_id=None, preview=True
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

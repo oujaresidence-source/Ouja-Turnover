@@ -118,6 +118,41 @@ class MonthlyPublicPageTests(unittest.TestCase):
         for phrase in forbidden:
             self.assertNotIn(phrase, page)
 
+    def test_preview_shell_is_noindex_and_visibly_internal(self):
+        from monthly_public.page import render_monthly_page
+
+        page = render_monthly_page("home", preview=True)
+        match = re.search(
+            r'<script id="monthly-page-state" type="application/json">(.*?)</script>',
+            page,
+            re.S,
+        )
+
+        self.assertIn('content="noindex,nofollow,noarchive"', page)
+        self.assertIn("تجربة داخلية", page)
+        self.assertIn("Internal preview", page)
+        self.assertTrue(json.loads(match.group(1))["preview"])
+
+    def test_public_shell_does_not_enable_preview(self):
+        from monthly_public.page import render_monthly_page
+
+        page = render_monthly_page("home")
+
+        self.assertNotIn('"preview":true', page)
+        self.assertNotIn('content="noindex,nofollow,noarchive"', page)
+
+    def test_preview_javascript_uses_gated_endpoints_and_url_only_token(self):
+        path = os.path.join(ROOT, "monthly_public", "static", "monthly.js")
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+
+        self.assertIn('config: "/api/monthly/ops/preview/config"', source)
+        self.assertIn('listing: "/api/monthly/ops/preview/listing/"', source)
+        self.assertIn("function previewToken()", source)
+        self.assertIn("function previewPath", source)
+        self.assertIn("if (runtime.preview) return Promise.resolve(false)", source)
+        self.assertNotIn("sessionStorage.setItem(PREVIEW", source)
+
 
 class MonthlyPublicPageBotBoundaryTests(unittest.TestCase):
     @classmethod

@@ -7,7 +7,7 @@ import re
 from typing import Any, Dict, Optional
 
 
-ASSET_VERSION = "v20260825b"
+ASSET_VERSION = "v20260826c"
 CSS_PATH = "/monthly/static/monthly.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly.%s.js" % ASSET_VERSION
 
@@ -81,6 +81,21 @@ def render_monthly_page(
     state = _json_script(
         page_state(route, slug=slug, listing_id=listing_id, preview=preview)
     )
+    robots = (
+        '  <meta name="robots" content="noindex,nofollow,noarchive">\n'
+        if preview
+        else ""
+    )
+    body_class = ' class="preview-mode"' if preview else ""
+    preview_banner = (
+        '''  <aside class="preview-banner" role="note" data-preview-en="Internal preview">
+    <strong data-copy="previewLabel">تجربة داخلية</strong>
+    <span data-copy="previewBanner">تعرض كل الشقق للتجربة، بما فيها البيانات الناقصة. لا تنشر ولا تحذف أي معلومة.</span>
+  </aside>
+'''
+        if preview
+        else ""
+    )
     return """<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -88,11 +103,11 @@ def render_monthly_page(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#173d32">
   <meta name="description" content="شقق عوجا المفروشة للإقامة الشهرية في الرياض، مع سعر رسمي واضح ودعم طوال الإقامة.">
-  <title>عوجا بالشهر · الرياض</title>
+%s  <title>عوجا بالشهر · الرياض</title>
   <link rel="stylesheet" href="%s">
   <script src="%s" defer></script>
 </head>
-<body>
+<body%s>
   <a class="skip-link" href="#monthly-main">انتقل إلى المحتوى</a>
   <svg class="icon-library" aria-hidden="true" focusable="false">
     <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
@@ -106,7 +121,7 @@ def render_monthly_page(
     <symbol id="icon-message" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-9 8 9 9 0 0 1-4-.9L3 21l1.8-4A9 9 0 1 1 21 12Z"/></symbol>
     <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Zm0 6v5m0 3v.1"/></symbol>
   </svg>
-  <div class="site-shell">
+%s  <div class="site-shell">
     <header class="site-header">
       <a class="brand" href="/monthly" aria-label="عوجا بالشهر، الرئيسية">
         <span class="brand-mark" aria-hidden="true">عوجا</span>
@@ -134,7 +149,7 @@ def render_monthly_page(
   <div id="monthly-errors" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
   <script id="monthly-page-state" type="application/json">%s</script>
 </body>
-</html>""" % (CSS_PATH, JS_PATH, state)
+</html>""" % (robots, CSS_PATH, JS_PATH, body_class, preview_banner, state)
 
 
 __all__ = [

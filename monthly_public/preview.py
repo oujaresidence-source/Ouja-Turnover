@@ -91,7 +91,7 @@ def build_preview_generation(
         missing = tuple(dict.fromkeys(blocker_codes + warning_codes))
         listing["preview"] = True
         listing["preview_missing"] = missing
-        listing["preview_complete"] = not blocker_codes
+        listing["preview_complete"] = not missing
         results.append(
             PublicationResult(
                 listing=_freeze(listing),
