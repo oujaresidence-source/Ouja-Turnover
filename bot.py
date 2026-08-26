@@ -60155,6 +60155,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
+    "/api/cp/lead",                          # public /cp meeting request — validated + rate-limited in cp/routes.py
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
     "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
     # The «قاعدة المعرفة» share link. Owner's explicit decision (2026-08-03): whoever

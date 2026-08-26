@@ -222,3 +222,14 @@ class BrandAssets(_Base):
         html = self.body(self.get("/cp/ar"))
         self.assertIn('rel="icon" href="/cp/icon.png"', html)
         self.assertIn('og:image" content="https://oujares.com/cp/share.png', html)
+
+
+class MiddlewareExemption(unittest.TestCase):
+    """Found on the live deploy, not locally: bot.py's global role middleware
+    401s any POST not in its exemption map, and these tests build a bare app
+    that never runs it. The lead endpoint must stay exempt — it is the public
+    door of the whole page."""
+
+    def test_lead_endpoint_is_exempt_from_role_writes(self):
+        import bot
+        self.assertIn("/api/cp/lead", bot._ROLE_EXEMPT_WRITES)
