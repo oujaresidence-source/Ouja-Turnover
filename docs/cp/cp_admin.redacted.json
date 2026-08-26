@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "published_version": "v2",
+  "updated_at": "2026-08-27T…+03:00",
+  "updated_by": "<user id>",
+  "contacts": {
+    "whatsapp": "9665337·····",
+    "email": "Info@oujares.com",
+    "booking_link": "",
+    "booking_modes": {
+      "online": true,
+      "office": true
+    },
+    "office_label_ar": "في مكتبنا · الرياض",
+    "slots": [
+      "am",
+      "pm",
+      "eve"
+    ],
+    "lead_channel_id": "",
+    "pdf_path": "",
+    "english_ready": false
+  },
+  "copy": {
+    "…": "only the keys the owner edited"
+  },
+  "figures_manual": {
+    "…": "{value, as_of, source} per key"
+  },
+  "benchmarks": {
+    "…": "{value, as_of, source} per key"
+  },
+  "showcase": {
+    "max": 6,
+    "units": [
+      "6 × {listing_id, name_ar, bedrooms_label_ar, line_ar, cover_url, hidden}"
+    ]
+  },
+  "reviews": {
+    "ids": [
+      86,
+      117,
+      97,
+      186,
+      198,
+      98
+    ]
+  },
+  "shots": [],
+  "history": [
+    "last 10 × {at, by, version, overlay}"
+  ],
+  "published_overlay": {
+    "…": "frozen copy of the seven sections at publish time"
+  }
+}
