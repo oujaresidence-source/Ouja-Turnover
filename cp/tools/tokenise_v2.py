@@ -190,6 +190,14 @@ RULES = [
     ("gap:10px;font-size:13px;color:var(--faint)}",
      "gap:10px;font-size:13px;color:var(--mute)}", 1),
 
+    # PORT FIX — .shot only ever holds the mock's fake-UI divs, so a real
+    # uploaded screenshot has nothing constraining it: any aspect ratio other
+    # than the slot's 16/11 would stretch or spill. Cover-crop it instead, so
+    # whatever the owner uploads sits correctly in the frame.
+    ('.shot .ui{position:absolute;',
+     '.shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'
+     'display:block}\n.shot .ui{position:absolute;', 1),
+
     # PORT FIX — a real <img> inside .ph is unconstrained in the mock (it only
     # ever holds a placeholder span), so a 1024px photo overflowed a 390px
     # phone. Measured before/after.
