@@ -83,6 +83,7 @@ def build_health(
         coverage_details = {
             "calendar": {"covered": 0, "missing_ids": [], "stale_ids": []},
             "price": {"covered": 0, "missing_ids": []},
+            "review": {"covered": 0, "missing_ids": []},
         }
     else:
         if now is not None:
@@ -91,6 +92,14 @@ def build_health(
         refresh_time = generation.generated_at
         generation_id = generation.generation_id
         source_timestamps = dict(generation.source_timestamps)
+        missing_review_ids = []
+        review_covered = 0
+        for result in generation.results:
+            reviews = result.listing.get("public_reviews")
+            if isinstance(reviews, Mapping) and int(reviews.get("rating_count") or 0) > 0:
+                review_covered += 1
+            else:
+                missing_review_ids.append(str(result.listing["id"]))
         coverage_details = {
             "calendar": {
                 "covered": int(raw_counts.get("calendar_covered", 0)),
@@ -100,6 +109,10 @@ def build_health(
             "price": {
                 "covered": int(raw_counts.get("price_covered", 0)),
                 "missing_ids": list(generation.missing_price_ids),
+            },
+            "review": {
+                "covered": review_covered,
+                "missing_ids": missing_review_ids,
             },
         }
         for result in generation.results:
@@ -258,6 +271,7 @@ def build_health(
     coverage = {
         "calendar": int(raw_counts.get("calendar_covered", 0)),
         "price": int(raw_counts.get("price_covered", 0)),
+        "review": int(coverage_details["review"]["covered"]),
     }
     report = {
         "checked_at": now.isoformat() if hasattr(now, "isoformat") else None,

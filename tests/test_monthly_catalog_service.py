@@ -115,6 +115,42 @@ class CatalogServiceTest(unittest.TestCase):
         self.assertEqual(result["counts"]["duplicate_source_rows"], 1)
         self.assertIn("duplicate_listing_source", result["launch_blockers"])
 
+    def test_portfolio_reports_review_coverage_without_review_text(self):
+        self.source["listings"][0]["publication"]["public_reviews"] = {
+            "rating_value": 4.9,
+            "rating_scale": 5,
+            "rating_count": 16,
+            "text_review_count": 1,
+            "source_label": "approved_public_reviews",
+            "topic_mentions": [],
+            "category_scores": [],
+            "latest_reviews": [
+                {
+                    "id": "r1",
+                    "rating": 5,
+                    "guest_name": "Sara A.",
+                    "text": "نظيف جدًا",
+                    "language": "ar",
+                    "channel": "Airbnb",
+                    "date": "2026-08-24",
+                }
+            ],
+        }
+
+        portfolio = self.service().portfolio()
+        listing = self.service().listing("101")
+
+        row = portfolio["listings"][0]
+        self.assertEqual(row["review_count"], 16)
+        self.assertTrue(row["review_ready"])
+        self.assertNotIn("latest_reviews", row)
+        self.assertNotIn("نظيف جدًا", str(portfolio))
+        self.assertEqual(portfolio["counts"]["review_covered"], 1)
+        self.assertEqual(
+            listing["source_readiness"]["reviews"]["latest_reviews"][0]["text"],
+            "نظيف جدًا",
+        )
+
     def test_listing_prefill_uses_draft_then_approved_then_source(self):
         self.store.save_profile_draft(
             "101", {"name_ar": "عنوان المسودة"}, 0, "ops"

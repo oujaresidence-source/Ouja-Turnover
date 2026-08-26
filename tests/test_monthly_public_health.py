@@ -83,7 +83,7 @@ class HealthTests(unittest.TestCase):
 
         self.assertEqual(report["refresh_time"], generation.generated_at)
         self.assertEqual(report["counts"], {"received": 2, "valid": 2, "blocked": 0, "published": 2})
-        self.assertEqual(report["coverage"], {"calendar": 2, "price": 2})
+        self.assertEqual(report["coverage"], {"calendar": 2, "price": 2, "review": 0})
         self.assertTrue(report["configuration"]["whatsapp"])
         self.assertTrue(report["configuration"]["working_hours"])
         self.assertTrue(report["contract_4_6_months"]["ready"])
@@ -99,6 +99,30 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(report["source_timestamps"], {"catalog": "2026-08-25T09:45:00+03:00"})
         self.assertEqual(report["coverage_details"]["calendar"]["missing_ids"], [])
         self.assertEqual(report["coverage_details"]["price"]["missing_ids"], [])
+        self.assertEqual(report["coverage_details"]["review"]["missing_ids"], ["1001", "1002"])
+
+    def test_review_coverage_counts_only_listing_specific_public_projections(self):
+        reviewed = valid_listing(id=1001)
+        reviewed["public_reviews"] = {
+            "rating_value": 4.8,
+            "rating_scale": 5,
+            "rating_count": 5,
+            "text_review_count": 0,
+            "source_label": "approved_public_reviews",
+            "topic_mentions": [],
+            "category_scores": [],
+            "latest_reviews": [],
+        }
+        generation = build_generation(
+            source([reviewed, valid_listing(id=1002, slug="ouja-1002")]),
+            valid_settings(),
+            NOW,
+        )
+
+        report = build_health(generation, valid_settings(), now=NOW)
+
+        self.assertEqual(report["coverage"]["review"], 1)
+        self.assertEqual(report["coverage_details"]["review"]["missing_ids"], ["1002"])
 
     def test_publication_blockers_include_licence_and_content_details(self):
         content = valid_listing(id=1001, content_verified=False)

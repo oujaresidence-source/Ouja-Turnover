@@ -11,7 +11,8 @@
   };
   const STAGES = [
     "landing_view", "entry_route_choice", "matcher_start", "matcher_answer",
-    "matcher_completion", "results_view", "result_impression", "listing_view",
+    "price_priority_selected", "matcher_completion", "results_view", "no_match",
+    "result_impression", "listing_view", "review_section_view", "price_breakdown_open",
     "whatsapp_click", "lead_created", "team_response", "booked", "lost"
   ];
   const LOST_REASONS = [
@@ -20,6 +21,7 @@
   ];
   const PURPOSES = ["work", "family", "treatment", "visit"];
   const DURATION_BANDS = ["1_month", "2_3_months", "4_6_months"];
+  const PRICE_PRIORITIES = ["experience", "value", "lowest_suitable"];
   const INFORMATION_REASONS = ["dates", "residents", "place", "contract_terms", "other"];
   const ALTERNATIVE_REASONS = ["lower_price", "dates", "location", "space"];
   const STAFF_ACTIONS = ["confirm_request", "request_information", "prepare_alternative"];
@@ -145,6 +147,7 @@
       published: "منشورة",
       calendar: "تغطية التقويم",
       price: "تغطية السعر الرسمي",
+      review: "تغطية التقييمات الموثقة",
       coverageOf: "{covered} من {total}",
       noInventory: "لا يوجد مخزون مستلم لحساب النسبة.",
       missingIds: "مفقود: {ids}",
@@ -193,12 +196,16 @@
       purposes: "أغراض الإقامة",
       places: "معرفات الأماكن المطلوبة",
       durations: "مدد الإقامة",
+      pricePriorities: "أولويات ترتيب السعر",
       lossReasons: "أسباب الخسارة",
       emptyGroup: "لا توجد بيانات مسجلة.",
       work: "عمل أو انتقال",
       family: "إقامة عائلية",
       treatment: "علاج",
       visit: "زيارة",
+      priority_experience: "أفضل تجربة مناسبة",
+      priority_value: "أفضل قيمة مقابل السعر",
+      priority_lowest_suitable: "أقل سعر مناسب",
       "1_month": "شهر واحد",
       "2_3_months": "شهران إلى ثلاثة",
       "4_6_months": "أربعة إلى ستة أشهر",
@@ -228,10 +235,14 @@
       entry_route_choice: "اختيار المساعدة أو التصفح",
       matcher_start: "بدء المطابقة",
       matcher_answer: "إجابة المطابقة",
+      price_priority_selected: "اختيار أولوية السعر",
       matcher_completion: "إكمال المطابقة",
       results_view: "عرض النتائج",
+      no_match: "عدم وجود تطابق كامل",
       result_impression: "ظهور توصية",
       listing_view: "فتح صفحة وحدة",
+      review_section_view: "قراءة قسم التقييمات",
+      price_breakdown_open: "فتح تفاصيل السعر",
       whatsapp_click: "الضغط على واتساب",
       lead_created: "إنشاء مرجع الطلب",
       team_response: "رد الفريق",
@@ -357,6 +368,7 @@
       published: "Published",
       calendar: "Calendar coverage",
       price: "Official price coverage",
+      review: "Verified review coverage",
       coverageOf: "{covered} of {total}",
       noInventory: "No received inventory is available for a rate.",
       missingIds: "Missing: {ids}",
@@ -405,12 +417,16 @@
       purposes: "Stay purposes",
       places: "Requested place IDs",
       durations: "Stay durations",
+      pricePriorities: "Price-order priorities",
       lossReasons: "Lost reasons",
       emptyGroup: "No data recorded.",
       work: "Work or relocation",
       family: "Family stay",
       treatment: "Treatment",
       visit: "Visit",
+      priority_experience: "Best suitable experience",
+      priority_value: "Best value for the price",
+      priority_lowest_suitable: "Lowest suitable price",
       "1_month": "One month",
       "2_3_months": "Two to three months",
       "4_6_months": "Four to six months",
@@ -440,10 +456,14 @@
       entry_route_choice: "Guided or browse choice",
       matcher_start: "Matcher start",
       matcher_answer: "Matcher answer",
+      price_priority_selected: "Price priority selected",
       matcher_completion: "Matcher completion",
       results_view: "Results view",
+      no_match: "No complete match",
       result_impression: "Recommendation impression",
       listing_view: "Listing view",
+      review_section_view: "Review section viewed",
+      price_breakdown_open: "Price breakdown opened",
       whatsapp_click: "WhatsApp click",
       lead_created: "Lead reference created",
       team_response: "Team response",
@@ -700,6 +720,7 @@
     const coverageDetails = data.coverage_details || {};
     coverage(coverageList, text("calendar"), coverageValue.calendar, counts.received, coverageDetails.calendar);
     coverage(coverageList, text("price"), coverageValue.price, counts.received, coverageDetails.price);
+    coverage(coverageList, text("review"), coverageValue.review, counts.received, coverageDetails.review);
 
     const configuration = document.getElementById("configuration-list");
     configuration.replaceChildren();
@@ -813,6 +834,10 @@
       return {band: band, count: Number((data.duration_bands || {})[band]) || 0};
     });
     demandGroup(demand, text("durations"), durationRows, function (row) { return text(row.band); });
+    const priorityRows = PRICE_PRIORITIES.map(function (priority) {
+      return {priority: priority, count: Number((data.price_priorities || {})[priority]) || 0};
+    });
+    demandGroup(demand, text("pricePriorities"), priorityRows, function (row) { return text("priority_" + row.priority); });
     const lostRows = LOST_REASONS.map(function (reason) {
       return {reason: reason, count: Number((data.lost_reasons || {})[reason]) || 0};
     });
@@ -1090,6 +1115,7 @@
       if (item.place_id) details.push(placeText(item.place, String(item.place_id)));
       if (item.duration_months) details.push(text("monthsLabel", {value: number(item.duration_months)}));
       if (item.duration_band && DURATION_BANDS.includes(item.duration_band)) details.push(text(item.duration_band));
+      if (item.price_priority && PRICE_PRIORITIES.includes(item.price_priority)) details.push(text("priority_" + item.price_priority));
       const copy = stageLabel(item.event) + (details.length ? " · " + details.join(" · ") : "");
       journeyList.append(node("li", "", copy));
     });

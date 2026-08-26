@@ -76,7 +76,21 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260826c")
+        self.assertEqual(ASSET_VERSION, "v20260826d")
+
+    def test_portfolio_and_survey_expose_verified_review_readiness(self):
+        js = JS_FILE.read_text("utf-8")
+
+        for required in (
+            "row.review_ready",
+            "row.review_count",
+            "source.reviews",
+            "reviewsReady",
+            "reviewsMissing",
+            "status-stack",
+        ):
+            self.assertIn(required, js)
+        self.assertIn(".status-stack", CSS_FILE.read_text("utf-8"))
 
     def test_styles_preserve_operations_tokens_and_accessibility(self):
         css = CSS_FILE.read_text("utf-8")

@@ -19,6 +19,7 @@ from .catalog_profiles import (
 )
 from .catalog_store import CatalogStore
 from .publication import validate_listing
+from .reviews import sanitize_review_projection
 from .priority_places import (
     PRIORITY_PLACE_MIGRATION_ID,
     load_priority_places,
@@ -262,6 +263,12 @@ class CatalogService:
             prepared = self._prepared_listing(listing_id, source)
             prefill = prepared["prefill"]
             record = prepared["record"]
+            public_reviews = prepared["publication_result"].listing.get("public_reviews")
+            review_count = (
+                int(public_reviews.get("rating_count") or 0)
+                if isinstance(public_reviews, Mapping)
+                else 0
+            )
             listings.append(
                 {
                     "id": listing_id,
@@ -288,6 +295,8 @@ class CatalogService:
                     "approved_at": record["approved_at"],
                     "published": prepared["published"],
                     "exact_match_eligible": prepared["exact_match_eligible"],
+                    "review_count": review_count,
+                    "review_ready": review_count > 0,
                 }
             )
         counts = {
@@ -299,6 +308,7 @@ class CatalogService:
             "source_blocked": sum(row["status"] == "source_blocked" for row in listings),
             "duplicate_source_rows": source["duplicates"],
             "malformed_source_rows": source["malformed"],
+            "review_covered": sum(row["review_ready"] for row in listings),
         }
         launch_blockers = []
         if source["duplicates"]:
@@ -392,6 +402,7 @@ class CatalogService:
                 "rating": prepared["prefill"].get("source_readiness", {}),
                 "image_count": len(public_listing.get("images") or ()),
                 "licence_present": bool((public_listing.get("licence") or {}).get("licence_no")),
+                "reviews": sanitize_review_projection(public_listing.get("public_reviews")),
             },
             "source_timestamps": prepared["source_timestamps"],
             "nearest_places": nearest_places(
