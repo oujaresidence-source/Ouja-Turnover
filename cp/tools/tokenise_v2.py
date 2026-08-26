@@ -43,6 +43,11 @@ class PortError(RuntimeError):
 # figure / link tokens — (literal, replacement, exact count in the mock)
 # Order matters: longer literals run before their substrings (3.75 before 3.7).
 # --------------------------------------------------------------------------- #
+# the mock's placeholder roofline, repeated in header and footer
+MARK = ('<svg viewBox="0 0 34 22" aria-hidden="true">'
+        '<path d="M1 21 L17 3 L33 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/>'
+        '<path d="M8 21 L17 11 L26 21" fill="none" stroke="#141312" stroke-width="2.4" stroke-linejoin="round"/></svg>')
+
 RULES = [
     # market (AirDNA) — from cp_market.json / benchmarks config
     ("21,812", "__MKT_LISTINGS__", 3),
@@ -129,6 +134,14 @@ RULES = [
      'href="__MAIL_HREF__"', 1),
     ('href="mailto:Info@oujares.com"', 'href="__MAIL_PLAIN__"', 1),
     (">Info@oujares.com</a>", ">__EMAIL_TEXT__</a>", 1),
+
+    # PORT FIX — the mock draws a placeholder roofline mark and even says so in
+    # its title ("مكان الشعار الرسمي"). Production swaps in the real logo when
+    # one exists, and keeps the mark as the fallback.
+    ('<a class="logo" href="#hero" aria-label="عوجا للأملاك" title="مكان الشعار الرسمي">'
+     + MARK, '<a class="logo" href="#hero" aria-label="عوجا للأملاك">__LOGO_MARK__', 1),
+    ('<div class="logo" style="font-size:22px">' + MARK,
+     '<div class="logo" style="font-size:22px">__LOGO_MARK_FOOT__', 1),
 
     # PORT FIX — the production head: fonts become self-hosted (§2.4) and the
     # page gains canonical/OG/JSON-LD via a token before the stylesheet.

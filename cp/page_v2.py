@@ -33,6 +33,24 @@ DRAWER_KEYS = ("compare", "system", "stay", "guests", "units", "owners", "gov")
 DEFAULT_RESV_OK = ("نؤكد الموعد على جوالك خلال يوم عمل. "
                    "وإن كان عاجلاً، فالواتساب يصل إلى الفريق مباشرة.")
 
+# the mock's placeholder roofline — the fallback when no logo is installed
+FALLBACK_MARK = (
+    '<svg viewBox="0 0 34 22" aria-hidden="true">'
+    '<path d="M1 21 L17 3 L33 21" fill="none" stroke="currentColor" '
+    'stroke-width="2.4" stroke-linejoin="round"/>'
+    '<path d="M8 21 L17 11 L26 21" fill="none" stroke="currentColor" '
+    'stroke-width="2.4" stroke-linejoin="round"/></svg>')
+
+
+def logo_mark(has_logo, height=21):
+    """The brand mark. A real logo is a plain <img> with explicit height so it
+    cannot shift the header while it loads (CLS is 0 and stays 0)."""
+    if not has_logo:
+        return FALLBACK_MARK
+    return ('<img src="/cp/logo.png" alt="" aria-hidden="true" '
+            'style="height:%dpx;width:auto;flex:none" '
+            'height="%d" decoding="async">' % (height, height))
+
 
 def _read(path, default=""):
     try:
@@ -243,7 +261,7 @@ def _apply_modes(out, contacts):
 
 
 def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
-              check=True, more_key=None):
+              check=True, more_key=None, has_logo=False):
     """The v2 page (or one /more page when more_key is given).
 
     `sections` is an overlay-sections dict (published or working). `photos`
@@ -357,6 +375,8 @@ def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
         "__ASOF_LINE__": "حتى " + _ar_month_year(stamp["as_of"]),
         "__RESV_OK__": _e(resv_ok),
         "__FONT_FACES__": "<style>" + _FONT_FACES + "</style>" if _FONT_FACES else "",
+        "__LOGO_MARK__": logo_mark(has_logo, 21),
+        "__LOGO_MARK_FOOT__": logo_mark(has_logo, 19),
     }
     figures.update(_contacts_blocks(contacts))
     for token, value in figures.items():

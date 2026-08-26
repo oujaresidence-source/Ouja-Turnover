@@ -226,6 +226,7 @@ def _render_v2(request, more_key=None):
         photos=_resolve_photos(units),
         reviews=_resolve_reviews(sections),
         more_key=more_key,
+        has_logo=has_logo(),
     )
 
 
@@ -282,9 +283,11 @@ async def handle_asset(request):
     name = request.match_info.get("name", "")
     if name not in _ASSET_NAMES:
         raise HOST.web.HTTPNotFound()
+    path = brand_path(name)
+    if not path:
+        raise HOST.web.HTTPNotFound()
     return HOST.web.FileResponse(
-        os.path.join(_ASSETS, name),
-        headers={"Cache-Control": "public, max-age=604800"})
+        path, headers={"Cache-Control": "public, max-age=604800"})
 
 
 _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(
@@ -292,6 +295,28 @@ _FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(
 _FONT_NAMES = ("NotoNaskhArabic-500.woff2", "NotoNaskhArabic-600.woff2",
                "NotoNaskhArabic-700.woff2", "Almarai-300.woff2",
                "Almarai-400.woff2", "Almarai-700.woff2")
+
+
+def brand_path(name):
+    """An uploaded brand asset wins over the one committed in the repo, so the
+    owner can change the logo without a deploy."""
+    up = os.path.join(HOST.upload_dir or "", "brand", name)
+    if HOST.upload_dir and os.path.exists(up):
+        return up
+    built = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", name)
+    return built if os.path.exists(built) else ""
+
+
+def has_logo():
+    return bool(brand_path("logo.png"))
+
+
+async def handle_logo(request):
+    path = brand_path("logo.png")
+    if not path:
+        raise HOST.web.HTTPNotFound()
+    return HOST.web.FileResponse(path, headers={
+        "Cache-Control": "public, max-age=86400", "Content-Type": "image/png"})
 
 
 async def handle_font(request):
@@ -487,6 +512,7 @@ def register(app):
     g("/cp/ar", _safe_public(handle_ar))
     g("/cp/ar/more/{key}", _safe_public(handle_more))
     g("/cp/font/{name}", _safe_public(handle_font))
+    g("/cp/logo.png", _safe_public(handle_logo))
     g("/cp/en", _safe_public(handle_en))
     g("/cp.pdf", _safe_public(handle_pdf))
     g("/cp/{name:(?:icon|icon-192|icon-512|share)[.]png}", _safe_public(handle_asset))

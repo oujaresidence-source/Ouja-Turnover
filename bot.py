@@ -31593,7 +31593,7 @@ async function cpContact(){ var ar=cpAr(), b=document.getElementById('cpBody'); 
   var c=d.contacts||{}; _cp.data.contacts=c; var m=c.booking_modes||{};
   function fld(lbl,id,val,ph){ return '<label class="muted" style="font-size:11px">'+esc(lbl)+'</label><input id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph||'')+'" style="'+fbInp()+'">'; }
   function chk(id,on,lbl){ return '<label style="display:inline-flex;align-items:center;gap:6px;margin-inline-end:14px;font-size:12.5px"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'> '+esc(lbl)+'</label>'; }
-  b.innerHTML='<div style="'+fbCard()+'"><b>☎️ '+(ar?'التواصل والحجز':'Contact and booking')+'</b>'
+  b.innerHTML=cpLogoCard()+'<div style="'+fbCard()+'"><b>☎️ '+(ar?'التواصل والحجز':'Contact and booking')+'</b>'
    +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px">'+(ar?'هذي الأرقام تظهر على الصفحة العامة مباشرة بعد النشر.':'These appear on the public page after publishing.')+'</div>'
    +fld(ar?'رقم الواتساب':'WhatsApp','cpWa',c.whatsapp,'966533779297')
    +fld(ar?'البريد':'Email','cpMail',c.email,'Info@oujares.com')
@@ -31605,6 +31605,36 @@ async function cpContact(){ var ar=cpAr(), b=document.getElementById('cpBody'); 
    +fld(ar?'مسار ملف PDF':'PDF path','cpPdf',c.pdf_path)
    +'<div style="margin:6px 0">'+chk('cpEn',!!c.english_ready,ar?'النسخة الإنجليزية جاهزة':'English ready')+'</div>'
    +'<button class="btn primary sm" onclick="cpContactSave()">'+(ar?'حفظ':'Save')+'</button></div>'; }
+/* The logo slot. One upload drives four things — the page header, the footer,
+   the browser tab icon and the WhatsApp preview card — so it is regenerated
+   server-side from the same file rather than asking for four uploads. */
+function cpLogoCard(){ var ar=cpAr(); var bust=Date.now();
+  return '<div style="'+fbCard()+'"><b>🏛️ '+(ar?'شعار عوجا':'Ouja logo')+'</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'
+   +(ar?'يظهر في أعلى الصفحة وفي أسفلها، ومنه تُبنى أيقونة المتصفح وصورة معاينة الواتساب. PNG أو JPG بخلفية بسيطة، ويفضّل مربّع.'
+       :'Shown in the header and footer; the browser icon and the WhatsApp preview card are built from it. PNG or JPG, ideally square.')+'</div>'
+   +'<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
+   +'<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:12px;min-width:120px;text-align:center">'
+   +'<img id="cpLogoPrev" src="/cp/logo.png?t='+bust+'" alt="" style="max-width:120px;max-height:74px;display:block;margin:0 auto" '
+   +'onerror="this.style.display=&#39;none&#39;;var n=document.getElementById(&#39;cpLogoNone&#39;);if(n)n.style.display=&#39;block&#39;">'
+   +'<div id="cpLogoNone" class="muted" style="display:none;font-size:11px">'+(ar?'لا يوجد شعار':'no logo')+'</div></div>'
+   +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+   +'<label class="btn primary sm" style="cursor:pointer">'+(ar?'ارفع الشعار':'Upload logo')
+   +'<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="cpLogoUpload(event)"></label>'
+   +'<button class="btn ghost sm" onclick="cpLogoDelete()">'+(ar?'احذف':'Remove')+'</button>'
+   +'<a class="btn ghost sm" href="/cp/share.png?t='+bust+'" target="_blank" rel="noopener">'+(ar?'بطاقة الواتساب':'Share card')+'</a>'
+   +'</div></div></div>'; }
+async function cpLogoUpload(ev){ var ar=cpAr(); var f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  if(f.size>4*1024*1024){ toast(ar?'الملف كبير (الحد 4MB)':'Too large (4MB)'); return; }
+  var fd=new FormData(); fd.append('file',f);
+  toast(ar?'⏳ رفع الشعار…':'⏳ Uploading…'); var r;
+  try{ var rs=await fetch('/api/cp/admin/logo-upload?token='+encodeURIComponent(tok()),{method:'POST',body:fd}); r=await rs.json(); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'رُكّب الشعار ✓ — اضغط «انشر» ليظهر للعامة':'Logo installed ✓ — press Publish'); cpContact(); }
+  else toast((r&&r.error)||'⚠'); }
+async function cpLogoDelete(){ var ar=cpAr();
+  var m=await fbModal({title:(ar?'حذف الشعار':'Remove logo'),msg:(ar?'نرجع للعلامة الافتراضية في التصميم.':'Revert to the design placeholder mark.'),confirm:(ar?'احذف':'Remove')});
+  if(!m.ok) return; var r; try{ r=await post('/api/cp/admin/logo-delete',{}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast('✓'); cpContact(); } else toast('⚠'); }
 async function cpContactSave(){ function val(id){ var e=document.getElementById(id); return e?e.value:''; } function on(id){ var e=document.getElementById(id); return !!(e&&e.checked); }
   var slots=[]; if(on('cpSam'))slots.push('am'); if(on('cpSpm'))slots.push('pm'); if(on('cpSev'))slots.push('eve');
   await cpSave('contacts',{whatsapp:val('cpWa'),email:val('cpMail'),booking_link:val('cpBook'),booking_modes:{online:on('cpMOn'),office:on('cpMOff')},office_label_ar:val('cpOff'),slots:slots,lead_channel_id:val('cpChan'),pdf_path:val('cpPdf'),english_ready:on('cpEn')}); cpContact(); }

@@ -112,3 +112,48 @@ class Uploads(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LogoUpload(_Base):
+    def _upload(self, data, filename="logo.png"):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename=filename, content_type="image/png")
+        return self.loop.run_until_complete(
+            self.client.post("/api/cp/admin/logo-upload", data=form))
+
+    def test_upload_installs_and_derives_the_four_assets(self):
+        r = self._upload(_png_bytes("OUJA"))
+        d = self.jbody(r)
+        self.assertTrue(d["ok"], d)
+        self.assertEqual(set(d["derived"]),
+                         {"icon.png", "icon-192.png", "icon-512.png", "share.png"})
+        import os
+        brand = os.path.join(UPLOADS, "brand")
+        self.assertTrue(os.path.exists(os.path.join(brand, "logo.png")))
+
+    def test_uploaded_logo_is_served_and_wins_over_the_built_in(self):
+        self._upload(_png_bytes("OUJA"))
+        r = self.loop.run_until_complete(self.client.get("/cp/logo.png"))
+        self.assertEqual(r.status, 200)
+        r2 = self.loop.run_until_complete(self.client.get("/cp/share.png"))
+        self.assertEqual(r2.status, 200)
+
+    def test_share_card_is_the_right_shape(self):
+        self._upload(_png_bytes("OUJA"))
+        from PIL import Image
+        import os
+        im = Image.open(os.path.join(UPLOADS, "brand", "share.png"))
+        self.assertEqual(im.size, (1200, 630))
+
+    def test_bad_type_refused(self):
+        r = self._upload(b"not an image at all", filename="x.png")
+        self.assertEqual(r.status, 400)
+
+    def test_delete_reverts_to_the_built_in(self):
+        self._upload(_png_bytes("OUJA"))
+        r = self.loop.run_until_complete(
+            self.client.post("/api/cp/admin/logo-delete", json={}))
+        self.assertTrue(self.jbody(r)["ok"])
+        import os
+        self.assertFalse(os.path.exists(os.path.join(UPLOADS, "brand", "logo.png")))

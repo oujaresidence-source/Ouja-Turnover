@@ -424,6 +424,102 @@ async def serve_shot(request):
         "Content-Type": _SHOT_CT.get(sid.rsplit(".", 1)[-1], "image/png")})
 
 
+# --------------------------------------------------------------------------- #
+# the logo — one upload, four derived assets
+# --------------------------------------------------------------------------- #
+def _brand_dir():
+    d = os.path.join(HOST.upload_dir or "", "brand")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def rebuild_brand(png_bytes):
+    """logo.png in, favicon trio + 1200x630 share card out.
+
+    Composed on the LOGO'S OWN background colour rather than the page cream: a
+    logo that ships with its own ground shows a visible seam otherwise (that
+    happened on v1 and had to be redone).
+    """
+    from PIL import Image
+    src = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    flat = Image.new("RGB", src.size, src.convert("RGB").getpixel((2, 2)))
+    flat.paste(src, (0, 0), src)
+    ground = flat.getpixel((2, 2))
+
+    # tight crop around the mark so the favicon is not mostly padding
+    grey = flat.convert("L")
+    w, h = flat.size
+    px = grey.load()
+    base = px[2, 2]
+    xs, ys = [], []
+    for y in range(0, h, max(1, h // 220)):
+        for x in range(0, w, max(1, w // 220)):
+            if abs(px[x, y] - base) > 18:
+                xs.append(x)
+                ys.append(y)
+    if xs and ys:
+        l, r, t, b = min(xs), max(xs), min(ys), max(ys)
+    else:
+        l, r, t, b = 0, w - 1, 0, h - 1
+    mw, mh = max(1, r - l), max(1, b - t)
+
+    side = int(max(mw, mh) * 1.18)
+    cx, cy = (l + r) // 2, (t + b) // 2
+    icon = flat.crop((cx - side // 2, cy - side // 2, cx + side // 2, cy + side // 2))
+    out = _brand_dir()
+    for size, name in ((512, "icon-512.png"), (192, "icon-192.png"), (64, "icon.png")):
+        icon.resize((size, size), Image.LANCZOS).save(os.path.join(out, name),
+                                                      optimize=True)
+    card = Image.new("RGB", (1200, 630), ground)
+    mark = flat.crop((l, t, r + 1, b + 1))
+    scale = min(760.0 / mw, 470.0 / mh)
+    mark = mark.resize((max(1, int(mw * scale)), max(1, int(mh * scale))), Image.LANCZOS)
+    card.paste(mark, ((1200 - mark.width) // 2, (630 - mark.height) // 2))
+    card.save(os.path.join(out, "share.png"), optimize=True)
+    return ["icon.png", "icon-192.png", "icon-512.png", "share.png"]
+
+
+async def api_logo_upload(request):
+    post = await request.post()
+    field = post.get("file")
+    data = field.file.read() if hasattr(field, "file") else (
+        field if isinstance(field, (bytes, bytearray)) else b"")
+    if not data:
+        return HOST.json_response({"ok": False, "error": "no_file"}, 400)
+    if len(data) > 4 * 1024 * 1024:
+        return HOST.json_response({"ok": False, "error": "الملف كبير (الحد 4MB)"}, 400)
+    ext, _ct = _sniff(bytes(data[:16]))
+    if ext not in ("png", "jpg", "webp"):
+        return HOST.json_response(
+            {"ok": False, "error": "الشعار يجب أن يكون PNG أو JPG أو WebP"}, 400)
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(bytes(data)))
+        buf = io.BytesIO()
+        img.convert("RGBA").save(buf, format="PNG")
+        png = buf.getvalue()
+    except Exception:
+        return HOST.json_response({"ok": False, "error": "تعذّرت قراءة الصورة"}, 400)
+    with open(os.path.join(_brand_dir(), "logo.png"), "wb") as fh:
+        fh.write(png)
+    derived = []
+    try:
+        derived = rebuild_brand(png)
+    except Exception:
+        traceback.print_exc()   # the logo still installs; the icons keep the old set
+    return HOST.json_response({"ok": True, "derived": derived})
+
+
+async def api_logo_delete(request):
+    removed = []
+    for name in ("logo.png", "icon.png", "icon-192.png", "icon-512.png", "share.png"):
+        path = os.path.join(_brand_dir(), name)
+        if os.path.exists(path):
+            os.remove(path)
+            removed.append(name)
+    return HOST.json_response({"ok": True, "removed": removed})
+
+
 async def api_lead_status(request):
     b = await _body(request)
     status = str(b.get("status") or "")
@@ -463,4 +559,6 @@ def register(app):
     p("/api/cp/admin/snapshot-now", _guarded(api_snapshot_now))
     p("/api/cp/admin/lead-status", _guarded(api_lead_status))
     p("/api/cp/admin/shot-upload", _guarded(api_shot_upload))
+    p("/api/cp/admin/logo-upload", _guarded(api_logo_upload))
+    p("/api/cp/admin/logo-delete", _guarded(api_logo_delete))
     g("/cp/shot/{id}", serve_shot)

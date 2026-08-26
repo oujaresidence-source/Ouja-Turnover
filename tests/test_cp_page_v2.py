@@ -257,3 +257,27 @@ class DocumentShellAndContrast(unittest.TestCase):
         """A real 1024px <img> inside .ph overflowed a 390px phone by 14px."""
         self.assertIn(".unit .ph img{display:block;width:100%;height:100%;"
                       "object-fit:cover}", render())
+
+
+class BrandLogo(unittest.TestCase):
+    """One upload drives the header, the footer, the tab icon and the share
+    card. Without a logo the page falls back to the design's placeholder mark
+    rather than showing a broken image."""
+
+    def test_logo_renders_in_header_and_footer(self):
+        html = render(has_logo=True)
+        self.assertEqual(html.count("/cp/logo.png"), 2)
+
+    def test_logo_has_explicit_height_so_it_cannot_shift_the_header(self):
+        html = render(has_logo=True)
+        self.assertIn('height="21"', html)
+        self.assertIn('height="19"', html)
+
+    def test_without_a_logo_the_design_mark_is_used(self):
+        html = render(has_logo=False)
+        self.assertEqual(html.count('viewBox="0 0 34 22"'), 2)
+        self.assertNotIn("/cp/logo.png", html)
+
+    def test_the_mock_placeholder_title_is_gone(self):
+        self.assertNotIn("مكان الشعار الرسمي", render(has_logo=True))
+        self.assertNotIn("مكان الشعار الرسمي", render(has_logo=False))
