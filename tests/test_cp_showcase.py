@@ -81,11 +81,15 @@ class PublicRender(_Base):
         self._publish()
         _, html = self.get("/cp/ar")
         srcs = re.findall(r'<img[^>]+src="([^"]+)"', html)
+        self.assertTrue(srcs, "no images rendered — the assertion would pass vacuously")
         for src in srcs:
             with self.subTest(src=src):
-                self.assertTrue(src.startswith("/elite/img") or
-                                src.startswith("/cp/shot/"),
+                # the rule is that no VENDOR url reaches a reader: photos go
+                # through /elite/img, and our own brand assets are served from
+                # /cp/. Anything else (an S3 host, a CDN) is the leak.
+                self.assertTrue(src.startswith("/elite/img") or src.startswith("/cp/"),
                                 "raw image URL leaked: %r" % src)
+                self.assertNotIn("://", src)
 
     def test_hostaway_is_never_called_on_the_public_path(self):
         """listing_photos is the pipeline; the sync function is the only thing
