@@ -312,17 +312,41 @@ def _ranked_item(
     return item
 
 
-def _sort(items: Sequence[Dict[str, Any]]) -> Tuple[Dict[str, Any], ...]:
-    return tuple(
-        sorted(
-            items,
-            key=lambda item: (
+def _sort(
+    items: Sequence[Dict[str, Any]], price_priority: str
+) -> Tuple[Dict[str, Any], ...]:
+    if not items:
+        return ()
+    if price_priority == "lowest_suitable":
+        key = lambda item: (
+            item["quote"]["stay_total_sar"],
+            -item["fit_score"],
+            _id_sort(item["id"]),
+        )
+    elif price_priority == "value":
+        totals = [item["quote"]["stay_total_sar"] for item in items]
+        lowest, highest = min(totals), max(totals)
+        span = max(1, highest - lowest)
+
+        def key(item: Mapping[str, Any]) -> Tuple[Any, ...]:
+            fit = max(0.0, min(1.0, float(item["fit_score"]) / 100.0))
+            affordability = 1.0 - (
+                (item["quote"]["stay_total_sar"] - lowest) / span
+            )
+            value_score = 0.7 * fit + 0.3 * affordability
+            return (
+                -value_score,
                 -item["fit_score"],
                 item["quote"]["stay_total_sar"],
                 _id_sort(item["id"]),
-            ),
+            )
+    else:
+        key = lambda item: (
+            -item["fit_score"],
+            item["quote"]["stay_total_sar"],
+            _id_sort(item["id"]),
         )
-    )
+    return tuple(sorted(items, key=key))
 
 
 def _with_tradeoffs(
@@ -457,8 +481,9 @@ def rank(
             if near is not None:
                 near_items.append(near)
 
-    exact = _with_tradeoffs(_sort(exact_items), lang)
-    near = _sort(near_items)
+    price_priority = parsed["price_priority"]
+    exact = _with_tradeoffs(_sort(exact_items, price_priority), lang)
+    near = _sort(near_items, price_priority)
     catalog_sorted = tuple(sorted(catalog, key=lambda item: _id_sort(item["id"])))
     return {
         "top": exact[:3],
@@ -471,6 +496,7 @@ def rank(
         "unavailable_count": unavailable_count,
         "catalog_claim": catalog_claim(len(catalog_sorted), lang),
         "empty_state": _empty_state(exact, near, pending, lang),
+        "price_priority": price_priority,
     }
 
 

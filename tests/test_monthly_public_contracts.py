@@ -26,6 +26,7 @@ def valid_match_request(**overrides):
         "place": {"kind": "destination", "id": "kafd", "label": "KAFD"},
         "residents": 2,
         "sleeping": "one_bedroom",
+        "price_priority": "value",
         "move_in": "2026-09-01",
         "duration_months": 2,
         "flexibility": "fixed",
@@ -41,7 +42,27 @@ class MatchRequestContractTests(unittest.TestCase):
         self.assertEqual(parsed["purpose"], "work")
         self.assertEqual(parsed["place"]["id"], "kafd")
         self.assertEqual(parsed["duration_months"], 2)
+        self.assertEqual(parsed["price_priority"], "value")
         self.assertNotIn("budget", parsed)
+
+    def test_price_priority_is_controlled_and_defaults_safely(self):
+        for priority in ("experience", "value", "lowest_suitable"):
+            with self.subTest(priority=priority):
+                self.assertEqual(
+                    parse_match_request(
+                        valid_match_request(price_priority=priority)
+                    )["price_priority"],
+                    priority,
+                )
+
+        legacy = valid_match_request()
+        legacy.pop("price_priority")
+        self.assertEqual(parse_match_request(legacy)["price_priority"], "value")
+
+        with self.assertRaises(ContractError) as caught:
+            parse_match_request(valid_match_request(price_priority="highest_revenue"))
+        self.assertEqual(caught.exception.field, "price_priority")
+        self.assertEqual(caught.exception.code, "unsupported")
 
     def test_accepts_every_approved_purpose_branch(self):
         for purpose in ("work", "family", "treatment", "visit"):

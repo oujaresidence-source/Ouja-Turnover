@@ -14,6 +14,7 @@ from typing import Any, Collection, Dict, Mapping, Optional
 
 PURPOSES = ("work", "family", "treatment", "visit")
 FLEXIBILITY_OPTIONS = ("fixed", "plus_minus_7")
+PRICE_PRIORITIES = ("experience", "value", "lowest_suitable")
 SLEEPING_OPTIONS = (
     "studio",
     "one_bedroom",
@@ -59,6 +60,7 @@ MATCHER_QUESTIONS = (
     "place",
     "residents",
     "sleeping",
+    "price_priority",
     "move_in",
     "move_out",
     "duration_months",
@@ -481,6 +483,7 @@ def parse_match_request(value: Any) -> Dict[str, Any]:
             "place",
             "residents",
             "sleeping",
+            "price_priority",
             "move_in",
             "move_out",
             "duration_months",
@@ -497,6 +500,11 @@ def parse_match_request(value: Any) -> Dict[str, Any]:
             maximum=MAX_PUBLIC_RESIDENTS,
         ),
         "sleeping": _choice(data.get("sleeping"), "sleeping", SLEEPING_OPTIONS),
+        "price_priority": _choice(
+            data.get("price_priority", "value"),
+            "price_priority",
+            PRICE_PRIORITIES,
+        ),
         "flexibility": _choice(
             data.get("flexibility"), "flexibility", FLEXIBILITY_OPTIONS
         ),

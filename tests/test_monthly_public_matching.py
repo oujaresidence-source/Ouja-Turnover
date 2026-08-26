@@ -52,6 +52,7 @@ def request(**overrides):
         "place": {"kind": "neighborhood", "id": "al_malqa", "label": "الملقا"},
         "residents": 2,
         "sleeping": "one_bedroom",
+        "price_priority": "experience",
         "move_in": "2026-09-01",
         "duration_months": 1,
         "flexibility": "fixed",
@@ -257,6 +258,47 @@ class MatchingRankingTests(unittest.TestCase):
             now=NOW,
         )
         self.assertEqual(equal["top"][0]["id"], "1004")
+
+    def test_lowest_suitable_orders_verified_matches_by_total_price(self):
+        ranked = rank(
+            generation(
+                listing(1001, rate=18000, facts={"workspace": True}),
+                listing(1002, rate=9000),
+            ),
+            request(price_priority="lowest_suitable"),
+            "en",
+            now=NOW,
+        )
+
+        self.assertEqual(ranked["top"][0]["id"], "1002")
+        self.assertEqual(ranked["price_priority"], "lowest_suitable")
+
+    def test_value_priority_balances_fit_and_total_price(self):
+        ranked = rank(
+            generation(
+                listing(1001, rate=30000, facts={"workspace": True}),
+                listing(1002, rate=9000),
+            ),
+            request(price_priority="value"),
+            "en",
+            now=NOW,
+        )
+
+        self.assertEqual(ranked["top"][0]["id"], "1002")
+        self.assertEqual(ranked["price_priority"], "value")
+
+    def test_experience_priority_keeps_verified_fit_ahead_of_price(self):
+        ranked = rank(
+            generation(
+                listing(1001, rate=30000, facts={"workspace": True}),
+                listing(1002, rate=9000),
+            ),
+            request(price_priority="experience"),
+            "en",
+            now=NOW,
+        )
+
+        self.assertEqual(ranked["top"][0]["id"], "1001")
 
     def test_top_three_alternatives_and_catalog_partition_is_truthful(self):
         ranked = rank(
