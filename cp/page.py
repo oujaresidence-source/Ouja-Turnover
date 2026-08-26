@@ -167,7 +167,7 @@ def build_voices(reviews, copy):
             '<p class="src"><b>%s</b> &middot; %s &middot; %s</p></div>'
             % (' lang="en" dir="ltr"' if r.get("language") == "en" else "",
                body, response, _e(r.get("guest_name", "")),
-               _e(r.get("listing_name", "")), _e(r.get("date", ""))))
+               "<bdi>%s</bdi>" % _e(r.get("listing_name", "")), _e(r.get("date", ""))))
     return '<div class="voices">\n      ' + "\n      ".join(out) + "\n    </div>"
 
 
@@ -229,6 +229,15 @@ def build_head_extra(base, lang="ar"):
     constantly, so the preview card is the first thing most readers ever see."""
     b = (base or "").rstrip("/")
     bits = [
+        "<style>"
+        ".voice .tr{display:block;margin-top:10px;padding-top:10px;"
+        "border-top:1px dashed var(--rule);color:var(--ink-soft);font-size:.92em;"
+        "direction:rtl;text-align:right}"
+        ".voice .reply{margin-top:10px;padding:10px 14px;background:var(--paper-deep);"
+        "border-inline-start:2px solid var(--ochre-text);color:var(--ink-soft);"
+        "font-size:.92em}"
+        ".voice .src bdi{unicode-bidi:isolate}"
+        "</style>",
         '<link rel="canonical" href="%s/cp/%s">' % (_e(b), lang),
         '<link rel="alternate" hreflang="x-default" href="%s/cp/ar">' % _e(b),
         '<meta property="og:url" content="%s/cp/%s">' % (_e(b), lang),

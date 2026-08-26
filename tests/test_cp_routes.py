@@ -136,11 +136,18 @@ class StatsApi(_Base):
         self.assertEqual(cell["source"], "seeds")
         self.assertEqual(data["market"]["occupancy_pct"], 38)
 
-    def test_reviews_api_is_empty_until_slots_are_filled(self):
+    def test_reviews_api_serves_the_six_filled_slots(self):
         r = self.get("/api/cp/reviews")
         data = self.loop.run_until_complete(r.json())
         self.assertTrue(data["ok"])
-        self.assertEqual(data["count"], 0)
+        self.assertEqual(data["count"], 6)
+        # the critical review is present and untouched (seeds §15)
+        texts = [x["text_original"] for x in data["reviews"]]
+        self.assertTrue(any("العزل ضعيف" in t for t in texts))
+        # no internal fields leak through the public API
+        for x in data["reviews"]:
+            self.assertNotIn("review_id", x)
+            self.assertNotIn("_why_chosen", x)
 
 
 class Leads(_Base):

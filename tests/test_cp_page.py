@@ -230,3 +230,61 @@ class TemplateHygiene(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSixChosenReviews(unittest.TestCase):
+    """The filled slots (owner direction 2026-08-26: use the /business store).
+
+    Every text must be byte-for-byte identical to business/data/reviews_curated.json
+    — the store is the proof the words are the guests' own. If someone 'tidies' a
+    review in cp_reviews.json, this is the test that catches it.
+    """
+
+    def setUp(self):
+        import json
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "cp", "data", "cp_reviews.json"),
+                encoding="utf-8") as fh:
+            self.slots = json.load(fh)
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "business", "data",
+                "reviews_curated.json"), encoding="utf-8") as fh:
+            self.store = {r["id"]: r for r in json.load(fh)}
+
+    def test_six_slots_all_filled(self):
+        self.assertEqual(len(self.slots), 6)
+        for rec in self.slots:
+            with self.subTest(slot=rec["slot"]):
+                self.assertTrue(rec["text_original"].strip())
+
+    def test_every_text_is_verbatim_from_the_store(self):
+        for rec in self.slots:
+            with self.subTest(slot=rec["slot"]):
+                self.assertEqual(rec["text_original"],
+                                 self.store[rec["review_id"]]["text"])
+
+    def test_the_critical_slot_is_genuinely_critical(self):
+        critical = [r for r in self.slots if r["slot"] == 6][0]
+        self.assertIn("العزل ضعيف", critical["text_original"])
+
+    def test_the_english_review_carries_a_marked_translation(self):
+        en = [r for r in self.slots if r["language"] == "en"]
+        self.assertEqual(len(en), 1)
+        self.assertTrue(en[0]["translation_ar"].strip())
+
+    def test_dates_are_month_and_year_only(self):
+        import re
+        for rec in self.slots:
+            with self.subTest(slot=rec["slot"]):
+                self.assertTrue(re.match(r"^[؀-ۿ]+ 20\d\d$", rec["date"]),
+                                "date %r is not «month year»" % rec["date"])
+
+    def test_they_render_and_the_blanks_are_gone(self):
+        html = render(reviews=self.slots)
+        self.assertIn("العزل ضعيف", html)          # the critical one, kept in
+        self.assertIn("ثاني مرة ازورهم", html)      # the returning guest
+        self.assertIn("وحلها لي في دقائق", html)    # the fixed problem
+        self.assertIn("I booked last minute", html)  # the English original
+        self.assertIn("الترجمة", html)               # its marked translation
+        self.assertNotIn("مراجعة منشورة حقيقية", html)  # no leftover blank briefs
+        self.assertEqual(page.remaining_placeholders(html), [])
