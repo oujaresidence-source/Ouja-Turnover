@@ -22,12 +22,12 @@ def payload(response):
 
 
 class FakeRequest:
-    def __init__(self, body=None, match=None, method="POST"):
+    def __init__(self, body=None, match=None, method="POST", query=None):
         self._body = {} if body is None else body
         self.match_info = match or {}
         self.method = method
         self.path = "/api/monthly/ops/test"
-        self.query = {}
+        self.query = query or {}
         self.headers = {}
         self.cookies = {}
 
@@ -241,6 +241,88 @@ class MonthlyCatalogRouteTest(unittest.TestCase):
             ("POST", "/api/monthly/ops/refresh"),
         }
         self.assertTrue(expected.issubset(set(router.routes)))
+
+    def test_preview_api_requires_monthly_operations_access(self):
+        denied = self.bot._json({"error": "unauthorized"}, 401)
+        with mock.patch.object(
+            self.bot, "_monthly_ops_gate", return_value=denied
+        ), mock.patch.object(
+            self.bot, "_build_monthly_preview_app"
+        ) as builder:
+            response = run(
+                self.bot._api_monthly_preview_config(
+                    FakeRequest(method="GET", query={"lang": "ar"})
+                )
+            )
+
+        self.assertEqual(response.status, 401)
+        builder.assert_not_called()
+
+    def test_preview_api_is_a_thin_read_only_adapter(self):
+        preview = mock.Mock()
+        preview.config.return_value = {"ok": True, "preview": True}
+        preview.browse.return_value = {"ok": True, "results": []}
+        preview.match.return_value = {"ok": True, "catalog": []}
+        preview.listing.return_value = {"ok": True, "listing": {"id": "101"}}
+        with mock.patch.object(
+            self.bot, "_build_monthly_preview_app", return_value=preview
+        ) as builder:
+            responses = (
+                run(self.bot._api_monthly_preview_config(FakeRequest(method="GET"))),
+                run(self.bot._api_monthly_preview_search(FakeRequest(method="GET"))),
+                run(
+                    self.bot._api_monthly_preview_match(
+                        FakeRequest({"lang": "en", "purpose": "family"})
+                    )
+                ),
+                run(
+                    self.bot._api_monthly_preview_listing(
+                        FakeRequest(match={"id": "101"}, method="GET")
+                    )
+                ),
+            )
+
+        self.assertTrue(all(response.status == 200 for response in responses))
+        self.assertEqual(builder.call_count, 4)
+        preview.config.assert_called_once_with("ar")
+        preview.browse.assert_called_once()
+        preview.match.assert_called_once_with({"purpose": "family"}, "en")
+        preview.listing.assert_called_once()
+
+    def test_preview_registers_only_read_only_customer_contracts(self):
+        class Router:
+            def __init__(self):
+                self.routes = []
+
+            def add_get(self, path, handler):
+                self.routes.append(("GET", path))
+
+            def add_post(self, path, handler):
+                self.routes.append(("POST", path))
+
+        router = Router()
+        self.bot._register_monthly_v2_only_routes(router)
+        routes = set(router.routes)
+        self.assertTrue(
+            {
+                ("GET", "/monthly/ops/preview"),
+                ("GET", "/monthly/ops/preview/search"),
+                ("GET", "/monthly/ops/preview/match"),
+                ("GET", "/monthly/ops/preview/id/{lid}"),
+                ("GET", "/monthly/ops/preview/{slug}"),
+                ("GET", "/api/monthly/ops/preview/config"),
+                ("GET", "/api/monthly/ops/preview/search"),
+                ("POST", "/api/monthly/ops/preview/match"),
+                ("GET", "/api/monthly/ops/preview/listing/{id}"),
+            }.issubset(routes)
+        )
+        self.assertFalse(
+            any(
+                method == "POST" and path.startswith("/api/monthly/ops/preview/")
+                and path != "/api/monthly/ops/preview/match"
+                for method, path in routes
+            )
+        )
 
 
 if __name__ == "__main__":

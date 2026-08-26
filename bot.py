@@ -192,6 +192,7 @@ try:
         render_monthly_catalog_page as _render_monthly_catalog_page,
     )
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
+    from monthly_public.preview import build_preview_app as _build_monthly_preview_app
     from monthly_public.page import (
         ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
         CSS_PATH as _MONTHLY_PUBLIC_CSS_PATH,
@@ -212,6 +213,7 @@ try:
 except Exception as _mpub_err:          # pragma: no cover - optional staged rollout
     print("[monthly-public] import failed (v2 routes disabled):", _mpub_err)
     _MonthlyAnalyticsStore = _MonthlyLeadStore = _MonthlyPublicApp = None
+    _build_monthly_preview_app = None
     _monthly_public_load_settings = _MonthlySnapshotStore = None
     _MonthlyCatalogService = _MonthlyCatalogStore = None
     _CatalogContractError = _CatalogRevisionConflict = None
@@ -59275,6 +59277,65 @@ async def _monthly_catalog_response(call, *args):
         }, 503)
 
 
+def _monthly_preview_instance():
+    if _build_monthly_preview_app is None or _monthly_catalog_service is None:
+        raise RuntimeError("monthly preview is unavailable")
+    return _build_monthly_preview_app(
+        _monthly_catalog_service, clock=lambda: datetime.now(TZ)
+    )
+
+
+async def _monthly_preview_call(method, *args):
+    try:
+        preview = await asyncio.to_thread(_monthly_preview_instance)
+        call = getattr(preview, method)
+        result = await asyncio.to_thread(call, *args)
+        return _monthly_public_response(result)
+    except Exception:
+        return _json({
+            "ok": False,
+            "error": {
+                "code": "preview_unavailable",
+                "message_ar": "تعذر تحميل المعاينة الداخلية حاليًا.",
+                "message_en": "The internal preview is currently unavailable.",
+            },
+        }, 503)
+
+
+async def _api_monthly_preview_config(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_preview_call("config", request.query.get("lang", "ar"))
+
+
+async def _api_monthly_preview_search(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_preview_call("browse", _monthly_v2_browse_query(request))
+
+
+async def _api_monthly_preview_match(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    raw = await _read_body(request)
+    body = dict(raw) if isinstance(raw, dict) else raw
+    lang = body.pop("lang", "ar") if isinstance(body, dict) else "ar"
+    return await _monthly_preview_call("match", body, lang)
+
+
+async def _api_monthly_preview_listing(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_preview_call(
+        "listing",
+        _monthly_v2_listing_query(request, request.match_info.get("id", "")),
+    )
+
+
 async def _api_monthly_catalog_listings(request):
     denied = _monthly_catalog_gate(request)
     if denied is not None:
@@ -59446,6 +59507,49 @@ async def _handle_monthly_catalog(request):
     )
 
 
+def _monthly_preview_page(route, *, slug=None, listing_id=None):
+    if _render_monthly_public_page is None:
+        raise RuntimeError("monthly preview renderer is unavailable")
+    return _render_monthly_public_page(
+        route, slug=slug, listing_id=listing_id, preview=True
+    )
+
+
+async def _handle_monthly_preview(request, route="home"):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_preview_page(
+            route,
+            slug=request.match_info.get("slug"),
+            listing_id=request.match_info.get("lid"),
+        )
+    except (RuntimeError, ValueError):
+        return _monthly_public_unavailable()
+    return web.Response(
+        text=body,
+        content_type="text/html",
+        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
+async def _handle_monthly_preview_home(request):
+    return await _handle_monthly_preview(request, "home")
+
+
+async def _handle_monthly_preview_browse(request):
+    return await _handle_monthly_preview(request, "browse")
+
+
+async def _handle_monthly_preview_match(request):
+    return await _handle_monthly_preview(request, "match")
+
+
+async def _handle_monthly_preview_listing(request):
+    return await _handle_monthly_preview(request, "listing")
+
+
 async def _handle_monthly_catalog_css(request):
     if not _monthly_public_v2_enabled():
         return _monthly_off()
@@ -59599,6 +59703,11 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/event", _api_monthly_v2_event)
     router.add_get("/monthly/ops", _handle_monthly_ops)
     router.add_get("/monthly/ops/listings", _handle_monthly_catalog)
+    router.add_get("/monthly/ops/preview", _handle_monthly_preview_home)
+    router.add_get("/monthly/ops/preview/search", _handle_monthly_preview_browse)
+    router.add_get("/monthly/ops/preview/match", _handle_monthly_preview_match)
+    router.add_get("/monthly/ops/preview/id/{lid}", _handle_monthly_preview_listing)
+    router.add_get("/monthly/ops/preview/{slug}", _handle_monthly_preview_listing)
     router.add_get(_MONTHLY_OPS_CSS_PATH, _handle_monthly_ops_css)
     router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
     router.add_get(_MONTHLY_CATALOG_CSS_PATH, _handle_monthly_catalog_css)
@@ -59609,6 +59718,10 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/ops/action", _api_monthly_v2_ops_action)
     router.add_post("/api/monthly/ops/response", _api_monthly_v2_ops_response)
     router.add_post("/api/monthly/ops/outcome", _api_monthly_v2_ops_outcome)
+    router.add_get("/api/monthly/ops/preview/config", _api_monthly_preview_config)
+    router.add_get("/api/monthly/ops/preview/search", _api_monthly_preview_search)
+    router.add_post("/api/monthly/ops/preview/match", _api_monthly_preview_match)
+    router.add_get("/api/monthly/ops/preview/listing/{id}", _api_monthly_preview_listing)
     router.add_get("/api/monthly/ops/listings", _api_monthly_catalog_listings)
     router.add_get("/api/monthly/ops/listing/{id}", _api_monthly_catalog_listing)
     router.add_post("/api/monthly/ops/listing/{id}/draft", _api_monthly_catalog_profile_draft)

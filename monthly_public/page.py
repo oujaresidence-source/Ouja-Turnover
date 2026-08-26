@@ -39,6 +39,7 @@ def page_state(
     *,
     slug: Any = None,
     listing_id: Any = None,
+    preview: bool = False,
 ) -> Dict[str, Any]:
     """Return the only server-authored state embedded in the public shell."""
 
@@ -55,6 +56,7 @@ def page_state(
         "slug": safe_slug,
         "listing_id": safe_listing_id,
         "default_lang": "ar",
+        "preview": bool(preview),
     }
 
 
@@ -72,10 +74,13 @@ def render_monthly_page(
     *,
     slug: Any = None,
     listing_id: Any = None,
+    preview: bool = False,
 ) -> str:
     """Render one CSP-friendly shell; listing content is loaded from local APIs."""
 
-    state = _json_script(page_state(route, slug=slug, listing_id=listing_id))
+    state = _json_script(
+        page_state(route, slug=slug, listing_id=listing_id, preview=preview)
+    )
     return """<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
