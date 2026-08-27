@@ -157,3 +157,67 @@ class LogoUpload(_Base):
         self.assertTrue(self.jbody(r)["ok"])
         import os
         self.assertFalse(os.path.exists(os.path.join(UPLOADS, "brand", "logo.png")))
+
+
+class ManageExistingShots(_Base):
+    """The gap the owner hit: upload existed, but nothing listed, renamed or
+    removed what had been uploaded — so a screenshot could go up and then be
+    unreachable from the tab forever."""
+
+    def _upload(self, caption="كشف المالك"):
+        cp_admin.ocr_text = lambda data: ("", "test")
+        return self.jbody(self.upload(_png_bytes(), caption=caption))
+
+    def test_uploaded_shots_are_listed(self):
+        self._upload("لقطة أولى")
+        d = self.jbody(self.loop.run_until_complete(
+            self.client.get("/api/cp/admin/shots")))
+        self.assertTrue(d["ok"])
+        self.assertEqual(len(d["shots"]), 1)
+        self.assertEqual(d["shots"][0]["caption_ar"], "لقطة أولى")
+        self.assertEqual(d["max"], 3)
+
+    def test_caption_and_order_can_be_saved(self):
+        a = self._upload("أولى")["shot"]
+        b = self._upload("ثانية")["shot"]
+        r = self.loop.run_until_complete(self.client.post(
+            "/api/cp/admin/shots",
+            json=[{"id": b["id"], "caption_ar": "صارت أولى", "path": b["path"]},
+                  {"id": a["id"], "caption_ar": "صارت ثانية", "path": a["path"]}]))
+        self.assertEqual(r.status, 200)
+        d = self.jbody(self.loop.run_until_complete(
+            self.client.get("/api/cp/admin/shots")))
+        self.assertEqual([s["caption_ar"] for s in d["shots"]],
+                         ["صارت أولى", "صارت ثانية"])
+
+    def test_delete_removes_the_entry_and_the_file(self):
+        import os
+        sid = self._upload()["shot"]["id"]
+        path = os.path.join(UPLOADS, sid)
+        self.assertTrue(os.path.exists(path))
+        r = self.loop.run_until_complete(
+            self.client.post("/api/cp/admin/shot-delete", json={"id": sid}))
+        self.assertTrue(self.jbody(r)["ok"])
+        self.assertFalse(os.path.exists(path),
+                         "an orphaned file stays publicly fetchable at /cp/shot/<id>")
+        r2 = self.loop.run_until_complete(self.client.get("/cp/shot/" + sid))
+        self.assertEqual(r2.status, 404)
+
+    def test_deleting_frees_a_slot(self):
+        ids = [self._upload("%d" % i)["shot"]["id"] for i in range(3)]
+        self.assertEqual(self.upload(_png_bytes()).status, 400)   # full
+        self.loop.run_until_complete(
+            self.client.post("/api/cp/admin/shot-delete", json={"id": ids[0]}))
+        self.assertEqual(self.jbody(self.upload(_png_bytes()))["ok"], True)
+
+    def test_deleting_an_unknown_id_404s(self):
+        r = self.loop.run_until_complete(
+            self.client.post("/api/cp/admin/shot-delete", json={"id": "nope"}))
+        self.assertEqual(r.status, 404)
+
+    def test_the_tab_lists_renames_reorders_and_deletes(self):
+        import bot
+        for fn in ("cpShotsDraw", "cpShotCap", "cpShotMove", "cpShotsSave",
+                   "cpShotDelete"):
+            with self.subTest(fn=fn):
+                self.assertIn("function " + fn + "(", bot.DASHBOARD_HTML)

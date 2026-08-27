@@ -265,6 +265,34 @@ async def api_leads_csv(request):
                                  'attachment; filename="cp-leads.csv"'})
 
 
+async def api_shots_get(request):
+    """What is already uploaded. The upload endpoint existed without this, so
+    the tab could add screenshots but never show, rename or remove them."""
+    return HOST.json_response({"ok": True,
+                               "shots": _store().overlay().get("shots") or [],
+                               "max": admin_store.SHOTS_MAX})
+
+
+async def api_shot_delete(request):
+    """Drop one screenshot from the page AND from disk — an orphaned upload
+    stays publicly fetchable at its /cp/shot/<id> url otherwise."""
+    b = await _body(request)
+    sid = str(b.get("id") or "")
+    store = _store()
+    shots = store.overlay().get("shots") or []
+    kept = [sh for sh in shots if sh.get("id") != sid]
+    if len(kept) == len(shots):
+        return HOST.json_response({"ok": False, "error": "shot_not_found"}, 404)
+    store.update_section("shots", kept, by=_user(request))
+    try:
+        path = os.path.join(HOST.upload_dir or "", sid)
+        if HOST.upload_dir and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        traceback.print_exc()
+    return HOST.json_response({"ok": True, "shots": kept})
+
+
 async def api_history_get(request):
     hist = _store().overlay().get("history") or []
     return HOST.json_response({"ok": True, "history": [
@@ -548,6 +576,7 @@ def register(app):
     g("/api/cp/admin/reviews", _guarded(api_reviews_get))
     g("/api/cp/admin/leads", _guarded(api_leads_get))
     g("/api/cp/admin/leads.csv", _guarded(api_leads_csv))
+    g("/api/cp/admin/shots", _guarded(api_shots_get))
     g("/api/cp/admin/history", _guarded(api_history_get))
     for section in ("contacts", "copy", "figures", "benchmarks",
                     "showcase", "reviews", "shots"):
@@ -559,6 +588,7 @@ def register(app):
     p("/api/cp/admin/snapshot-now", _guarded(api_snapshot_now))
     p("/api/cp/admin/lead-status", _guarded(api_lead_status))
     p("/api/cp/admin/shot-upload", _guarded(api_shot_upload))
+    p("/api/cp/admin/shot-delete", _guarded(api_shot_delete))
     p("/api/cp/admin/logo-upload", _guarded(api_logo_upload))
     p("/api/cp/admin/logo-delete", _guarded(api_logo_delete))
     g("/cp/shot/{id}", serve_shot)

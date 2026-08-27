@@ -280,11 +280,19 @@ class DocumentShellAndContrast(unittest.TestCase):
         self.assertNotIn('<span style="color:var(--faint)">النسخة', html)
         self.assertNotIn("gap:10px;font-size:13px;color:var(--faint)}", html)
 
-    def test_uploaded_screenshots_are_cover_cropped(self):
-        """The slot is 16/11 and only ever held fake-UI divs; a real upload of
-        any other ratio would stretch or spill without this."""
-        self.assertIn(".shot img{position:absolute;inset:0;width:100%;height:100%;"
-                      "object-fit:cover;display:block}", render())
+    def test_uploaded_screenshots_are_shown_whole(self):
+        """CONTAIN, not cover. A photo survives losing its edges; a UI
+        screenshot does not — cropping eats a toolbar row or the top of a
+        table, the very content the section exists to show."""
+        html = render()
+        self.assertIn("object-fit:contain", html)
+        self.assertNotIn(".shot img{position:absolute;inset:0;width:100%;"
+                         "height:100%;object-fit:cover", html)
+
+    def test_unit_photos_still_crop_to_fill(self):
+        """Different rule on purpose: a residence photo should fill its tile."""
+        self.assertIn(".unit .ph img{display:block;width:100%;height:100%;"
+                      "object-fit:cover}", render())
 
     def test_unit_photos_are_constrained(self):
         """A real 1024px <img> inside .ph overflowed a 390px phone by 14px."""

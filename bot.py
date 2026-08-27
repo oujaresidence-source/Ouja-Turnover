@@ -31767,12 +31767,52 @@ function cpRevToggle(id,on){ var d=_cp.data.revs; d.chosen=d.chosen||[]; var i=d
   else if(!on&&i>=0) d.chosen.splice(i,1); cpRevFilter(); }
 async function cpRevsSave(){ var r=await cpSave('reviews',{ids:(_cp.data.revs||{}).chosen||[]}); if(r) cpRevs(); }
 
-async function cpShots(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/overview'); }catch(_){ d=null; }
-  b.innerHTML='<div style="'+fbCard()+'"><b>🖼️ '+(ar?'لقطات النظام':'Platform screenshots')+'</b>'
-   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'+(ar?'ثلاث لقطات من النظام تظهر في قسم «الدليل». كل لقطة تُقرأ آلياً وتُفحص — أي رقم ممنوع يرفض الرفع.':'Three screenshots for the «proof» section. Each is OCR’d and scanned — a blocked figure refuses the upload.')+'</div>'
-   +'<label class="muted" style="font-size:11px">'+(ar?'الوصف':'Caption')+'</label><input id="cpShotCap" style="'+fbInp()+'">'
-   +'<label class="btn ghost sm" style="cursor:pointer">'+(ar?'اختر صورة':'Choose image')+'<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="cpShotUpload(event)"></label>'
-   +' <span class="muted" style="font-size:11px">PNG/JPG/WebP · '+(ar?'حتى 4MB':'up to 4MB')+'</span></div>'; }
+async function cpShots(){ var b=document.getElementById('cpBody'); if(!b) return; var d; try{ d=await api('/api/cp/admin/shots'); }catch(_){ d=null; }
+  if(!d){ cpErr(b); return; }
+  _cp.shots=(d.shots||[]).map(function(x){ return {id:x.id,caption_ar:x.caption_ar||'',path:x.path||''}; });
+  _cp.shotsMax=d.max||3; cpShotsDraw(); }
+/* Draws from LOCAL state so renaming or reordering never loses a typed
+   caption; only upload and delete go back to the server. */
+function cpShotsDraw(){ var ar=cpAr(), b=document.getElementById('cpBody'); if(!b) return;
+  var list=_cp.shots||[], max=_cp.shotsMax||3, bust=Date.now();
+  var h='<div style="'+fbCard()+'"><b>🖼️ '+(ar?'لقطات النظام':'Platform screenshots')+' ('+list.length+'/'+max+')</b>'
+   +'<div class="muted" style="font-size:11.5px;margin:4px 0 10px;line-height:1.6">'
+   +(ar?'ثلاث لقطات تظهر في قسم «الدليل». المقاس الأمثل 1200×825، وأي مقاس آخر يظهر كاملاً بهامش — لا يُقص. كل لقطة تُقرأ آلياً، وأي رقم ممنوع يرفض الرفع.'
+       :'Three screenshots for the «proof» section. Best at 1200x825; any other ratio is shown whole with padding — never cropped. Each is OCR-scanned and a blocked figure refuses the upload.')+'</div>';
+  h+=list.length?list.map(function(sh,i){
+    return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">'
+     +'<img src="/cp/shot/'+esc(sh.id)+'?t='+bust+'" alt="" style="width:150px;height:103px;object-fit:contain;background:var(--surface-2);border-radius:8px;flex:none">'
+     +'<div style="flex:1;min-width:200px">'
+     +'<label class="muted" style="font-size:11px">'+(ar?'الوصف':'Caption')+'</label>'
+     +'<input value="'+esc(sh.caption_ar)+'" oninput="cpShotCap('+i+',this.value)" style="'+fbInp()+'">'
+     +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+     +'<button class="btn ghost sm" onclick="cpShotMove('+i+',-1)">↑</button>'
+     +'<button class="btn ghost sm" onclick="cpShotMove('+i+',1)">↓</button>'
+     +'<button class="btn ghost sm" onclick="cpShotDelete(&#39;'+esc(sh.id)+'&#39;)">✕ '+(ar?'احذف':'Delete')+'</button>'
+     +'<a class="btn ghost sm" href="/cp/shot/'+esc(sh.id)+'" target="_blank" rel="noopener">'+(ar?'افتح':'Open')+'</a>'
+     +'</div></div></div>'; }).join('')
+   :('<div class="muted" style="font-size:12px;padding:6px 0">'+(ar?'ما رفعت أي لقطة بعد — القسم يعرض الأشكال الافتراضية.':'Nothing uploaded yet — the section shows placeholders.')+'</div>');
+  if(list.length) h+='<button class="btn primary sm" onclick="cpShotsSave()">'+(ar?'حفظ الأوصاف والترتيب':'Save captions and order')+'</button>';
+  h+='</div>';
+  if(list.length<max){
+    h+='<div style="'+fbCard()+';margin-top:8px"><b>'+(ar?'أضف لقطة':'Add a screenshot')+'</b>'
+     +'<label class="muted" style="font-size:11px;display:block;margin-top:6px">'+(ar?'الوصف':'Caption')+'</label>'
+     +'<input id="cpShotCap" placeholder="'+(ar?'مثال: كشف المالك الشهري':'e.g. Monthly owner statement')+'" style="'+fbInp()+'">'
+     +'<label class="btn primary sm" style="cursor:pointer">'+(ar?'اختر صورة':'Choose image')
+     +'<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="cpShotUpload(event)"></label>'
+     +' <span class="muted" style="font-size:11px">PNG/JPG/WebP · '+(ar?'حتى 4MB':'up to 4MB')+'</span></div>';
+  } else {
+    h+='<div class="muted" style="font-size:11.5px;margin-top:8px">'+(ar?('وصلت الحد ('+max+') — احذف واحدة لإضافة غيرها.'):('Max reached ('+max+') — delete one to add another.'))+'</div>';
+  }
+  b.innerHTML=h; }
+function cpShotCap(i,v){ if(_cp.shots&&_cp.shots[i]) _cp.shots[i].caption_ar=v; }
+function cpShotMove(i,dir){ var l=_cp.shots||[], j=i+dir; if(j<0||j>=l.length) return; var t=l[i]; l[i]=l[j]; l[j]=t; cpShotsDraw(); }
+async function cpShotsSave(){ var r=await cpSave('shots',_cp.shots||[]); if(r) cpShots(); }
+async function cpShotDelete(id){ var ar=cpAr();
+  var m=await fbModal({title:(ar?'حذف اللقطة':'Delete screenshot'),msg:(ar?'تُحذف من الصفحة ومن الخادم نهائياً.':'Removed from the page and from the server permanently.'),confirm:(ar?'احذف':'Delete')});
+  if(!m.ok) return; var r; try{ r=await post('/api/cp/admin/shot-delete',{id:id}); }catch(_){ r=null; }
+  if(r&&r.ok){ toast(ar?'حُذفت ✓ — اضغط «انشر» ليختفي من الصفحة العامة':'Deleted ✓ — press Publish'); cpShots(); }
+  else toast((r&&r.error)||'⚠'); }
 async function cpShotUpload(ev){ var ar=cpAr(); var f=ev.target.files&&ev.target.files[0]; if(!f) return;
   if(f.size>4*1024*1024){ toast(ar?'الصورة كبيرة (الحد 4MB)':'Too large (4MB)'); return; }
   var fd=new FormData(); fd.append('file',f); fd.append('caption_ar',(document.getElementById('cpShotCap')||{}).value||'');
