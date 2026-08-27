@@ -122,9 +122,117 @@ ol.steps span{font-size:10pt;color:var(--ink2)}
 .foot{position:absolute;bottom:12mm;inset-inline-start:16mm;inset-inline-end:16mm;
   font-size:8pt;color:var(--mute);border-top:1px solid var(--line);padding-top:3mm}
 .dark .foot{color:#8F877A;border-color:var(--line-dark,#3A3631)}
+.vpage{display:flex;flex-direction:column;justify-content:center}
+.vision .k,.mission .k{display:block;font-size:9pt;letter-spacing:.06em;
+  color:var(--mute);margin-bottom:4mm}
+.vision p{font-family:var(--serif);font-weight:500;font-size:19pt;line-height:1.75;
+  color:var(--ink);max-width:158mm;margin:0}
+.mission p{font-size:12pt;line-height:1.9;color:var(--ink2);max-width:158mm;margin:0}
+.vpage .rule{margin:11mm 0}
+.units{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-top:4mm}
+.unit{border:1px solid var(--line);border-radius:3mm;overflow:hidden;background:var(--white)}
+.unit img{display:block;width:100%;height:38mm;object-fit:cover}
+.unit .ub{padding:4mm}
+.unit .ub b{font-family:var(--serif);font-size:11.5pt;font-weight:600;display:block}
+.unit .ub span{font-size:9pt;color:var(--mute)}
 .pill{display:inline-block;font-size:8.5pt;color:var(--mute);border:1px solid var(--line);
   border-radius:99px;padding:1mm 3mm;margin-inline-start:2mm}
 """
+
+
+# Bedroom count -> the descriptor the page uses. Listing names spell it several
+# ways in the wild — "3BR", "Grand 4BR", "2 Master Bedrooms", "غرفتين نوم" — so
+# the count is extracted rather than pattern-matched per phrasing.
+_COUNT_LABEL = {1: "غرفة نوم واحدة", 2: "غرفتا نوم", 3: "ثلاث غرف نوم",
+                4: "أربع غرف نوم", 5: "خمس غرف نوم"}
+_COUNT_RX = re.compile(r"(\d)\s*(?:BR\b|bed|Master|غرف)", re.I)
+_AR_COUNT = ((("غرفتا", "غرفتين"), 2), (("ثلاث",), 3), (("أربع",), 4),
+             (("خمس",), 5), (("غرفة",), 1))
+
+
+def _generic_label(name):
+    """Fallback when a review has no drawer entry: keep the bedroom count and
+    drop everything that identifies the unit or its district."""
+    name = name or ""
+    m = _COUNT_RX.search(name)
+    if m and int(m.group(1)) in _COUNT_LABEL:
+        return _COUNT_LABEL[int(m.group(1))]
+    for words, n in _AR_COUNT:
+        if any(w in name for w in words):
+            return _COUNT_LABEL[n]
+    return "وحدة مفروشة"
+
+
+def review_labels():
+    """Guest -> the descriptor the PAGE shows under their review.
+
+    The store's listing name carries the unit's identifier and its district
+    («Ouja Luxury | 2 Master Bedrooms | Al-Nuzha»). The page never prints that
+    — its drawer says «غرفتا نوم رئيسيتان» — because the owner's standing rule
+    is that locations stay general and units are not named publicly. The PDF
+    was printing the raw name. The map is read from the drawer so the two
+    documents cannot say different things.
+    """
+    out = {}
+    for who in re.findall(r'<div class="who">(.*?)</div>',
+                          page_v2.MORE.get("guests", ""), re.S):
+        parts = [p.strip() for p in re.sub(r"<[^>]+>", "", who).split("·")]
+        if len(parts) >= 2:
+            out[parts[0]] = parts[1]
+    return out
+
+
+def unit_tiles(base="https://oujares.com"):
+    """Download the six unit photos the live page is serving and embed them.
+
+    Reading them off the live page rather than rebuilding the urls means the
+    PDF shows exactly what a visitor sees, including any cover the owner
+    picked by hand. Offline or on any failure this returns "" and the page is
+    simply omitted — a profile with a missing photo grid is worse than one
+    without the section.
+    """
+    import base64
+    import urllib.request
+    try:
+        page = urllib.request.urlopen(base + "/cp/ar", timeout=20).read().decode("utf-8")
+    except Exception as exc:
+        print("[pdf] residences page skipped (page unreachable): %r" % (exc,))
+        return ""
+    block = re.search(r'<div class="units">(.*?)</div>\s*</div>\s*</section>',
+                      page, re.S)
+    if not block:
+        print("[pdf] residences page skipped (no unit grid on the live page)")
+        return ""
+    cards = re.findall(r'<img[^>]+src="([^"]+)"[^>]*>.*?<h3>(.*?)</h3>'
+                       r'<div class="sp">(.*?)</div>', block.group(1), re.S)
+    out = []
+    for src, name, sp in cards[:6]:
+        url = src if src.startswith("http") else base + src.replace("&amp;", "&")
+        try:
+            raw = urllib.request.urlopen(url, timeout=25).read()
+        except Exception:
+            continue
+        # the tile prints ~38mm tall; embedding a 1024px original made the
+        # document 5.5MB, which is not a file anyone forwards
+        try:
+            import io as _io
+            from PIL import Image
+            im = Image.open(_io.BytesIO(raw)).convert("RGB")
+            im.thumbnail((760, 760), Image.LANCZOS)
+            buf = _io.BytesIO()
+            im.save(buf, format="JPEG", quality=78, optimize=True)
+            raw = buf.getvalue()
+        except Exception:
+            pass
+        b64 = base64.b64encode(raw).decode("ascii")
+        out.append('<div class="unit"><img src="data:image/jpeg;base64,%s" alt="">'
+                   '<div class="ub"><b>%s</b><span>%s</span></div></div>'
+                   % (b64, name.strip(), sp.strip()))
+    if len(out) < 3:
+        print("[pdf] residences page skipped (only %d photos resolved)" % len(out))
+        return ""
+    print("[pdf] residences page: %d photos embedded" % len(out))
+    return "".join(out)
 
 
 def build_html():
@@ -193,14 +301,17 @@ def build_html():
            _e(t("s2_p2")), _e(t("s2_p3")), _e(t("footer_note"))))
 
     # 3 mission and vision
+    # The vision is the page's argument, so it gets the page. The mission sits
+    # under it as the operational half of the same idea.
     pages.append(
-        '<div class="page"><p class="eyebrow">%s</p><h2>%s</h2>'
-        '<div class="two"><div class="card"><b>%s</b><span>%s</span></div>'
-        '<div class="card"><b>%s</b><span>%s</span></div></div>'
+        '<div class="page vpage"><p class="eyebrow">%s</p><h2>%s</h2>'
+        '<div class="vision"><span class="k">%s</span><p>%s</p></div>'
+        '<div class="rule"></div>'
+        '<div class="mission"><span class="k">%s</span><p>%s</p></div>'
         '<div class="foot">%s</div></div>'
         % (_e("ما نعمل من أجله"), _e(t("s3_title")),
-           _e(t("s3_mission_k")), _e(t("s3_mission")),
            _e(t("s3_vision_k")), _e(t("s3_vision")),
+           _e(t("s3_mission_k")), _e(t("s3_mission")),
            _e(t("footer_note"))))
 
     pages.append(
@@ -216,6 +327,7 @@ def build_html():
            _e(t("footer_note"))))
 
     # 5 reviews
+    labels = review_labels()
     qs = []
     for r in reviews:
         if not (r.get("text_original") or "").strip():
@@ -224,7 +336,9 @@ def build_html():
         ltr = ' dir="ltr" style="text-align:left"' if r.get("language") == "en" else ""
         qs.append('<div class="q%s"><p%s>«%s»</p><div class="who">%s · %s · %s</div></div>'
                   % (crit, ltr, _e(r["text_original"]), _e(r.get("guest_name", "")),
-                     _e(r.get("listing_name", "")), _e(r.get("date", ""))))
+                     _e(labels.get(r.get("guest_name", ""), "")
+                        or _generic_label(r.get("listing_name", ""))),
+                     _e(r.get("date", ""))))
     pages.append(
         '<div class="page"><p class="eyebrow">%s</p><h2>%s</h2><p class="lede">%s</p>%s'
         '<p class="lede" style="font-size:10pt">%s</p><div class="foot">%s</div></div>'
@@ -244,6 +358,17 @@ def build_html():
         '<div class="foot">%s</div></div>'
         % (_e("كيف نُشغّل"), _e(t("s6_title")), _e(t("s6_lede")), steps_html,
            _e(t("s6_foot")), _e(t("footer_note"))))
+
+    # residences — the same six photos the live page serves, embedded so the
+    # PDF carries them rather than linking to them
+    tiles = unit_tiles()
+    if tiles:
+        pages.append(
+            '<div class="page"><p class="eyebrow">%s</p><h2>%s</h2>'
+            '<p class="lede">%s</p><div class="units">%s</div>'
+            '<div class="foot">%s</div></div>'
+            % (_e("المحفظة"), _e(t("s7_title")), _e(t("s7_lede")), tiles,
+               _e(t("footer_note"))))
 
     # closing
     pages.append(

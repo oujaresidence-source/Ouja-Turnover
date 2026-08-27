@@ -433,3 +433,44 @@ class PdfProfile(unittest.TestCase):
         self.assertGreater(os.path.getsize(path), 50_000)
         with open(path, "rb") as fh:
             self.assertEqual(fh.read(5), b"%PDF-")
+
+
+class PdfDisclosure(unittest.TestCase):
+    """What the printed profile must NOT carry. The store's listing names hold
+    the unit identifier and its district; the page never prints those, and the
+    PDF printed them until the owner spotted it."""
+
+    @classmethod
+    def setUpClass(cls):
+        from cp.tools import build_pdf
+        cls.html = build_pdf.build_html()
+
+    def test_no_district_names_in_review_attributions(self):
+        import re
+        whos = " ".join(re.findall(r'<div class="who">(.*?)</div>', self.html))
+        for leak in ("Al-Nuzha", "Al-Qairawan", "النزهة", "القيروان",
+                     "Master Bedrooms", "Private Pool"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, whos)
+
+    def test_attributions_are_the_pages_own_descriptors(self):
+        import re
+        whos = re.findall(r'<div class="who">(.*?)</div>', self.html)
+        self.assertGreaterEqual(len(whos), 6)
+        for w in whos:
+            with self.subTest(who=w):
+                self.assertNotIn("|", w, "a raw listing name reached the PDF")
+
+    def test_a_review_without_a_drawer_entry_still_anonymises(self):
+        from cp.tools import build_pdf
+        self.assertEqual(build_pdf._generic_label(
+            "Ouja Luxury | 2 Master Bedrooms | Al-Nuzha"), "غرفتا نوم")
+        self.assertEqual(build_pdf._generic_label("Grand 4BR | Private Floor"),
+                         "أربع غرف نوم")
+        self.assertEqual(build_pdf._generic_label("something unmatched"),
+                         "وحدة مفروشة")
+
+    def test_the_footer_does_not_cite_a_section_the_pdf_lacks(self):
+        """The page's footer cites AirDNA because the page has a market
+        comparison; the PDF does not."""
+        self.assertNotIn("AirDNA", self.html)
