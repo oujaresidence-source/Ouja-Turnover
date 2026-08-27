@@ -23,6 +23,16 @@ from .showcase_store import ShowcaseStore
 
 _LISTING_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _GROUP_ID_RE = re.compile(r"^showcase_[A-Za-z0-9_-]{2,64}$")
+_SHOWCASE_REQUIRED_BLOCKERS = frozenset(
+    {
+        "listing_id_missing",
+        "inactive_listing",
+        "licence_missing",
+        "licence_expiry_missing",
+        "licence_expiry_invalid",
+        "licence_expired",
+    }
+)
 
 
 def _utc_now() -> dt.datetime:
@@ -198,21 +208,41 @@ class ShowcaseService:
             issue.code for issue in result.blockers
         } == {"price_missing"}
 
+    def _showcase_result(
+        self,
+        group: Mapping[str, Any],
+        listing_id: str,
+        result: PublicationResult,
+    ) -> Optional[PublicationResult]:
+        if result.publishable:
+            return result
+        blocker_codes = {issue.code for issue in result.blockers}
+        if blocker_codes & _SHOWCASE_REQUIRED_BLOCKERS:
+            return None
+        if not result.listing.get("images"):
+            return None
+        has_price = self.manual_rate(group, listing_id) is not None or bool(
+            result.listing.get("official_prices")
+        )
+        if not has_price:
+            return None
+        return replace(
+            result,
+            blockers=(),
+            warnings=tuple(result.warnings) + tuple(result.blockers),
+            publishable=True,
+            exact_match_eligible=result.availability_status == "confirmed",
+        )
+
     def _eligible_by_id(
         self,
         group: Mapping[str, Any],
     ) -> Dict[str, PublicationResult]:
         eligible = {}
         for listing_id, result in self._results_by_id().items():
-            if result.publishable:
-                eligible[listing_id] = result
-            elif self._price_can_complete(group, listing_id, result):
-                eligible[listing_id] = replace(
-                    result,
-                    blockers=(),
-                    publishable=True,
-                    exact_match_eligible=result.availability_status == "confirmed",
-                )
+            showcase_result = self._showcase_result(group, listing_id, result)
+            if showcase_result is not None:
+                eligible[listing_id] = showcase_result
         return eligible
 
     def eligible_result(

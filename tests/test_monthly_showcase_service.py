@@ -41,10 +41,23 @@ class ShowcaseServiceTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def _reset_inventory(self, listings):
+        self.raw_listings = listings
+        self.source = source_with(self.raw_listings)
+        self.generation = build_generation(self.source, valid_settings(), NOW)
+        self.service = ShowcaseService(
+            store=self.store,
+            inventory_provider=lambda: self.source,
+            snapshot_provider=lambda: self.generation,
+            session_secret=SECRET,
+            clock=lambda: NOW,
+        )
+
     def _approve(self, **overrides):
+        listing_ids = overrides.pop("listing_ids", ["101", "102", "103"])
         value = valid_group(
             slug="one-building",
-            listing_ids=["101", "102", "103"],
+            listing_ids=listing_ids,
             **overrides,
         )
         saved = self.service.save_draft(
@@ -58,6 +71,97 @@ class ShowcaseServiceTest(unittest.TestCase):
             saved["draft_revision"],
             "faisal",
         )
+
+    @staticmethod
+    def _listing_with_optional_gaps(**overrides):
+        listing = valid_listing(
+            id="104",
+            slug="home-104",
+            name_ar="",
+            name_en="",
+            short_ar="",
+            short_en="",
+            structured={},
+            content_verified=False,
+            bedrooms=None,
+            beds=None,
+            baths=None,
+            capacity=None,
+            neighborhood="",
+            neighborhood_ar="",
+            neighborhood_en="",
+            neighborhood_verified=False,
+            images=["https://images.example.test/104-1.jpg"],
+            official_prices={},
+            commercial_terms={},
+            calendar=None,
+            rating=None,
+            reviews_count=None,
+            rating_verified=False,
+        )
+        listing.update(overrides)
+        return listing
+
+    def test_showcase_publishes_optional_gaps_with_minimum_verified_facts(self):
+        self._reset_inventory([self._listing_with_optional_gaps()])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={
+                "104": {"monthly_rate_sar": 8000, "enabled": True}
+            },
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+
+        self.assertEqual(
+            [row.listing["id"] for row in public["results"]],
+            ["104"],
+        )
+
+    def test_showcase_still_blocks_missing_advertising_licence(self):
+        self._reset_inventory([
+            self._listing_with_optional_gaps(licence=None)
+        ])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={
+                "104": {"monthly_rate_sar": 8000, "enabled": True}
+            },
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+
+        self.assertEqual(public["results"], ())
+
+    def test_showcase_still_blocks_missing_real_image(self):
+        self._reset_inventory([
+            self._listing_with_optional_gaps(images=[])
+        ])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={
+                "104": {"monthly_rate_sar": 8000, "enabled": True}
+            },
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+
+        self.assertEqual(public["results"], ())
+
+    def test_showcase_still_blocks_missing_monthly_price(self):
+        self._reset_inventory([self._listing_with_optional_gaps()])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={},
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+
+        self.assertEqual(public["results"], ())
 
     def test_public_group_counts_only_current_eligible_members(self):
         self._approve(fixed_price_enabled=False)
