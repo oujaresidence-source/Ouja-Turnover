@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .fonts import FONT_CSS_PATH
 
-ASSET_VERSION = "v20260827d"
+ASSET_VERSION = "v20260828a"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 

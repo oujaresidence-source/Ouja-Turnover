@@ -85,8 +85,10 @@ class ShowcaseServiceTest(unittest.TestCase):
             content_verified=False,
             bedrooms=None,
             beds=None,
+            beds_count=None,
             baths=None,
             capacity=None,
+            floor_area_sqm=None,
             neighborhood="",
             neighborhood_ar="",
             neighborhood_en="",
@@ -162,6 +164,44 @@ class ShowcaseServiceTest(unittest.TestCase):
         public = self.service.public_by_slug("one-building", "ar")
 
         self.assertEqual(public["results"], ())
+
+    def test_relaxed_showcase_uses_safe_localized_titles_and_omits_empty_facts(self):
+        self._reset_inventory([self._listing_with_optional_gaps()])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={
+                "104": {"monthly_rate_sar": 8000, "enabled": True}
+            },
+        )
+
+        ar = present_showcase(
+            self.service.public_by_slug("one-building", "ar"), "ar"
+        )["homes"][0]
+        en = present_showcase(
+            self.service.public_by_slug("one-building", "en"), "en"
+        )["homes"][0]
+
+        self.assertEqual(ar["title"], "شقة عوجا · 104")
+        self.assertEqual(en["title"], "Ouja home · 104")
+        self.assertEqual(ar["facts"], {})
+        self.assertEqual(en["facts"], {})
+
+    def test_staff_group_counts_relaxed_homes_with_optional_gaps(self):
+        self._reset_inventory([self._listing_with_optional_gaps()])
+        self._approve(
+            listing_ids=["104"],
+            fixed_price_enabled=False,
+            listing_prices={
+                "104": {"monthly_rate_sar": 8000, "enabled": True}
+            },
+        )
+
+        staff = self.service.group("showcase_a1")
+
+        self.assertEqual(staff["eligible_count"], 1)
+        self.assertEqual(staff["eligible_with_gaps_count"], 1)
+        self.assertEqual(staff["blocked_listing_ids"], [])
 
     def test_public_group_counts_only_current_eligible_members(self):
         self._approve(fixed_price_enabled=False)

@@ -76,7 +76,7 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260827d")
+        self.assertEqual(ASSET_VERSION, "v20260828a")
 
     def test_showcase_editor_uses_real_cover_choices_and_per_home_prices(self):
         js = JS_FILE.read_text("utf-8")
@@ -93,6 +93,17 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
             self.assertIn(required, js)
         self.assertIn(".showcase-cover-gallery", css)
         self.assertIn(".showcase-listing-price", css)
+
+    def test_showcase_list_labels_public_homes_with_optional_gaps(self):
+        js = JS_FILE.read_text("utf-8")
+
+        for required in (
+            "eligible_with_gaps_count",
+            "showcaseEligibleWithGaps",
+            "تظهر مع بيانات ناقصة",
+            "Published with missing details",
+        ):
+            self.assertIn(required, js)
 
     def test_portfolio_and_survey_expose_verified_review_readiness(self):
         js = JS_FILE.read_text("utf-8")

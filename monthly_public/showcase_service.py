@@ -196,18 +196,6 @@ class ShowcaseService:
         rate = group.get("fixed_monthly_rate_sar")
         return rate if isinstance(rate, int) and not isinstance(rate, bool) and rate > 0 else None
 
-    def _price_can_complete(
-        self,
-        group: Mapping[str, Any],
-        listing_id: str,
-        result: PublicationResult,
-    ) -> bool:
-        if self.manual_rate(group, listing_id) is None:
-            return False
-        return bool(result.blockers) and {
-            issue.code for issue in result.blockers
-        } == {"price_missing"}
-
     def _showcase_result(
         self,
         group: Mapping[str, Any],
@@ -226,8 +214,18 @@ class ShowcaseService:
         )
         if not has_price:
             return None
+        listing = dict(result.listing)
+        if "title_bedroom_conflict" in blocker_codes:
+            listing["name_ar"] = "شقة عوجا · %s" % listing_id
+            listing["name_en"] = "Ouja home · %s" % listing_id
+        else:
+            if "arabic_title_missing" in blocker_codes:
+                listing["name_ar"] = "شقة عوجا · %s" % listing_id
+            if "english_title_missing" in blocker_codes:
+                listing["name_en"] = "Ouja home · %s" % listing_id
         return replace(
             result,
+            listing=listing,
             blockers=(),
             warnings=tuple(result.warnings) + tuple(result.blockers),
             publishable=True,
@@ -309,12 +307,21 @@ class ShowcaseService:
     def _staff_record(self, record: Mapping[str, Any]) -> Dict[str, Any]:
         value = record.get("draft") or record.get("approved") or {}
         configured = [str(item) for item in value.get("listing_ids") or ()]
+        strict = self._results_by_id() if value else {}
         eligible = self._eligible_by_id(value) if value else {}
         blocked = [listing_id for listing_id in configured if listing_id not in eligible]
+        eligible_with_gaps = [
+            listing_id
+            for listing_id in configured
+            if listing_id in eligible
+            and listing_id in strict
+            and not strict[listing_id].publishable
+        ]
         return {
             **copy.deepcopy(dict(record)),
             "configured_count": len(configured),
             "eligible_count": len(configured) - len(blocked),
+            "eligible_with_gaps_count": len(eligible_with_gaps),
             "blocked_listing_ids": blocked,
             "public_url": (
                 "/monthly/showcase/%s" % record["approved"]["slug"]
@@ -452,6 +459,11 @@ def present_showcase(public: Mapping[str, Any], lang: str) -> Dict[str, Any]:
     homes = []
     for result in public["results"]:
         home = present_listing(result, language)
+        facts = home.get("facts")
+        if isinstance(facts, Mapping):
+            home["facts"] = {
+                key: value for key, value in facts.items() if value is not None
+            }
         rate = manual_rates.get(str(result.listing.get("id")))
         if isinstance(rate, int) and not isinstance(rate, bool):
             home["showcase_monthly_rate_sar"] = rate
