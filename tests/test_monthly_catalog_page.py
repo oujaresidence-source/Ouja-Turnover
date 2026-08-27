@@ -76,7 +76,7 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260826d")
+        self.assertEqual(ASSET_VERSION, "v20260827b")
 
     def test_portfolio_and_survey_expose_verified_review_readiness(self):
         js = JS_FILE.read_text("utf-8")

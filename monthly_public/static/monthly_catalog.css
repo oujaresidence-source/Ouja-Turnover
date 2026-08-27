@@ -27,6 +27,7 @@
   --page: 1240px;
   --z-sticky: 20;
   --z-skip: 40;
+  --font-sans: "Thmanyah Sans", "IBM Plex Sans Arabic", "Segoe UI", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -43,9 +44,10 @@ body {
   overflow-x: clip;
   background: var(--ivory);
   color: var(--ink);
-  font-family: "IBM Plex Sans Arabic", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.55;
+  font-kerning: normal;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -372,7 +374,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--focus); }
 .place-row-actions { display: grid; justify-items: end; gap: 7px; }
 .place-row-actions .button { min-width: 92px; }
 
-[dir="ltr"] body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+[dir="ltr"] body { font-family: var(--font-sans); }
 [dir="ltr"] .listing-row, [dir="ltr"] input, [dir="ltr"] textarea { text-align: left; }
 
 @media (max-width: 960px) {

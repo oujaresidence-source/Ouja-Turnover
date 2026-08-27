@@ -226,6 +226,10 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             ("POST", "/api/monthly/ops/places/approve"),
             ("POST", "/api/monthly/ops/refresh"),
         }
+        expected.add(("GET", self.bot._MONTHLY_FONT_CSS_PATH))
+        expected.update(
+            ("GET", path) for path in self.bot._MONTHLY_FONT_ASSET_FILES
+        )
         saved = self.bot.MONTHLY_ENABLED, self.bot.MONTHLY_PUBLIC_V2
         try:
             for enabled, v2 in ((False, True), (True, False), (False, False)):

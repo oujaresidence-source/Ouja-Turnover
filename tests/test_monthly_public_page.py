@@ -64,17 +64,21 @@ class MonthlyPublicPageTests(unittest.TestCase):
         self.assertNotIn("user-scalable", page)
 
     def test_shell_loads_only_explicit_versioned_local_assets(self):
+        from monthly_public.fonts import FONT_CSS_PATH, PRELOAD_FONT_PATH
         from monthly_public.page import ASSET_VERSION, CSS_PATH, JS_PATH, render_monthly_page
 
         page = render_monthly_page("home")
         parser = AssetParser()
         parser.feed(page)
 
-        self.assertEqual(parser.assets, [CSS_PATH, JS_PATH])
+        self.assertEqual(
+            parser.assets,
+            [PRELOAD_FONT_PATH, FONT_CSS_PATH, CSS_PATH, JS_PATH],
+        )
         self.assertRegex(CSS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.css$")
         self.assertRegex(JS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.js$")
         self.assertFalse(any(value.startswith(("http://", "https://", "//")) for value in parser.assets))
-        self.assertEqual(ASSET_VERSION, "v20260826g")
+        self.assertEqual(ASSET_VERSION, "v20260827b")
 
     def test_page_state_is_safe_and_supports_every_approved_deep_link(self):
         from monthly_public.page import page_state, render_monthly_page

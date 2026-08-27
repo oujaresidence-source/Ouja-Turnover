@@ -6,8 +6,10 @@ import json
 import re
 from typing import Any, Dict, Optional
 
+from .fonts import FONT_CSS_PATH, PRELOAD_FONT_PATH
 
-ASSET_VERSION = "v20260826g"
+
+ASSET_VERSION = "v20260827b"
 CSS_PATH = "/monthly/static/monthly.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly.%s.js" % ASSET_VERSION
 
@@ -122,6 +124,8 @@ def render_monthly_page(
   <meta name="theme-color" content="#173d32">
   <meta name="description" content="شقق عوجا المفروشة للإقامة الشهرية في الرياض، مع سعر رسمي واضح ودعم طوال الإقامة.">
 %s  <title>عوجا بالشهر · الرياض</title>
+  <link rel="preload" href="%s" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="%s">
   <link rel="stylesheet" href="%s">
   <script src="%s" defer></script>
 </head>
@@ -169,6 +173,8 @@ def render_monthly_page(
 </body>
 </html>""" % (
         robots,
+        PRELOAD_FONT_PATH,
+        FONT_CSS_PATH,
         CSS_PATH,
         JS_PATH,
         body_class,

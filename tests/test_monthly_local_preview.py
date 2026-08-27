@@ -2,7 +2,9 @@
 
 import unittest
 
+from monthly_public.fonts import FONT_ASSET_FILES, FONT_CSS_PATH
 from monthly_public.local_preview import build_source, route_contract
+from monthly_public.local_preview import create_web_app
 
 
 class LocalPreviewSourceTest(unittest.TestCase):
@@ -58,6 +60,17 @@ class LocalPreviewRouteTest(unittest.TestCase):
             [("POST", "/api/monthly/ops/preview/match")],
             [(method, path) for method, path in routes if method == "POST"],
         )
+
+    def test_preview_serves_the_shared_font_stylesheet_and_allowlisted_fonts(self):
+        app = create_web_app(build_source({"results": [{"id": 1}]}))
+        paths = {
+            resource.canonical
+            for resource in app.router.resources()
+            if getattr(resource, "canonical", None)
+        }
+
+        self.assertIn(FONT_CSS_PATH, paths)
+        self.assertTrue(set(FONT_ASSET_FILES).issubset(paths))
 
 
 if __name__ == "__main__":

@@ -31,6 +31,8 @@
   --measure: 68ch;
   --z-sticky: 20;
   --z-toast: 40;
+  --font-sans: "Thmanyah Sans", "IBM Plex Sans Arabic", "Segoe UI", Arial, sans-serif;
+  --font-display: "Thmanyah Serif Display", "Thmanyah Sans", "IBM Plex Sans Arabic", serif;
 }
 
 * {
@@ -53,19 +55,12 @@ body {
   overflow-x: clip;
   background: var(--ivory);
   color: var(--ink);
-  font-family: "IBM Plex Sans Arabic", "Tajawal", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.65;
+  font-kerning: normal;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-}
-
-[dir="ltr"] body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-}
-
-[dir="ltr"] :is(h1, h2, h3) {
-  font-family: Georgia, "Times New Roman", serif;
 }
 
 button,
@@ -120,6 +115,7 @@ p {
 h1,
 h2,
 h3 {
+  font-family: var(--font-display);
   line-height: 1.18;
   text-wrap: balance;
 }

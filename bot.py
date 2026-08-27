@@ -192,6 +192,11 @@ try:
         render_monthly_catalog_page as _render_monthly_catalog_page,
     )
     from monthly_public.leads import LeadStore as _MonthlyLeadStore
+    from monthly_public.fonts import (
+        FONT_ASSET_FILES as _MONTHLY_FONT_ASSET_FILES,
+        FONT_CSS_FILE as _MONTHLY_FONT_CSS_FILE,
+        FONT_CSS_PATH as _MONTHLY_FONT_CSS_PATH,
+    )
     from monthly_public.preview import build_preview_app as _build_monthly_preview_app
     from monthly_public.page import (
         ASSET_ROUTES as _MONTHLY_PUBLIC_ASSET_ROUTES,
@@ -222,6 +227,8 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _monthly_catalog_apply_approved_profile = None
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
+    _MONTHLY_FONT_ASSET_FILES = {}
+    _MONTHLY_FONT_CSS_FILE = _MONTHLY_FONT_CSS_PATH = ""
     _MONTHLY_OPS_CSS_PATH = _MONTHLY_OPS_JS_PATH = ""
     _MONTHLY_CATALOG_CSS_PATH = _MONTHLY_CATALOG_JS_PATH = ""
     _render_monthly_public_page = None
@@ -59277,6 +59284,40 @@ async def _handle_monthly_v2_js(request):
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
+
+async def _handle_monthly_font_css(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    try:
+        with open(_MONTHLY_FONT_CSS_FILE, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="text/css",
+        charset="utf-8",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+async def _handle_monthly_font(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    path = _MONTHLY_FONT_ASSET_FILES.get(request.path)
+    if path is None:
+        return _monthly_off()
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+    except OSError:
+        return _monthly_off()
+    return web.Response(
+        body=body,
+        content_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
 async def _handle_monthly(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
@@ -60047,6 +60088,9 @@ def _register_monthly_v2_only_routes(router):
     router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
     router.add_get(_MONTHLY_CATALOG_CSS_PATH, _handle_monthly_catalog_css)
     router.add_get(_MONTHLY_CATALOG_JS_PATH, _handle_monthly_catalog_js)
+    router.add_get(_MONTHLY_FONT_CSS_PATH, _handle_monthly_font_css)
+    for font_path in sorted(_MONTHLY_FONT_ASSET_FILES):
+        router.add_get(font_path, _handle_monthly_font)
     router.add_get("/api/monthly/ops/health", _api_monthly_v2_ops_health)
     router.add_get("/api/monthly/ops/funnel", _api_monthly_v2_ops_funnel)
     router.add_post("/api/monthly/ops/lead", _api_monthly_v2_ops_lead)

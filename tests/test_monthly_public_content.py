@@ -464,9 +464,14 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("height: auto", gallery_css)
         self.assertNotIn("object-fit: cover", gallery_css)
 
-    def test_english_headings_use_local_serif_while_controls_remain_sans(self):
-        self.assertRegex(self.css, r'(?s)\[dir="ltr"\]\s+:is\(h1, h2, h3\).*?Georgia')
-        self.assertIn('[dir="ltr"] body', self.css)
+    def test_thmanyah_display_headings_and_sans_controls_are_language_consistent(self):
+        self.assertRegex(
+            self.css,
+            r'(?s)h1,\s*h2,\s*h3\s*\{.*?font-family:\s*var\(--font-display\)',
+        )
+        self.assertIn('--font-sans: "Thmanyah Sans"', self.css)
+        self.assertIn('--font-display: "Thmanyah Serif Display"', self.css)
+        self.assertNotIn("Georgia", self.css)
 
     def test_primary_button_meets_wcag_aa_contrast(self):
         def rgb(value):

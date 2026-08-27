@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 from zoneinfo import ZoneInfo
 
+from .fonts import FONT_ASSET_FILES, FONT_CSS_FILE, FONT_CSS_PATH
 from .page import CSS_PATH, JS_PATH, render_monthly_page
 from .preview import build_preview_app
 from .priority_places import load_priority_places
@@ -209,7 +210,8 @@ def create_web_app(source: Mapping[str, Any], token: str = DEFAULT_TOKEN) -> Any
 
     @web.middleware
     async def safety(request: Any, handler: Any) -> Any:
-        if request.path not in (CSS_PATH, JS_PATH) and request.query.get("token") != token:
+        public_assets = {CSS_PATH, JS_PATH, FONT_CSS_PATH, *FONT_ASSET_FILES}
+        if request.path not in public_assets and request.query.get("token") != token:
             return response({"ok": False, "error": {"code": "unauthorized"}}, 401)
         result = await handler(request)
         result.headers["X-Content-Type-Options"] = "nosniff"
@@ -236,6 +238,15 @@ def create_web_app(source: Mapping[str, Any], token: str = DEFAULT_TOKEN) -> Any
     async def javascript(_request: Any) -> Any:
         return web.FileResponse(Path(__file__).with_name("static") / "monthly.js")
 
+    async def font_css(_request: Any) -> Any:
+        return web.FileResponse(FONT_CSS_FILE)
+
+    async def font_asset(request: Any) -> Any:
+        asset = FONT_ASSET_FILES.get(request.path)
+        if asset is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(asset)
+
     async def config(request: Any) -> Any:
         return response(preview.config(request.query.get("lang", "ar")))
 
@@ -257,6 +268,9 @@ def create_web_app(source: Mapping[str, Any], token: str = DEFAULT_TOKEN) -> Any
 
     app.router.add_get(CSS_PATH, css)
     app.router.add_get(JS_PATH, javascript)
+    app.router.add_get(FONT_CSS_PATH, font_css)
+    for font_path in FONT_ASSET_FILES:
+        app.router.add_get(font_path, font_asset)
     app.router.add_get("/monthly/ops/preview", lambda request: page(request, "home"))
     app.router.add_get("/monthly/ops/preview/search", lambda request: page(request, "browse"))
     app.router.add_get("/monthly/ops/preview/match", lambda request: page(request, "match"))

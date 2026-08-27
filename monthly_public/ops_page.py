@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from .fonts import FONT_CSS_PATH
 
-ASSET_VERSION = "v20260826a"
+ASSET_VERSION = "v20260827b"
 CSS_PATH = "/monthly/static/monthly_ops.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_ops.%s.js" % ASSET_VERSION
 
@@ -19,6 +20,7 @@ def render_monthly_ops_page() -> str:
   <meta name="theme-color" content="#173d32">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>تشغيل السكن الشهري · عوجا</title>
+  <link rel="stylesheet" href="%s">
   <link rel="stylesheet" href="%s">
   <script src="%s" defer></script>
 </head>
@@ -262,7 +264,7 @@ def render_monthly_ops_page() -> str:
     </main>
   </div>
 </body>
-</html>""" % (CSS_PATH, JS_PATH)
+</html>""" % (FONT_CSS_PATH, CSS_PATH, JS_PATH)
 
 
 __all__ = ["ASSET_VERSION", "CSS_PATH", "JS_PATH", "render_monthly_ops_page"]
