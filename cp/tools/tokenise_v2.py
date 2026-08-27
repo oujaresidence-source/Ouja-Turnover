@@ -195,8 +195,14 @@ RULES = [
     # than the slot's 16/11 would stretch or spill. Cover-crop it instead, so
     # whatever the owner uploads sits correctly in the frame.
     ('.shot .ui{position:absolute;',
-     '.shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;'
-     'display:block}\n.shot .ui{position:absolute;', 1),
+     # CONTAIN, not cover: a photo can lose its edges harmlessly, but a UI
+     # screenshot cannot — cropping eats a toolbar row or the top of a table,
+     # which is exactly the content the section exists to show. The whole
+     # screenshot is always visible; a ratio other than the slot's 16/11 just
+     # sits on the beige with a little air.
+     '.shot img{position:absolute;inset:0;width:100%;height:100%;'
+     'object-fit:contain;background:var(--beige);display:block}\n'
+     '.shot .ui{position:absolute;', 1),
 
     # PORT FIX — a real <img> inside .ph is unconstrained in the mock (it only
     # ever holds a placeholder span), so a 1024px photo overflowed a 390px
