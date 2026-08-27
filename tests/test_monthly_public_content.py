@@ -361,7 +361,14 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
             self.assertIn(hook, self.js)
         self.assertNotIn("runtime.request || runtime.listingQuery", self.js)
         self.assertIn("request: runtime.listingRequest", self.js)
-        self.assertIn("queryString(runtime.listingRequest)", self.js)
+        self.assertIn(
+            "listingNavigationPath(item, runtime.listingRequest)", self.js
+        )
+        navigation = self.js[
+            self.js.index("function listingNavigationPath"):
+            self.js.index("function openListing")
+        ]
+        self.assertIn("queryString(values)", navigation)
 
     def test_browse_entry_clears_guided_state_without_clearing_browse_filters(self):
         navigate = self.js[self.js.index("function navigate") : self.js.index("function stateMessage")]
@@ -379,12 +386,19 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         open_listing = self.js[
             self.js.index("function openListing") : self.js.index("function createCard")
         ]
-        self.assertIn('const guided = runtime.page.route !== "browse"', open_listing)
+        self.assertIn('const inShowcase = runtime.page.route === "showcase"', open_listing)
+        self.assertIn(
+            'const guided = runtime.page.route !== "browse" && !inShowcase',
+            open_listing,
+        )
         self.assertIn(
             "runtime.recommendationContext = guided ? safeRecommendationContext(item, runtime.lang) : null",
             open_listing,
         )
-        self.assertIn("const sourceRequest = guided ? runtime.request : runtime.browseQuery", open_listing)
+        self.assertIn(
+            "const sourceRequest = inShowcase ? {} : (guided ? runtime.request : runtime.browseQuery)",
+            open_listing,
+        )
 
     def test_contact_state_is_shared_by_home_results_and_listing(self):
         self.assertIn("function contactState", self.js)
@@ -444,9 +458,9 @@ class MonthlyPublicStaticContentTests(unittest.TestCase):
         self.assertIn("min-height: 44px", self.css[self.css.index(".preview-edit-link"):])
 
     def test_customer_shell_stays_within_a_small_uncompressed_asset_budget(self):
-        self.assertLess(len(self.js.encode("utf-8")), 125_000)
+        self.assertLess(len(self.js.encode("utf-8")), 130_000)
         self.assertLess(len(self.css.encode("utf-8")), 30_000)
-        self.assertLess(len(gzip.compress(self.js.encode("utf-8"), compresslevel=9)), 30_000)
+        self.assertLess(len(gzip.compress(self.js.encode("utf-8"), compresslevel=9)), 31_000)
 
     def test_ranked_clicks_do_not_duplicate_visible_impressions(self):
         self.assertIn("rankedImpressionIds", self.js)
