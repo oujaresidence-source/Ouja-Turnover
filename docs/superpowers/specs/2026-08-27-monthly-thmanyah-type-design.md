@@ -36,4 +36,3 @@ The attached license was reviewed and its web-distribution restriction was expla
 - Existing monthly unit, contract, and integration suites remain green.
 - Public CSS remains independent of third-party font hosts.
 - Browser checks cover Arabic and English on mobile and desktop, including loading, headings, body copy, forms, prices, and the dense listing-data table.
-

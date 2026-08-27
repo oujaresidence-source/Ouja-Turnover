@@ -120,4 +120,3 @@ Stage only the typography assets, monthly code/tests, and this documentation. Do
 - [ ] **Step 5: Push once**
 
 Push `main` to its configured upstream and verify the remote commit and public asset responses.
-
