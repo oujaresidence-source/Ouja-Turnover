@@ -314,3 +314,52 @@ class BrandLogo(unittest.TestCase):
     def test_the_mock_placeholder_title_is_gone(self):
         self.assertNotIn("مكان الشعار الرسمي", render(has_logo=True))
         self.assertNotIn("مكان الشعار الرسمي", render(has_logo=False))
+
+
+class ReachChip(unittest.TestCase):
+    """Owner request 2026-08-27: show the TikTok reach. It is absent from the
+    seeds file, so it renders only through the manual layer's value+date+source
+    gate — the same discipline the page claims about itself in the governance
+    section."""
+
+    def test_the_chip_renders_with_both_figures(self):
+        html = render()
+        self.assertIn("مليون مشاهدة", html)
+        self.assertIn("75,000", html)
+        self.assertIn("تيك توك", html)
+
+    def test_it_links_to_the_account(self):
+        self.assertIn('href="https://tiktok.com/@oujares"', render())
+
+    def test_the_four_original_chips_survive(self):
+        html = render()
+        for chip in ("تصريح سياحي لكل وحدة", "رابحة ومموّلة ذاتياً منذ 2024",
+                     "كل رقم هنا له مصدر وتاريخ"):
+            with self.subTest(chip=chip):
+                self.assertIn(chip, html)
+
+    def test_an_incomplete_entry_is_not_reported(self):
+        from cp import stats as st
+        original = st.MANUAL
+        try:
+            broken = dict(original)
+            broken["tiktok_views"] = {"value": 100000000, "as_of": "",
+                                      "source": "internal"}
+            st.MANUAL = st.valid_manual(broken)
+            self.assertNotIn("مليون مشاهدة", render())
+        finally:
+            st.MANUAL = original
+
+    def test_millions_read_as_a_word_not_a_wall_of_zeros(self):
+        self.assertEqual(page_v2._ar_millions(100000000), "100 مليون")
+        self.assertEqual(page_v2._ar_millions(2500000), "2.5 مليون")
+        self.assertEqual(page_v2._ar_millions(75000), "75,000")
+
+    def test_unit_photo_ratio_matches_its_box(self):
+        """The tile's .ph is aspect-ratio 4/3; the img's intrinsic hint must
+        agree or the browser reserves the wrong space."""
+        html = render(sections={"showcase": {"units": [
+            {"listing_id": "1", "name_ar": "س", "bedrooms_label_ar": "غرفتان",
+             "line_ar": "خط"}]}},
+            photos={"1": {"photo": "/elite/img?u=x", "srcset": ""}})
+        self.assertIn('width="1200" height="900"', html)

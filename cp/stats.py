@@ -83,6 +83,8 @@ PROVENANCE = {
     "median_response_minutes": "manual", "messages_total": "manual",
     "messages_monthly_start": "manual", "messages_monthly_now": "manual",
     "maintenance_closed_in_sla": "manual", "team_headcount": "manual",
+    # reach: no PMS can know it, so it travels hand-sourced like the rest
+    "tiktok_followers": "manual", "tiktok_views": "manual",
     "residences_per_person_per_day": "manual", "residences_per_custodian": "manual",
 
     "designed_capacity_residences": "seeds", "platform_lines_of_code": "seeds",

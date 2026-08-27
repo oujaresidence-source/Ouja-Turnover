@@ -76,7 +76,7 @@ SCRIPT = _read(os.path.join(_TPL, "v2.js"))
 COPY_DEFAULTS = _read_json(os.path.join(_DATA, "cp_copy_v2_ar.json"), {})
 BENCH_DEFAULTS = _read_json(os.path.join(_DATA, "cp_benchmarks.json"), {})
 DEFAULT_BLOCKS = {name: _read(os.path.join(_TPL, "defaults", name + ".html"))
-                  for name in ("doors", "page_quotes", "units_grid", "shots",
+                  for name in ("doors", "trust", "page_quotes", "units_grid", "shots",
                                "bench", "occ_types", "drawer_reviews",
                                "drawer_units")}
 MORE = {key: _read(os.path.join(_TPL, "more", key + ".html"))
@@ -115,7 +115,7 @@ def build_units_grid(units, photos):
         shot = photos.get(str(u.get("listing_id"))) or {}
         if shot.get("photo"):
             ph = ('<img src="%s" srcset="%s" sizes="(max-width:700px) 100vw, 33vw" '
-                  'alt="%s" loading="lazy" decoding="async" width="1024" height="683" '
+                  'alt="%s" loading="lazy" decoding="async" width="1200" height="900" '
                   'onerror="this.closest(&quot;.ph&quot;)&amp;&amp;'
                   'this.remove()">' % (_e(shot["photo"]), _e(shot.get("srcset", "")),
                                        _e(u.get("name_ar", ""))))
@@ -141,6 +141,26 @@ def build_drawer_units(units):
                        _e(u.get("line_ar", ""))))
     return ("<ol>\n        " + "\n        ".join(rows) + "\n      </ol>") \
         if rows else DEFAULT_BLOCKS["drawer_units"]
+
+
+CHECK_ICON = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+              'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="M20 6L9 17l-5-5"/></svg>')
+
+
+def build_trust(copy, social=None):
+    """The hero's trust chips. Four come from editable copy keys; a fifth is
+    added only when the reach figures carry a value, a date and a source — the
+    same gate every other hand-entered figure passes. Reach is distribution
+    evidence for a company whose guests arrive from TikTok, so it sits beside
+    the operating claims rather than in a marketing box of its own."""
+    items = [copy.get("trust_%d" % i) for i in (1, 2, 3, 4)]
+    items = [t for t in items if t]
+    if social:
+        items.append(social)
+    return ('<div class="trust">\n      '
+            + "\n      ".join('<span>%s%s</span>' % (CHECK_ICON, t) for t in items)
+            + "\n    </div>")
 
 
 def build_page_quotes(reviews):
@@ -289,8 +309,26 @@ def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
     cat = v("category_scores") or {}
     stamp = stats.sync_stamp(snapshot=snapshot)
 
+    # Reach chip — rendered ONLY when both figures came through the manual
+    # gate (source == "manual" means they carried a value, a date and a
+    # source). An incomplete entry falls back to "seeds" and is not reported,
+    # exactly like every other hand-entered number on this page.
+    social_chip = ""
+    followers, views = cells.get("tiktok_followers"), cells.get("tiktok_views")
+    if (followers and views
+            and followers["source"] == "manual" and views["source"] == "manual"
+            and followers["value"] and views["value"]):
+        social_chip = (
+            '<a href="https://tiktok.com/@oujares" target="_blank" rel="noopener" '
+            'style="color:inherit;text-decoration:none">%s مشاهدة و%s متابع على '
+            'تيك توك</a>' % (_ar_millions(views["value"]),
+                             _fmt("messages_total", followers["value"])))
+
     blocks = {
         "__DOORS__": DEFAULT_BLOCKS["doors"],
+        "__TRUST__": build_trust({k: (copy_overrides.get(k) or COPY_DEFAULTS.get(k))
+                                  for k in ("trust_1", "trust_2", "trust_3", "trust_4")},
+                                 social_chip),
         "__PAGE_QUOTES__": build_page_quotes(reviews) if reviews
         else DEFAULT_BLOCKS["page_quotes"],
         "__DRAWER_REVIEWS__": build_drawer_reviews(reviews) if reviews
@@ -397,6 +435,20 @@ def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
         guard.assert_clean(out, label=("/cp/ar v2" if more_key is None
                                        else "/cp/ar/more/" + more_key))
     return out
+
+
+def _ar_millions(n):
+    """100000000 -> «100 مليون». Arabic reads a round reach figure as a word,
+    not as a wall of zeros."""
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n >= 1000000:
+        v = n / 1000000.0
+        return ("%d مليون" % round(v)) if abs(v - round(v)) < 0.05 \
+            else ("%.1f مليون" % v)
+    return stats.fmt("messages_total", n)
 
 
 _AR_MONTHS = {1: "يناير", 2: "فبراير", 3: "مارس", 4: "أبريل", 5: "مايو",

@@ -236,6 +236,7 @@ MORE_LINK_EXPECTED = 7
 # --------------------------------------------------------------------------- #
 BLOCKS = [
     (r'<div class="doors">.*?\n    </div>', "__DOORS__", 1),
+    (r'<div class="trust">.*?\n    </div>', "__TRUST__", 1),
     (r'<div class="quotes">.*?\n    </div>', "__PAGE_QUOTES__", 1),
     (r'<div class="units">.*?\n    </div>', "__UNITS_GRID__", 1),
     (r'<div class="shots">.*?\n    </div>', "__SHOTS__", 1),
@@ -293,7 +294,7 @@ COPY_KEYS = [
 # tokens whose replaced block is saved verbatim as the render-time DEFAULT —
 # the page stays pixel-identical to the mock until the dashboard configures
 # that block, and no default markup is ever authored by hand.
-DEFAULTED = {"__DOORS__": "doors", "__PAGE_QUOTES__": "page_quotes",
+DEFAULTED = {"__DOORS__": "doors", "__TRUST__": "trust", "__PAGE_QUOTES__": "page_quotes",
              "__UNITS_GRID__": "units_grid", "__SHOTS__": "shots",
              "__BENCH__": "bench", "__OCC_TYPES__": "occ_types",
              "__DRAWER_REVIEWS__": "drawer_reviews",
@@ -379,7 +380,9 @@ def main(argv):
 
     defaults = {}
     tokenised = port(src, defaults_out=defaults)
-    copy_reg = extract_copy(tokenised)
+    # from `inter`, not `tokenised`: the block rules carve the trust chips
+    # (and others) out of the final template, but they are still editable copy
+    copy_reg = extract_copy(inter)
 
     os.makedirs(OUT_MORE, exist_ok=True)
     defaults_dir = os.path.join(PKG, "templates", "defaults")

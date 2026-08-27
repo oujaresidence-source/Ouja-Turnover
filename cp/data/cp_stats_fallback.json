@@ -52,6 +52,10 @@
   "messages_monthly_now": 23000,
   "maintenance_closed_in_sla": 1000,
 
+  "_reach_note": "Owner-confirmed 2026-08-27. Absent from the seeds file, so it renders ONLY through the manual layer's value+date+source gate.",
+  "tiktok_followers": 75000,
+  "tiktok_views": 100000000,
+
   "residences_per_person_per_day": 4.0,
   "residences_per_custodian": 12,
   "team_headcount": 22,
