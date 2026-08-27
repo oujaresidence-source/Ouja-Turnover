@@ -371,3 +371,106 @@ class ReachChip(unittest.TestCase):
              "line_ar": "خط"}]}},
             photos={"1": {"photo": "/elite/img?u=x", "srcset": ""}})
         self.assertIn('width="1200" height="900"', html)
+
+
+class PdfProfile(unittest.TestCase):
+    """The printed profile is the page in print, not a lookalike: same tokens,
+    same fonts, figures from the same stats layer, and the guard runs on the
+    assembled HTML before a page is rendered."""
+
+    @classmethod
+    def setUpClass(cls):
+        from cp.tools import build_pdf
+        cls.mod = build_pdf
+        cls.html = build_pdf.build_html()
+
+    def test_it_is_guard_clean(self):
+        guard.assert_clean(self.html, label="pdf")
+
+    def test_no_token_is_left_unfilled(self):
+        self.assertEqual(page_v2.remaining_placeholders(self.html), [])
+
+    def test_every_requested_section_is_present(self):
+        for title in ("من نحن", "البداية", "الرسالة والرؤية", "من نخدم",
+                      "مراجعاتنا", "نموذج التشغيل"):
+            with self.subTest(section=title):
+                self.assertIn(title, self.html)
+
+    def test_figures_come_from_the_stats_layer(self):
+        for figure in ("8,114", "13,093", "4.77", "2,633", "74", "94%"):
+            with self.subTest(figure=figure):
+                self.assertIn(figure, self.html)
+
+    def test_reviews_are_the_same_six_verbatim(self):
+        self.assertIn("العزل ضعيف", self.html)
+        self.assertIn("ثاني مرة ازورهم", self.html)
+        self.assertIn("I booked last minute", self.html)
+
+    def test_the_english_review_keeps_its_direction(self):
+        self.assertIn('dir="ltr"', self.html)
+
+    def test_the_doors_are_the_pages_own_doors(self):
+        """The PDF must not disagree with the page about what we offer: both
+        render the same block. The first version read an older file and the
+        third door came out differently worded."""
+        import re
+        page_doors = re.findall(r"<b>(.*?)</b>", page_v2.DEFAULT_BLOCKS["doors"])
+        self.assertEqual(len(page_doors), 5)
+        for door in page_doors:
+            with self.subTest(door=door):
+                self.assertIn(door, self.html)
+        self.assertIn("خمسة أطراف", self.html)
+
+    def test_it_uses_the_pages_own_design_tokens(self):
+        self.assertIn("--beige:", self.html)
+        self.assertIn("Thmanyah Display", self.html)
+
+    def test_the_built_pdf_ships(self):
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "cp", "assets", "profile-ar.pdf")
+        self.assertTrue(os.path.exists(path))
+        self.assertGreater(os.path.getsize(path), 50_000)
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(5), b"%PDF-")
+
+
+class PdfDisclosure(unittest.TestCase):
+    """What the printed profile must NOT carry. The store's listing names hold
+    the unit identifier and its district; the page never prints those, and the
+    PDF printed them until the owner spotted it."""
+
+    @classmethod
+    def setUpClass(cls):
+        from cp.tools import build_pdf
+        cls.html = build_pdf.build_html()
+
+    def test_no_district_names_in_review_attributions(self):
+        import re
+        whos = " ".join(re.findall(r'<div class="who">(.*?)</div>', self.html))
+        for leak in ("Al-Nuzha", "Al-Qairawan", "النزهة", "القيروان",
+                     "Master Bedrooms", "Private Pool"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, whos)
+
+    def test_attributions_are_the_pages_own_descriptors(self):
+        import re
+        whos = re.findall(r'<div class="who">(.*?)</div>', self.html)
+        self.assertGreaterEqual(len(whos), 6)
+        for w in whos:
+            with self.subTest(who=w):
+                self.assertNotIn("|", w, "a raw listing name reached the PDF")
+
+    def test_a_review_without_a_drawer_entry_still_anonymises(self):
+        from cp.tools import build_pdf
+        self.assertEqual(build_pdf._generic_label(
+            "Ouja Luxury | 2 Master Bedrooms | Al-Nuzha"), "غرفتا نوم")
+        self.assertEqual(build_pdf._generic_label("Grand 4BR | Private Floor"),
+                         "أربع غرف نوم")
+        self.assertEqual(build_pdf._generic_label("something unmatched"),
+                         "وحدة مفروشة")
+
+    def test_the_footer_does_not_cite_a_section_the_pdf_lacks(self):
+        """The page's footer cites AirDNA because the page has a market
+        comparison; the PDF does not."""
+        self.assertNotIn("AirDNA", self.html)
