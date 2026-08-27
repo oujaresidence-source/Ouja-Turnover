@@ -149,6 +149,30 @@ class MonthlyShowcasePageTest(unittest.TestCase):
         for phrase in ("up to 30%", "maximum discount", "خصم يصل", "أقصى خصم"):
             self.assertNotIn(phrase, source)
 
+    def test_showcase_copy_explains_the_relaxed_minimum_without_calling_manual_prices_official(self):
+        script = """
+          const app = require('./monthly_public/static/monthly.js');
+          process.stdout.write(JSON.stringify({
+            arPrice: app.COPY.ar.showcaseListingPrice,
+            enPrice: app.COPY.en.showcaseListingPrice,
+            arEmpty: app.COPY.ar.showcaseEmptyText,
+            enEmpty: app.COPY.en.showcaseEmptyText
+          }));
+        """
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        copy = json.loads(result.stdout)
+        self.assertEqual(copy["arPrice"], "كل بيت بسعره الشهري المعتمد")
+        self.assertEqual(copy["enPrice"], "Each home has its approved monthly price")
+        self.assertIn("الصورة والسعر ومعلومات الإعلان", copy["arEmpty"])
+        self.assertIn("image, price, and advertising information", copy["enEmpty"])
+
 
 if __name__ == "__main__":
     unittest.main()

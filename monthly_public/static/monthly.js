@@ -208,11 +208,11 @@
       showcaseKicker: "🏢 عرض سكني خاص",
       showcaseFixedPrice: "سعر شهري موحّد لهذه المجموعة",
       showcaseFixedPriceHelp: "يسري هذا السعر عند اختيار بيت من هذا الرابط. وتبقى بقية الشروط والتوفر خاصة بكل بيت.",
-      showcaseListingPrice: "كل بيت بسعره الشهري الرسمي",
-      showcaseListingPriceHelp: "الرابط مستمر، والأسعار المعروضة هي الأسعار الرسمية لكل بيت.",
+      showcaseListingPrice: "كل بيت بسعره الشهري المعتمد",
+      showcaseListingPriceHelp: "الرابط مستمر، ويظهر لكل بيت السعر الشهري الذي اعتمدته عوجا.",
       showcaseHomes: "{count} بيوت في هذا العرض",
       showcaseEmptyTitle: "ما فيه بيوت منشورة في هذا العرض حاليًا.",
-      showcaseEmptyText: "الرابط محفوظ. تظهر البيوت هنا تلقائيًا بعد اكتمال متطلبات النشر.",
+      showcaseEmptyText: "الرابط محفوظ. تظهر البيوت هنا بعد اعتماد الصورة والسعر ومعلومات الإعلان.",
       showcaseBack: "العودة إلى العرض الخاص"
     },
     en: {
@@ -409,11 +409,11 @@
       showcaseKicker: "🏢 Private home collection",
       showcaseFixedPrice: "One monthly price for this collection",
       showcaseFixedPriceHelp: "This price applies when a home is selected through this link. Availability and all other terms remain specific to each home.",
-      showcaseListingPrice: "Each home keeps its official monthly price",
-      showcaseListingPriceHelp: "This link remains active, and every displayed price is the home's official rate.",
+      showcaseListingPrice: "Each home has its approved monthly price",
+      showcaseListingPriceHelp: "This link remains active, and each home shows the monthly price approved by Ouja.",
       showcaseHomes: "{count} homes in this collection",
       showcaseEmptyTitle: "No homes are published in this collection right now.",
-      showcaseEmptyText: "The link remains active. Homes appear automatically after they complete publication checks.",
+      showcaseEmptyText: "The link remains active. Homes appear after their image, price, and advertising information are approved.",
       showcaseBack: "Back to the private collection"
     }
   };
