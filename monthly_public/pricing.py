@@ -105,12 +105,22 @@ def _preliminary(start: dt.date, end: dt.date, months: Optional[int]) -> bool:
 
 
 def quote_for(
-    listing: Mapping[str, Any], request: Mapping[str, Any], now: dt.datetime
+    listing: Mapping[str, Any],
+    request: Mapping[str, Any],
+    now: dt.datetime,
+    *,
+    fixed_monthly_rate_sar: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Return a complete public quote or ``None`` when cached coverage is incomplete."""
 
     if not isinstance(listing, Mapping) or not isinstance(request, Mapping):
         return None
+    fixed_rate = None
+    if fixed_monthly_rate_sar is not None:
+        fixed_rate = _number(fixed_monthly_rate_sar)
+        if fixed_rate is None or fixed_rate > 1_000_000:
+            return None
+        fixed_rate = int(fixed_rate) if fixed_rate.is_integer() else fixed_rate
     start = _date(request.get("move_in"))
     if start is None:
         return None
@@ -135,15 +145,21 @@ def quote_for(
             end = _add(start, months)
         except (ValueError, OverflowError):
             return None
-        prices = listing.get("official_prices")
-        price = _entry(
-            prices.get(start.strftime("%Y-%m")) if isinstance(prices, Mapping) else None,
-            now,
-            require_total=False,
-        )
-        if price is None:
-            return None
-        price["stay_total_sar"] = price["monthly_rate_sar"] * months
+        if fixed_rate is not None:
+            price = {
+                "monthly_rate_sar": fixed_rate,
+                "stay_total_sar": fixed_rate * months,
+            }
+        else:
+            prices = listing.get("official_prices")
+            price = _entry(
+                prices.get(start.strftime("%Y-%m")) if isinstance(prices, Mapping) else None,
+                now,
+                require_total=False,
+            )
+            if price is None:
+                return None
+            price["stay_total_sar"] = price["monthly_rate_sar"] * months
     elif supplied_move_out not in (None, ""):
         end = _date(supplied_move_out)
         if end is None or end <= start:
