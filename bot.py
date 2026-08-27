@@ -61510,7 +61510,8 @@ async def start_web_server():
                     "base_url": _cp_base,
                     "links": {"wa": _cp_wa,
                               "email": (os.environ.get("CP_EMAIL") or "Info@oujares.com").strip()},
-                    "pdf_path": (os.environ.get("CP_PDF_PATH") or "").strip(),
+                    "pdf_path": ((os.environ.get("CP_PDF_PATH") or "").strip()
+                                 or "cp/assets/profile-ar.pdf"),
                     "default_lang": (os.environ.get("CP_DEFAULT_LANG") or "ar").strip().lower(),
                     "english_ready": _as_bool(os.environ.get("CP_ENGLISH_READY"), False),
                     "redirect_business": _as_bool(os.environ.get("CP_REDIRECT_BUSINESS"), False),
