@@ -78,7 +78,7 @@ class MonthlyPublicPageTests(unittest.TestCase):
         self.assertRegex(CSS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.css$")
         self.assertRegex(JS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.js$")
         self.assertFalse(any(value.startswith(("http://", "https://", "//")) for value in parser.assets))
-        self.assertEqual(ASSET_VERSION, "v20260827c")
+        self.assertEqual(ASSET_VERSION, "v20260827d")
 
     def test_page_state_is_safe_and_supports_every_approved_deep_link(self):
         from monthly_public.page import page_state, render_monthly_page

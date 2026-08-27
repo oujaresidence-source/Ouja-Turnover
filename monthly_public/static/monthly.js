@@ -1450,6 +1450,19 @@
     return grid;
   }
 
+  function showcaseHeroImage(showcase, homes) {
+    const candidates = [showcase && showcase.image_url].concat(
+      (Array.isArray(homes) ? homes : []).map(function (home) {
+        return home && home.cover && home.cover.url;
+      })
+    );
+    for (const candidate of candidates) {
+      const safe = safeImageUrl(candidate);
+      if (safe) return safe;
+    }
+    return "";
+  }
+
   async function renderShowcase() {
     loadingView();
     const slug = runtime.page && runtime.page.showcase_slug;
@@ -1466,6 +1479,7 @@
     runtime.recommendationContext = null;
     runtime.listingRequest = {};
 
+    const homes = Array.isArray(showcase.homes) ? showcase.homes : [];
     const target = clearMain();
     const wrap = element("div", "page-width showcase-page");
     const hero = element("section", "showcase-hero");
@@ -1475,18 +1489,19 @@
       element("h1", "", showcase.name || ""),
       element("p", "showcase-description", showcase.description || "")
     );
-    const imageUrl = safeImageUrl(showcase.image_url);
+    const imageUrl = showcaseHeroImage(showcase, homes);
     if (imageUrl) {
       const media = element("figure", "showcase-hero-media");
       const image = element("img");
       image.src = imageUrl;
       image.alt = showcase.name || "";
-      image.width = 960;
-      image.height = 720;
+      image.width = 1600;
+      image.height = 700;
       image.loading = "eager";
       image.decoding = "async";
+      image.addEventListener("error", function () { media.hidden = true; });
       media.appendChild(image);
-      append(hero, words, media);
+      append(hero, media, words);
     } else {
       hero.appendChild(words);
     }
@@ -1514,7 +1529,6 @@
     })));
     wrap.appendChild(offer);
 
-    const homes = Array.isArray(showcase.homes) ? showcase.homes : [];
     if (homes.length) {
       const heading = element("div", "section-heading showcase-heading");
       heading.appendChild(element("h2", "", copy("showcaseHomes", { count: formatNumber(homes.length) })));
@@ -2719,6 +2733,7 @@
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,
+    showcaseHeroImage: showcaseHeroImage,
     showcaseListingPath: showcaseListingPath,
     setLanguage: setLanguage
   };

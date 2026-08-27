@@ -1373,8 +1373,10 @@ p {
 .showcase-hero-copy {
   display: grid;
   align-content: center;
+  justify-items: center;
   min-width: 0;
-  padding: clamp(28px, 6vw, 68px);
+  padding: clamp(28px, 5vw, 56px);
+  text-align: center;
 }
 
 .showcase-kicker {
@@ -1386,7 +1388,7 @@ p {
 }
 
 .showcase-hero h1 {
-  max-width: 16ch;
+  max-width: 20ch;
   margin-block-end: 18px;
   color: var(--palm-950);
   font-size: clamp(2.25rem, 6vw, 4.8rem);
@@ -1401,16 +1403,18 @@ p {
 }
 
 .showcase-hero-media {
-  min-height: 280px;
+  width: 100%;
   margin: 0;
+  aspect-ratio: 16 / 7;
   background: var(--stone-200);
 }
 
 .showcase-hero-media img {
+  display: block;
   width: 100%;
   height: 100%;
-  min-height: 280px;
   object-fit: cover;
+  object-position: center;
 }
 
 .showcase-offer {
@@ -1553,15 +1557,6 @@ p {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .showcase-hero:has(.showcase-hero-media) {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  }
-
-  .showcase-hero-media,
-  .showcase-hero-media img {
-    min-height: 500px;
-  }
-
   .gallery {
     grid-template-columns: 2fr 1fr 1fr;
   }
@@ -1631,6 +1626,10 @@ p {
 
   .showcase-offer {
     margin-block-end: 52px;
+  }
+
+  .showcase-hero-media {
+    aspect-ratio: 16 / 10;
   }
 }
 
