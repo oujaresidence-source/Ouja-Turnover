@@ -23,6 +23,7 @@ from .contracts import (
 _LEAD_REFERENCE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _LISTING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 _JOURNEY_ID = re.compile(r"^journey_[A-Za-z0-9_-]{22,64}$")
+_SHOWCASE_ID = re.compile(r"^showcase_[A-Za-z0-9_-]{2,64}$")
 
 
 def _utc_now() -> dt.datetime:
@@ -120,6 +121,7 @@ class AnalyticsStore:
         *,
         listing_id: Optional[str] = None,
         journey_id: Optional[str] = None,
+        showcase_id: Optional[str] = None,
         now: Optional[dt.datetime] = None,
     ) -> Dict[str, Any]:
         """Atomically persist the contact click and created-lead lifecycle.
@@ -144,11 +146,17 @@ class AnalyticsStore:
             normalized_journey = str(journey_id).strip()
             if not _JOURNEY_ID.fullmatch(normalized_journey):
                 raise ValueError("invalid journey ID")
+        normalized_showcase: Optional[str] = None
+        if showcase_id not in (None, ""):
+            normalized_showcase = str(showcase_id).strip()
+            if not _SHOWCASE_ID.fullmatch(normalized_showcase):
+                raise ValueError("invalid showcase ID")
         occurred = _as_datetime(now if now is not None else self.clock()).isoformat()
-        journey_context = (
-            {"journey_id": normalized_journey} if normalized_journey else {}
-        )
-        expected = (
+        journey_context = {
+            **({"journey_id": normalized_journey} if normalized_journey else {}),
+            **({"showcase_id": normalized_showcase} if normalized_showcase else {}),
+        }
+        expected = [
             (
                 "whatsapp_click",
                 {
@@ -157,7 +165,24 @@ class AnalyticsStore:
                 },
             ),
             ("lead_created", journey_context),
-        )
+        ]
+        if normalized_showcase:
+            expected.extend(
+                [
+                    (
+                        "showcase_whatsapp_click",
+                        {
+                            **(
+                                {"listing_id": normalized_listing}
+                                if normalized_listing
+                                else {}
+                            ),
+                            **journey_context,
+                        },
+                    ),
+                    ("showcase_lead_created", journey_context),
+                ]
+            )
         result_rows: Dict[str, sqlite3.Row] = {}
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -254,6 +279,9 @@ class AnalyticsStore:
             if event == "lead_created":
                 if rows:
                     raise ValueError("lead creation must be the first lifecycle event")
+            elif event == "showcase_lead_created":
+                if "lead_created" not in names or {"booked", "lost"}.intersection(names):
+                    raise ValueError("showcase lead creation requires an open created lead")
             elif event == "team_response":
                 if "lead_created" not in names or {"booked", "lost"}.intersection(names):
                     raise ValueError("team response requires an open created lead")
@@ -385,10 +413,20 @@ class AnalyticsStore:
                 if isinstance(context.get("rank"), int):
                     item["rank"] = context["rank"]
             elif event in (
-                "listing_view", "review_section_view", "price_breakdown_open", "whatsapp_click"
+                "listing_view",
+                "review_section_view",
+                "price_breakdown_open",
+                "whatsapp_click",
+                "showcase_view",
+                "showcase_listing_impression",
+                "showcase_listing_view",
+                "showcase_whatsapp_click",
+                "showcase_lead_created",
             ):
                 if isinstance(context.get("listing_id"), str):
                     item["listing_id"] = context["listing_id"]
+                if isinstance(context.get("showcase_id"), str):
+                    item["showcase_id"] = context["showcase_id"]
             journey.append(item)
         return journey
 

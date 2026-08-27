@@ -281,6 +281,37 @@ def parse_showcase(
     }
 
 
+def parse_showcase_request(value: Any) -> Dict[str, str]:
+    """Validate the small public request for one permanent group URL."""
+
+    raw = _mapping(value)
+    unknown = sorted(str(key) for key in raw if key not in {"slug", "lang"})
+    if unknown:
+        raise _error(
+            unknown[0],
+            "unknown_field",
+            "يحتوي الطلب على حقل غير معتمد.",
+            "The request contains an unsupported field.",
+        )
+    slug = _text(raw.get("slug"), "slug", 120)
+    if not _SLUG_RE.fullmatch(slug):
+        raise _error(
+            "slug",
+            "invalid_format",
+            "رابط المجموعة غير صحيح.",
+            "The showcase URL is invalid.",
+        )
+    lang = raw.get("lang", "ar")
+    if lang not in ("ar", "en"):
+        raise _error(
+            "lang",
+            "unsupported",
+            "اللغة المحددة غير معتمدة.",
+            "The selected language is unsupported.",
+        )
+    return {"slug": slug, "lang": str(lang)}
+
+
 def _secret(value: Any) -> bytes:
     if isinstance(value, bytearray):
         value = bytes(value)

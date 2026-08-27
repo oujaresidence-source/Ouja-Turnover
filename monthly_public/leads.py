@@ -31,6 +31,8 @@ _SESSION_RE = re.compile(r"^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$")
 _REFERENCE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{5,63}$")
 _LISTING_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 _JOURNEY_RE = re.compile(r"^journey_[A-Za-z0-9_-]{22,64}$")
+_SHOWCASE_RE = re.compile(r"^showcase_[A-Za-z0-9_-]{2,64}$")
+_SHOWCASE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 STAFF_ACTIONS = ("confirm_request", "request_information", "prepare_alternative")
 INFORMATION_REASONS = ("dates", "residents", "place", "contract_terms", "other")
 ALTERNATIVE_REASONS = ("lower_price", "dates", "location", "space")
@@ -205,6 +207,41 @@ def _approved_quote(value: Any) -> Dict[str, Any]:
     return safe
 
 
+def _approved_showcase(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    required = {
+        "group_id",
+        "revision",
+        "slug",
+        "price_mode",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or set(value) - required - {"context"}
+    ):
+        raise ValueError("invalid showcase reference")
+    group_id = _text(value.get("group_id"), "showcase.group_id", 80)
+    if not _SHOWCASE_RE.fullmatch(group_id):
+        raise ValueError("invalid showcase group ID")
+    revision = _integer(value.get("revision"), 1, 999_999_999, "showcase.revision")
+    slug = _text(value.get("slug"), "showcase.slug", 120)
+    if not _SHOWCASE_SLUG_RE.fullmatch(slug):
+        raise ValueError("invalid showcase slug")
+    price_mode = _choice(
+        value.get("price_mode"),
+        ("fixed", "listing"),
+        "showcase.price_mode",
+    )
+    return {
+        "group_id": group_id,
+        "revision": revision,
+        "slug": slug,
+        "price_mode": price_mode,
+    }
+
+
 def _reference(now: dt.datetime) -> str:
     return "OJM-%s-%s" % (now.strftime("%Y%m%d"), secrets.token_hex(4).upper())
 
@@ -256,7 +293,14 @@ class LeadStore:
                     ),
                     outcome TEXT CHECK (outcome IS NULL OR outcome IN ('booked', 'lost')),
                     outcome_at TEXT,
-                    lost_reason TEXT
+                    lost_reason TEXT,
+                    showcase_group_id TEXT,
+                    showcase_revision INTEGER,
+                    showcase_slug TEXT,
+                    showcase_price_mode TEXT CHECK (
+                        showcase_price_mode IS NULL OR
+                        showcase_price_mode IN ('fixed', 'listing')
+                    )
                 )
                 """
             )
@@ -283,6 +327,18 @@ class LeadStore:
                 connection.execute(
                     "ALTER TABLE monthly_public_leads ADD COLUMN journey_id TEXT"
                 )
+            showcase_columns = {
+                "showcase_group_id": "TEXT",
+                "showcase_revision": "INTEGER",
+                "showcase_slug": "TEXT",
+                "showcase_price_mode": "TEXT",
+            }
+            for column, sql_type in showcase_columns.items():
+                if column not in columns:
+                    connection.execute(
+                        "ALTER TABLE monthly_public_leads ADD COLUMN %s %s"
+                        % (column, sql_type)
+                    )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_monthly_lead_dedupe ON monthly_public_leads(session_id, listing_id, request_key, created_at)"
             )
@@ -308,7 +364,7 @@ class LeadStore:
 
     @staticmethod
     def _row(row: sqlite3.Row) -> Dict[str, Any]:
-        return {
+        result = {
             "reference": row["reference"],
             "session_id": row["session_id"],
             "journey_id": row["journey_id"],
@@ -328,6 +384,14 @@ class LeadStore:
             "outcome_at": row["outcome_at"],
             "lost_reason": row["lost_reason"],
         }
+        if row["showcase_group_id"]:
+            result["showcase"] = {
+                "group_id": row["showcase_group_id"],
+                "revision": row["showcase_revision"],
+                "slug": row["showcase_slug"],
+                "price_mode": row["showcase_price_mode"],
+            }
+        return result
 
     def create(
         self,
@@ -339,6 +403,7 @@ class LeadStore:
         approved_places: Any = None,
         journey_id: Any = None,
         now: Optional[dt.datetime] = None,
+        showcase: Any = None,
     ) -> Dict[str, Any]:
         if not isinstance(session_id, str) or not _SESSION_RE.fullmatch(session_id):
             raise ValueError("invalid anonymous session")
@@ -352,9 +417,18 @@ class LeadStore:
                 raise ValueError("invalid journey ID")
         safe_request = _approved_request(request, approved_places)
         safe_quote = _approved_quote(quote)
+        safe_showcase = _approved_showcase(showcase)
         request_json = json.dumps(safe_request, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         quote_json = json.dumps(safe_quote, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-        request_key = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+        showcase_json = json.dumps(
+            safe_showcase or {},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        request_key = hashlib.sha256(
+            (request_json + "|" + showcase_json).encode("utf-8")
+        ).hexdigest()
         current = _time(now if now is not None else self.clock())
 
         with self._connection() as connection:
@@ -377,8 +451,29 @@ class LeadStore:
                     raise ValueError("reference factory returned an invalid reference")
                 try:
                     connection.execute(
-                        "INSERT INTO monthly_public_leads(reference, session_id, journey_id, listing_id, request_key, request_json, quote_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (reference, session_id, normalized_journey, listing, request_key, request_json, quote_json, current.isoformat(), current.isoformat()),
+                        """
+                        INSERT INTO monthly_public_leads(
+                            reference, session_id, journey_id, listing_id,
+                            request_key, request_json, quote_json,
+                            showcase_group_id, showcase_revision, showcase_slug,
+                            showcase_price_mode, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            reference,
+                            session_id,
+                            normalized_journey,
+                            listing,
+                            request_key,
+                            request_json,
+                            quote_json,
+                            safe_showcase.get("group_id") if safe_showcase else None,
+                            safe_showcase.get("revision") if safe_showcase else None,
+                            safe_showcase.get("slug") if safe_showcase else None,
+                            safe_showcase.get("price_mode") if safe_showcase else None,
+                            current.isoformat(),
+                            current.isoformat(),
+                        ),
                     )
                     row = connection.execute("SELECT * FROM monthly_public_leads WHERE reference = ?", (reference,)).fetchone()
                     return self._row(row)
@@ -800,6 +895,7 @@ def build_whatsapp_handoff(
     approved_places: Any = None,
     journey_id: Any = None,
     now: Optional[dt.datetime] = None,
+    showcase: Any = None,
 ) -> Dict[str, Any]:
     """Create an anonymous lead and a bilingual pre-filled WhatsApp URL."""
 
@@ -815,6 +911,7 @@ def build_whatsapp_handoff(
             "response_window": window,
         }
     _validate_handoff(listing, request, quote, approved_places)
+    safe_showcase = _approved_showcase(showcase)
     listing_id = str(listing.get("id") or "").strip()
     lead = store.create(
         session_id,
@@ -824,6 +921,7 @@ def build_whatsapp_handoff(
         approved_places=approved_places,
         journey_id=journey_id,
         now=current,
+        showcase=safe_showcase,
     )
     request = lead["request"]
     quote = lead["quote"]
@@ -848,6 +946,17 @@ def build_whatsapp_handoff(
         "المقيمون / Residents: %s" % (request.get("residents") or "—"),
         "الغرض / Purpose: %s" % (request.get("purpose") or "—"),
     ]
+    if lead.get("showcase"):
+        group = lead["showcase"]
+        lines.append(
+            "مجموعة العرض / Showcase: %s | ID %s | revision %s | %s"
+            % (
+                group["slug"],
+                group["group_id"],
+                group["revision"],
+                group["price_mode"],
+            )
+        )
     if request.get("sleeping"):
         lines.append("ترتيب النوم / Sleeping: %s" % request["sleeping"])
     if request.get("flexibility"):
@@ -878,6 +987,11 @@ def build_whatsapp_handoff(
                 lead["reference"],
                 listing_id=listing_id,
                 journey_id=lead.get("journey_id"),
+                showcase_id=(
+                    lead.get("showcase", {}).get("group_id")
+                    if lead.get("showcase")
+                    else None
+                ),
                 now=current,
             )
             recorded = True

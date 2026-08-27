@@ -37,6 +37,12 @@ from .matching import rank, space_matches
 from .presentation import present_card, present_listing
 from .pricing import add_months, quote_for
 from .settings import MonthlySettings, response_window
+from .showcase_contracts import (
+    ShowcaseContextError,
+    ShowcaseContractError,
+    parse_showcase_request,
+)
+from .showcase_service import ShowcaseNotFound, present_showcase
 from .snapshot import revalidate_generation
 
 
@@ -333,6 +339,11 @@ class MonthlyOpsApp:
                     "outcome": lead.get("outcome"),
                     "outcome_at": lead.get("outcome_at"),
                     "lost_reason": lead.get("lost_reason"),
+                    **(
+                        {"showcase": dict(lead["showcase"])}
+                        if isinstance(lead.get("showcase"), Mapping)
+                        else {}
+                    ),
                     "actions": [
                         {
                             "action": row.get("action"),
@@ -658,6 +669,7 @@ class MonthlyPublicApp:
         approved_places: Any,
         session_secret: Any,
         clock: Any,
+        showcase_service: Any = None,
     ) -> None:
         if not isinstance(settings, MonthlySettings):
             raise TypeError("settings must be MonthlySettings")
@@ -671,6 +683,7 @@ class MonthlyPublicApp:
         self.session_secret = session_secret
         self.clock = clock
         self.catalog_health_provider = None
+        self.showcase_service = showcase_service
         self.ops = MonthlyOpsApp(self)
 
     @staticmethod
@@ -788,6 +801,78 @@ class MonthlyPublicApp:
             if slug is not None and result.listing.get("slug") == slug:
                 return result
         return None
+
+    def _showcase_listing(
+        self,
+        token: Any,
+        request: Mapping[str, Any],
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Any], Optional[Any]]:
+        if token in (None, ""):
+            return None, None, None
+        if self.showcase_service is None:
+            raise ContractError(
+                "showcase_context",
+                "showcase_unavailable",
+                "رابط المجموعة غير متاح حاليًا.",
+                "The showcase link is currently unavailable.",
+            )
+        try:
+            resolved = self.showcase_service.resolve_context(token)
+        except ShowcaseContextError as error:
+            raise ContractError(
+                "showcase_context",
+                "invalid_showcase_context",
+                "رابط المجموعة غير صالح أو تغيّر.",
+                "The showcase link is invalid or has changed.",
+            ) from error
+        group = resolved["group"]
+        listing_id = request.get("listing_id")
+        if listing_id is not None:
+            listing_id = str(listing_id)
+            if listing_id not in {str(item) for item in group.get("listing_ids") or ()}:
+                raise ContractError(
+                    "showcase_context",
+                    "showcase_listing_mismatch",
+                    "الشقة ليست ضمن هذه المجموعة.",
+                    "The home is not in this showcase.",
+                )
+        else:
+            slug = request.get("slug")
+            listing_id = None
+            for candidate in group.get("listing_ids") or ():
+                result = self.showcase_service.eligible_result(group, candidate)
+                if result is not None and result.listing.get("slug") == slug:
+                    listing_id = str(candidate)
+                    break
+            if listing_id is None:
+                raise ContractError(
+                    "showcase_context",
+                    "showcase_listing_mismatch",
+                    "الشقة ليست ضمن هذه المجموعة.",
+                    "The home is not in this showcase.",
+                )
+        result = self.showcase_service.eligible_result(group, listing_id)
+        rate = (
+            group.get("fixed_monthly_rate_sar")
+            if group.get("fixed_price_enabled") is True
+            else None
+        )
+        return resolved, result, rate
+
+    @staticmethod
+    def _showcase_response(
+        resolved: Mapping[str, Any],
+        token: str,
+    ) -> Dict[str, Any]:
+        group = resolved["group"]
+        enabled = group.get("fixed_price_enabled") is True
+        return {
+            "group_id": resolved["group_id"],
+            "revision": resolved["revision"],
+            "slug": group["slug"],
+            "price_mode": "fixed" if enabled else "listing",
+            "context": token,
+        }
 
     def _canonical_place(
         self,
@@ -1042,6 +1127,34 @@ class MonthlyPublicApp:
         except Exception:
             return _internal_error()
 
+    def showcase(self, value: Any) -> Dict[str, Any]:
+        try:
+            if self.showcase_service is None:
+                return _error(
+                    "showcase_unavailable",
+                    "صفحة المجموعة غير متاحة حاليًا.",
+                    "The showcase page is currently unavailable.",
+                )
+            request = parse_showcase_request(value)
+            public = self.showcase_service.public_by_slug(
+                request["slug"], request["lang"]
+            )
+            return {
+                "ok": True,
+                "showcase": present_showcase(public, request["lang"]),
+            }
+        except ShowcaseContractError as error:
+            return {"ok": False, "error": error.as_dict()}
+        except ShowcaseNotFound:
+            return _error(
+                "showcase_not_found",
+                "المجموعة غير موجودة أو لم تعتمد بعد.",
+                "The showcase was not found or is not approved yet.",
+                field="slug",
+            )
+        except Exception:
+            return _internal_error()
+
     def listing(self, value: Any) -> Dict[str, Any]:
         try:
             current, generation = self._request_context()
@@ -1050,7 +1163,15 @@ class MonthlyPublicApp:
                 parse_listing_request(value), generation, approved_places
             )
             language = _language(request.get("lang"))
-            result = self._find(request, generation)
+            showcase, showcase_result, fixed_rate = self._showcase_listing(
+                request.get("showcase_context"),
+                request,
+            )
+            result = (
+                showcase_result
+                if showcase is not None
+                else self._find(request, generation)
+            )
             if result is None:
                 return _error(
                     "listing_not_found",
@@ -1072,10 +1193,26 @@ class MonthlyPublicApp:
                 availability = _availability(result, request)
                 status = availability
                 if availability == "available":
-                    quote = quote_for(result.listing, _pricing_request(request), current)
+                    quote = quote_for(
+                        result.listing,
+                        _pricing_request(request),
+                        current,
+                        fixed_monthly_rate_sar=fixed_rate,
+                    )
                     if quote is None:
                         status = "price_missing"
-            return {"ok": True, "listing": detail, "quote": quote, "quote_status": status}
+            response = {
+                "ok": True,
+                "listing": detail,
+                "quote": quote,
+                "quote_status": status,
+            }
+            if showcase is not None:
+                response["showcase"] = self._showcase_response(
+                    showcase,
+                    request["showcase_context"],
+                )
+            return response
         except ContractError as error:
             return _contract_error(error)
         except Exception:
@@ -1092,7 +1229,14 @@ class MonthlyPublicApp:
                 "Select stay dates to view a quote.",
                 field="move_in",
             )
-        return {"ok": True, "quote": result["quote"], "quote_status": result["quote_status"]}
+        response = {
+            "ok": True,
+            "quote": result["quote"],
+            "quote_status": result["quote_status"],
+        }
+        if "showcase" in result:
+            response["showcase"] = result["showcase"]
+        return response
 
     def lead(self, value: Any) -> Dict[str, Any]:
         try:
@@ -1105,7 +1249,7 @@ class MonthlyPublicApp:
                     "صيغة الطلب غير صحيحة.",
                     "The request format is invalid.",
                 )
-            unknown = sorted(set(value) - {"session_id", "journey_id", "listing_id", "general_help", "request", "lang"})
+            unknown = sorted(set(value) - {"session_id", "journey_id", "listing_id", "general_help", "request", "lang", "showcase_context"})
             if unknown:
                 raise ContractError(
                     unknown[0],
@@ -1195,8 +1339,25 @@ class MonthlyPublicApp:
                     "نوع طلب المساعدة غير صحيح.",
                     "The general-help flag is invalid.",
                 )
-            parsed_listing = parse_listing_request({"listing_id": value.get("listing_id")})
-            result = self._find(parsed_listing, generation)
+            parsed_listing = parse_listing_request(
+                {
+                    "listing_id": value.get("listing_id"),
+                    **(
+                        {"showcase_context": value.get("showcase_context")}
+                        if value.get("showcase_context") not in (None, "")
+                        else {}
+                    ),
+                }
+            )
+            showcase, showcase_result, fixed_rate = self._showcase_listing(
+                parsed_listing.get("showcase_context"),
+                parsed_listing,
+            )
+            result = (
+                showcase_result
+                if showcase is not None
+                else self._find(parsed_listing, generation)
+            )
             if result is None:
                 return _error(
                     "listing_not_found",
@@ -1218,7 +1379,12 @@ class MonthlyPublicApp:
                     "التوفر غير مؤكد للتواريخ المحددة.",
                     "Availability is not confirmed for the selected dates.",
                 )
-            quote = quote_for(result.listing, _pricing_request(request), current)
+            quote = quote_for(
+                result.listing,
+                _pricing_request(request),
+                current,
+                fixed_monthly_rate_sar=fixed_rate,
+            )
             if quote is None:
                 return _error(
                     "price_missing",
@@ -1236,6 +1402,14 @@ class MonthlyPublicApp:
                 approved_places=self._place_registry(generation, approved_places),
                 journey_id=journey_id,
                 now=current,
+                showcase=(
+                    self._showcase_response(
+                        showcase,
+                        parsed_listing["showcase_context"],
+                    )
+                    if showcase is not None
+                    else None
+                ),
             )
             if handoff.get("ok") is False:
                 blocked = _error(

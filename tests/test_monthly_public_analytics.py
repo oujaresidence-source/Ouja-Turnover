@@ -53,6 +53,8 @@ class AnalyticsStoreTests(unittest.TestCase):
             "price_priority_selected", "matcher_completion", "results_view", "no_match",
             "result_impression", "listing_view", "review_section_view",
             "price_breakdown_open", "whatsapp_click",
+            "showcase_view", "showcase_listing_impression",
+            "showcase_listing_view", "showcase_whatsapp_click",
         )
         for name in names:
             with self.subTest(name=name):
@@ -61,6 +63,22 @@ class AnalyticsStoreTests(unittest.TestCase):
                     session_secret=SECRET,
                 )
         self.assertEqual([event["event"] for event in self.store.events()], list(names))
+
+    def test_showcase_events_keep_only_the_group_reference(self):
+        event = self.store.record(
+            {
+                "event": "showcase_view",
+                "session_id": self.session,
+                "context": {
+                    "showcase_id": "showcase_a1",
+                    "showcase_price": 12500,
+                    "message": "must not persist",
+                },
+            },
+            session_secret=SECRET,
+        )
+
+        self.assertEqual(event["context"], {"showcase_id": "showcase_a1"})
 
     def test_funnel_links_anonymous_session_to_lead_and_counts_outcomes(self):
         for name in ("landing_view", "matcher_start", "matcher_completion", "results_view", "listing_view", "whatsapp_click"):

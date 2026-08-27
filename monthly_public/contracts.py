@@ -42,9 +42,14 @@ PUBLIC_EVENT_NAMES = (
     "review_section_view",
     "price_breakdown_open",
     "whatsapp_click",
+    "showcase_view",
+    "showcase_listing_impression",
+    "showcase_listing_view",
+    "showcase_whatsapp_click",
 )
 TRUSTED_LIFECYCLE_EVENT_NAMES = (
     "lead_created",
+    "showcase_lead_created",
     "team_response",
     "booked",
     "lost",
@@ -592,6 +597,7 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
             "price_priority",
             "place",
             "lang",
+            "showcase_context",
         },
     )
     result: Dict[str, Any] = {}
@@ -628,6 +634,12 @@ def parse_listing_request(value: Any) -> Dict[str, Any]:
         result["place"] = _place(data["place"])
     if data.get("lang") not in (None, ""):
         result["lang"] = _choice(data["lang"], "lang", LANGUAGES)
+    if data.get("showcase_context") not in (None, ""):
+        result["showcase_context"] = _required_text(
+            data["showcase_context"],
+            "showcase_context",
+            max_length=256,
+        )
     return result
 
 
@@ -686,6 +698,21 @@ def _event_context(
         safe["listing_id"] = _required_text(
             data["listing_id"], "context.listing_id", max_length=80, safe_id=True
         )
+    if data.get("showcase_id") not in (None, ""):
+        showcase_id = _required_text(
+            data["showcase_id"],
+            "context.showcase_id",
+            max_length=80,
+            safe_id=True,
+        )
+        if not showcase_id.startswith("showcase_"):
+            raise _error(
+                "context.showcase_id",
+                "invalid_format",
+                "معرّف المجموعة غير صحيح.",
+                "The showcase identifier is invalid.",
+            )
+        safe["showcase_id"] = showcase_id
     if data.get("move_in") not in (None, ""):
         safe["move_in"] = _date(data["move_in"], "context.move_in")
     derived_band: Optional[str] = None
