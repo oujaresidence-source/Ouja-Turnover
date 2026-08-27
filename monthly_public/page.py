@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .fonts import FONT_CSS_PATH, PRELOAD_FONT_PATH
 
 
-ASSET_VERSION = "v20260827d"
+ASSET_VERSION = "v20260827e"
 CSS_PATH = "/monthly/static/monthly.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly.%s.js" % ASSET_VERSION
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .fonts import FONT_CSS_PATH
 
-ASSET_VERSION = "v20260827c"
+ASSET_VERSION = "v20260827d"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 
@@ -128,7 +128,7 @@ def render_monthly_catalog_page() -> str:
         <div class="section-heading">
           <div>
             <h2 data-copy="showcasesTitle">روابط خاصة لمجموعة شقق</h2>
-            <p data-copy="showcasesDetail">اجمع شقق المبنى في رابط دائم، وحدد سعرًا شهريًا موحدًا يمكن إيقافه بدون حذف السعر الأصلي.</p>
+            <p data-copy="showcasesDetail">اجمع شقق المبنى في رابط دائم، واختر الغلاف والسعر لكل شقة بشكل مستقل.</p>
           </div>
           <button id="new-showcase" class="button button-secondary" type="button" data-copy="newShowcase">مجموعة جديدة</button>
         </div>
@@ -143,7 +143,7 @@ def render_monthly_catalog_page() -> str:
                 <span data-copy="showcaseSearch">ابحث عن شقة</span>
                 <input id="showcase-search" type="search" autocomplete="off" data-copy-placeholder="searchPlaceholder" placeholder="مثال: 101 أو الملقا">
               </label>
-              <p data-copy="showcaseApartmentHelp">اختر كل الشقق الفعلية في المبنى. الشقة الناقصة تبقى محفوظة هنا، لكنها لا تظهر للعميل حتى تجتاز فحص النشر.</p>
+              <p data-copy="showcaseApartmentHelp">اختر كل الشقق الفعلية في المبنى. المعاينة الداخلية تعرضها كلها، والرابط العام يظهر الجاهز للنشر فقط.</p>
               <div id="showcase-listings" class="showcase-listings"></div>
             </fieldset>
             <div id="showcase-public-link" class="showcase-public-link" hidden></div>

@@ -187,6 +187,8 @@ class MonthlyShowcaseBotTest(unittest.TestCase):
         router = Router()
         self.bot._register_monthly_v2_only_routes(router)
         expected = {
+            ("GET", "/monthly/ops/preview/showcase/{showcase_slug}"),
+            ("GET", "/api/monthly/ops/preview/showcase"),
             ("GET", "/api/monthly/ops/showcases"),
             ("GET", "/api/monthly/ops/showcase/{id}"),
             ("POST", "/api/monthly/ops/showcase"),

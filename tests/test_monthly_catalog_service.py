@@ -159,6 +159,14 @@ class CatalogServiceTest(unittest.TestCase):
         self.assertEqual(result["prefill"]["name_ar"], "عنوان المسودة")
         self.assertEqual(result["prefill"]["sources"]["name_ar"], "monthly_draft")
 
+    def test_listing_exposes_validated_images_for_showcase_cover_choice(self):
+        result = self.service().listing("101")
+
+        self.assertEqual(
+            result["approved_image_options"],
+            list(valid_listing(id=101)["images"]),
+        )
+
     def test_approval_keeps_background_blockers_separate(self):
         self.source["listings"][0]["publication"] = valid_listing(
             id=101, official_prices={}

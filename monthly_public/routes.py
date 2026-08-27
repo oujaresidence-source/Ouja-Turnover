@@ -861,25 +861,28 @@ class MonthlyPublicApp:
                     "The home is not in this showcase.",
                 )
         result = self.showcase_service.eligible_result(group, listing_id)
-        rate = (
-            group.get("fixed_monthly_rate_sar")
-            if group.get("fixed_price_enabled") is True
-            else None
-        )
+        rate = self.showcase_service.manual_rate(group, listing_id)
         return resolved, result, rate
 
-    @staticmethod
     def _showcase_response(
+        self,
         resolved: Mapping[str, Any],
         token: str,
+        listing_id: Any = None,
     ) -> Dict[str, Any]:
         group = resolved["group"]
         enabled = group.get("fixed_price_enabled") is True
+        prices = group.get("listing_prices")
+        explicit = (
+            isinstance(prices, Mapping)
+            and str(listing_id or "") in prices
+            and isinstance(prices.get(str(listing_id or "")), Mapping)
+        )
         return {
             "group_id": resolved["group_id"],
             "revision": resolved["revision"],
             "slug": group["slug"],
-            "price_mode": "fixed" if enabled else "listing",
+            "price_mode": "listing" if explicit else ("fixed" if enabled else "listing"),
             "context": token,
         }
 
@@ -1220,6 +1223,7 @@ class MonthlyPublicApp:
                 response["showcase"] = self._showcase_response(
                     showcase,
                     request["showcase_context"],
+                    result.listing["id"],
                 )
             return response
         except ContractError as error:
@@ -1415,6 +1419,7 @@ class MonthlyPublicApp:
                     self._showcase_response(
                         showcase,
                         parsed_listing["showcase_context"],
+                        result.listing["id"],
                     )
                     if showcase is not None
                     else None

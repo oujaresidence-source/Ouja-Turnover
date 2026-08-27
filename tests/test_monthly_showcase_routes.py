@@ -126,6 +126,54 @@ class ShowcaseRouteTest(unittest.TestCase):
         self.assertEqual(good["showcase"]["price_mode"], "fixed")
         self.assertEqual(bad["error"]["code"], "invalid_showcase_context")
 
+    def test_each_listing_can_have_its_own_manual_price(self):
+        record = self.showcases.group("showcase_a1")
+        updated = dict(record["draft"])
+        updated.update(
+            {
+                "listing_prices": {
+                    "101": {"monthly_rate_sar": 8000, "enabled": True},
+                    "102": {"monthly_rate_sar": 9500, "enabled": True},
+                },
+                "fixed_price_enabled": False,
+            }
+        )
+        saved = self.showcases.save_draft(
+            "showcase_a1", updated, record["draft_revision"], "faisal"
+        )
+        self.showcases.approve(
+            "showcase_a1", saved["draft_revision"], "faisal"
+        )
+        self.token = self.showcases.context_for_slug("one-building")["context"]
+
+        first = self.app.listing(self.listing_request("101"))
+        second = self.app.listing(self.listing_request("102"))
+
+        self.assertEqual(first["quote"]["monthly_rate_sar"], 8000)
+        self.assertEqual(second["quote"]["monthly_rate_sar"], 9500)
+
+    def test_disabled_listing_price_overrides_legacy_group_price(self):
+        record = self.showcases.group("showcase_a1")
+        updated = dict(record["draft"])
+        updated["listing_prices"] = {
+            "101": {"monthly_rate_sar": 8000, "enabled": False}
+        }
+        saved = self.showcases.save_draft(
+            "showcase_a1", updated, record["draft_revision"], "faisal"
+        )
+        self.showcases.approve(
+            "showcase_a1", saved["draft_revision"], "faisal"
+        )
+        self.token = self.showcases.context_for_slug("one-building")["context"]
+
+        disabled = self.app.listing(self.listing_request("101"))
+        unchanged = self.app.listing(self.listing_request("102"))
+
+        self.assertEqual(disabled["quote"]["monthly_rate_sar"], 12000)
+        self.assertEqual(disabled["showcase"]["price_mode"], "listing")
+        self.assertEqual(unchanged["quote"]["monthly_rate_sar"], 12500)
+        self.assertEqual(unchanged["showcase"]["price_mode"], "fixed")
+
     def test_group_price_can_publish_a_price_only_blocked_member(self):
         result = self.app.listing(self.listing_request("102"))
 

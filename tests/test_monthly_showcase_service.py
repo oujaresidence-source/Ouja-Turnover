@@ -87,6 +87,73 @@ class ShowcaseServiceTest(unittest.TestCase):
             self.service.eligible_result(public["group"], "103")
         )
 
+    def test_manual_prices_are_independent_for_each_home(self):
+        self._approve(
+            fixed_price_enabled=False,
+            listing_prices={
+                "101": {"monthly_rate_sar": 8000, "enabled": True},
+                "102": {"monthly_rate_sar": 9500, "enabled": True},
+                "103": {"monthly_rate_sar": 11000, "enabled": True},
+            },
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+        presented = present_showcase(public, "ar")
+
+        self.assertEqual(
+            [row.listing["id"] for row in public["results"]], ["101", "102"]
+        )
+        self.assertEqual(self.service.manual_rate(public["group"], "101"), 8000)
+        self.assertEqual(self.service.manual_rate(public["group"], "102"), 9500)
+        self.assertIsNone(self.service.eligible_result(public["group"], "103"))
+        self.assertEqual(
+            {str(home["id"]): home.get("showcase_monthly_rate_sar") for home in presented["homes"]},
+            {"101": 8000, "102": 9500},
+        )
+
+    def test_disabled_manual_price_is_retained_but_not_applied(self):
+        self._approve(
+            fixed_price_enabled=False,
+            listing_prices={
+                "102": {"monthly_rate_sar": 9500, "enabled": False}
+            },
+        )
+
+        public = self.service.public_by_slug("one-building", "ar")
+
+        self.assertEqual(public["group"]["listing_prices"]["102"]["monthly_rate_sar"], 9500)
+        self.assertIsNone(self.service.manual_rate(public["group"], "102"))
+        self.assertNotIn("102", [row.listing["id"] for row in public["results"]])
+
+    def test_cover_must_come_from_the_selected_home_approved_images(self):
+        source_image = self.raw_listings[0]["images"][1]
+        saved = self.service.save_draft(
+            "showcase_cover",
+            valid_group(
+                listing_ids=["101"],
+                image_listing_id="101",
+                image_url=source_image,
+                fixed_price_enabled=False,
+            ),
+            0,
+            "faisal",
+        )
+        self.assertEqual(saved["draft"]["image_url"], source_image)
+
+        with self.assertRaises(Exception) as caught:
+            self.service.save_draft(
+                "showcase_bad_cover",
+                valid_group(
+                    listing_ids=["101"],
+                    image_listing_id="101",
+                    image_url="https://images.example.test/not-in-home.jpg",
+                    fixed_price_enabled=False,
+                ),
+                0,
+                "faisal",
+            )
+        self.assertEqual(getattr(caught.exception, "code", None), "image_not_from_listing")
+
     def test_context_resolves_latest_approved_state_not_client_revision(self):
         approved = self._approve(fixed_price_enabled=True)
         token = self.service.context_for_slug("one-building")["context"]

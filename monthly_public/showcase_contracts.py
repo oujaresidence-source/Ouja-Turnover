@@ -18,7 +18,9 @@ SHOWCASE_FIELDS = frozenset(
         "description_ar",
         "description_en",
         "image_url",
+        "image_listing_id",
         "listing_ids",
+        "listing_prices",
         "fixed_monthly_rate_sar",
         "fixed_price_enabled",
     }
@@ -204,17 +206,87 @@ def _listing_ids(
     return result
 
 
-def _optional_rate(value: Any) -> Optional[int]:
+def _optional_rate(value: Any, field: str = "fixed_monthly_rate_sar") -> Optional[int]:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 1_000_000:
         raise _error(
-            "fixed_monthly_rate_sar",
+            field,
             "invalid_number",
             "السعر الشهري غير صحيح.",
             "The monthly price is invalid.",
         )
     return value
+
+
+def _optional_listing_id(value: Any, members: Collection[str]) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    listing_id = str(value).strip()
+    if listing_id not in {str(item) for item in members}:
+        raise _error(
+            "image_listing_id",
+            "cover_listing_not_selected",
+            "اختر صورة من إحدى شقق المجموعة.",
+            "Choose a cover from one of the collection homes.",
+        )
+    return listing_id
+
+
+def _listing_prices(value: Any, members: Collection[str]) -> Dict[str, Dict[str, Any]]:
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, Mapping):
+        raise _error(
+            "listing_prices",
+            "invalid_type",
+            "صيغة أسعار الشقق غير صحيحة.",
+            "The apartment-price format is invalid.",
+        )
+    member_ids = {str(item) for item in members}
+    result: Dict[str, Dict[str, Any]] = {}
+    for raw_listing_id, raw_price in value.items():
+        listing_id = str(raw_listing_id).strip()
+        field = "listing_prices.%s" % listing_id
+        if listing_id not in member_ids:
+            raise _error(
+                field,
+                "listing_not_selected",
+                "لا يمكن تسعير شقة خارج المجموعة.",
+                "A home outside the collection cannot be priced here.",
+            )
+        if not isinstance(raw_price, Mapping) or set(raw_price) - {
+            "monthly_rate_sar",
+            "enabled",
+        }:
+            raise _error(
+                field,
+                "invalid_type",
+                "بيانات سعر الشقة غير صحيحة.",
+                "The apartment-price values are invalid.",
+            )
+        enabled = raw_price.get("enabled")
+        if not isinstance(enabled, bool):
+            raise _error(
+                field + ".enabled",
+                "invalid_type",
+                "اختر تشغيل السعر أو إيقافه.",
+                "Choose whether this apartment price is enabled.",
+            )
+        rate_field = field + ".monthly_rate_sar"
+        rate = _optional_rate(raw_price.get("monthly_rate_sar"), rate_field)
+        if enabled and rate is None:
+            raise _error(
+                rate_field,
+                "required",
+                "أدخل السعر الشهري لهذه الشقة.",
+                "Enter the monthly price for this apartment.",
+            )
+        result[listing_id] = {
+            "monthly_rate_sar": rate,
+            "enabled": enabled,
+        }
+    return result
 
 
 def parse_showcase(
@@ -256,6 +328,18 @@ def parse_showcase(
             "استخدم حروفًا إنجليزية صغيرة وأرقامًا وشرطات فقط.",
             "Use lowercase letters, numbers, and single hyphens only.",
         )
+    listing_ids = _listing_ids(raw.get("listing_ids"), known_listing_ids)
+    image_url = _optional_https_url(raw.get("image_url"), "image_url")
+    image_listing_id = _optional_listing_id(
+        raw.get("image_listing_id"), listing_ids
+    )
+    if image_listing_id is not None and image_url is None:
+        raise _error(
+            "image_url",
+            "required",
+            "اختر صورة الغلاف.",
+            "Choose the cover image.",
+        )
     return {
         "name_ar": _language_text(raw.get("name_ar"), "name_ar", "ar", 180),
         "name_en": _language_text(raw.get("name_en"), "name_en", "en", 180),
@@ -274,8 +358,10 @@ def parse_showcase(
             500,
             required=False,
         ),
-        "image_url": _optional_https_url(raw.get("image_url"), "image_url"),
-        "listing_ids": _listing_ids(raw.get("listing_ids"), known_listing_ids),
+        "image_url": image_url,
+        "image_listing_id": image_listing_id,
+        "listing_ids": listing_ids,
+        "listing_prices": _listing_prices(raw.get("listing_prices"), listing_ids),
         "fixed_monthly_rate_sar": rate,
         "fixed_price_enabled": enabled,
     }

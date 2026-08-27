@@ -76,7 +76,23 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260827c")
+        self.assertEqual(ASSET_VERSION, "v20260827d")
+
+    def test_showcase_editor_uses_real_cover_choices_and_per_home_prices(self):
+        js = JS_FILE.read_text("utf-8")
+        css = CSS_FILE.read_text("utf-8")
+
+        for required in (
+            "approved_image_options",
+            "image_listing_id",
+            "listing_prices",
+            "showcaseListingRate",
+            "showcasePreviewLink",
+            "renderShowcaseCoverPicker",
+        ):
+            self.assertIn(required, js)
+        self.assertIn(".showcase-cover-gallery", css)
+        self.assertIn(".showcase-listing-price", css)
 
     def test_portfolio_and_survey_expose_verified_review_readiness(self):
         js = JS_FILE.read_text("utf-8")
@@ -439,6 +455,8 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
             self.assertIn(endpoint, js)
         self.assertIn("renderShowcases", js)
         self.assertIn("showcase-membership", CSS_FILE.read_text("utf-8"))
+        self.assertIn('"/monthly/ops/preview/showcase/" + value.slug', js)
+        self.assertNotIn('authPath(state.showcaseRecord.preview_url', js)
 
         payload = self._javascript_result(
             "api.buildShowcasePayload({"

@@ -525,7 +525,7 @@
     config: "/api/monthly/ops/preview/config",
     browse: "/api/monthly/ops/preview/search",
     match: "/api/monthly/ops/preview/match",
-    showcase: null,
+    showcase: "/api/monthly/ops/preview/showcase",
     listing: "/api/monthly/ops/preview/listing/",
     lead: null,
     event: null
@@ -1425,6 +1425,13 @@
       body.appendChild(element("p", "price-line", copy("perMonth", { amount: formatNumber(item.quote.monthly_rate_sar) })));
       const included = approvedIncluded(item.quote.included || []).map(function (key) { return copy(key); });
       if (included.length) body.appendChild(element("p", "card-included", copy("quoteIncludes", { items: included.join(runtime.lang === "ar" ? "، " : ", ") })));
+    } else if (
+      runtime.page.route === "showcase" &&
+      Number.isInteger(item.showcase_monthly_rate_sar)
+    ) {
+      body.appendChild(element("p", "price-line showcase-card-price", copy("perMonth", {
+        amount: formatNumber(item.showcase_monthly_rate_sar)
+      })));
     } else if (
       runtime.page.route === "showcase" && runtime.showcase &&
       runtime.showcase.fixed_price_enabled === true &&

@@ -112,6 +112,8 @@ class MonthlyShowcasePageTest(unittest.TestCase):
         )
         for value in required:
             self.assertIn(value, source)
+        self.assertIn('showcase: "/api/monthly/ops/preview/showcase"', source)
+        self.assertIn("item.showcase_monthly_rate_sar", source)
 
     def test_showcase_copy_is_bilingual_and_has_no_discount_claims(self):
         script = """

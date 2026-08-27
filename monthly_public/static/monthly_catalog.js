@@ -267,6 +267,17 @@
   function buildShowcasePayload(raw) {
     const source = raw && typeof raw === "object" ? raw : {};
     const rate = number(source.fixed_monthly_rate_sar, false);
+    const selected = Array.from(new Set((Array.isArray(source.listing_ids) ? source.listing_ids : []).map(function (listingId) { return String(listingId || "").trim(); }).filter(Boolean)));
+    const prices = {};
+    selected.forEach(function (listingId) {
+      const row = source.listing_prices && source.listing_prices[listingId];
+      if (!row || typeof row !== "object") return;
+      const apartmentRate = number(row.monthly_rate_sar, false);
+      prices[listingId] = {
+        monthly_rate_sar: apartmentRate === undefined ? null : apartmentRate,
+        enabled: row.enabled === true
+      };
+    });
     return {
       name_ar: String(source.name_ar || "").trim(),
       name_en: String(source.name_en || "").trim(),
@@ -274,7 +285,9 @@
       description_ar: String(source.description_ar || "").trim(),
       description_en: String(source.description_en || "").trim(),
       image_url: String(source.image_url || "").trim() || null,
-      listing_ids: Array.from(new Set((Array.isArray(source.listing_ids) ? source.listing_ids : []).map(function (listingId) { return String(listingId || "").trim(); }).filter(Boolean))),
+      image_listing_id: present(source.image_listing_id) ? String(source.image_listing_id).trim() : null,
+      listing_ids: selected,
+      listing_prices: prices,
       fixed_monthly_rate_sar: rate === undefined ? null : rate,
       fixed_price_enabled: source.fixed_price_enabled === true
     };
@@ -378,7 +391,7 @@
     whatsapp: "رقم واتساب بصيغة دولية", timezone: "المنطقة الزمنية", workingHours: "أوقات الرد", from: "من", to: "إلى", internetIncluded: "أؤكد أن الإنترنت مشمول", maintenanceIncluded: "أؤكد أن الصيانة مشمولة", deposit: "مبلغ التأمين (ر.س)", refund_ar: "شروط الاسترداد بالعربي", refund_en: "شروط الاسترداد بالإنجليزي", payment_ar: "طريقة الدفع بالعربي", payment_en: "طريقة الدفع بالإنجليزي", addPayment: "إضافة طريقة دفع", longRoute: "مسار مراجعة 4–6 أشهر", settingsSaved: "حُفظت مسودة الإعدادات.", settingsApproved: "تم اعتماد الإعدادات.",
     place_id: "معرّف داخلي للمكان", place_ar: "اسم المكان بالعربي", place_en: "اسم المكان بالإنجليزي", purposes: "أغراض الإقامة", place_coordinates: "إحداثيات المكان أو رابط Google Maps", source_note: "دليل التحقق المختصر", activePlace: "فعّال للموقع", edit: "تعديل", placeSaved: "حُفظت مسودة المكان.", placeApproved: "تم اعتماد المكان.", noPlaces: "لا توجد أماكن معتمدة بعد.", work: "عمل أو انتقال", family: "عائلة", treatment: "علاج", visit: "زيارة", refreshOk: "تم طلب تحديث النسخة الآمنة.",
     approvedDestinations: "مكان معتمد", business_hubs: "مراكز الأعمال", hospitals: "المستشفيات", family_retail: "وجهات العائلة والتسوق", riyadh_season: "موسم الرياض", events: "الفعاليات والمعارض", nearestPlaces: "أقرب 5 أماكن معتمدة", nearestDetail: "المسافة محسوبة بخط مستقيم بين نقطتين موثقتين، وليست وقت قيادة.", nearbyNoPin: "وثّق إحداثيات الشقة أولًا حتى نحسب أقرب الأماكن بدون تخمين.", nearbyEmpty: "لا توجد أماكن معتمدة يمكن حساب المسافة لها حاليًا.", straightLine: "بخط مستقيم", openMap: "فتح الخريطة", coordinateProof: "مصدر الإحداثيات", officialProof: "المصدر الرسمي", verifiedOn: "تم التحقق", reviewEvery: "المراجعة",
-    showcaseNameAr: "اسم المجموعة بالعربي", showcaseNameEn: "اسم المجموعة بالإنجليزي", showcaseSlug: "الرابط الدائم بالإنجليزي", showcaseDescriptionAr: "وصف المجموعة بالعربي", showcaseDescriptionEn: "وصف المجموعة بالإنجليزي", showcaseImage: "رابط صورة المبنى (اختياري)", showcaseRate: "السعر الشهري الموحد (ر.س)", showcaseEnabled: "تشغيل السعر الموحد في الرابط الخاص", showcaseApproved: "تم اعتماد الرابط الدائم.", showcaseSaved: "حُفظت مسودة المجموعة.", showcaseNoGroups: "ما فيه مجموعات خاصة إلى الآن.", showcaseOpen: "تعديل المجموعة", showcasePublished: "رابط معتمد", showcaseDraft: "مسودة", showcaseMembers: "شقق", showcaseEligible: "تظهر للعميل", showcaseBlocked: "تحتاج إكمال", showcaseOpenLink: "فتح رابط العميل", showcaseDisablePrice: "إيقاف السعر الموحد", showcaseEnablePrice: "تشغيل السعر الموحد", showcasePriceOn: "السعر الموحد شغال", showcasePriceOff: "كل شقة بسعرها الأصلي", showcaseSelectOne: "اختر شقة واحدة على الأقل"
+    showcaseNameAr: "اسم المجموعة بالعربي", showcaseNameEn: "اسم المجموعة بالإنجليزي", showcaseSlug: "الرابط الدائم بالإنجليزي", showcaseDescriptionAr: "وصف المجموعة بالعربي", showcaseDescriptionEn: "وصف المجموعة بالإنجليزي", showcaseCover: "صورة واجهة العرض", showcaseCoverHelp: "اختر صورة حقيقية من صور إحدى الشقق المحددة.", showcaseCoverLoading: "جاري تجهيز الصور المتاحة…", showcaseCoverEmpty: "اختر شقة أولًا حتى تظهر صورها.", showcaseCoverMissing: "ما فيه صور معتمدة لهذه الشقة حاليًا.", showcaseCurrentCover: "صورة الغلاف الحالية", showcaseListingRate: "السعر الشهري لهذه الشقة (ر.س)", showcaseListingRateEnabled: "استخدم هذا السعر في الرابط", showcaseApproved: "تم اعتماد الرابط الدائم.", showcaseSaved: "حُفظت مسودة المجموعة.", showcaseNoGroups: "ما فيه مجموعات خاصة إلى الآن.", showcaseOpen: "تعديل المجموعة", showcasePublished: "رابط معتمد", showcaseDraft: "مسودة", showcaseMembers: "شقق", showcaseEligible: "تظهر للعميل", showcaseBlocked: "تحتاج إكمال", showcaseOpenLink: "فتح رابط العميل", showcasePreviewLink: "معاينة كل الشقق المختارة", showcasePricePerHome: "سعر مستقل لكل شقة", showcaseSelectOne: "اختر شقة واحدة على الأقل"
   };
   const EN = Object.assign({}, AR, {
     identity: "Identity and photos", space: "Space and facts", location: "Location", content: "Arabic and English content", terms: "Monthly terms", sources: "Source readiness", approval: "Review and approval",
@@ -390,13 +403,13 @@
     whatsapp: "WhatsApp number in international format", timezone: "Timezone", workingHours: "Response hours", from: "From", to: "To", internetIncluded: "I confirm internet is included", maintenanceIncluded: "I confirm maintenance is included", deposit: "Deposit (SAR)", refund_ar: "Arabic refund terms", refund_en: "English refund terms", payment_ar: "Arabic payment method", payment_en: "English payment method", addPayment: "Add payment method", longRoute: "4–6 month review route", settingsSaved: "Settings draft saved.", settingsApproved: "Settings approved.",
     place_id: "Internal place ID", place_ar: "Arabic place name", place_en: "English place name", purposes: "Stay purposes", place_coordinates: "Place coordinates or Google Maps URL", source_note: "Short verification evidence", activePlace: "Active on website", edit: "Edit", placeSaved: "Place draft saved.", placeApproved: "Place approved.", noPlaces: "No approved places yet.", work: "Work or relocation", family: "Family", treatment: "Treatment", visit: "Visit", refreshOk: "Safe snapshot refresh requested.",
     approvedDestinations: "approved destinations", business_hubs: "Business hubs", hospitals: "Hospitals", family_retail: "Family retail", riyadh_season: "Riyadh Season", events: "Events and exhibitions", nearestPlaces: "Nearest 5 approved places", nearestDetail: "Distance is straight-line between two verified pins, not driving time.", nearbyNoPin: "Verify the apartment pin first so nearby places can be calculated without guessing.", nearbyEmpty: "No approved destinations can be measured right now.", straightLine: "straight-line", openMap: "Open map", coordinateProof: "Coordinate source", officialProof: "Official source", verifiedOn: "Verified", reviewEvery: "Review cadence",
-    showcaseNameAr: "Arabic collection name", showcaseNameEn: "English collection name", showcaseSlug: "Permanent English URL", showcaseDescriptionAr: "Arabic collection description", showcaseDescriptionEn: "English collection description", showcaseImage: "Building image URL (optional)", showcaseRate: "One monthly price (SAR)", showcaseEnabled: "Enable the fixed price on the private link", showcaseApproved: "Permanent link approved.", showcaseSaved: "Collection draft saved.", showcaseNoGroups: "No private collections yet.", showcaseOpen: "Edit collection", showcasePublished: "Approved link", showcaseDraft: "Draft", showcaseMembers: "homes", showcaseEligible: "customer-visible", showcaseBlocked: "need completion", showcaseOpenLink: "Open customer link", showcaseDisablePrice: "Disable fixed price", showcaseEnablePrice: "Enable fixed price", showcasePriceOn: "Fixed price is active", showcasePriceOff: "Each home uses its original price", showcaseSelectOne: "Choose at least one home"
+    showcaseNameAr: "Arabic collection name", showcaseNameEn: "English collection name", showcaseSlug: "Permanent English URL", showcaseDescriptionAr: "Arabic collection description", showcaseDescriptionEn: "English collection description", showcaseCover: "Showcase cover", showcaseCoverHelp: "Choose a real photo from one of the selected apartments.", showcaseCoverLoading: "Loading available photos…", showcaseCoverEmpty: "Choose an apartment first to see its photos.", showcaseCoverMissing: "This apartment has no approved photos yet.", showcaseCurrentCover: "Current cover image", showcaseListingRate: "Monthly price for this apartment (SAR)", showcaseListingRateEnabled: "Use this price on the private link", showcaseApproved: "Permanent link approved.", showcaseSaved: "Collection draft saved.", showcaseNoGroups: "No private collections yet.", showcaseOpen: "Edit collection", showcasePublished: "Approved link", showcaseDraft: "Draft", showcaseMembers: "homes", showcaseEligible: "customer-visible", showcaseBlocked: "need completion", showcaseOpenLink: "Open customer link", showcasePreviewLink: "Preview every selected home", showcasePricePerHome: "Independent price per apartment", showcaseSelectOne: "Choose at least one home"
   });
   const COPY = {
-    ar: { skipLink: "انتقل إلى المحتوى", productName: "بيانات الشقق", dashboard: "لوحة عوجا", contextLabel: "السكن الشهري", pageTitle: "جهّز كل شقة للنشر من مكان واحد", pageDetail: "راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.", refreshData: "تحديث البيانات", previewCustomerJourney: "معاينة رحلة العميل", previewCustomerDetail: "يعرض كل الشقق داخليًا ولا ينشر أي شقة", apartmentsTab: "الشقق", showcasesTab: "العروض الخاصة", settingsTab: "الإعدادات المشتركة", placesTab: "الأماكن المعتمدة", loadFailed: "تعذر تحميل بيانات الشقق", loadFailedDetail: "حاول التحديث، ولن تتأثر البيانات المعتمدة الحالية.", globalTitle: "إعدادات تُكتب مرة واحدة", globalDetail: "رقم التواصل، أوقات الرد، التأمين، طرق الدفع، ومسار الإقامات من أربعة إلى ستة أشهر.", saveDraft: "حفظ المسودة", approveSettings: "اعتماد الإعدادات", portfolioTitle: "الشقق المستلمة", portfolioDetail: "صف واحد لكل شقة فعلية، مع الناقص والخطوة التالية.", searchLabel: "ابحث برقم الشقة أو الاسم", searchPlaceholder: "مثال: 101 أو الملقا", statusLabel: "الحالة", allStatuses: "كل الحالات", needsReview: "تحتاج مراجعة", readyApproval: "جاهزة للاعتماد", published: "منشورة", sourceBlocked: "محجوبة من مصدر حي", blockerLabel: "الناقص", allBlockers: "كل الأسباب", licence: "معلومات الإعلان", price: "السعر الرسمي", calendar: "التقويم", content: "المحتوى", backToApartments: "العودة للشقق", surveyTitle: "مراجعة الشقة", previewReadiness: "معاينة الجاهزية", saveAndPreview: "حفظ ومشاهدة كتجربة عميل", approveAndRefresh: "اعتماد وتحديث الموقع", placesTitle: "الأماكن المهمة للعملاء", placesDetail: "أدخل المكان مرة واحدة، ولا يظهر القرب إلا بعد اعتماد إحداثيات الطرفين.", addPlace: "إضافة مكان", approvePlace: "اعتماد المكان", reviewsReady: "{count} تقييم موثق", reviewsMissing: "لا توجد تقييمات موثقة", showcasesTitle: "روابط خاصة لمجموعة شقق", showcasesDetail: "اجمع شقق المبنى في رابط دائم، وحدد سعرًا شهريًا موحدًا يمكن إيقافه بدون حذف السعر الأصلي.", newShowcase: "مجموعة جديدة", showcaseApartments: "شقق المجموعة", showcaseSearch: "ابحث عن شقة", showcaseApartmentHelp: "اختر كل الشقق الفعلية في المبنى. الشقة الناقصة تبقى محفوظة هنا، لكنها لا تظهر للعميل حتى تجتاز فحص النشر.", approveShowcase: "اعتماد الرابط" },
-    en: { skipLink: "Skip to content", productName: "Apartment data", dashboard: "Ouja dashboard", contextLabel: "Monthly stays", pageTitle: "Prepare every apartment for publishing in one place", pageDetail: "Review trusted prefills, complete what is missing, then approve it for the website.", refreshData: "Refresh data", previewCustomerJourney: "Preview customer journey", previewCustomerDetail: "Shows every home internally and publishes none", apartmentsTab: "Apartments", showcasesTab: "Private collections", settingsTab: "Shared settings", placesTab: "Approved places", loadFailed: "Apartment data could not be loaded", loadFailedDetail: "Try refreshing. Current approved data remains unchanged.", globalTitle: "Settings entered once", globalDetail: "Contact number, response hours, deposit, payments, and the four-to-six-month route.", saveDraft: "Save draft", approveSettings: "Approve settings", portfolioTitle: "Received apartments", portfolioDetail: "One row per real apartment, showing the gap and next step.", searchLabel: "Search by apartment ID or name", searchPlaceholder: "For example: 101 or Al Malqa", statusLabel: "Status", allStatuses: "All statuses", needsReview: "Needs review", readyApproval: "Ready to approve", published: "Published", sourceBlocked: "Blocked by live source", blockerLabel: "Missing item", allBlockers: "All reasons", licence: "Advertising information", price: "Official price", calendar: "Calendar", content: "Content", backToApartments: "Back to apartments", surveyTitle: "Review apartment", previewReadiness: "Preview readiness", saveAndPreview: "Save and view as a customer", approveAndRefresh: "Approve and refresh website", placesTitle: "Customer destinations", placesDetail: "Enter each destination once. Proximity appears only after both pins are verified.", addPlace: "Add place", approvePlace: "Approve place", reviewsReady: "{count} verified reviews", reviewsMissing: "No verified reviews", showcasesTitle: "Private links for groups of homes", showcasesDetail: "Group a building's homes under one permanent URL and use a fixed monthly price that can be disabled without deleting original prices.", newShowcase: "New collection", showcaseApartments: "Collection homes", showcaseSearch: "Search apartments", showcaseApartmentHelp: "Choose every real home in the building. Incomplete homes stay saved here but do not appear to customers until publication checks pass.", approveShowcase: "Approve link" }
+    ar: { skipLink: "انتقل إلى المحتوى", productName: "بيانات الشقق", dashboard: "لوحة عوجا", contextLabel: "السكن الشهري", pageTitle: "جهّز كل شقة للنشر من مكان واحد", pageDetail: "راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.", refreshData: "تحديث البيانات", previewCustomerJourney: "معاينة رحلة العميل", previewCustomerDetail: "يعرض كل الشقق داخليًا ولا ينشر أي شقة", apartmentsTab: "الشقق", showcasesTab: "العروض الخاصة", settingsTab: "الإعدادات المشتركة", placesTab: "الأماكن المعتمدة", loadFailed: "تعذر تحميل بيانات الشقق", loadFailedDetail: "حاول التحديث، ولن تتأثر البيانات المعتمدة الحالية.", globalTitle: "إعدادات تُكتب مرة واحدة", globalDetail: "رقم التواصل، أوقات الرد، التأمين، طرق الدفع، ومسار الإقامات من أربعة إلى ستة أشهر.", saveDraft: "حفظ المسودة", approveSettings: "اعتماد الإعدادات", portfolioTitle: "الشقق المستلمة", portfolioDetail: "صف واحد لكل شقة فعلية، مع الناقص والخطوة التالية.", searchLabel: "ابحث برقم الشقة أو الاسم", searchPlaceholder: "مثال: 101 أو الملقا", statusLabel: "الحالة", allStatuses: "كل الحالات", needsReview: "تحتاج مراجعة", readyApproval: "جاهزة للاعتماد", published: "منشورة", sourceBlocked: "محجوبة من مصدر حي", blockerLabel: "الناقص", allBlockers: "كل الأسباب", licence: "معلومات الإعلان", price: "السعر الرسمي", calendar: "التقويم", content: "المحتوى", backToApartments: "العودة للشقق", surveyTitle: "مراجعة الشقة", previewReadiness: "معاينة الجاهزية", saveAndPreview: "حفظ ومشاهدة كتجربة عميل", approveAndRefresh: "اعتماد وتحديث الموقع", placesTitle: "الأماكن المهمة للعملاء", placesDetail: "أدخل المكان مرة واحدة، ولا يظهر القرب إلا بعد اعتماد إحداثيات الطرفين.", addPlace: "إضافة مكان", approvePlace: "اعتماد المكان", reviewsReady: "{count} تقييم موثق", reviewsMissing: "لا توجد تقييمات موثقة", showcasesTitle: "روابط خاصة لمجموعة شقق", showcasesDetail: "اجمع شقق المبنى في رابط دائم، واختر الغلاف والسعر لكل شقة بشكل مستقل.", newShowcase: "مجموعة جديدة", showcaseApartments: "شقق المجموعة", showcaseSearch: "ابحث عن شقة", showcaseApartmentHelp: "اختر كل الشقق الفعلية في المبنى. المعاينة الداخلية تعرضها كلها، والرابط العام يظهر الجاهز للنشر فقط.", approveShowcase: "اعتماد الرابط" },
+    en: { skipLink: "Skip to content", productName: "Apartment data", dashboard: "Ouja dashboard", contextLabel: "Monthly stays", pageTitle: "Prepare every apartment for publishing in one place", pageDetail: "Review trusted prefills, complete what is missing, then approve it for the website.", refreshData: "Refresh data", previewCustomerJourney: "Preview customer journey", previewCustomerDetail: "Shows every home internally and publishes none", apartmentsTab: "Apartments", showcasesTab: "Private collections", settingsTab: "Shared settings", placesTab: "Approved places", loadFailed: "Apartment data could not be loaded", loadFailedDetail: "Try refreshing. Current approved data remains unchanged.", globalTitle: "Settings entered once", globalDetail: "Contact number, response hours, deposit, payments, and the four-to-six-month route.", saveDraft: "Save draft", approveSettings: "Approve settings", portfolioTitle: "Received apartments", portfolioDetail: "One row per real apartment, showing the gap and next step.", searchLabel: "Search by apartment ID or name", searchPlaceholder: "For example: 101 or Al Malqa", statusLabel: "Status", allStatuses: "All statuses", needsReview: "Needs review", readyApproval: "Ready to approve", published: "Published", sourceBlocked: "Blocked by live source", blockerLabel: "Missing item", allBlockers: "All reasons", licence: "Advertising information", price: "Official price", calendar: "Calendar", content: "Content", backToApartments: "Back to apartments", surveyTitle: "Review apartment", previewReadiness: "Preview readiness", saveAndPreview: "Save and view as a customer", approveAndRefresh: "Approve and refresh website", placesTitle: "Customer destinations", placesDetail: "Enter each destination once. Proximity appears only after both pins are verified.", addPlace: "Add place", approvePlace: "Approve place", reviewsReady: "{count} verified reviews", reviewsMissing: "No verified reviews", showcasesTitle: "Private links for groups of homes", showcasesDetail: "Group a building's homes under one permanent URL, then choose the cover and price for each apartment independently.", newShowcase: "New collection", showcaseApartments: "Collection homes", showcaseSearch: "Search apartments", showcaseApartmentHelp: "Choose every real home in the building. Internal preview shows all of them; the public link shows only publication-ready homes.", approveShowcase: "Approve link" }
   };
-  const state = { lang: "ar", listings: [], counts: {}, listing: null, profile: {}, step: "identity", settings: null, places: {}, placeId: "", placeRevision: 0, showcases: [], showcaseRecord: null, showcaseDraft: null };
+  const state = { lang: "ar", listings: [], counts: {}, listing: null, profile: {}, step: "identity", settings: null, places: {}, placeId: "", placeRevision: 0, showcases: [], showcaseRecord: null, showcaseDraft: null, showcaseImages: {} };
   const id = function (value) { return document.getElementById(value); };
   const text = function (key) { return (state.lang === "ar" ? AR : EN)[key] || translatedBlocker(key, state.lang); };
 
@@ -518,20 +531,41 @@
   }
   async function loadRows() { const result = await api("/api/monthly/ops/listings"); state.listings = result.listings || []; state.counts = result.counts || {}; renderSummary(); renderRows(); }
 
+  function normalizedShowcaseDraft(value) {
+    const draft = buildShowcasePayload(value || {});
+    const explicit = Object.keys(draft.listing_prices || {}).length > 0;
+    if (
+      !explicit && draft.fixed_price_enabled === true &&
+      Number.isFinite(Number(draft.fixed_monthly_rate_sar))
+    ) {
+      draft.listing_ids.forEach(function (listingId) {
+        draft.listing_prices[listingId] = {
+          monthly_rate_sar: draft.fixed_monthly_rate_sar,
+          enabled: true
+        };
+      });
+      draft.fixed_price_enabled = false;
+    }
+    return draft;
+  }
+
   function newShowcase() {
     state.showcaseRecord = null;
-    state.showcaseDraft = buildShowcasePayload({
+    state.showcaseDraft = normalizedShowcaseDraft({
       name_ar: "", name_en: "", slug: "", description_ar: "", description_en: "",
-      image_url: "", listing_ids: [], fixed_monthly_rate_sar: null, fixed_price_enabled: false
+      image_url: "", image_listing_id: null, listing_ids: [], listing_prices: {}, fixed_monthly_rate_sar: null, fixed_price_enabled: false
     });
+    state.showcaseImages = {};
     renderShowcaseEditor();
   }
 
   async function openShowcase(groupId) {
     try {
       state.showcaseRecord = await api("/api/monthly/ops/showcase/" + encodeURIComponent(groupId));
-      state.showcaseDraft = clone(state.showcaseRecord.draft || state.showcaseRecord.approved || {});
-      if (state.showcaseRecord.approved) state.showcaseDraft.fixed_price_enabled = state.showcaseRecord.approved.fixed_price_enabled === true;
+      state.showcaseDraft = normalizedShowcaseDraft(
+        state.showcaseRecord.draft || state.showcaseRecord.approved || {}
+      );
+      state.showcaseImages = {};
       renderShowcaseEditor();
     } catch (error) { showcaseError(error); }
   }
@@ -557,15 +591,121 @@
       const labelText = listing[state.lang === "ar" ? "public_title_ar" : "public_title_en"] || listing.source_title || listing.id;
       const haystack = [listing.id, labelText, listing.source_title].join(" ").toLocaleLowerCase();
       if (query && !haystack.includes(query)) return;
-      const label = node("label", { className: "showcase-listing-option" }), input = node("input", { type: "checkbox", name: "showcase_listing", value: listing.id, checked: selected.has(String(listing.id)) }), identity = node("span", { className: "showcase-listing-identity" });
+      const listingId = String(listing.id), row = node("div", { className: "showcase-listing-option" }), selectLabel = node("label", { className: "showcase-listing-select" }), input = node("input", { type: "checkbox", name: "showcase_listing", value: listing.id, checked: selected.has(listingId) }), identity = node("span", { className: "showcase-listing-identity" });
       add(identity, node("strong", { text: labelText }), node("span", { text: text("apartment") + " " + listing.id + " · " + listing.completion_percent + "% " + text("complete") }));
       input.addEventListener("change", function () {
         const values = new Set((state.showcaseDraft.listing_ids || []).map(String));
-        if (input.checked) values.add(String(listing.id)); else values.delete(String(listing.id));
+        if (input.checked) values.add(listingId); else values.delete(listingId);
         state.showcaseDraft.listing_ids = Array.from(values);
+        if (!input.checked && state.showcaseDraft.image_listing_id === listingId) {
+          state.showcaseDraft.image_url = null;
+          state.showcaseDraft.image_listing_id = null;
+        }
+        if (input.checked && !state.showcaseDraft.listing_prices[listingId]) {
+          state.showcaseDraft.listing_prices[listingId] = { monthly_rate_sar: null, enabled: false };
+        }
+        renderShowcaseMembers(id("showcase-search").value);
+        renderShowcaseCoverPicker();
+        loadShowcaseImages();
       });
-      add(label, input, identity); root.appendChild(label);
+      add(selectLabel, input, identity); row.appendChild(selectLabel);
+      if (selected.has(listingId)) {
+        const stored = state.showcaseDraft.listing_prices[listingId] || { monthly_rate_sar: null, enabled: false };
+        const price = node("div", { className: "showcase-listing-price" });
+        const rateLabel = node("label");
+        const rateInput = node("input", { type: "number", value: stored.monthly_rate_sar });
+        rateInput.min = "1"; rateInput.max = "1000000"; rateInput.inputMode = "numeric";
+        add(rateLabel, node("span", { text: text("showcaseListingRate") }), rateInput);
+        const enabledLabel = node("label", { className: "check-field showcase-price-switch" });
+        const enabledInput = node("input", { type: "checkbox", checked: stored.enabled === true });
+        add(enabledLabel, enabledInput, node("span", { text: text("showcaseListingRateEnabled") }));
+        rateInput.addEventListener("input", function () {
+          const value = number(rateInput.value, false);
+          state.showcaseDraft.listing_prices[listingId] = {
+            monthly_rate_sar: value === undefined ? null : value,
+            enabled: enabledInput.checked
+          };
+        });
+        enabledInput.addEventListener("change", function () {
+          const value = number(rateInput.value, false);
+          state.showcaseDraft.listing_prices[listingId] = {
+            monthly_rate_sar: value === undefined ? null : value,
+            enabled: enabledInput.checked
+          };
+        });
+        add(price, rateLabel, enabledLabel); row.appendChild(price);
+      }
+      root.appendChild(row);
     });
+  }
+
+  function listingLabel(listingId) {
+    const listing = state.listings.find(function (row) { return String(row.id) === String(listingId); });
+    return listing ? (listing[state.lang === "ar" ? "public_title_ar" : "public_title_en"] || listing.source_title || listing.id) : String(listingId);
+  }
+
+  function renderShowcaseCoverPicker() {
+    const root = id("showcase-cover-picker");
+    if (!root) return;
+    empty(root);
+    add(root, node("strong", { text: text("showcaseCover") }), node("p", { text: text("showcaseCoverHelp") }));
+    const selected = (state.showcaseDraft.listing_ids || []).map(String);
+    if (!selected.length) {
+      root.appendChild(node("p", { className: "showcase-cover-empty", text: text("showcaseCoverEmpty") }));
+      return;
+    }
+    const currentUrl = state.showcaseDraft.image_url;
+    if (currentUrl && /^https:\/\//.test(currentUrl)) {
+      const current = node("div", { className: "showcase-current-cover" });
+      const image = node("img", { src: currentUrl, alt: text("showcaseCurrentCover") });
+      image.referrerPolicy = "no-referrer";
+      add(current, image, node("span", { text: text("showcaseCurrentCover") }));
+      root.appendChild(current);
+    }
+    selected.forEach(function (listingId) {
+      const section = node("section", { className: "showcase-cover-group" });
+      section.appendChild(node("h4", { text: listingLabel(listingId) }));
+      const images = state.showcaseImages[listingId];
+      if (images === undefined) {
+        section.appendChild(node("p", { className: "showcase-cover-empty", text: text("showcaseCoverLoading") }));
+      } else if (!images.length) {
+        section.appendChild(node("p", { className: "showcase-cover-empty", text: text("showcaseCoverMissing") }));
+      } else {
+        const gallery = node("div", { className: "showcase-cover-gallery" });
+        images.forEach(function (url, index) {
+          const chosen = state.showcaseDraft.image_url === url && state.showcaseDraft.image_listing_id === listingId;
+          const choice = node("button", { type: "button", className: "showcase-cover-choice" + (chosen ? " selected" : "") });
+          choice.setAttribute("aria-pressed", chosen ? "true" : "false");
+          choice.setAttribute("aria-label", text("showcaseCover") + " · " + listingLabel(listingId) + " · " + (index + 1));
+          const image = node("img", { src: url, alt: "" });
+          image.loading = "lazy"; image.referrerPolicy = "no-referrer";
+          choice.appendChild(image);
+          choice.addEventListener("click", function () {
+            state.showcaseDraft.image_url = url;
+            state.showcaseDraft.image_listing_id = listingId;
+            renderShowcaseCoverPicker();
+          });
+          gallery.appendChild(choice);
+        });
+        section.appendChild(gallery);
+      }
+      root.appendChild(section);
+    });
+  }
+
+  async function loadShowcaseImages() {
+    const selected = (state.showcaseDraft && state.showcaseDraft.listing_ids || []).map(String);
+    await Promise.all(selected.filter(function (listingId) {
+      return state.showcaseImages[listingId] === undefined;
+    }).map(async function (listingId) {
+      try {
+        const listing = await api("/api/monthly/ops/listing/" + encodeURIComponent(listingId));
+        state.showcaseImages[listingId] = (listing.approved_image_options || []).filter(function (url) { return typeof url === "string" && /^https:\/\//.test(url); });
+      } catch (_error) {
+        state.showcaseImages[listingId] = [];
+      }
+    }));
+    renderShowcaseCoverPicker();
   }
 
   function renderShowcaseEditor() {
@@ -574,20 +714,21 @@
       field(text("showcaseNameAr"), "name_ar", value.name_ar, { noSource: true }),
       field(text("showcaseNameEn"), "name_en", value.name_en, { noSource: true }),
       field(text("showcaseSlug"), "slug", value.slug, { readOnly: Boolean(approved), noSource: true }),
-      field(text("showcaseImage"), "image_url", value.image_url, { noSource: true }),
       field(text("showcaseDescriptionAr"), "description_ar", value.description_ar, { kind: "textarea", full: true, noSource: true }),
-      field(text("showcaseDescriptionEn"), "description_en", value.description_en, { kind: "textarea", full: true, noSource: true }),
-      field(text("showcaseRate"), "fixed_monthly_rate_sar", value.fixed_monthly_rate_sar, { type: "number", noSource: true }),
-      check(text("showcaseEnabled"), "fixed_price_enabled", value.fixed_price_enabled === true)
+      field(text("showcaseDescriptionEn"), "description_en", value.description_en, { kind: "textarea", full: true, noSource: true })
     );
+    fields.appendChild(node("div", { id: "showcase-cover-picker", className: "showcase-cover-picker span-all" }));
     id("showcase-search").value = ""; renderShowcaseMembers("");
+    renderShowcaseCoverPicker(); loadShowcaseImages();
     const publicLink = id("showcase-public-link"); empty(publicLink); publicLink.hidden = true;
     if (state.showcaseRecord && state.showcaseRecord.public_url && /^\/monthly\/showcase\/[a-z0-9-]+$/.test(state.showcaseRecord.public_url)) {
       const link = node("a", { text: text("showcaseOpenLink") }); link.href = state.showcaseRecord.public_url; link.target = "_blank"; link.rel = "noopener";
-      const enabled = approved && approved.fixed_price_enabled === true;
-      const toggle = node("button", { type: "button", className: "button button-secondary", text: text(enabled ? "showcaseDisablePrice" : "showcaseEnablePrice") });
-      toggle.addEventListener("click", toggleShowcasePrice);
-      add(publicLink, link, node("span", { className: "status-chip " + (enabled ? "ready" : "warning"), text: text(enabled ? "showcasePriceOn" : "showcasePriceOff") }), toggle); publicLink.hidden = false;
+      const preview = node("a", { text: text("showcasePreviewLink") });
+      const previewPath = /^\/monthly\/ops\/preview\/showcase\/[a-z0-9-]+$/.test(state.showcaseRecord.preview_url || "")
+        ? state.showcaseRecord.preview_url
+        : "/monthly/ops/preview/showcase/" + value.slug;
+      preview.href = authPath(previewPath, window.location.search); preview.target = "_blank"; preview.rel = "noopener";
+      add(publicLink, preview, link, node("span", { className: "status-chip ready", text: text("showcasePricePerHome") })); publicLink.hidden = false;
     }
     clearEditorConflict(id("showcase-status")); id("showcase-status").textContent = ""; id("showcase-error").hidden = true; form.hidden = false;
   }
@@ -600,10 +741,12 @@
       slug: form.elements.slug.value,
       description_ar: form.elements.description_ar.value,
       description_en: form.elements.description_en.value,
-      image_url: form.elements.image_url.value,
+      image_url: state.showcaseDraft.image_url,
+      image_listing_id: state.showcaseDraft.image_listing_id,
       listing_ids: state.showcaseDraft.listing_ids,
-      fixed_monthly_rate_sar: form.elements.fixed_monthly_rate_sar.value,
-      fixed_price_enabled: form.elements.fixed_price_enabled.checked
+      listing_prices: state.showcaseDraft.listing_prices,
+      fixed_monthly_rate_sar: state.showcaseDraft.fixed_monthly_rate_sar,
+      fixed_price_enabled: false
     });
   }
 

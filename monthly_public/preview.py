@@ -14,6 +14,7 @@ from .presentation import present_card
 from .publication import PublicationResult, validate_listing
 from .routes import MonthlyPublicApp, _contract_error, _internal_error, _language
 from .settings import load_settings
+from .showcase_service import ShowcaseService
 from .snapshot import SnapshotGeneration, SnapshotStore
 
 
@@ -319,6 +320,30 @@ class MonthlyPreviewApp(MonthlyPublicApp):
         response["preview"] = True
         return response
 
+    def showcase(self, value: Any) -> Dict[str, Any]:
+        response = super().showcase(value)
+        if not response.get("ok"):
+            return response
+        generation = self._generation()
+        by_id = generation.by_id if generation is not None else {}
+        for home in response.get("showcase", {}).get("homes") or ():
+            publication = by_id.get(str(home.get("id")))
+            if publication is None:
+                continue
+            home.update(
+                {
+                    "preview": True,
+                    "preview_complete": bool(
+                        publication.listing.get("preview_complete")
+                    ),
+                    "preview_missing": list(
+                        publication.listing.get("preview_missing") or ()
+                    ),
+                }
+            )
+        response["preview"] = True
+        return response
+
     @staticmethod
     def lead(_value: Any) -> Dict[str, Any]:
         return {
@@ -334,16 +359,29 @@ class MonthlyPreviewApp(MonthlyPublicApp):
     event = lead
 
 
-def build_preview_app(service: Any, *, clock: Any) -> MonthlyPreviewApp:
+def build_preview_app(
+    service: Any,
+    *,
+    clock: Any,
+    showcase_service: Any = None,
+) -> MonthlyPreviewApp:
     """Build one isolated preview app without replacing the public snapshot."""
 
     current = clock()
     validation_settings = load_settings(service.approved_settings_values())
-    generation = build_preview_generation(
-        service.preview_inventory(), validation_settings, current
-    )
+    source = service.preview_inventory()
+    generation = build_preview_generation(source, validation_settings, current)
     snapshot = SnapshotStore()
     snapshot.current = generation
+    preview_showcases = None
+    if showcase_service is not None:
+        preview_showcases = ShowcaseService(
+            store=showcase_service.store,
+            inventory_provider=lambda: copy.deepcopy(source),
+            snapshot_provider=lambda: generation,
+            session_secret=showcase_service.session_secret,
+            clock=clock,
+        )
     return MonthlyPreviewApp(
         snapshot_store=snapshot,
         settings=_preview_settings(),
@@ -352,6 +390,7 @@ def build_preview_app(service: Any, *, clock: Any) -> MonthlyPreviewApp:
         approved_places=service.approved_places(),
         session_secret=None,
         clock=clock,
+        showcase_service=preview_showcases,
     )
 
 

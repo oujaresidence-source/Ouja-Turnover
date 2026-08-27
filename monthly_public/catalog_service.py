@@ -396,6 +396,7 @@ class CatalogService:
             "published": prepared["published"],
             "exact_match_eligible": prepared["exact_match_eligible"],
             "availability_status": prepared["availability_status"],
+            "approved_image_options": list(public_listing.get("images") or ()),
             "source_readiness": {
                 "price_months": sorted(public_listing.get("official_prices") or {}),
                 "calendar": copy.deepcopy(dict(public_listing.get("calendar") or {})),

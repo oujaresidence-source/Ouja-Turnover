@@ -7,6 +7,8 @@ import unittest
 from monthly_public.catalog_service import CatalogService
 from monthly_public.catalog_store import CatalogStore
 from monthly_public.preview import build_preview_app, build_preview_generation
+from monthly_public.showcase_service import ShowcaseService
+from monthly_public.showcase_store import ShowcaseStore
 from tests.monthly_public_fixtures import NOW, valid_settings
 from tests.test_monthly_catalog_profiles import valid_settings as valid_settings_values
 from tests.test_monthly_catalog_service import source_listing
@@ -111,7 +113,42 @@ class MonthlyPreviewAppTest(unittest.TestCase):
             snapshot_refresh=lambda: {"accepted": True},
             clock=lambda: NOW,
         )
-        self.app = build_preview_app(self.service, clock=lambda: NOW)
+        self.showcase_store = ShowcaseStore(
+            os.path.join(self.tmp.name, "showcases.sqlite3")
+        )
+        self.showcases = ShowcaseService(
+            store=self.showcase_store,
+            inventory_provider=self.service.preview_inventory,
+            snapshot_provider=lambda: build_preview_generation(
+                self.service.preview_inventory(), valid_settings(), NOW
+            ),
+            session_secret=b"preview-showcase-secret-is-32-bytes",
+            clock=lambda: NOW,
+        )
+        saved = self.showcases.save_draft(
+            "showcase_preview",
+            {
+                "name_ar": "عمارة النزهة",
+                "name_en": "Nuzha Building",
+                "slug": "nuzha",
+                "description_ar": "مجموعة شقق عوجا في مبنى واحد.",
+                "description_en": "Ouja homes in one building.",
+                "image_url": None,
+                "image_listing_id": None,
+                "listing_ids": ["101", "202"],
+                "listing_prices": {},
+                "fixed_monthly_rate_sar": None,
+                "fixed_price_enabled": False,
+            },
+            0,
+            "ops",
+        )
+        self.showcases.approve(
+            "showcase_preview", saved["draft_revision"], "ops"
+        )
+        self.app = build_preview_app(
+            self.service, clock=lambda: NOW, showcase_service=self.showcases
+        )
 
     def test_preview_config_uses_daily_ten_to_ten_and_blocks_contact(self):
         config = self.app.config("ar")
@@ -203,6 +240,21 @@ class MonthlyPreviewAppTest(unittest.TestCase):
         self.assertEqual(detail["listing"]["title"], "عوجا | اسم مسودة الفريق")
         self.assertIsNone(self.store.profile("101")["approved"])
         self.assertEqual(self.source, source_before)
+
+    def test_showcase_preview_includes_every_selected_real_home(self):
+        result = self.app.showcase({"slug": "nuzha", "lang": "ar"})
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["preview"])
+        self.assertEqual(result["showcase"]["eligible_count"], 2)
+        self.assertEqual(
+            [str(home["id"]) for home in result["showcase"]["homes"]],
+            ["101", "202"],
+        )
+        incomplete = next(
+            home for home in result["showcase"]["homes"] if str(home["id"]) == "202"
+        )
+        self.assertIn("licence_missing", incomplete["preview_missing"])
 
 
 if __name__ == "__main__":

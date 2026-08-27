@@ -59773,7 +59773,9 @@ def _monthly_preview_instance():
     if _build_monthly_preview_app is None or _monthly_catalog_service is None:
         raise RuntimeError("monthly preview is unavailable")
     return _build_monthly_preview_app(
-        _monthly_catalog_service, clock=lambda: datetime.now(TZ)
+        _monthly_catalog_service,
+        clock=lambda: datetime.now(TZ),
+        showcase_service=_monthly_showcase_service,
     )
 
 
@@ -59825,6 +59827,19 @@ async def _api_monthly_preview_listing(request):
     return await _monthly_preview_call(
         "listing",
         _monthly_v2_listing_query(request, request.match_info.get("id", "")),
+    )
+
+
+async def _api_monthly_preview_showcase(request):
+    denied = _monthly_catalog_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_preview_call(
+        "showcase",
+        {
+            "slug": request.query.get("slug", ""),
+            "lang": request.query.get("lang", "ar"),
+        },
     )
 
 
@@ -60154,12 +60169,18 @@ async def _handle_monthly_catalog(request):
     )
 
 
-def _monthly_preview_page(route, *, slug=None, listing_id=None):
+def _monthly_preview_page(
+        route, *, slug=None, listing_id=None, showcase_slug=None):
     if _render_monthly_public_page is None:
         raise RuntimeError("monthly preview renderer is unavailable")
-    return _render_monthly_public_page(
-        route, slug=slug, listing_id=listing_id, preview=True
-    )
+    values = {
+        "slug": slug,
+        "listing_id": listing_id,
+        "preview": True,
+    }
+    if showcase_slug is not None:
+        values["showcase_slug"] = showcase_slug
+    return _render_monthly_public_page(route, **values)
 
 
 async def _handle_monthly_preview(request, route="home"):
@@ -60171,6 +60192,7 @@ async def _handle_monthly_preview(request, route="home"):
             route,
             slug=request.match_info.get("slug"),
             listing_id=request.match_info.get("lid"),
+            showcase_slug=request.match_info.get("showcase_slug"),
         )
     except (RuntimeError, ValueError):
         return _monthly_public_unavailable()
@@ -60195,6 +60217,10 @@ async def _handle_monthly_preview_match(request):
 
 async def _handle_monthly_preview_listing(request):
     return await _handle_monthly_preview(request, "listing")
+
+
+async def _handle_monthly_preview_showcase(request):
+    return await _handle_monthly_preview(request, "showcase")
 
 
 async def _handle_monthly_catalog_css(request):
@@ -60355,6 +60381,10 @@ def _register_monthly_v2_only_routes(router):
     router.add_get("/monthly/ops/preview/search", _handle_monthly_preview_browse)
     router.add_get("/monthly/ops/preview/match", _handle_monthly_preview_match)
     router.add_get("/monthly/ops/preview/id/{lid}", _handle_monthly_preview_listing)
+    router.add_get(
+        "/monthly/ops/preview/showcase/{showcase_slug}",
+        _handle_monthly_preview_showcase,
+    )
     router.add_get("/monthly/ops/preview/{slug}", _handle_monthly_preview_listing)
     router.add_get(_MONTHLY_OPS_CSS_PATH, _handle_monthly_ops_css)
     router.add_get(_MONTHLY_OPS_JS_PATH, _handle_monthly_ops_js)
@@ -60373,6 +60403,7 @@ def _register_monthly_v2_only_routes(router):
     router.add_get("/api/monthly/ops/preview/search", _api_monthly_preview_search)
     router.add_post("/api/monthly/ops/preview/match", _api_monthly_preview_match)
     router.add_get("/api/monthly/ops/preview/listing/{id}", _api_monthly_preview_listing)
+    router.add_get("/api/monthly/ops/preview/showcase", _api_monthly_preview_showcase)
     router.add_get("/api/monthly/ops/listings", _api_monthly_catalog_listings)
     router.add_get("/api/monthly/ops/listing/{id}", _api_monthly_catalog_listing)
     router.add_post("/api/monthly/ops/listing/{id}/draft", _api_monthly_catalog_profile_draft)

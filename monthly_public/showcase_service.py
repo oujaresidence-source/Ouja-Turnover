@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from .presentation import present_listing
 from .publication import PublicationResult
 from .showcase_contracts import (
+    ShowcaseContractError,
     ShowcaseContextError,
     issue_showcase_context,
     parse_showcase,
@@ -97,6 +98,63 @@ class ShowcaseService:
             raise RuntimeError("monthly showcase inventory is empty")
         return known
 
+    def _inventory_by_id(self) -> Dict[str, Mapping[str, Any]]:
+        source = self.inventory_provider()
+        if not isinstance(source, Mapping) or not isinstance(
+            source.get("listings"), (list, tuple)
+        ):
+            raise RuntimeError("monthly showcase inventory is unavailable")
+        rows: Dict[str, Mapping[str, Any]] = {}
+        for row in source["listings"]:
+            if not isinstance(row, Mapping):
+                continue
+            value = row.get("id")
+            if value in (None, "") and isinstance(row.get("hostaway"), Mapping):
+                value = row["hostaway"].get("id")
+            listing_id = str(value or "").strip()
+            if _LISTING_ID_RE.fullmatch(listing_id) and listing_id not in rows:
+                rows[listing_id] = row
+        if not rows:
+            raise RuntimeError("monthly showcase inventory is empty")
+        return rows
+
+    @staticmethod
+    def _approved_image_urls(row: Mapping[str, Any]) -> tuple[str, ...]:
+        values = []
+        candidates = [row]
+        for key in ("publication", "public", "hostaway"):
+            nested = row.get(key)
+            if isinstance(nested, Mapping):
+                candidates.append(nested)
+        for source in candidates:
+            images = source.get("images")
+            if not isinstance(images, (list, tuple)):
+                continue
+            for image in images:
+                url = image.get("url") if isinstance(image, Mapping) else image
+                if (
+                    isinstance(url, str)
+                    and url.startswith("https://")
+                    and url not in values
+                ):
+                    values.append(url)
+        return tuple(values)
+
+    def _parse(self, value: Mapping[str, Any]) -> Dict[str, Any]:
+        inventory = self._inventory_by_id()
+        parsed = parse_showcase(value, inventory)
+        source_id = parsed.get("image_listing_id")
+        if source_id is not None:
+            images = self._approved_image_urls(inventory[source_id])
+            if parsed.get("image_url") not in images:
+                raise ShowcaseContractError(
+                    "image_url",
+                    "image_not_from_listing",
+                    "اختر صورة موثقة من الشقة المحددة.",
+                    "Choose a verified image from the selected apartment.",
+                )
+        return parsed
+
     def _results_by_id(self) -> Dict[str, PublicationResult]:
         generation = self.snapshot_provider()
         values = getattr(generation, "results", None)
@@ -114,11 +172,27 @@ class ShowcaseService:
         return result
 
     @staticmethod
-    def _price_can_complete(group: Mapping[str, Any], result: PublicationResult) -> bool:
+    def manual_rate(group: Mapping[str, Any], listing_id: Any) -> Optional[int]:
+        key = str(listing_id or "")
+        prices = group.get("listing_prices")
+        if isinstance(prices, Mapping) and key in prices:
+            row = prices.get(key)
+            if not isinstance(row, Mapping) or row.get("enabled") is not True:
+                return None
+            rate = row.get("monthly_rate_sar")
+            return rate if isinstance(rate, int) and not isinstance(rate, bool) and rate > 0 else None
         if group.get("fixed_price_enabled") is not True:
-            return False
+            return None
         rate = group.get("fixed_monthly_rate_sar")
-        if isinstance(rate, bool) or not isinstance(rate, int) or rate < 1:
+        return rate if isinstance(rate, int) and not isinstance(rate, bool) and rate > 0 else None
+
+    def _price_can_complete(
+        self,
+        group: Mapping[str, Any],
+        listing_id: str,
+        result: PublicationResult,
+    ) -> bool:
+        if self.manual_rate(group, listing_id) is None:
             return False
         return bool(result.blockers) and {
             issue.code for issue in result.blockers
@@ -132,7 +206,7 @@ class ShowcaseService:
         for listing_id, result in self._results_by_id().items():
             if result.publishable:
                 eligible[listing_id] = result
-            elif self._price_can_complete(group, result):
+            elif self._price_can_complete(group, listing_id, result):
                 eligible[listing_id] = replace(
                     result,
                     blockers=(),
@@ -157,7 +231,7 @@ class ShowcaseService:
         value: Mapping[str, Any],
         actor: str,
     ) -> Dict[str, Any]:
-        parsed = parse_showcase(value, self._known_listing_ids())
+        parsed = self._parse(value)
         for _attempt in range(5):
             group_id = "showcase_%s" % secrets.token_urlsafe(12)
             if self.store.record(group_id)["draft"] is None:
@@ -172,7 +246,7 @@ class ShowcaseService:
         actor: str,
     ) -> Dict[str, Any]:
         key = _group_id(group_id)
-        parsed = parse_showcase(value, self._known_listing_ids())
+        parsed = self._parse(value)
         return self.store.save_draft(key, parsed, revision, actor)
 
     def approve(
@@ -185,7 +259,7 @@ class ShowcaseService:
         record = self.store.record(key)
         if not isinstance(record.get("draft"), Mapping):
             raise ShowcaseNotFound(key)
-        parse_showcase(record["draft"], self._known_listing_ids())
+        self._parse(record["draft"])
         return self.store.approve(key, revision, actor)
 
     def set_price_enabled(
@@ -214,6 +288,11 @@ class ShowcaseService:
             "blocked_listing_ids": blocked,
             "public_url": (
                 "/monthly/showcase/%s" % record["approved"]["slug"]
+                if isinstance(record.get("approved"), Mapping)
+                else None
+            ),
+            "preview_url": (
+                "/monthly/ops/preview/showcase/%s" % record["approved"]["slug"]
                 if isinstance(record.get("approved"), Mapping)
                 else None
             ),
@@ -256,6 +335,15 @@ class ShowcaseService:
             for listing_id in group["listing_ids"]
             if listing_id in eligible
         )
+        manual_rates = {
+            listing_id: self.manual_rate(group, listing_id)
+            for listing_id in group["listing_ids"]
+        }
+        manual_rates = {
+            listing_id: rate
+            for listing_id, rate in manual_rates.items()
+            if rate is not None
+        }
         return {
             "group_id": record["group_id"],
             "revision": record["approved_revision"],
@@ -264,6 +352,7 @@ class ShowcaseService:
             "configured_count": len(group["listing_ids"]),
             "eligible_count": len(results),
             "lang": language,
+            "manual_rates": manual_rates,
             "context": issue_showcase_context(
                 self.session_secret,
                 record["group_id"],
@@ -296,10 +385,15 @@ class ShowcaseService:
         approved = [row for row in records if isinstance(row.get("approved"), Mapping)]
         blocked_members = 0
         enabled = 0
+        listing_prices_enabled = 0
         for row in approved:
             group = row["approved"]
             if group.get("fixed_price_enabled") is True:
                 enabled += 1
+            listing_prices_enabled += sum(
+                self.manual_rate(group, listing_id) is not None
+                for listing_id in group.get("listing_ids") or ()
+            )
             eligible = self._eligible_by_id(group)
             blocked_members += sum(
                 1 for listing_id in group.get("listing_ids") or () if listing_id not in eligible
@@ -310,6 +404,7 @@ class ShowcaseService:
             "received": len(records),
             "approved": len(approved),
             "fixed_price_enabled": enabled,
+            "listing_prices_enabled": listing_prices_enabled,
             "blocked_members": blocked_members,
         }
 
@@ -321,6 +416,22 @@ def present_showcase(public: Mapping[str, Any], lang: str) -> Dict[str, Any]:
     suffix = "ar" if language == "ar" else "en"
     group = public["group"]
     enabled = group.get("fixed_price_enabled") is True
+    manual_rates = public.get("manual_rates")
+    if not isinstance(manual_rates, Mapping):
+        manual_rates = {}
+    homes = []
+    for result in public["results"]:
+        home = present_listing(result, language)
+        rate = manual_rates.get(str(result.listing.get("id")))
+        if isinstance(rate, int) and not isinstance(rate, bool):
+            home["showcase_monthly_rate_sar"] = rate
+        homes.append(home)
+    explicit_prices = group.get("listing_prices")
+    explicit_enabled = isinstance(explicit_prices, Mapping) and any(
+        isinstance(row, Mapping) and row.get("enabled") is True
+        for row in explicit_prices.values()
+    )
+    price_mode = "per_listing" if explicit_enabled else ("fixed" if enabled else "listing")
     return {
         "group_id": public["group_id"],
         "revision": public["revision"],
@@ -328,14 +439,13 @@ def present_showcase(public: Mapping[str, Any], lang: str) -> Dict[str, Any]:
         "name": group["name_%s" % suffix],
         "description": group.get("description_%s" % suffix) or "",
         "image_url": group.get("image_url"),
-        "price_mode": "fixed" if enabled else "listing",
-        "fixed_price_enabled": enabled,
+        "price_mode": price_mode,
+        "fixed_price_enabled": enabled and price_mode == "fixed",
         "fixed_monthly_rate_sar": (
-            group.get("fixed_monthly_rate_sar") if enabled else None
+            group.get("fixed_monthly_rate_sar") if price_mode == "fixed" else None
         ),
+        "manual_price_count": len(manual_rates),
         "eligible_count": public["eligible_count"],
         "context": public["context"],
-        "homes": tuple(
-            present_listing(result, language) for result in public["results"]
-        ),
+        "homes": tuple(homes),
     }

@@ -21,7 +21,9 @@ def valid_group(**overrides):
         "description_ar": "ثمان شقق عوجا في مبنى واحد.",
         "description_en": "Eight Ouja homes in one building.",
         "image_url": "https://images.example.test/building.jpg",
+        "image_listing_id": None,
         "listing_ids": ["101"],
+        "listing_prices": {},
         "fixed_monthly_rate_sar": 12500,
         "fixed_price_enabled": True,
     }
@@ -64,6 +66,65 @@ class ShowcaseContractTest(unittest.TestCase):
                 ),
                 {"101"},
             )
+
+    def test_normalizes_independent_listing_prices_and_cover_source(self):
+        parsed = parse_showcase(
+            valid_group(
+                listing_ids=["101", "102"],
+                image_listing_id="102",
+                image_url="https://images.example.test/102-2.jpg",
+                listing_prices={
+                    "101": {"monthly_rate_sar": 8000, "enabled": True},
+                    "102": {"monthly_rate_sar": 9500, "enabled": False},
+                },
+                fixed_price_enabled=False,
+            ),
+            {"101", "102"},
+        )
+
+        self.assertEqual(parsed["image_listing_id"], "102")
+        self.assertEqual(
+            parsed["listing_prices"],
+            {
+                "101": {"monthly_rate_sar": 8000, "enabled": True},
+                "102": {"monthly_rate_sar": 9500, "enabled": False},
+            },
+        )
+
+    def test_listing_prices_cannot_target_a_home_outside_the_group(self):
+        with self.assertRaises(ShowcaseContractError) as caught:
+            parse_showcase(
+                valid_group(
+                    listing_prices={
+                        "102": {"monthly_rate_sar": 9000, "enabled": True}
+                    }
+                ),
+                {"101", "102"},
+            )
+
+        self.assertEqual(caught.exception.field, "listing_prices.102")
+
+    def test_enabled_listing_price_requires_an_amount(self):
+        with self.assertRaises(ShowcaseContractError) as caught:
+            parse_showcase(
+                valid_group(
+                    listing_prices={
+                        "101": {"monthly_rate_sar": None, "enabled": True}
+                    }
+                ),
+                {"101"},
+            )
+
+        self.assertEqual(caught.exception.field, "listing_prices.101.monthly_rate_sar")
+
+    def test_cover_source_must_be_a_selected_home(self):
+        with self.assertRaises(ShowcaseContractError) as caught:
+            parse_showcase(
+                valid_group(image_listing_id="102"),
+                {"101", "102"},
+            )
+
+        self.assertEqual(caught.exception.field, "image_listing_id")
 
     def test_rejects_unapproved_fields_and_untrusted_image_urls(self):
         with self.assertRaises(ShowcaseContractError) as caught:
