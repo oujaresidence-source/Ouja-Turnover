@@ -446,3 +446,15 @@ class ShowcaseStore:
             }
             for row in rows
         ]
+
+    def write_probe(self) -> bool:
+        """Confirm the mounted database can begin a write without changing data."""
+
+        try:
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute("SELECT 1").fetchone()
+                connection.rollback()
+            return True
+        except sqlite3.Error:
+            return False
