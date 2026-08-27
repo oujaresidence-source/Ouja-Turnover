@@ -100,6 +100,8 @@ class MonthlyOpsPageContractTests(unittest.TestCase):
             "source_timestamps", "calendarRefresh", "engineRefresh",
             "catalog", "approved_profiles", "drafts_waiting",
             "active_destinations", "write_probe", "action_url",
+            "showcase", "showcaseStore", "showcaseGroups", "showcaseApproved",
+            "showcaseFixedPrices", "showcaseBlockedHomes",
             "action.href = authPath(issue.action_url",
         )
         for name in required:

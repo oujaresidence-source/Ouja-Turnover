@@ -23,6 +23,32 @@ def source(listings):
 
 
 class HealthTests(unittest.TestCase):
+    def test_showcase_store_health_is_visible_and_unwritable_store_blocks_launch(self):
+        generation = build_generation(source([valid_listing()]), valid_settings(), NOW)
+        showcase = {
+            "configured": True,
+            "write_probe": False,
+            "received": 2,
+            "approved": 1,
+            "fixed_price_enabled": 1,
+            "blocked_members": 3,
+        }
+
+        report = build_health(
+            generation,
+            valid_settings(),
+            showcase=showcase,
+            now=NOW,
+        )
+
+        self.assertEqual(report["showcase"]["approved"], 1)
+        self.assertEqual(report["showcase"]["blocked_members"], 3)
+        self.assertIn(
+            "showcase_store_unhealthy",
+            {issue["code"] for issue in report["red_blockers"]},
+        )
+        self.assertFalse(report["ready"])
+
     def test_health_names_catalog_readiness_and_safe_action_links(self):
         listing = valid_listing(content_verified=False)
         generation = build_generation(source([listing]), valid_settings(), NOW)

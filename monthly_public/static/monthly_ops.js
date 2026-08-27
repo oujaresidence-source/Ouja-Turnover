@@ -162,6 +162,11 @@
       catalogApproved: "شقق معتمدة",
       catalogDrafts: "مسودات تنتظر المراجعة",
       catalogDestinations: "أماكن فعّالة",
+      showcaseStore: "تخزين روابط مجموعات الشقق",
+      showcaseGroups: "مجموعات مستلمة",
+      showcaseApproved: "روابط معتمدة",
+      showcaseFixedPrices: "أسعار موحدة مفعّلة",
+      showcaseBlockedHomes: "شقق المجموعة تحتاج إكمال",
       reviewListing: "راجع بيانات الشقة",
       configured: "مهيأ",
       notConfigured: "غير مهيأ",
@@ -383,6 +388,11 @@
       catalogApproved: "Approved apartments",
       catalogDrafts: "Drafts awaiting review",
       catalogDestinations: "Active destinations",
+      showcaseStore: "Apartment-collection store",
+      showcaseGroups: "Received collections",
+      showcaseApproved: "Approved links",
+      showcaseFixedPrices: "Active fixed prices",
+      showcaseBlockedHomes: "Collection homes needing completion",
       reviewListing: "Review apartment data",
       configured: "Configured",
       notConfigured: "Not configured",
@@ -740,6 +750,12 @@
     status(configuration, text("catalogApproved"), number(catalog.approved_profiles || 0), "neutral");
     status(configuration, text("catalogDrafts"), number(catalog.drafts_waiting || 0), catalog.drafts_waiting ? "warning" : "ok");
     status(configuration, text("catalogDestinations"), number(catalog.active_destinations || 0), "neutral");
+    const showcase = data.showcase || {};
+    status(configuration, text("showcaseStore"), text(showcase.write_probe ? "healthy" : "unhealthy"), showcase.write_probe ? "ok" : "danger");
+    status(configuration, text("showcaseGroups"), number(showcase.received || 0), "neutral");
+    status(configuration, text("showcaseApproved"), number(showcase.approved || 0), "neutral");
+    status(configuration, text("showcaseFixedPrices"), number(showcase.fixed_price_enabled || 0), "neutral");
+    status(configuration, text("showcaseBlockedHomes"), number(showcase.blocked_members || 0), showcase.blocked_members ? "warning" : "ok");
 
     const blockerList = document.getElementById("blockers-list");
     blockerList.replaceChildren();

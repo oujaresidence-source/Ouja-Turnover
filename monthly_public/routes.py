@@ -170,12 +170,21 @@ class MonthlyOpsApp:
                     catalog.setdefault("configured", True)
                 except Exception:
                     catalog = {"configured": True, "write_probe": False}
+            showcase = {"configured": False, "write_probe": False}
+            service = getattr(self._public, "showcase_service", None)
+            if service is not None:
+                try:
+                    showcase = dict(service.health())
+                    showcase.setdefault("configured", True)
+                except Exception:
+                    showcase = {"configured": True, "write_probe": False}
             return build_health(
                 self._public._generation(),
                 settings,
                 analytics=self._public.analytics_store,
                 lead_store=self._public.lead_store,
                 catalog=catalog,
+                showcase=showcase,
                 now=current,
             )
         except Exception:

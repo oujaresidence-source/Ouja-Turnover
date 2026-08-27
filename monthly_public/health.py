@@ -58,6 +58,7 @@ def build_health(
     analytics: Any = None,
     lead_store: Any = None,
     catalog: Any = None,
+    showcase: Any = None,
     now: Any = None,
 ) -> Dict[str, Any]:
     """Build one evidence-based status payload; readiness means no red blockers."""
@@ -185,6 +186,38 @@ def build_health(
                 }
             )
 
+    showcase_health = {
+        "configured": False,
+        "write_probe": False,
+        "received": 0,
+        "approved": 0,
+        "fixed_price_enabled": 0,
+        "blocked_members": 0,
+    }
+    if isinstance(showcase, Mapping):
+        showcase_health["configured"] = showcase.get("configured", True) is True
+        showcase_health["write_probe"] = showcase.get("write_probe") is True
+        for key in (
+            "received",
+            "approved",
+            "fixed_price_enabled",
+            "blocked_members",
+        ):
+            value = showcase.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                showcase_health[key] = value
+        if not showcase_health["configured"] or not showcase_health["write_probe"]:
+            red.append(
+                {
+                    "source": "showcase",
+                    "code": "showcase_store_unhealthy",
+                    "field": "showcase",
+                    "message_ar": "تخزين روابط مجموعات الشقق غير سليم.",
+                    "message_en": "The apartment-collection store is unhealthy.",
+                    "action_url": "/monthly/ops/listings",
+                }
+            )
+
     if analytics is None:
         analytics_health = {
             "healthy": False,
@@ -295,6 +328,7 @@ def build_health(
         "analytics": analytics_health,
         "leads": lead_health,
         "catalog": catalog_health,
+        "showcase": showcase_health,
         "red_blockers": red,
     }
     report["ready"] = not red

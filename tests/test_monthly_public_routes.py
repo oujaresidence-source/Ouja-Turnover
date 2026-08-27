@@ -637,6 +637,27 @@ class MonthlyPublicRouteContracts(unittest.TestCase):
         self.assertTrue(outcome["ok"])
         self.assertEqual(self.leads.get(made["lead_reference"])["lost_reason"], "price")
 
+    def test_ops_health_reads_showcase_service_health_without_exposing_records(self):
+        class HealthyShowcase:
+            @staticmethod
+            def health():
+                return {
+                    "configured": True,
+                    "write_probe": True,
+                    "received": 2,
+                    "approved": 1,
+                    "fixed_price_enabled": 1,
+                    "blocked_members": 4,
+                }
+
+        self.app.showcase_service = HealthyShowcase()
+
+        health = self.app.ops.health()
+
+        self.assertEqual(health["showcase"]["received"], 2)
+        self.assertEqual(health["showcase"]["approved"], 1)
+        self.assertNotIn("records", health["showcase"])
+
 
 if __name__ == "__main__":
     unittest.main()
