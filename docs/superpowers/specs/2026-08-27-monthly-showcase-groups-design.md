@@ -57,8 +57,13 @@ uses the apartment's verified official price. If no apartment is eligible, the
 page remains available and explains that no confirmed option is available
 without claiming availability or price.
 
-Only apartments that pass normal publication checks can appear publicly. A
-blocked apartment stays assigned in the staff group so its data is not lost.
+Only apartments that pass normal publication checks can appear publicly. While
+the approved fixed group price is active, it may satisfy `price_missing` for
+that group only. It cannot bypass licence, content, images, identity, calendar,
+or any other publication blocker. A blocked apartment stays assigned in the
+staff group so its data is not lost. When the fixed price is disabled, a home
+that still lacks an original verified price disappears from the public group
+without being removed from the staff record.
 
 ## Pricing Rules
 
