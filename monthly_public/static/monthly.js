@@ -204,7 +204,16 @@
       generalHelpAction: "جهّز طلب مساعدة",
       selectPurpose: "سبب الإقامة",
       selectSleeping: "ترتيب النوم",
-      selectFlexibility: "مرونة التواريخ"
+      selectFlexibility: "مرونة التواريخ",
+      showcaseKicker: "🏢 عرض سكني خاص",
+      showcaseFixedPrice: "سعر شهري موحّد لهذه المجموعة",
+      showcaseFixedPriceHelp: "يسري هذا السعر عند اختيار بيت من هذا الرابط. وتبقى بقية الشروط والتوفر خاصة بكل بيت.",
+      showcaseListingPrice: "كل بيت بسعره الشهري الرسمي",
+      showcaseListingPriceHelp: "الرابط مستمر، والأسعار المعروضة هي الأسعار الرسمية لكل بيت.",
+      showcaseHomes: "{count} بيوت في هذا العرض",
+      showcaseEmptyTitle: "ما فيه بيوت منشورة في هذا العرض حاليًا.",
+      showcaseEmptyText: "الرابط محفوظ. تظهر البيوت هنا تلقائيًا بعد اكتمال متطلبات النشر.",
+      showcaseBack: "العودة إلى العرض الخاص"
     },
     en: {
       brand: "Ouja Monthly",
@@ -396,7 +405,16 @@
       generalHelpAction: "Prepare help request",
       selectPurpose: "Stay purpose",
       selectSleeping: "Sleeping arrangement",
-      selectFlexibility: "Date flexibility"
+      selectFlexibility: "Date flexibility",
+      showcaseKicker: "🏢 Private home collection",
+      showcaseFixedPrice: "One monthly price for this collection",
+      showcaseFixedPriceHelp: "This price applies when a home is selected through this link. Availability and all other terms remain specific to each home.",
+      showcaseListingPrice: "Each home keeps its official monthly price",
+      showcaseListingPriceHelp: "This link remains active, and every displayed price is the home's official rate.",
+      showcaseHomes: "{count} homes in this collection",
+      showcaseEmptyTitle: "No homes are published in this collection right now.",
+      showcaseEmptyText: "The link remains active. Homes appear automatically after they complete publication checks.",
+      showcaseBack: "Back to the private collection"
     }
   };
 
@@ -492,10 +510,13 @@
   const SESSION_TOKEN_RE = /^anon_[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/;
   const JOURNEY_ID_RE = /^journey_[A-Za-z0-9_-]{22,64}$/;
   const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+  const SHOWCASE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const SHOWCASE_CONTEXT_RE = /^sc_showcase_[A-Za-z0-9_-]{2,64}\.[1-9][0-9]{0,8}\.[A-Za-z0-9_-]{43}$/;
   const PUBLIC_ENDPOINTS = {
     config: "/api/monthly/config",
     browse: "/api/monthly/search",
     match: "/api/monthly/match",
+    showcase: "/api/monthly/showcase",
     listing: "/api/monthly/listing/",
     lead: "/api/monthly/lead",
     event: "/api/monthly/event"
@@ -504,6 +525,7 @@
     config: "/api/monthly/ops/preview/config",
     browse: "/api/monthly/ops/preview/search",
     match: "/api/monthly/ops/preview/match",
+    showcase: null,
     listing: "/api/monthly/ops/preview/listing/",
     lead: null,
     event: null
@@ -512,7 +534,7 @@
 
   const runtime = {
     lang: "ar",
-    page: { route: "home", slug: null, listing_id: null },
+    page: { route: "home", slug: null, listing_id: null, showcase_slug: null },
     preview: false,
     config: null,
     journeyId: null,
@@ -520,6 +542,8 @@
     request: null,
     listingRequest: {},
     recommendationContext: null,
+    showcaseContext: null,
+    showcase: null,
     impressedListingIds: new Set(),
     results: null,
     currentListing: null,
@@ -682,6 +706,10 @@
       }
     }
     if (route === "listing") {
+      const showcaseContext = params.get("sc");
+      if (showcaseContext && SHOWCASE_CONTEXT_RE.test(showcaseContext)) {
+        values.showcase_context = showcaseContext;
+      }
       const purpose = params.get("purpose");
       const sleeping = params.get("sleeping");
       const flexibility = params.get("flexibility");
@@ -1094,11 +1122,11 @@
 
   function parsePageState() {
     const node = document.getElementById("monthly-page-state");
-    if (!node) return { route: "home", slug: null, listing_id: null };
+    if (!node) return { route: "home", slug: null, listing_id: null, showcase_slug: null };
     try {
       return JSON.parse(node.textContent || "{}");
     } catch (_error) {
-      return { route: "home", slug: null, listing_id: null };
+      return { route: "home", slug: null, listing_id: null, showcase_slug: null };
     }
   }
 
@@ -1108,19 +1136,23 @@
       path = "/monthly" + path.slice("/monthly/ops/preview".length);
       if (path === "/monthly/") path = "/monthly";
     }
-    if (path === "/monthly" || path === "/monthly/") return { route: "home", slug: null, listing_id: null };
-    if (path === "/monthly/match") return { route: "match", slug: null, listing_id: null };
-    if (path === "/monthly/search") return { route: "browse", slug: null, listing_id: null };
+    if (path === "/monthly" || path === "/monthly/") return { route: "home", slug: null, listing_id: null, showcase_slug: null };
+    if (path === "/monthly/match") return { route: "match", slug: null, listing_id: null, showcase_slug: null };
+    if (path === "/monthly/search") return { route: "browse", slug: null, listing_id: null, showcase_slug: null };
     const idMatch = path.match(/^\/monthly\/id\/([A-Za-z0-9_-]+)$/);
-    if (idMatch) return { route: "listing", listing_id: idMatch[1], slug: null };
+    if (idMatch) return { route: "listing", listing_id: idMatch[1], slug: null, showcase_slug: null };
+    const showcaseMatch = path.match(/^\/monthly\/showcase\/([a-z0-9]+(?:-[a-z0-9]+)*)$/);
+    if (showcaseMatch) return { route: "showcase", showcase_slug: showcaseMatch[1], listing_id: null, slug: null };
     const slugMatch = path.match(/^\/monthly\/([A-Za-z0-9_-]+)$/);
-    if (slugMatch) return { route: "listing", listing_id: null, slug: slugMatch[1] };
-    return { route: "home", slug: null, listing_id: null };
+    if (slugMatch) return { route: "listing", listing_id: null, slug: slugMatch[1], showcase_slug: null };
+    return { route: "home", slug: null, listing_id: null, showcase_slug: null };
   }
 
   function applyLocationSearch() {
     const parsed = parseLocationSearch(window.location.search, runtime.page.route);
     if (runtime.page.route === "browse") {
+      runtime.showcaseContext = null;
+      runtime.showcase = null;
       runtime.browseQuery = parsed;
       runtime.request = null;
       runtime.matcher = initialMatcherState();
@@ -1130,6 +1162,8 @@
       return;
     }
     if (runtime.page.route === "listing") {
+      runtime.showcaseContext = parsed.showcase_context || null;
+      delete parsed.showcase_context;
       if (window.location.search || Object.keys(parsed).length) {
         runtime.listingRequest = parsed;
       } else {
@@ -1137,6 +1171,10 @@
         if (!runtime.recommendationContext || [runtime.recommendationContext.listing_id, runtime.recommendationContext.slug].indexOf(identifier) === -1) runtime.listingRequest = {};
       }
       return;
+    }
+    if (runtime.page.route !== "showcase") {
+      runtime.showcaseContext = null;
+      runtime.showcase = null;
     }
     runtime.listingRequest = {};
   }
@@ -1306,21 +1344,43 @@
     return list;
   }
 
-  function listingPath(item) {
+  function rawListingPath(item) {
     const safeSlug = typeof item.slug === "string" && /^[A-Za-z0-9_-]+$/.test(item.slug) ? item.slug : null;
-    const path = safeSlug ? "/monthly/" + safeSlug : "/monthly/id/" + encodeURIComponent(item.id);
-    return previewPath(path);
+    return safeSlug ? "/monthly/" + safeSlug : "/monthly/id/" + encodeURIComponent(item.id);
+  }
+
+  function showcaseListingPath(item, context) {
+    const path = rawListingPath(item);
+    if (typeof context !== "string" || !context || context.length > 256) return path;
+    const params = new URLSearchParams();
+    params.set("sc", context);
+    return path + "?" + params.toString();
+  }
+
+  function listingPath(item) {
+    return previewPath(
+      runtime.showcaseContext
+        ? showcaseListingPath(item, runtime.showcaseContext)
+        : rawListingPath(item)
+    );
+  }
+
+  function listingNavigationPath(item, request) {
+    const values = Object.assign({}, request || {});
+    if (runtime.showcaseContext) values.sc = runtime.showcaseContext;
+    return previewPath(rawListingPath(item) + queryString(values));
   }
 
   function openListing(event, item) {
     event.preventDefault();
     const page = { route: "listing", listing_id: String(item.id), slug: null };
-    const guided = runtime.page.route !== "browse";
+    const inShowcase = runtime.page.route === "showcase";
+    const guided = runtime.page.route !== "browse" && !inShowcase;
     runtime.recommendationContext = guided ? safeRecommendationContext(item, runtime.lang) : null;
-    const sourceRequest = guided ? runtime.request : runtime.browseQuery;
+    const sourceRequest = inShowcase ? {} : (guided ? runtime.request : runtime.browseQuery);
     runtime.listingRequest = canonicalListingRequest(sourceRequest, item);
     persistState();
-    navigate(page, listingPath(item) + queryString(runtime.listingRequest));
+    navigate(page, listingNavigationPath(item, runtime.listingRequest));
   }
 
   function createCard(item, index) {
@@ -1365,6 +1425,14 @@
       body.appendChild(element("p", "price-line", copy("perMonth", { amount: formatNumber(item.quote.monthly_rate_sar) })));
       const included = approvedIncluded(item.quote.included || []).map(function (key) { return copy(key); });
       if (included.length) body.appendChild(element("p", "card-included", copy("quoteIncludes", { items: included.join(runtime.lang === "ar" ? "، " : ", ") })));
+    } else if (
+      runtime.page.route === "showcase" && runtime.showcase &&
+      runtime.showcase.fixed_price_enabled === true &&
+      Number.isInteger(runtime.showcase.fixed_monthly_rate_sar)
+    ) {
+      body.appendChild(element("p", "price-line showcase-card-price", copy("perMonth", {
+        amount: formatNumber(runtime.showcase.fixed_monthly_rate_sar)
+      })));
     }
     const status = publicAvailabilityStatus(item.availability_status, Boolean(item.quote));
     if (status) {
@@ -1380,6 +1448,92 @@
     const grid = element("div", "listing-grid");
     (items || []).forEach(function (item, index) { grid.appendChild(createCard(item, index + 1)); });
     return grid;
+  }
+
+  async function renderShowcase() {
+    loadingView();
+    const slug = runtime.page && runtime.page.showcase_slug;
+    if (!SHOWCASE_SLUG_RE.test(slug || "") || !ENDPOINTS.showcase) {
+      throw new Error(copy("serviceUnavailable"));
+    }
+    const result = await getJSON(ENDPOINTS.showcase, { slug: slug, lang: runtime.lang });
+    const showcase = result && result.showcase;
+    if (!showcase || !SHOWCASE_CONTEXT_RE.test(showcase.context || "")) {
+      throw new Error(copy("serviceUnavailable"));
+    }
+    runtime.showcase = showcase;
+    runtime.showcaseContext = showcase.context;
+    runtime.recommendationContext = null;
+    runtime.listingRequest = {};
+
+    const target = clearMain();
+    const wrap = element("div", "page-width showcase-page");
+    const hero = element("section", "showcase-hero");
+    const words = element("div", "showcase-hero-copy");
+    append(words,
+      element("p", "showcase-kicker", copy("showcaseKicker")),
+      element("h1", "", showcase.name || ""),
+      element("p", "showcase-description", showcase.description || "")
+    );
+    const imageUrl = safeImageUrl(showcase.image_url);
+    if (imageUrl) {
+      const media = element("figure", "showcase-hero-media");
+      const image = element("img");
+      image.src = imageUrl;
+      image.alt = showcase.name || "";
+      image.width = 960;
+      image.height = 720;
+      image.loading = "eager";
+      image.decoding = "async";
+      media.appendChild(image);
+      append(hero, words, media);
+    } else {
+      hero.appendChild(words);
+    }
+    wrap.appendChild(hero);
+
+    const offer = element("section", "showcase-offer");
+    const offerText = element("div");
+    if (showcase.fixed_price_enabled === true && Number.isInteger(showcase.fixed_monthly_rate_sar)) {
+      append(offerText,
+        element("span", "showcase-offer-label", copy("showcaseFixedPrice")),
+        element("strong", "showcase-offer-value", copy("perMonth", {
+          amount: formatNumber(showcase.fixed_monthly_rate_sar)
+        })),
+        element("p", "", copy("showcaseFixedPriceHelp"))
+      );
+    } else {
+      append(offerText,
+        element("strong", "showcase-offer-value listing-prices", copy("showcaseListingPrice")),
+        element("p", "", copy("showcaseListingPriceHelp"))
+      );
+    }
+    offer.appendChild(offerText);
+    offer.appendChild(element("span", "showcase-count", copy("showcaseHomes", {
+      count: formatNumber(showcase.eligible_count || 0)
+    })));
+    wrap.appendChild(offer);
+
+    const homes = Array.isArray(showcase.homes) ? showcase.homes : [];
+    if (homes.length) {
+      const heading = element("div", "section-heading showcase-heading");
+      heading.appendChild(element("h2", "", copy("showcaseHomes", { count: formatNumber(homes.length) })));
+      wrap.appendChild(heading);
+      wrap.appendChild(catalogGrid(homes));
+    } else {
+      wrap.appendChild(stateMessage(copy("showcaseEmptyTitle"), copy("showcaseEmptyText"), "warning"));
+    }
+    target.appendChild(wrap);
+    document.title = (showcase.name || copy("brand")) + " · " + copy("brand");
+    track("showcase_view", { showcase_id: showcase.group_id });
+    homes.forEach(function (home) {
+      track("showcase_listing_impression", {
+        showcase_id: showcase.group_id,
+        listing_id: String(home.id)
+      });
+    });
+    announce(showcase.name || copy("showcaseKicker"));
+    focusMain();
   }
 
   async function renderHome() {
@@ -1962,6 +2116,7 @@
   function listingQuery(identifier, bySlug) {
     const values = Object.assign({ lang: runtime.lang }, listingQuoteRequest(runtime.listingRequest));
     if (bySlug) values.lookup = "slug";
+    if (runtime.showcaseContext) values.showcase_context = runtime.showcaseContext;
     return requestPath(ENDPOINTS.listing + encodeURIComponent(identifier), values);
   }
 
@@ -2347,7 +2502,7 @@
       }
       runtime.listingRequest = request;
       persistState();
-      window.history.replaceState(runtime.page, "", previewPath(listingPath(listing) + queryString(runtime.listingRequest)));
+      window.history.replaceState(runtime.page, "", listingNavigationPath(listing, runtime.listingRequest));
       loadListing(listing.id, false);
     });
     return form;
@@ -2364,7 +2519,8 @@
           journey_id: runtime.journeyId,
           listing_id: String(listing.id),
           request: runtime.listingRequest,
-          lang: runtime.lang
+          lang: runtime.lang,
+          showcase_context: runtime.showcaseContext || undefined
         });
       });
       const handoffUrl = safeWhatsAppUrl(handoff.url);
@@ -2416,6 +2572,16 @@
   function renderListingPage(listing, quote, status) {
     const target = clearMain();
     const wrap = element("article", "page-width listing-page");
+    if (runtime.showcase && SHOWCASE_SLUG_RE.test(runtime.showcase.slug || "")) {
+      const returnBar = element("aside", "showcase-return");
+      const returnLink = actionLink(
+        copy("showcaseBack"),
+        "/monthly/showcase/" + runtime.showcase.slug,
+        "showcase-return-link"
+      );
+      append(returnBar, returnLink, element("span", "", runtime.showcase.price_mode === "fixed" ? copy("showcaseFixedPrice") : copy("showcaseListingPrice")));
+      wrap.appendChild(returnBar);
+    }
     wrap.appendChild(gallery(listing));
     const layout = element("div", "listing-layout");
     layout.appendChild(listingContent(listing));
@@ -2433,6 +2599,12 @@
       target.appendChild(mobile);
     }
     track("listing_view", { listing_id: String(listing.id) });
+    if (runtime.showcase) {
+      track("showcase_listing_view", {
+        showcase_id: runtime.showcase.group_id,
+        listing_id: String(listing.id)
+      });
+    }
     announce(listing.title);
     focusMain();
   }
@@ -2443,6 +2615,8 @@
       const result = await requestJSON(listingQuery(identifier, bySlug));
       runtime.currentListing = result.listing;
       runtime.quote = result.quote;
+      runtime.showcase = result.showcase || null;
+      runtime.showcaseContext = result.showcase && result.showcase.context ? result.showcase.context : runtime.showcaseContext;
       renderListingPage(result.listing, result.quote, result.quote_status);
     } catch (error) {
       if (error.code === "listing_not_found") {
@@ -2473,6 +2647,7 @@
         else renderMatcher();
       }
       else if (runtime.page.route === "browse") await renderBrowse();
+      else if (runtime.page.route === "showcase") await renderShowcase();
       else if (runtime.page.route === "listing") {
         const identifier = runtime.page.listing_id || runtime.page.slug;
         await localizeRecommendationContext();
@@ -2544,6 +2719,7 @@
     safeRecommendationContext: safeRecommendationContext,
     safeImageUrl: safeImageUrl,
     safeWhatsAppUrl: safeWhatsAppUrl,
+    showcaseListingPath: showcaseListingPath,
     setLanguage: setLanguage
   };
 });

@@ -78,7 +78,7 @@ class MonthlyPublicPageTests(unittest.TestCase):
         self.assertRegex(CSS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.css$")
         self.assertRegex(JS_PATH, r"^/monthly/static/monthly\.[a-z0-9]+\.js$")
         self.assertFalse(any(value.startswith(("http://", "https://", "//")) for value in parser.assets))
-        self.assertEqual(ASSET_VERSION, "v20260827b")
+        self.assertEqual(ASSET_VERSION, "v20260827c")
 
     def test_page_state_is_safe_and_supports_every_approved_deep_link(self):
         from monthly_public.page import page_state, render_monthly_page
@@ -195,6 +195,7 @@ class MonthlyPublicPageBotBoundaryTests(unittest.TestCase):
             "/monthly/search": "browse",
             "/monthly/match": "match",
             "/monthly/id/{lid}": "listing",
+            "/monthly/showcase/{showcase_slug}": "showcase",
             "/monthly/{slug}": "listing",
         }
         registered = self.bot._monthly_public_v2_page_routes()

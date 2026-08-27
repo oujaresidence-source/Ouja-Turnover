@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .fonts import FONT_CSS_PATH
 
-ASSET_VERSION = "v20260827b"
+ASSET_VERSION = "v20260827c"
 CSS_PATH = "/monthly/static/monthly_catalog.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly_catalog.%s.js" % ASSET_VERSION
 
@@ -60,6 +60,7 @@ def render_monthly_catalog_page() -> str:
 
       <nav class="workspace-tabs" aria-label="أقسام تجهيز البيانات" role="tablist">
         <button id="tab-portfolio" class="workspace-tab active" type="button" role="tab" aria-selected="true" aria-controls="portfolio" data-panel="portfolio" data-copy="apartmentsTab">الشقق</button>
+        <button id="tab-showcases" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="showcases" data-panel="showcases" data-copy="showcasesTab">العروض الخاصة</button>
         <button id="tab-global" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="global-setup" data-panel="global-setup" data-copy="settingsTab">الإعدادات المشتركة</button>
         <button id="tab-places" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="places" data-panel="places" data-copy="placesTab">الأماكن المعتمدة</button>
       </nav>
@@ -121,6 +122,38 @@ def render_monthly_catalog_page() -> str:
           </label>
         </form>
         <div id="listing-table" class="listing-table" aria-live="polite"></div>
+      </section>
+
+      <section id="showcases" class="workspace-panel" role="tabpanel" aria-labelledby="tab-showcases" hidden>
+        <div class="section-heading">
+          <div>
+            <h2 data-copy="showcasesTitle">روابط خاصة لمجموعة شقق</h2>
+            <p data-copy="showcasesDetail">اجمع شقق المبنى في رابط دائم، وحدد سعرًا شهريًا موحدًا يمكن إيقافه بدون حذف السعر الأصلي.</p>
+          </div>
+          <button id="new-showcase" class="button button-secondary" type="button" data-copy="newShowcase">مجموعة جديدة</button>
+        </div>
+        <div class="showcase-workspace">
+          <div id="showcase-list" class="showcase-list" aria-live="polite"></div>
+          <form id="showcase-form" class="form-surface showcase-form" autocomplete="off" novalidate hidden>
+            <div id="showcase-error" class="error-summary" role="alert" tabindex="-1" hidden></div>
+            <div id="showcase-fields" class="form-grid"></div>
+            <fieldset class="showcase-members span-all">
+              <legend data-copy="showcaseApartments">شقق المجموعة</legend>
+              <label class="search-field">
+                <span data-copy="showcaseSearch">ابحث عن شقة</span>
+                <input id="showcase-search" type="search" autocomplete="off" data-copy-placeholder="searchPlaceholder" placeholder="مثال: 101 أو الملقا">
+              </label>
+              <p data-copy="showcaseApartmentHelp">اختر كل الشقق الفعلية في المبنى. الشقة الناقصة تبقى محفوظة هنا، لكنها لا تظهر للعميل حتى تجتاز فحص النشر.</p>
+              <div id="showcase-listings" class="showcase-listings"></div>
+            </fieldset>
+            <div id="showcase-public-link" class="showcase-public-link" hidden></div>
+            <footer class="form-actions showcase-actions">
+              <span id="showcase-status" class="status-text" role="status" aria-live="polite"></span>
+              <button id="save-showcase" class="button button-secondary" type="submit" data-copy="saveDraft">حفظ المسودة</button>
+              <button id="approve-showcase" class="button button-primary" type="button" data-copy="approveShowcase">اعتماد الرابط</button>
+            </footer>
+          </form>
+        </div>
       </section>
 
       <section id="survey" class="workspace-panel survey-panel" role="region" aria-labelledby="survey-title" hidden>

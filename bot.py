@@ -212,6 +212,19 @@ try:
     )
     from monthly_public.legacy import render_legacy_monthly_page as _render_monthly_legacy_page
     from monthly_public.routes import MonthlyPublicApp as _MonthlyPublicApp
+    from monthly_public.showcase_contracts import (
+        ShowcaseContractError as _ShowcaseContractError,
+    )
+    from monthly_public.showcase_service import (
+        ShowcaseNotFound as _ShowcaseNotFound,
+        ShowcaseService as _MonthlyShowcaseService,
+    )
+    from monthly_public.showcase_store import (
+        DuplicateShowcaseSlug as _DuplicateShowcaseSlug,
+        ImmutableShowcaseSlug as _ImmutableShowcaseSlug,
+        RevisionConflict as _ShowcaseRevisionConflict,
+        ShowcaseStore as _MonthlyShowcaseStore,
+    )
     from monthly_public.settings import load_settings as _monthly_public_load_settings
     from monthly_public.snapshot import SnapshotStore as _MonthlySnapshotStore
     from monthly_public.reviews import build_review_projections as _monthly_review_projections
@@ -223,7 +236,11 @@ except Exception as _mpub_err:          # pragma: no cover - optional staged rol
     _monthly_public_load_settings = _MonthlySnapshotStore = None
     _monthly_review_projections = None
     _MonthlyCatalogService = _MonthlyCatalogStore = None
+    _MonthlyShowcaseService = _MonthlyShowcaseStore = None
     _CatalogContractError = _CatalogRevisionConflict = None
+    _ShowcaseContractError = _ShowcaseNotFound = None
+    _ShowcaseRevisionConflict = None
+    _DuplicateShowcaseSlug = _ImmutableShowcaseSlug = None
     _monthly_catalog_apply_approved_profile = None
     _MONTHLY_PUBLIC_ASSET_ROUTES = _MONTHLY_PUBLIC_PAGE_ROUTES = {}
     _MONTHLY_PUBLIC_CSS_PATH = _MONTHLY_PUBLIC_JS_PATH = ""
@@ -58320,6 +58337,8 @@ _monthly_public_app = None
 _monthly_catalog_store = None
 _monthly_catalog_service = None
 _monthly_catalog_seed_status = None
+_monthly_showcase_store = None
+_monthly_showcase_service = None
 if _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
     try:
         _monthly_public_snapshot = _MonthlySnapshotStore(
@@ -58730,7 +58749,35 @@ if (_monthly_catalog_store is not None
         print("[monthly-catalog] service unavailable:", _mcat_service_err)
         _monthly_catalog_service = None
 
+if (_HAS_MONTHLY_PUBLIC
+        and MONTHLY_ENABLED
+        and _MonthlyShowcaseStore is not None
+        and _MonthlyShowcaseService is not None):
+    try:
+        if (not isinstance(_monthly_public_session_secret, bytes)
+                or len(_monthly_public_session_secret) < 32):
+            raise RuntimeError("MONTHLY_SESSION_SECRET must contain at least 32 bytes")
+        _monthly_showcase_store = _MonthlyShowcaseStore(
+            _state_path("monthly_showcases.sqlite3")
+        )
+        _monthly_showcase_service = _MonthlyShowcaseService(
+            store=_monthly_showcase_store,
+            inventory_provider=_monthly_public_source_adapter,
+            snapshot_provider=lambda: (
+                _monthly_public_snapshot.current
+                if _monthly_public_snapshot is not None
+                else None
+            ),
+            session_secret=_monthly_public_session_secret,
+            clock=lambda: datetime.now(TZ),
+        )
+    except Exception as _mshowcase_init_err:
+        print("[monthly-showcase] service unavailable:", _mshowcase_init_err)
+        _monthly_showcase_store = None
+        _monthly_showcase_service = None
+
 if _monthly_public_app is not None:
+    _monthly_public_app.showcase_service = _monthly_showcase_service
     if _monthly_catalog_service is not None:
         _monthly_public_app.catalog_health_provider = _monthly_catalog_service.health
     else:
@@ -59237,7 +59284,8 @@ def _monthly_public_v2_asset_routes():
     return dict(_MONTHLY_PUBLIC_ASSET_ROUTES)
 
 
-def _monthly_public_page_html(route, request, *, slug=None, listing_id=None):
+def _monthly_public_page_html(
+        route, request, *, slug=None, listing_id=None, showcase_slug=None):
     if _render_monthly_public_page is None:
         raise RuntimeError("monthly public page renderer is unavailable")
     staff_review_available = (
@@ -59247,6 +59295,7 @@ def _monthly_public_page_html(route, request, *, slug=None, listing_id=None):
         route,
         slug=slug,
         listing_id=listing_id,
+        showcase_slug=showcase_slug,
         staff_review_available=staff_review_available,
     )
 
@@ -59363,6 +59412,19 @@ async def _handle_monthly_id(request):
         raise web.HTTPFound("/monthly/" + _gw_slug(snap, ov) + q)
     return web.Response(text=_monthly_render("listing", base=str(request.url.origin())), content_type="text/html")
 
+
+async def _handle_monthly_showcase(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    slug = request.match_info.get("showcase_slug", "")
+    try:
+        body = _monthly_public_page_html(
+            "showcase", request, showcase_slug=slug
+        )
+    except ValueError:
+        return _monthly_off()
+    return web.Response(text=body, content_type="text/html")
+
 async def _handle_monthly_detail(request):
     if not MONTHLY_ENABLED:
         return _monthly_off()
@@ -59416,7 +59478,7 @@ def _monthly_public_response(result):
     if result.get("ok") is not False:
         return _json(result)
     code = ((result.get("error") or {}).get("code") or "")
-    if code in ("listing_not_found", "lead_not_found"):
+    if code in ("listing_not_found", "lead_not_found", "showcase_not_found"):
         status = 404
     elif code in ("request_failed", "snapshot_missing"):
         status = 503
@@ -59472,7 +59534,7 @@ def _monthly_v2_listing_query(request, listing_id):
     raw = dict(request.query)
     out = ({"slug": listing_id} if raw.get("lookup") == "slug"
            else {"listing_id": listing_id})
-    for key in ("move_in", "move_out", "duration_months", "residents", "purpose", "lang"):
+    for key in ("move_in", "move_out", "duration_months", "residents", "purpose", "lang", "showcase_context"):
         if raw.get(key) not in (None, ""):
             out[key] = raw[key]
     if "duration_months" not in out and raw.get("months") not in (None, ""):
@@ -59517,6 +59579,20 @@ async def _api_monthly_v2_featured(request):
     if result.get("ok"):
         result = {"ok": True, "results": list(result.get("results") or [])[:6],
                   "auto": True}
+    return _monthly_public_response(result)
+
+
+async def _api_monthly_v2_showcase(request):
+    blocked = _monthly_public_v2_gate()
+    if blocked is not None:
+        return blocked
+    result = await asyncio.to_thread(
+        _monthly_public_app.showcase,
+        {
+            "slug": request.query.get("slug", ""),
+            "lang": request.query.get("lang", "ar"),
+        },
+    )
     return _monthly_public_response(result)
 
 
@@ -59853,6 +59929,161 @@ async def _api_monthly_catalog_refresh(request):
     return await _monthly_catalog_response(_monthly_catalog_service.refresh)
 
 
+def _monthly_showcase_gate(request):
+    if not _monthly_public_v2_enabled():
+        return _monthly_off()
+    denied = _monthly_ops_gate(request)
+    if denied is not None:
+        return denied
+    if _monthly_showcase_service is None:
+        return _json({
+            "error": "showcase_unavailable",
+            "message_ar": "خدمة العروض الخاصة غير متاحة حاليًا.",
+            "message_en": "The private-collection service is currently unavailable.",
+        }, 503)
+    return None
+
+
+async def _monthly_showcase_response(call, *args):
+    try:
+        result = await asyncio.to_thread(call, *args)
+        return _json({"ok": True, "result": result})
+    except _ShowcaseRevisionConflict as error:
+        return _json({
+            "error": "revision_conflict",
+            "current_revision": error.current,
+            "message_ar": "حُفظ تعديل أحدث. أعد تحميل العرض قبل الحفظ.",
+            "message_en": "A newer revision was saved. Reload the collection before saving.",
+        }, 409)
+    except _ShowcaseContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    except _ShowcaseNotFound:
+        return _json({
+            "error": "showcase_not_found",
+            "message_ar": "العرض الخاص غير موجود.",
+            "message_en": "The private collection was not found.",
+        }, 404)
+    except (_ImmutableShowcaseSlug, _DuplicateShowcaseSlug):
+        return _json({
+            "error": "invalid_request",
+            "issue": {
+                "field": "slug",
+                "code": "permanent_url_conflict",
+                "message_ar": "الرابط الدائم مستخدم أو لا يمكن تغييره بعد الاعتماد.",
+                "message_en": "The permanent URL is in use or cannot change after approval.",
+            },
+        }, 400)
+    except ValueError:
+        return _json({
+            "error": "invalid_request",
+            "issue": {
+                "field": "request",
+                "code": "invalid_value",
+                "message_ar": "قيمة الطلب غير صحيحة.",
+                "message_en": "The request value is invalid.",
+            },
+        }, 400)
+    except Exception:
+        return _json({
+            "error": "showcase_unavailable",
+            "message_ar": "تعذر تحميل العروض الخاصة حاليًا.",
+            "message_en": "Private collections are currently unavailable.",
+        }, 503)
+
+
+async def _api_monthly_showcases(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_showcase_response(_monthly_showcase_service.portfolio)
+
+
+async def _api_monthly_showcase(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    return await _monthly_showcase_response(
+        _monthly_showcase_service.group, request.match_info.get("id")
+    )
+
+
+async def _api_monthly_showcase_create(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"showcase"}, {"showcase"}
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_showcase_response(
+        _monthly_showcase_service.create_draft,
+        body["showcase"],
+        _req_actor(request),
+    )
+
+
+async def _api_monthly_showcase_draft(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request),
+            {"revision", "showcase"},
+            {"revision", "showcase"},
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_showcase_response(
+        _monthly_showcase_service.save_draft,
+        request.match_info.get("id"),
+        body["showcase"],
+        body["revision"],
+        _req_actor(request),
+    )
+
+
+async def _api_monthly_showcase_approve(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request), {"revision"}, {"revision"}
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_showcase_response(
+        _monthly_showcase_service.approve,
+        request.match_info.get("id"),
+        body["revision"],
+        _req_actor(request),
+    )
+
+
+async def _api_monthly_showcase_price(request):
+    denied = _monthly_showcase_gate(request)
+    if denied is not None:
+        return denied
+    try:
+        body = _monthly_catalog_body(
+            await _read_body(request),
+            {"revision", "enabled"},
+            {"revision", "enabled"},
+        )
+    except _CatalogContractError as error:
+        return _json({"error": "invalid_request", "issue": error.as_dict()}, 400)
+    return await _monthly_showcase_response(
+        _monthly_showcase_service.set_price_enabled,
+        request.match_info.get("id"),
+        body["enabled"],
+        body["revision"],
+        _req_actor(request),
+    )
+
+
 async def _handle_monthly_ops(request):
     if not _monthly_public_v2_enabled():
         return _monthly_off()
@@ -60077,6 +60308,7 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/match", _api_monthly_v2_match)
     router.add_post("/api/monthly/lead", _api_monthly_v2_lead)
     router.add_post("/api/monthly/event", _api_monthly_v2_event)
+    router.add_get("/api/monthly/showcase", _api_monthly_v2_showcase)
     router.add_get("/monthly/ops", _handle_monthly_ops)
     router.add_get("/monthly/ops/listings", _handle_monthly_catalog)
     router.add_get("/monthly/ops/preview", _handle_monthly_preview_home)
@@ -60112,6 +60344,12 @@ def _register_monthly_v2_only_routes(router):
     router.add_post("/api/monthly/ops/places/draft", _api_monthly_catalog_place_draft)
     router.add_post("/api/monthly/ops/places/approve", _api_monthly_catalog_place_approve)
     router.add_post("/api/monthly/ops/refresh", _api_monthly_catalog_refresh)
+    router.add_get("/api/monthly/ops/showcases", _api_monthly_showcases)
+    router.add_get("/api/monthly/ops/showcase/{id}", _api_monthly_showcase)
+    router.add_post("/api/monthly/ops/showcase", _api_monthly_showcase_create)
+    router.add_post("/api/monthly/ops/showcase/{id}/draft", _api_monthly_showcase_draft)
+    router.add_post("/api/monthly/ops/showcase/{id}/approve", _api_monthly_showcase_approve)
+    router.add_post("/api/monthly/ops/showcase/{id}/price", _api_monthly_showcase_price)
 
 
 async def _api_monthly_admin(request):
@@ -60947,6 +61185,9 @@ async def start_web_server():
         app.router.add_get("/monthly/search", _handle_monthly_search)
         if MONTHLY_PUBLIC_V2:
             app.router.add_get("/monthly/match", _handle_monthly_match)
+            app.router.add_get(
+                "/monthly/showcase/{showcase_slug}", _handle_monthly_showcase
+            )
             app.router.add_get(_MONTHLY_PUBLIC_CSS_PATH, _handle_monthly_v2_css)
             app.router.add_get(_MONTHLY_PUBLIC_JS_PATH, _handle_monthly_v2_js)
         app.router.add_get("/monthly/id/{lid}", _handle_monthly_id)

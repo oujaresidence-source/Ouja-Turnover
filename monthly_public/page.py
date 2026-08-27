@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .fonts import FONT_CSS_PATH, PRELOAD_FONT_PATH
 
 
-ASSET_VERSION = "v20260827b"
+ASSET_VERSION = "v20260827c"
 CSS_PATH = "/monthly/static/monthly.%s.css" % ASSET_VERSION
 JS_PATH = "/monthly/static/monthly.%s.js" % ASSET_VERSION
 
@@ -19,12 +19,14 @@ PAGE_ROUTES = {
     "/monthly/search": "browse",
     "/monthly/match": "match",
     "/monthly/id/{lid}": "listing",
+    "/monthly/showcase/{showcase_slug}": "showcase",
     "/monthly/{slug}": "listing",
 }
 ASSET_ROUTES = {CSS_PATH: "css", JS_PATH: "js"}
 
-_ROUTES = frozenset({"home", "match", "browse", "listing"})
+_ROUTES = frozenset({"home", "match", "browse", "listing", "showcase"})
 _SAFE_ROUTE_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_SAFE_SHOWCASE_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$|^[a-z0-9]$")
 
 
 def _safe_optional(value: Any, field: str) -> Optional[str]:
@@ -41,6 +43,7 @@ def page_state(
     *,
     slug: Any = None,
     listing_id: Any = None,
+    showcase_slug: Any = None,
     preview: bool = False,
     staff_review_available: bool = False,
 ) -> Dict[str, Any]:
@@ -50,14 +53,22 @@ def page_state(
         raise ValueError("invalid monthly page route")
     safe_slug = _safe_optional(slug, "slug")
     safe_listing_id = _safe_optional(listing_id, "listing_id")
+    safe_showcase_slug = _safe_optional(showcase_slug, "showcase_slug")
+    if safe_showcase_slug and not _SAFE_SHOWCASE_SLUG.fullmatch(safe_showcase_slug):
+        raise ValueError("invalid showcase_slug")
     if route != "listing" and (safe_slug or safe_listing_id):
         raise ValueError("listing state is only valid on a listing route")
+    if route != "showcase" and safe_showcase_slug:
+        raise ValueError("showcase state is only valid on a showcase route")
+    if route == "showcase" and not safe_showcase_slug:
+        raise ValueError("showcase route requires a slug")
     if safe_slug and safe_listing_id:
         raise ValueError("choose one listing route identifier")
     return {
         "route": route,
         "slug": safe_slug,
         "listing_id": safe_listing_id,
+        "showcase_slug": safe_showcase_slug,
         "default_lang": "ar",
         "preview": bool(preview),
         "staff_review_available": bool(staff_review_available),
@@ -78,6 +89,7 @@ def render_monthly_page(
     *,
     slug: Any = None,
     listing_id: Any = None,
+    showcase_slug: Any = None,
     preview: bool = False,
     staff_review_available: bool = False,
 ) -> str:
@@ -88,6 +100,7 @@ def render_monthly_page(
             route,
             slug=slug,
             listing_id=listing_id,
+            showcase_slug=showcase_slug,
             preview=preview,
             staff_review_available=staff_review_available,
         )

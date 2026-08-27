@@ -76,7 +76,7 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
     def test_catalog_asset_version_changes_for_the_save_and_preview_flow(self):
         from monthly_public.catalog_page import ASSET_VERSION
 
-        self.assertEqual(ASSET_VERSION, "v20260827b")
+        self.assertEqual(ASSET_VERSION, "v20260827c")
 
     def test_portfolio_and_survey_expose_verified_review_readiness(self):
         js = JS_FILE.read_text("utf-8")
@@ -414,6 +414,43 @@ class MonthlyCatalogPageContractTest(unittest.TestCase):
         self.assertIn("encodeURIComponent(refreshed.id)", save_profile)
         self.assertIn("window.location.assign(authPath(", save_profile)
         self.assertNotIn('"/approve"', save_profile)
+
+    def test_showcase_workspace_manages_a_permanent_link_without_deleting_price(self):
+        from monthly_public.catalog_page import render_monthly_catalog_page
+
+        html = render_monthly_catalog_page()
+        js = JS_FILE.read_text("utf-8")
+
+        for required in (
+            'id="tab-showcases"',
+            'id="showcases"',
+            'id="showcase-form"',
+            'id="showcase-listings"',
+            'data-copy="showcasesTab"',
+        ):
+            self.assertIn(required, html)
+        for endpoint in (
+            '"/api/monthly/ops/showcases"',
+            '"/api/monthly/ops/showcase"',
+            '"/draft"',
+            '"/approve"',
+            '"/price"',
+        ):
+            self.assertIn(endpoint, js)
+        self.assertIn("renderShowcases", js)
+        self.assertIn("showcase-membership", CSS_FILE.read_text("utf-8"))
+
+        payload = self._javascript_result(
+            "api.buildShowcasePayload({"
+            "name_ar:'مجموعة الملقا',name_en:'Al Malqa Collection',slug:'al-malqa',"
+            "description_ar:'ثمان شقق في مبنى واحد',description_en:'Eight homes in one building',"
+            "image_url:'https://images.example/building.jpg',listing_ids:['101','102'],"
+            "fixed_monthly_rate_sar:'12500',fixed_price_enabled:false"
+            "})"
+        )
+        self.assertEqual(payload["listing_ids"], ["101", "102"])
+        self.assertEqual(payload["fixed_monthly_rate_sar"], 12500)
+        self.assertFalse(payload["fixed_price_enabled"])
 
 
 class MonthlyCatalogPageBotBoundaryTest(unittest.TestCase):

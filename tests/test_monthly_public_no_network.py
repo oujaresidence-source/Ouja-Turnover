@@ -225,6 +225,13 @@ class MonthlyPublicBotBoundaryTests(unittest.TestCase):
             ("POST", "/api/monthly/ops/places/draft"),
             ("POST", "/api/monthly/ops/places/approve"),
             ("POST", "/api/monthly/ops/refresh"),
+            ("GET", "/api/monthly/showcase"),
+            ("GET", "/api/monthly/ops/showcases"),
+            ("GET", "/api/monthly/ops/showcase/{id}"),
+            ("POST", "/api/monthly/ops/showcase"),
+            ("POST", "/api/monthly/ops/showcase/{id}/draft"),
+            ("POST", "/api/monthly/ops/showcase/{id}/approve"),
+            ("POST", "/api/monthly/ops/showcase/{id}/price"),
         }
         expected.add(("GET", self.bot._MONTHLY_FONT_CSS_PATH))
         expected.update(

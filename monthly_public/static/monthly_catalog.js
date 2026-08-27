@@ -264,6 +264,22 @@
     };
   }
 
+  function buildShowcasePayload(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const rate = number(source.fixed_monthly_rate_sar, false);
+    return {
+      name_ar: String(source.name_ar || "").trim(),
+      name_en: String(source.name_en || "").trim(),
+      slug: String(source.slug || "").trim().toLowerCase(),
+      description_ar: String(source.description_ar || "").trim(),
+      description_en: String(source.description_en || "").trim(),
+      image_url: String(source.image_url || "").trim() || null,
+      listing_ids: Array.from(new Set((Array.isArray(source.listing_ids) ? source.listing_ids : []).map(function (listingId) { return String(listingId || "").trim(); }).filter(Boolean))),
+      fixed_monthly_rate_sar: rate === undefined ? null : rate,
+      fixed_price_enabled: source.fixed_price_enabled === true
+    };
+  }
+
   function matchesLanguage(value, language) {
     if (!present(value)) return false;
     return language === "ar" ? /[\u0600-\u06ff]/.test(String(value)) : /[A-Za-z]/.test(String(value));
@@ -344,7 +360,7 @@
     });
   }
 
-  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, profileReadiness, completionPercent, translatedBlocker, issueFieldLabel, fieldStep, summarizePlaces, formatDistance, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
+  const exported = { authPath, buildFactValue, parseCoordinatePair, buildProfilePayload, buildSettingsPayload, buildPlacePayload, buildShowcasePayload, profileReadiness, completionPercent, translatedBlocker, issueFieldLabel, fieldStep, summarizePlaces, formatDistance, filterListings, translatedDay, prefillSourceLabel, retainConflictDraft, approvalOutcome };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (typeof document === "undefined") return;
 
@@ -361,7 +377,8 @@
     saved: "حُفظت المسودة.", approval_published: "تم اعتماد الشقة ونشر النسخة الآمنة.", approval_blocked: "تم اعتماد الشقة، لكنها غير منشورة حتى تُحل عوائق المصدر.", approval_pending: "تم اعتماد الشقة، وتحديث الموقع بانتظار دورة التحديث التالية.", approval_failed: "تم اعتماد الشقة، لكن تحديث الموقع لم ينجح. النسخة السابقة ما زالت آمنة.", conflict: "حفظ شخص آخر نسخة أحدث. حمّلنا رقم النسخة الأحدث وأبقينا تعديلاتك في الحقول للمراجعة وإعادة الحفظ.", conflictCompare: "قارن التغييرات قبل إعادة الحفظ", serverVersion: "نسخة الفريق المحفوظة", yourVersion: "تعديلاتك الحالية", invalid: "راجع الحقل المحدد وأكمل البيانات المطلوبة.", unauthorized: "انتهت صلاحية الدخول. افتح الصفحة من لوحة عوجا مرة أخرى.", forbidden: "صلاحيتك لا تسمح بالتعديل.", service: "الخدمة غير متاحة مؤقتاً، والبيانات المعتمدة لم تتأثر.",
     whatsapp: "رقم واتساب بصيغة دولية", timezone: "المنطقة الزمنية", workingHours: "أوقات الرد", from: "من", to: "إلى", internetIncluded: "أؤكد أن الإنترنت مشمول", maintenanceIncluded: "أؤكد أن الصيانة مشمولة", deposit: "مبلغ التأمين (ر.س)", refund_ar: "شروط الاسترداد بالعربي", refund_en: "شروط الاسترداد بالإنجليزي", payment_ar: "طريقة الدفع بالعربي", payment_en: "طريقة الدفع بالإنجليزي", addPayment: "إضافة طريقة دفع", longRoute: "مسار مراجعة 4–6 أشهر", settingsSaved: "حُفظت مسودة الإعدادات.", settingsApproved: "تم اعتماد الإعدادات.",
     place_id: "معرّف داخلي للمكان", place_ar: "اسم المكان بالعربي", place_en: "اسم المكان بالإنجليزي", purposes: "أغراض الإقامة", place_coordinates: "إحداثيات المكان أو رابط Google Maps", source_note: "دليل التحقق المختصر", activePlace: "فعّال للموقع", edit: "تعديل", placeSaved: "حُفظت مسودة المكان.", placeApproved: "تم اعتماد المكان.", noPlaces: "لا توجد أماكن معتمدة بعد.", work: "عمل أو انتقال", family: "عائلة", treatment: "علاج", visit: "زيارة", refreshOk: "تم طلب تحديث النسخة الآمنة.",
-    approvedDestinations: "مكان معتمد", business_hubs: "مراكز الأعمال", hospitals: "المستشفيات", family_retail: "وجهات العائلة والتسوق", riyadh_season: "موسم الرياض", events: "الفعاليات والمعارض", nearestPlaces: "أقرب 5 أماكن معتمدة", nearestDetail: "المسافة محسوبة بخط مستقيم بين نقطتين موثقتين، وليست وقت قيادة.", nearbyNoPin: "وثّق إحداثيات الشقة أولًا حتى نحسب أقرب الأماكن بدون تخمين.", nearbyEmpty: "لا توجد أماكن معتمدة يمكن حساب المسافة لها حاليًا.", straightLine: "بخط مستقيم", openMap: "فتح الخريطة", coordinateProof: "مصدر الإحداثيات", officialProof: "المصدر الرسمي", verifiedOn: "تم التحقق", reviewEvery: "المراجعة"
+    approvedDestinations: "مكان معتمد", business_hubs: "مراكز الأعمال", hospitals: "المستشفيات", family_retail: "وجهات العائلة والتسوق", riyadh_season: "موسم الرياض", events: "الفعاليات والمعارض", nearestPlaces: "أقرب 5 أماكن معتمدة", nearestDetail: "المسافة محسوبة بخط مستقيم بين نقطتين موثقتين، وليست وقت قيادة.", nearbyNoPin: "وثّق إحداثيات الشقة أولًا حتى نحسب أقرب الأماكن بدون تخمين.", nearbyEmpty: "لا توجد أماكن معتمدة يمكن حساب المسافة لها حاليًا.", straightLine: "بخط مستقيم", openMap: "فتح الخريطة", coordinateProof: "مصدر الإحداثيات", officialProof: "المصدر الرسمي", verifiedOn: "تم التحقق", reviewEvery: "المراجعة",
+    showcaseNameAr: "اسم المجموعة بالعربي", showcaseNameEn: "اسم المجموعة بالإنجليزي", showcaseSlug: "الرابط الدائم بالإنجليزي", showcaseDescriptionAr: "وصف المجموعة بالعربي", showcaseDescriptionEn: "وصف المجموعة بالإنجليزي", showcaseImage: "رابط صورة المبنى (اختياري)", showcaseRate: "السعر الشهري الموحد (ر.س)", showcaseEnabled: "تشغيل السعر الموحد في الرابط الخاص", showcaseApproved: "تم اعتماد الرابط الدائم.", showcaseSaved: "حُفظت مسودة المجموعة.", showcaseNoGroups: "ما فيه مجموعات خاصة إلى الآن.", showcaseOpen: "تعديل المجموعة", showcasePublished: "رابط معتمد", showcaseDraft: "مسودة", showcaseMembers: "شقق", showcaseEligible: "تظهر للعميل", showcaseBlocked: "تحتاج إكمال", showcaseOpenLink: "فتح رابط العميل", showcaseDisablePrice: "إيقاف السعر الموحد", showcaseEnablePrice: "تشغيل السعر الموحد", showcasePriceOn: "السعر الموحد شغال", showcasePriceOff: "كل شقة بسعرها الأصلي", showcaseSelectOne: "اختر شقة واحدة على الأقل"
   };
   const EN = Object.assign({}, AR, {
     identity: "Identity and photos", space: "Space and facts", location: "Location", content: "Arabic and English content", terms: "Monthly terms", sources: "Source readiness", approval: "Review and approval",
@@ -372,13 +389,14 @@
     saved: "Draft saved.", approval_published: "The apartment was approved and the safe snapshot was published.", approval_blocked: "The apartment was approved but is not published until source blockers are resolved.", approval_pending: "The apartment was approved. Website refresh is waiting for the next refresh pass.", approval_failed: "The apartment was approved, but website refresh failed. The previous safe snapshot remains active.", conflict: "Someone saved a newer version. The latest revision is loaded and your edits remain in the fields for review and retry.", conflictCompare: "Compare changes before saving again", serverVersion: "Saved team version", yourVersion: "Your current edits", invalid: "Review the relevant field and complete the required data.", unauthorized: "Your access expired. Reopen this page from the Ouja dashboard.", forbidden: "Your role cannot make this change.", service: "The service is temporarily unavailable. Approved data was not changed.",
     whatsapp: "WhatsApp number in international format", timezone: "Timezone", workingHours: "Response hours", from: "From", to: "To", internetIncluded: "I confirm internet is included", maintenanceIncluded: "I confirm maintenance is included", deposit: "Deposit (SAR)", refund_ar: "Arabic refund terms", refund_en: "English refund terms", payment_ar: "Arabic payment method", payment_en: "English payment method", addPayment: "Add payment method", longRoute: "4–6 month review route", settingsSaved: "Settings draft saved.", settingsApproved: "Settings approved.",
     place_id: "Internal place ID", place_ar: "Arabic place name", place_en: "English place name", purposes: "Stay purposes", place_coordinates: "Place coordinates or Google Maps URL", source_note: "Short verification evidence", activePlace: "Active on website", edit: "Edit", placeSaved: "Place draft saved.", placeApproved: "Place approved.", noPlaces: "No approved places yet.", work: "Work or relocation", family: "Family", treatment: "Treatment", visit: "Visit", refreshOk: "Safe snapshot refresh requested.",
-    approvedDestinations: "approved destinations", business_hubs: "Business hubs", hospitals: "Hospitals", family_retail: "Family retail", riyadh_season: "Riyadh Season", events: "Events and exhibitions", nearestPlaces: "Nearest 5 approved places", nearestDetail: "Distance is straight-line between two verified pins, not driving time.", nearbyNoPin: "Verify the apartment pin first so nearby places can be calculated without guessing.", nearbyEmpty: "No approved destinations can be measured right now.", straightLine: "straight-line", openMap: "Open map", coordinateProof: "Coordinate source", officialProof: "Official source", verifiedOn: "Verified", reviewEvery: "Review cadence"
+    approvedDestinations: "approved destinations", business_hubs: "Business hubs", hospitals: "Hospitals", family_retail: "Family retail", riyadh_season: "Riyadh Season", events: "Events and exhibitions", nearestPlaces: "Nearest 5 approved places", nearestDetail: "Distance is straight-line between two verified pins, not driving time.", nearbyNoPin: "Verify the apartment pin first so nearby places can be calculated without guessing.", nearbyEmpty: "No approved destinations can be measured right now.", straightLine: "straight-line", openMap: "Open map", coordinateProof: "Coordinate source", officialProof: "Official source", verifiedOn: "Verified", reviewEvery: "Review cadence",
+    showcaseNameAr: "Arabic collection name", showcaseNameEn: "English collection name", showcaseSlug: "Permanent English URL", showcaseDescriptionAr: "Arabic collection description", showcaseDescriptionEn: "English collection description", showcaseImage: "Building image URL (optional)", showcaseRate: "One monthly price (SAR)", showcaseEnabled: "Enable the fixed price on the private link", showcaseApproved: "Permanent link approved.", showcaseSaved: "Collection draft saved.", showcaseNoGroups: "No private collections yet.", showcaseOpen: "Edit collection", showcasePublished: "Approved link", showcaseDraft: "Draft", showcaseMembers: "homes", showcaseEligible: "customer-visible", showcaseBlocked: "need completion", showcaseOpenLink: "Open customer link", showcaseDisablePrice: "Disable fixed price", showcaseEnablePrice: "Enable fixed price", showcasePriceOn: "Fixed price is active", showcasePriceOff: "Each home uses its original price", showcaseSelectOne: "Choose at least one home"
   });
   const COPY = {
-    ar: { skipLink: "انتقل إلى المحتوى", productName: "بيانات الشقق", dashboard: "لوحة عوجا", contextLabel: "السكن الشهري", pageTitle: "جهّز كل شقة للنشر من مكان واحد", pageDetail: "راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.", refreshData: "تحديث البيانات", previewCustomerJourney: "معاينة رحلة العميل", previewCustomerDetail: "يعرض كل الشقق داخليًا ولا ينشر أي شقة", apartmentsTab: "الشقق", settingsTab: "الإعدادات المشتركة", placesTab: "الأماكن المعتمدة", loadFailed: "تعذر تحميل بيانات الشقق", loadFailedDetail: "حاول التحديث، ولن تتأثر البيانات المعتمدة الحالية.", globalTitle: "إعدادات تُكتب مرة واحدة", globalDetail: "رقم التواصل، أوقات الرد، التأمين، طرق الدفع، ومسار الإقامات من أربعة إلى ستة أشهر.", saveDraft: "حفظ المسودة", approveSettings: "اعتماد الإعدادات", portfolioTitle: "الشقق المستلمة", portfolioDetail: "صف واحد لكل شقة فعلية، مع الناقص والخطوة التالية.", searchLabel: "ابحث برقم الشقة أو الاسم", searchPlaceholder: "مثال: 101 أو الملقا", statusLabel: "الحالة", allStatuses: "كل الحالات", needsReview: "تحتاج مراجعة", readyApproval: "جاهزة للاعتماد", published: "منشورة", sourceBlocked: "محجوبة من مصدر حي", blockerLabel: "الناقص", allBlockers: "كل الأسباب", licence: "معلومات الإعلان", price: "السعر الرسمي", calendar: "التقويم", content: "المحتوى", backToApartments: "العودة للشقق", surveyTitle: "مراجعة الشقة", previewReadiness: "معاينة الجاهزية", saveAndPreview: "حفظ ومشاهدة كتجربة عميل", approveAndRefresh: "اعتماد وتحديث الموقع", placesTitle: "الأماكن المهمة للعملاء", placesDetail: "أدخل المكان مرة واحدة، ولا يظهر القرب إلا بعد اعتماد إحداثيات الطرفين.", addPlace: "إضافة مكان", approvePlace: "اعتماد المكان", reviewsReady: "{count} تقييم موثق", reviewsMissing: "لا توجد تقييمات موثقة" },
-    en: { skipLink: "Skip to content", productName: "Apartment data", dashboard: "Ouja dashboard", contextLabel: "Monthly stays", pageTitle: "Prepare every apartment for publishing in one place", pageDetail: "Review trusted prefills, complete what is missing, then approve it for the website.", refreshData: "Refresh data", previewCustomerJourney: "Preview customer journey", previewCustomerDetail: "Shows every home internally and publishes none", apartmentsTab: "Apartments", settingsTab: "Shared settings", placesTab: "Approved places", loadFailed: "Apartment data could not be loaded", loadFailedDetail: "Try refreshing. Current approved data remains unchanged.", globalTitle: "Settings entered once", globalDetail: "Contact number, response hours, deposit, payments, and the four-to-six-month route.", saveDraft: "Save draft", approveSettings: "Approve settings", portfolioTitle: "Received apartments", portfolioDetail: "One row per real apartment, showing the gap and next step.", searchLabel: "Search by apartment ID or name", searchPlaceholder: "For example: 101 or Al Malqa", statusLabel: "Status", allStatuses: "All statuses", needsReview: "Needs review", readyApproval: "Ready to approve", published: "Published", sourceBlocked: "Blocked by live source", blockerLabel: "Missing item", allBlockers: "All reasons", licence: "Advertising information", price: "Official price", calendar: "Calendar", content: "Content", backToApartments: "Back to apartments", surveyTitle: "Review apartment", previewReadiness: "Preview readiness", saveAndPreview: "Save and view as a customer", approveAndRefresh: "Approve and refresh website", placesTitle: "Customer destinations", placesDetail: "Enter each destination once. Proximity appears only after both pins are verified.", addPlace: "Add place", approvePlace: "Approve place", reviewsReady: "{count} verified reviews", reviewsMissing: "No verified reviews" }
+    ar: { skipLink: "انتقل إلى المحتوى", productName: "بيانات الشقق", dashboard: "لوحة عوجا", contextLabel: "السكن الشهري", pageTitle: "جهّز كل شقة للنشر من مكان واحد", pageDetail: "راجع البيانات المعبأة تلقائيًا، أكمل الناقص، ثم اعتمدها للموقع.", refreshData: "تحديث البيانات", previewCustomerJourney: "معاينة رحلة العميل", previewCustomerDetail: "يعرض كل الشقق داخليًا ولا ينشر أي شقة", apartmentsTab: "الشقق", showcasesTab: "العروض الخاصة", settingsTab: "الإعدادات المشتركة", placesTab: "الأماكن المعتمدة", loadFailed: "تعذر تحميل بيانات الشقق", loadFailedDetail: "حاول التحديث، ولن تتأثر البيانات المعتمدة الحالية.", globalTitle: "إعدادات تُكتب مرة واحدة", globalDetail: "رقم التواصل، أوقات الرد، التأمين، طرق الدفع، ومسار الإقامات من أربعة إلى ستة أشهر.", saveDraft: "حفظ المسودة", approveSettings: "اعتماد الإعدادات", portfolioTitle: "الشقق المستلمة", portfolioDetail: "صف واحد لكل شقة فعلية، مع الناقص والخطوة التالية.", searchLabel: "ابحث برقم الشقة أو الاسم", searchPlaceholder: "مثال: 101 أو الملقا", statusLabel: "الحالة", allStatuses: "كل الحالات", needsReview: "تحتاج مراجعة", readyApproval: "جاهزة للاعتماد", published: "منشورة", sourceBlocked: "محجوبة من مصدر حي", blockerLabel: "الناقص", allBlockers: "كل الأسباب", licence: "معلومات الإعلان", price: "السعر الرسمي", calendar: "التقويم", content: "المحتوى", backToApartments: "العودة للشقق", surveyTitle: "مراجعة الشقة", previewReadiness: "معاينة الجاهزية", saveAndPreview: "حفظ ومشاهدة كتجربة عميل", approveAndRefresh: "اعتماد وتحديث الموقع", placesTitle: "الأماكن المهمة للعملاء", placesDetail: "أدخل المكان مرة واحدة، ولا يظهر القرب إلا بعد اعتماد إحداثيات الطرفين.", addPlace: "إضافة مكان", approvePlace: "اعتماد المكان", reviewsReady: "{count} تقييم موثق", reviewsMissing: "لا توجد تقييمات موثقة", showcasesTitle: "روابط خاصة لمجموعة شقق", showcasesDetail: "اجمع شقق المبنى في رابط دائم، وحدد سعرًا شهريًا موحدًا يمكن إيقافه بدون حذف السعر الأصلي.", newShowcase: "مجموعة جديدة", showcaseApartments: "شقق المجموعة", showcaseSearch: "ابحث عن شقة", showcaseApartmentHelp: "اختر كل الشقق الفعلية في المبنى. الشقة الناقصة تبقى محفوظة هنا، لكنها لا تظهر للعميل حتى تجتاز فحص النشر.", approveShowcase: "اعتماد الرابط" },
+    en: { skipLink: "Skip to content", productName: "Apartment data", dashboard: "Ouja dashboard", contextLabel: "Monthly stays", pageTitle: "Prepare every apartment for publishing in one place", pageDetail: "Review trusted prefills, complete what is missing, then approve it for the website.", refreshData: "Refresh data", previewCustomerJourney: "Preview customer journey", previewCustomerDetail: "Shows every home internally and publishes none", apartmentsTab: "Apartments", showcasesTab: "Private collections", settingsTab: "Shared settings", placesTab: "Approved places", loadFailed: "Apartment data could not be loaded", loadFailedDetail: "Try refreshing. Current approved data remains unchanged.", globalTitle: "Settings entered once", globalDetail: "Contact number, response hours, deposit, payments, and the four-to-six-month route.", saveDraft: "Save draft", approveSettings: "Approve settings", portfolioTitle: "Received apartments", portfolioDetail: "One row per real apartment, showing the gap and next step.", searchLabel: "Search by apartment ID or name", searchPlaceholder: "For example: 101 or Al Malqa", statusLabel: "Status", allStatuses: "All statuses", needsReview: "Needs review", readyApproval: "Ready to approve", published: "Published", sourceBlocked: "Blocked by live source", blockerLabel: "Missing item", allBlockers: "All reasons", licence: "Advertising information", price: "Official price", calendar: "Calendar", content: "Content", backToApartments: "Back to apartments", surveyTitle: "Review apartment", previewReadiness: "Preview readiness", saveAndPreview: "Save and view as a customer", approveAndRefresh: "Approve and refresh website", placesTitle: "Customer destinations", placesDetail: "Enter each destination once. Proximity appears only after both pins are verified.", addPlace: "Add place", approvePlace: "Approve place", reviewsReady: "{count} verified reviews", reviewsMissing: "No verified reviews", showcasesTitle: "Private links for groups of homes", showcasesDetail: "Group a building's homes under one permanent URL and use a fixed monthly price that can be disabled without deleting original prices.", newShowcase: "New collection", showcaseApartments: "Collection homes", showcaseSearch: "Search apartments", showcaseApartmentHelp: "Choose every real home in the building. Incomplete homes stay saved here but do not appear to customers until publication checks pass.", approveShowcase: "Approve link" }
   };
-  const state = { lang: "ar", listings: [], counts: {}, listing: null, profile: {}, step: "identity", settings: null, places: {}, placeId: "", placeRevision: 0 };
+  const state = { lang: "ar", listings: [], counts: {}, listing: null, profile: {}, step: "identity", settings: null, places: {}, placeId: "", placeRevision: 0, showcases: [], showcaseRecord: null, showcaseDraft: null };
   const id = function (value) { return document.getElementById(value); };
   const text = function (key) { return (state.lang === "ar" ? AR : EN)[key] || translatedBlocker(key, state.lang); };
 
@@ -460,7 +478,7 @@
   }
   function globalError(error) { id("catalog-error-detail").textContent = failureMessage(error); id("catalog-error").hidden = false; }
   function show(panel) {
-    ["portfolio", "global-setup", "places", "survey"].forEach(function (name) { id(name).hidden = name !== panel; });
+    ["portfolio", "showcases", "global-setup", "places", "survey"].forEach(function (name) { id(name).hidden = name !== panel; });
     document.querySelectorAll(".workspace-tab").forEach(function (tab) { const active = tab.dataset.panel === panel; tab.classList.toggle("active", active); tab.setAttribute("aria-selected", active ? "true" : "false"); });
   }
   function statusName(value) { return text(value); }
@@ -471,6 +489,12 @@
     root.appendChild(band); root.setAttribute("aria-busy", "false");
   }
   function currentFilters() { return { search: id("listing-search").value, status: id("status-filter").value, blocker: id("blocker-filter").value }; }
+  function showcaseValue(record) { return record && (record.draft || record.approved) || {}; }
+  function showcaseMemberships(listingId) {
+    return state.showcases.filter(function (record) {
+      return (showcaseValue(record).listing_ids || []).map(String).includes(String(listingId));
+    });
+  }
   function renderRows() {
     const rows = filterListings(state.listings, currentFilters()), root = id("listing-table"); empty(root); id("portfolio-count").textContent = rows.length + " / " + state.listings.length;
     if (!rows.length) { root.appendChild(node("p", { className: "empty-row", text: text("noRows") })); return; }
@@ -478,6 +502,10 @@
       const item = node("article", { className: "listing-row" }), picture = row.first_image && /^https:\/\//.test(row.first_image) ? node("img", { className: "listing-cover", src: row.first_image, alt: "" }) : node("div", { className: "listing-cover", text: row.id });
       if (picture.tagName === "IMG") { picture.loading = "lazy"; picture.referrerPolicy = "no-referrer"; }
       const name = node("div", { className: "listing-name" }); add(name, node("strong", { text: row[state.lang === "ar" ? "public_title_ar" : "public_title_en"] || row.source_title }), node("span", { text: text("apartment") + " " + row.id }));
+      showcaseMemberships(row.id).forEach(function (record) {
+        const group = showcaseValue(record);
+        name.appendChild(node("span", { className: "showcase-membership", text: group[state.lang === "ar" ? "name_ar" : "name_en"] || group.slug }));
+      });
       const progress = node("div", { className: "desktop-secondary" }), track = node("div", { className: "progress-track" }), fill = node("span"); fill.style.width = row.completion_percent + "%"; track.appendChild(fill); add(progress, node("span", { text: row.completion_percent + "% " + text("complete") }), track);
       const chip = node("span", { className: "status-chip " + (row.status === "published" || row.status === "ready_for_approval" ? "ready" : row.status === "source_blocked" ? "blocked" : "warning"), text: statusName(row.status) });
       const reviewCopy = row.review_ready ? COPY[state.lang].reviewsReady.replace("{count}", row.review_count || 0) : COPY[state.lang].reviewsMissing;
@@ -490,13 +518,142 @@
   }
   async function loadRows() { const result = await api("/api/monthly/ops/listings"); state.listings = result.listings || []; state.counts = result.counts || {}; renderSummary(); renderRows(); }
 
+  function newShowcase() {
+    state.showcaseRecord = null;
+    state.showcaseDraft = buildShowcasePayload({
+      name_ar: "", name_en: "", slug: "", description_ar: "", description_en: "",
+      image_url: "", listing_ids: [], fixed_monthly_rate_sar: null, fixed_price_enabled: false
+    });
+    renderShowcaseEditor();
+  }
+
+  async function openShowcase(groupId) {
+    try {
+      state.showcaseRecord = await api("/api/monthly/ops/showcase/" + encodeURIComponent(groupId));
+      state.showcaseDraft = clone(state.showcaseRecord.draft || state.showcaseRecord.approved || {});
+      if (state.showcaseRecord.approved) state.showcaseDraft.fixed_price_enabled = state.showcaseRecord.approved.fixed_price_enabled === true;
+      renderShowcaseEditor();
+    } catch (error) { showcaseError(error); }
+  }
+
+  function renderShowcases() {
+    const root = id("showcase-list"); empty(root);
+    if (!state.showcases.length) { root.appendChild(node("p", { className: "empty-row", text: text("showcaseNoGroups") })); return; }
+    state.showcases.forEach(function (record) {
+      const value = showcaseValue(record), row = node("article", { className: "showcase-row" }), identity = node("div", { className: "showcase-row-identity" }), meta = node("div", { className: "showcase-row-meta" }), actions = node("div", { className: "showcase-row-actions" });
+      add(identity, node("strong", { text: value[state.lang === "ar" ? "name_ar" : "name_en"] || value.slug || record.group_id }), node("span", { text: value.slug ? "/monthly/showcase/" + value.slug : record.group_id }));
+      add(meta, node("span", { text: (record.configured_count || 0) + " " + text("showcaseMembers") }), node("span", { text: (record.eligible_count || 0) + " " + text("showcaseEligible") }));
+      if (record.blocked_listing_ids && record.blocked_listing_ids.length) meta.appendChild(node("span", { className: "showcase-blocked", text: record.blocked_listing_ids.length + " " + text("showcaseBlocked") }));
+      const status = node("span", { className: "status-chip " + (record.approved ? "ready" : "warning"), text: text(record.approved ? "showcasePublished" : "showcaseDraft") });
+      const button = node("button", { type: "button", className: "button button-secondary", text: text("showcaseOpen") });
+      button.addEventListener("click", function () { openShowcase(record.group_id); });
+      add(actions, status, button); add(row, identity, meta, actions); root.appendChild(row);
+    });
+  }
+
+  function renderShowcaseMembers(search) {
+    const root = id("showcase-listings"), selected = new Set((state.showcaseDraft && state.showcaseDraft.listing_ids || []).map(String)), query = String(search || "").trim().toLocaleLowerCase(); empty(root);
+    state.listings.forEach(function (listing) {
+      const labelText = listing[state.lang === "ar" ? "public_title_ar" : "public_title_en"] || listing.source_title || listing.id;
+      const haystack = [listing.id, labelText, listing.source_title].join(" ").toLocaleLowerCase();
+      if (query && !haystack.includes(query)) return;
+      const label = node("label", { className: "showcase-listing-option" }), input = node("input", { type: "checkbox", name: "showcase_listing", value: listing.id, checked: selected.has(String(listing.id)) }), identity = node("span", { className: "showcase-listing-identity" });
+      add(identity, node("strong", { text: labelText }), node("span", { text: text("apartment") + " " + listing.id + " · " + listing.completion_percent + "% " + text("complete") }));
+      input.addEventListener("change", function () {
+        const values = new Set((state.showcaseDraft.listing_ids || []).map(String));
+        if (input.checked) values.add(String(listing.id)); else values.delete(String(listing.id));
+        state.showcaseDraft.listing_ids = Array.from(values);
+      });
+      add(label, input, identity); root.appendChild(label);
+    });
+  }
+
+  function renderShowcaseEditor() {
+    const form = id("showcase-form"), fields = id("showcase-fields"), value = state.showcaseDraft || {}, approved = state.showcaseRecord && state.showcaseRecord.approved; empty(fields);
+    add(fields,
+      field(text("showcaseNameAr"), "name_ar", value.name_ar, { noSource: true }),
+      field(text("showcaseNameEn"), "name_en", value.name_en, { noSource: true }),
+      field(text("showcaseSlug"), "slug", value.slug, { readOnly: Boolean(approved), noSource: true }),
+      field(text("showcaseImage"), "image_url", value.image_url, { noSource: true }),
+      field(text("showcaseDescriptionAr"), "description_ar", value.description_ar, { kind: "textarea", full: true, noSource: true }),
+      field(text("showcaseDescriptionEn"), "description_en", value.description_en, { kind: "textarea", full: true, noSource: true }),
+      field(text("showcaseRate"), "fixed_monthly_rate_sar", value.fixed_monthly_rate_sar, { type: "number", noSource: true }),
+      check(text("showcaseEnabled"), "fixed_price_enabled", value.fixed_price_enabled === true)
+    );
+    id("showcase-search").value = ""; renderShowcaseMembers("");
+    const publicLink = id("showcase-public-link"); empty(publicLink); publicLink.hidden = true;
+    if (state.showcaseRecord && state.showcaseRecord.public_url && /^\/monthly\/showcase\/[a-z0-9-]+$/.test(state.showcaseRecord.public_url)) {
+      const link = node("a", { text: text("showcaseOpenLink") }); link.href = state.showcaseRecord.public_url; link.target = "_blank"; link.rel = "noopener";
+      const enabled = approved && approved.fixed_price_enabled === true;
+      const toggle = node("button", { type: "button", className: "button button-secondary", text: text(enabled ? "showcaseDisablePrice" : "showcaseEnablePrice") });
+      toggle.addEventListener("click", toggleShowcasePrice);
+      add(publicLink, link, node("span", { className: "status-chip " + (enabled ? "ready" : "warning"), text: text(enabled ? "showcasePriceOn" : "showcasePriceOff") }), toggle); publicLink.hidden = false;
+    }
+    clearEditorConflict(id("showcase-status")); id("showcase-status").textContent = ""; id("showcase-error").hidden = true; form.hidden = false;
+  }
+
+  function showcaseFormValue() {
+    const form = id("showcase-form");
+    return buildShowcasePayload({
+      name_ar: form.elements.name_ar.value,
+      name_en: form.elements.name_en.value,
+      slug: form.elements.slug.value,
+      description_ar: form.elements.description_ar.value,
+      description_en: form.elements.description_en.value,
+      image_url: form.elements.image_url.value,
+      listing_ids: state.showcaseDraft.listing_ids,
+      fixed_monthly_rate_sar: form.elements.fixed_monthly_rate_sar.value,
+      fixed_price_enabled: form.elements.fixed_price_enabled.checked
+    });
+  }
+
+  function showcaseError(error) {
+    const panel = id("showcase-error"); empty(panel); panel.appendChild(node("p", { text: failureMessage(error) })); panel.hidden = false; panel.focus();
+  }
+
+  async function loadShowcases() {
+    state.showcases = await api("/api/monthly/ops/showcases");
+    renderShowcases(); renderRows();
+  }
+
+  async function saveShowcase() {
+    const localDraft = showcaseFormValue();
+    if (!localDraft.listing_ids.length) { const error = new Error("listing_ids"); error.status = 400; error.payload = { issue: { field: "listing_ids", message_ar: text("showcaseSelectOne"), message_en: text("showcaseSelectOne") } }; showcaseError(error); throw error; }
+    try {
+      let saved;
+      if (!state.showcaseRecord) {
+        saved = await api("/api/monthly/ops/showcase", { method: "POST", body: JSON.stringify({ showcase: localDraft }) });
+      } else {
+        saved = await api("/api/monthly/ops/showcase/" + encodeURIComponent(state.showcaseRecord.group_id) + "/draft", { method: "POST", body: JSON.stringify({ revision: state.showcaseRecord.draft_revision, showcase: localDraft }) });
+      }
+      const groupId = saved.group_id; await loadShowcases(); await openShowcase(groupId); id("showcase-status").textContent = text("showcaseSaved"); return state.showcaseRecord;
+    } catch (error) { showcaseError(error); throw error; }
+  }
+
+  async function approveShowcase() {
+    try {
+      const record = await saveShowcase();
+      await api("/api/monthly/ops/showcase/" + encodeURIComponent(record.group_id) + "/approve", { method: "POST", body: JSON.stringify({ revision: record.draft_revision }) });
+      await loadShowcases(); await openShowcase(record.group_id); id("showcase-status").textContent = text("showcaseApproved");
+    } catch (_error) { return; }
+  }
+
+  async function toggleShowcasePrice() {
+    if (!state.showcaseRecord || !state.showcaseRecord.approved) return;
+    const enabled = state.showcaseRecord.approved.fixed_price_enabled !== true;
+    try {
+      await api("/api/monthly/ops/showcase/" + encodeURIComponent(state.showcaseRecord.group_id) + "/price", { method: "POST", body: JSON.stringify({ revision: state.showcaseRecord.approved_revision, enabled: enabled }) });
+      await loadShowcases(); await openShowcase(state.showcaseRecord.group_id);
+    } catch (error) { showcaseError(error); }
+  }
+
   function field(labelText, path, value, options) {
     const config = options || {}, label = node("label", { className: config.full ? "span-all" : "" }); label.appendChild(node("span", { text: labelText })); let control;
     if (config.kind === "textarea") control = node("textarea", { name: path, value: value || "" });
     else if (config.kind === "select") { control = node("select", { name: path }); (config.options || []).forEach(function (choice) { const option = node("option", { value: choice[0], text: choice[1] }); if (String(choice[0]) === String(value)) option.selected = true; control.appendChild(option); }); }
     else control = node("input", { type: config.type || "text", name: path, value: value === undefined || value === null ? "" : value, readOnly: config.readOnly });
     label.appendChild(control);
-    if (state.listing && state.listing.prefill) {
+    if (!config.noSource && state.listing && state.listing.prefill) {
       const source = prefillSourceLabel(state.listing.prefill.sources, path, state.lang);
       if (source) label.appendChild(node("small", { className: "field-source", text: source }));
     }
@@ -728,14 +885,18 @@
 
   function bind() {
     id("catalog-ops-link").href = authPath("/monthly/ops", window.location.search); id("catalog-dashboard-link").href = authPath("/dashboard", window.location.search); id("preview-customer-journey").href = authPath("/monthly/ops/preview", window.location.search);
-    id("catalog-language").addEventListener("click", function () { state.lang = state.lang === "ar" ? "en" : "ar"; applyCopy(); renderSummary(); renderRows(); if (state.listing && !id("survey").hidden) renderSurvey(); if (state.settings && !id("global-setup").hidden) renderSettings(); if (!id("places").hidden) renderPlaces(); });
-    document.querySelectorAll(".workspace-tab").forEach(function (tab) { tab.addEventListener("click", async function () { const panel = tab.dataset.panel; show(panel); try { if (panel === "global-setup" && !state.settings) await loadSettings(); if (panel === "places") await loadPlaces(); } catch (error) { globalError(error); } }); });
+    id("catalog-language").addEventListener("click", function () { state.lang = state.lang === "ar" ? "en" : "ar"; applyCopy(); renderSummary(); renderRows(); if (state.listing && !id("survey").hidden) renderSurvey(); if (state.settings && !id("global-setup").hidden) renderSettings(); if (!id("places").hidden) renderPlaces(); if (!id("showcases").hidden) { renderShowcases(); if (state.showcaseDraft) renderShowcaseEditor(); } });
+    document.querySelectorAll(".workspace-tab").forEach(function (tab) { tab.addEventListener("click", async function () { const panel = tab.dataset.panel; show(panel); try { if (panel === "global-setup" && !state.settings) await loadSettings(); if (panel === "places") await loadPlaces(); if (panel === "showcases") await loadShowcases(); } catch (error) { if (panel === "showcases") showcaseError(error); else globalError(error); } }); });
     ["listing-search", "status-filter", "blocker-filter"].forEach(function (key) { id(key).addEventListener("input", renderRows); id(key).addEventListener("change", renderRows); }); id("portfolio-filters").addEventListener("submit", function (event) { event.preventDefault(); renderRows(); });
     id("close-survey").addEventListener("click", function () { show("portfolio"); }); id("survey-form").addEventListener("submit", function (event) { event.preventDefault(); saveProfile(false).catch(function () {}); }); id("preview-profile").addEventListener("click", function () { saveProfile(true).catch(function () {}); }); id("approve-profile").addEventListener("click", approveProfile);
     id("global-form").addEventListener("submit", function (event) { event.preventDefault(); saveSettings().catch(function (error) { editorError(id("settings-status"), error, state.settings); }); });
     id("approve-settings").addEventListener("click", async function () { try { const saved = await saveSettings(); await api("/api/monthly/ops/settings/approve", { method: "POST", body: JSON.stringify({ revision: saved.draft_revision }) }); id("settings-status").textContent = text("settingsApproved"); await loadSettings(); await loadRows(); } catch (error) { editorError(id("settings-status"), error, state.settings); } });
     id("new-place").addEventListener("click", function () { editPlace(null); }); id("place-form").addEventListener("submit", function (event) { event.preventDefault(); savePlace().catch(function (error) { editorError(id("places-title"), error, state.places[state.placeId]); }); });
     id("approve-place").addEventListener("click", async function () { try { const saved = await savePlace(), value = placeValue(); await api("/api/monthly/ops/places/approve", { method: "POST", body: JSON.stringify({ place_id: state.placeId, revision: saved.draft_revision, active: value.active }) }); id("places-title").textContent = text("placeApproved"); await loadPlaces(); id("place-form").hidden = true; } catch (error) { editorError(id("places-title"), error, state.places[state.placeId]); } });
+    id("new-showcase").addEventListener("click", newShowcase);
+    id("showcase-form").addEventListener("submit", function (event) { event.preventDefault(); saveShowcase().catch(function () {}); });
+    id("approve-showcase").addEventListener("click", approveShowcase);
+    id("showcase-search").addEventListener("input", function () { renderShowcaseMembers(id("showcase-search").value); });
     id("refresh-catalog").addEventListener("click", async function () { const button = id("refresh-catalog"); button.disabled = true; try { await api("/api/monthly/ops/refresh", { method: "POST", body: JSON.stringify({}) }); button.textContent = text("refreshOk"); await loadRows(); } catch (error) { globalError(error); } finally { button.disabled = false; } });
   }
 
@@ -750,5 +911,6 @@
         if (requestedSection && STEPS.includes(requestedSection)) { state.step = requestedSection; renderSurvey(); }
       });
     }
+    loadShowcases().catch(function () {});
   }).catch(function (error) { document.documentElement.dataset.catalogReady = "error"; globalError(error); });
 }());
