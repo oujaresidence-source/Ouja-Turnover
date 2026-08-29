@@ -181,7 +181,12 @@ class CatalogServiceTest(unittest.TestCase):
         self.assertIn("price_missing", result["background_blockers"])
         self.assertEqual(len(self.refresh_calls), 1)
 
-    def test_incomplete_staff_profile_cannot_be_approved(self):
+    def test_profile_below_showcase_minimum_cannot_be_approved(self):
+        self.source["listings"][0]["hostaway"]["images"] = []
+        self.source["listings"][0]["publication"] = valid_listing(
+            id=101, images=[], licence=None
+        )
+        self.source["listings"][0]["licence"] = None
         service = self.service()
         saved = service.save_profile_draft(
             "101", {"name_ar": "عوجا | عنوان"}, 0, "ops"
@@ -190,6 +195,21 @@ class CatalogServiceTest(unittest.TestCase):
             service.approve_profile("101", saved["draft_revision"], "ops")
         self.assertEqual(caught.exception.code, "profile_incomplete")
         self.assertIsNone(self.store.profile("101")["approved"])
+
+    def test_showcase_minimum_profile_can_be_approved_with_optional_gaps(self):
+        service = self.service()
+        partial = {
+            "active": True,
+            "images": [valid_profile()["images"][0]],
+            "licence": valid_profile()["licence"],
+        }
+        saved = service.save_profile_draft("101", partial, 0, "ops")
+
+        result = service.approve_profile("101", saved["draft_revision"], "ops")
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(len(self.refresh_calls), 1)
+        self.assertEqual(self.store.profile("101")["approved"], partial)
 
     def test_save_rejects_unknown_listing_and_stale_revision(self):
         service = self.service()

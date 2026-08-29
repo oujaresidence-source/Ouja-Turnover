@@ -43,6 +43,16 @@ _BACKGROUND_BLOCKERS = frozenset(
         "catalog_incomplete",
     }
 )
+_SHOWCASE_APPROVAL_BLOCKERS = frozenset(
+    {
+        "listing_id_missing",
+        "inactive_listing",
+        "licence_missing",
+        "licence_expiry_missing",
+        "licence_expiry_invalid",
+        "licence_expired",
+    }
+)
 
 
 def _utc_now() -> dt.datetime:
@@ -426,15 +436,24 @@ class CatalogService:
         self, listing_id: str, revision: int, actor: str
     ) -> Dict[str, Any]:
         key = _listing_id(listing_id)
-        self._row(key)
+        source = self._source()
+        row = self._row(key, source)
         record = self.store.profile(key)
         status = completion(record.get("draft") or {})
-        if not status["ready_for_approval"]:
+        _hostaway, _stay, _licence, _rating, publication = self._parts(row)
+        candidate = apply_approved_profile(publication, record.get("draft"))
+        minimum = validate_listing(candidate, self._effective_settings(), self._now())
+        minimum_codes = {issue.code for issue in minimum.blockers}
+        minimum_ready = (
+            not minimum_codes.intersection(_SHOWCASE_APPROVAL_BLOCKERS)
+            and bool(minimum.listing.get("images"))
+        )
+        if not status["ready_for_approval"] and not minimum_ready:
             raise CatalogContractError(
                 "profile",
                 "profile_incomplete",
-                "أكمل حقول الشقة المطلوبة قبل الاعتماد.",
-                "Complete the required listing fields before approval.",
+                "للاعتماد، فعّل الشقة وأضف صورة حقيقية ومعلومات إعلان سارية.",
+                "To approve, activate the listing and add a real image and valid advertising information.",
             )
         approved_record = self.store.approve_profile(key, revision, actor)
         refresh = self.refresh()
