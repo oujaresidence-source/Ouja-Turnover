@@ -565,7 +565,9 @@ async def _h_api_owner_detail(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    return api.jres(OW.owner_detail(owner))
+    # owner_detail reads the registry and the terms store and can touch the
+    # listings map — it belongs off the event loop like every neighbour here.
+    return api.jres(await asyncio.to_thread(OW.owner_detail, owner))
 
 
 async def _h_api_owner_profile(request):

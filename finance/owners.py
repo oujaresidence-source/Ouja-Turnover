@@ -23,7 +23,6 @@ ids — the table can't drift from the real statement math.
 import json
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -2184,14 +2183,10 @@ def _owner_profile_compute(owner):
     except Exception as e:
         print("owner_profile prewarm error:", e)
     # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
-    try:
-        pcache = getattr(B, "_owner_portal_cache", {}) or {}
-        warm = [k for k in ext_keys if (owner, k) not in pcache]
-        if len(warm) > 1:
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                list(ex.map(lambda k: B._owner_month_report(owner, k), warm))
-    except Exception as e:
-        print("owner_profile warmup error:", e)
+    # The parallel warm-up pool that used to live here spawned threads from INSIDE
+    # a to_thread worker to hide 12 serial network pulls. The span pull removed the
+    # pulls, so the pool now only buys thread-churn and a context that does not
+    # inherit the request's Hostaway priority. Dropped deliberately.
     # Compute each month ONCE, then derive the 3-month average from that series.
     # owner_anomalies used to re-fetch three reports per month — 36 redundant
     # lookups for data this function was already holding.
