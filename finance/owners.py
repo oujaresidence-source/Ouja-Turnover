@@ -1525,7 +1525,92 @@ def published_basis(owner, mkey):
     return b if b in PUBLISH_BASES else "normal"
 
 
+# ---- statement editor memo ------------------------------------------------------
+# statement_payload used to call compute_owner_statement on EVERY load — up to
+# three full owner-month computations per open (live, the published-basis
+# compare, and month_meta's partial-window pull). That is why «تعذّر تحميل
+# البيانات» appeared: nothing was memoized on this path at all.
+_stmt_payload_cache = {}     # (owner, mkey, basis_tag) -> (payload, ts)
+_stmt_compare_cache = {}     # (owner, mkey, basis_tag) -> (statement, ts)
+_stmt_cache_registered = [False]
+
+
+def _register_stmt_caches():
+    """Hook both caches into bot's _owner_cache_bust so every existing writer —
+    statement_edit, statement_publish, contract and registry changes, expense
+    verification — invalidates them without knowing they exist."""
+    if _stmt_cache_registered[0]:
+        return
+    try:
+        reg = getattr(_B(), "_owner_extra_caches", None)
+        if reg is None:
+            return                       # older bot.py: fall back to no memo
+        if _stmt_payload_cache not in reg:
+            reg.append(_stmt_payload_cache)
+            reg.append(_stmt_compare_cache)
+        _stmt_cache_registered[0] = True
+    except Exception as e:
+        print("stmt cache register error:", e)
+
+
+def _basis_tag(settings):
+    """A stable, total key fragment for the «بدون خصم ٣٪» alternate basis."""
+    if settings is None:
+        return "normal"
+    for name, val in PUBLISH_BASES.items():
+        if val == settings:
+            return name
+    try:
+        return "custom:" + json.dumps(settings, sort_keys=True)
+    except Exception:
+        return "custom:" + repr(sorted(settings.items()))
+
+
+def _link_tag(owner):
+    """The receipt-proxy rewrite swaps every receipt_url for an owner-scoped proxy
+    URL built from the owner's LIVE link token — and a link can be created or
+    revoked without any statement data changing. So link identity belongs in the
+    cache key, not in the invalidation path."""
+    try:
+        lk = (getattr(_B(), "_owner_links", None) or {}).get(owner) or {}
+        return str(lk.get("token") or "") if lk.get("active") else ""
+    except Exception:
+        return ""
+
+
+def _stmt_ttl(mkey):
+    try:
+        return _B()._owner_ttl_for(mkey)
+    except Exception:
+        return 1800
+
+
+def _stmt_cache_get(cache, key, mkey):
+    hit = cache.get(key)
+    if hit and (time.time() - hit[1]) < _stmt_ttl(mkey):
+        return hit[0]
+    return None
+
+
 def statement_payload(owner, mkey, settings=None):
+    """Memoized front door for the editor view. A cold open used to run up to
+    THREE full owner-month computations; now a warm open runs none.
+
+    Only successful payloads are cached, and every cached entry is dropped by
+    _owner_cache_bust the instant an edit, a publish, a contract change or an
+    expense verification touches this owner-month."""
+    _register_stmt_caches()
+    key = (owner, mkey, _basis_tag(settings) + "|" + _link_tag(owner))
+    hit = _stmt_cache_get(_stmt_payload_cache, key, mkey)
+    if hit is not None:
+        return hit
+    out = _statement_payload_compute(owner, mkey, settings=settings)
+    if isinstance(out, dict) and out.get("ok"):
+        _stmt_payload_cache[key] = (out, time.time())
+    return out
+
+
+def _statement_payload_compute(owner, mkey, settings=None):
     """Everything the editor view needs. `settings` = the read-only alternate
     basis for the «بدون خصم ٣٪» toggle; it changes what this screen SHOWS and
     nothing else (publish recomputes on its own, without it)."""
@@ -1551,8 +1636,12 @@ def statement_payload(owner, mkey, settings=None):
         ref = live
         if pub_basis != "normal":
             try:
-                ref = compute_owner_statement(owner, mkey,
-                                              settings=PUBLISH_BASES[pub_basis]) or live
+                _ck = (owner, mkey, pub_basis)
+                ref = _stmt_cache_get(_stmt_compare_cache, _ck, mkey)
+                if ref is None:
+                    ref = compute_owner_statement(
+                        owner, mkey, settings=PUBLISH_BASES[pub_basis]) or live
+                    _stmt_compare_cache[_ck] = (ref, time.time())
             except Exception as e:                  # never let this break the screen
                 print("stale-compare error:", e)
                 ref = None

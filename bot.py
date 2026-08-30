@@ -38004,6 +38004,19 @@ def _exp_mkey(d):
     s = str(d or "")[:7]
     return s if re.fullmatch(r"20\d{2}-\d{2}", s) else None
 
+# Caches keyed (owner, mkey, ...) that must follow the SAME invalidation as the
+# month reports. finance/owners.py registers its statement caches here, so every
+# existing _owner_cache_bust caller busts them too — an edit that is not visible
+# on the very next read is a correctness bug, not a caching trade-off.
+_owner_extra_caches = []
+
+OWNER_CUR_MONTH_TTL = int(os.environ.get("OWNER_CUR_MONTH_TTL", "1800"))
+
+def _owner_ttl_for(mkey):
+    """The current month still moves; a closed month does not."""
+    cur_key = datetime.now(TZ).date().isoformat()[:7]
+    return OWNER_CUR_MONTH_TTL if mkey == cur_key else 6 * 3600
+
 def _owner_cache_bust(owner=None, lid=None, mkey=None):
     """v2.2 Finding 2: drop memoized owner-month reports the moment underlying
     data changes (statement edits, registry/contract changes, expense
@@ -38044,6 +38057,14 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
             if mkey and k[1] != mkey:
                 continue
             _owner_partial_cache.pop(k, None)
+        # registered statement caches follow the identical scoping
+        for _cache in _owner_extra_caches:
+            for k in list(_cache.keys()):
+                if targeted and k[0] not in owners:
+                    continue
+                if mkey and k[1] != mkey:
+                    continue
+                _cache.pop(k, None)
         if n:
             _owner_portal_cache_save(force=True)    # deletions must never be lost
         return n
