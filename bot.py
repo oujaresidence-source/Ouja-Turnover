@@ -40,6 +40,7 @@ import asyncio
 import hashlib
 import statistics
 import hmac
+import atexit
 import contextvars
 import threading
 import urllib.parse
@@ -38105,6 +38106,8 @@ def _month_bounds(mkey):
 _MONEY_RULES_VERSION = 4        # 4 = honest cleaning type/amount through aggregation (was always "mixed")
                                 # 3 = cancelled reservations never auto-count (v2.2.3)
 
+_owner_partial_cache_boot = {}
+
 def _owner_portal_cache_load():
     out = {}
     try:
@@ -38123,30 +38126,66 @@ def _owner_portal_cache_load():
             o, _, m = str(k).partition("|")
             if o and m:
                 out[(o, m)] = (v["rep"], ts)
+        # the editor's first-N-days comparison partials — a bare {} before, so
+        # every restart recomputed them over a DIFFERENT window key
+        for k, v in (raw.get("partials") or {}).items():
+            try:
+                o, m, nd = str(k).split("|")
+                ts = float(v.get("ts") or 0)
+                if now - ts <= 6 * 3600:
+                    _owner_partial_cache_boot[(o, m, int(nd))] = (v.get("net"), ts)
+            except Exception:
+                continue
     except Exception as e:
         print("owner portal cache load error:", e)
     return out
 
 _owner_portal_cache = _owner_portal_cache_load()    # (owner, month) -> (payload_report, built_ts)
-_owner_partial_cache = {}   # (owner, mkey, ndays) -> (net, ts) — the editor's first-N-days compare
+_owner_partial_cache = dict(_owner_partial_cache_boot)   # (owner, mkey, ndays) -> (net, ts)
 
-_owner_portal_cache_save_state = {"lock": threading.Lock(), "ts": 0.0}
+# A debounced write must not lose the last 60 seconds on a Railway restart.
+atexit.register(lambda: _owner_portal_cache_flush())
 
-def _owner_portal_cache_save(force=False):
-    """Atomic, locked, lightly throttled — parallel month warm-ups all call this."""
+_owner_portal_cache_save_state = {"lock": threading.Lock(), "ts": 0.0,
+                                   "dirty": False, "timer": None}
+
+OWNER_CACHE_FLUSH_S = float(os.environ.get("OWNER_CACHE_FLUSH_S", "60"))
+
+def _owner_portal_cache_flush():
+    """Serialize the whole cache ONCE. Up to 400 owner-month reports, each carrying
+    every reservation and expense line, then an md5 over the full payload inside
+    _save_json — tens of megabytes of work holding the GIL, on a network-attached
+    volume. It used to run after EVERY report built; during a 12-month warm that
+    fired constantly."""
     st = _owner_portal_cache_save_state
     with st["lock"]:
-        now = time.time()
-        if not force and now - st["ts"] < 5:
-            return
-        st["ts"] = now
+        st["timer"] = None
+        st["dirty"] = False
+        st["ts"] = time.time()
         try:
             _save_json("owner_portal_cache.json",
                        {"rules": _MONEY_RULES_VERSION,
                         "entries": {"%s|%s" % k: {"rep": v[0], "ts": v[1]}
-                                    for k, v in _owner_portal_cache.items()}})
+                                    for k, v in _owner_portal_cache.items()},
+                        "partials": {"%s|%s|%s" % k: {"net": v[0], "ts": v[1]}
+                                     for k, v in _owner_partial_cache.items()}})
         except Exception as e:
             print("owner portal cache save error:", e)
+
+def _owner_portal_cache_save(force=False):
+    """Coalesce writes onto a timer instead of rewriting everything per report.
+    force=True flushes now — deletions must never be lost."""
+    if force:
+        return _owner_portal_cache_flush()
+    st = _owner_portal_cache_save_state
+    with st["lock"]:
+        st["dirty"] = True
+        if st.get("timer") is not None:
+            return                       # a flush is already scheduled
+        t = threading.Timer(OWNER_CACHE_FLUSH_S, _owner_portal_cache_flush)
+        t.daemon = True
+        st["timer"] = t
+        t.start()
 
 def _exp_mkey(d):
     """'YYYY-MM-DD…' → 'YYYY-MM' for month-scoped cache busts; junk → None (= all months)."""
