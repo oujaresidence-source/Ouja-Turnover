@@ -23,7 +23,6 @@ ids — the table can't drift from the real statement math.
 import json
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -1525,7 +1524,112 @@ def published_basis(owner, mkey):
     return b if b in PUBLISH_BASES else "normal"
 
 
+# ---- statement editor memo ------------------------------------------------------
+# statement_payload used to call compute_owner_statement on EVERY load — up to
+# three full owner-month computations per open (live, the published-basis
+# compare, and month_meta's partial-window pull). That is why «تعذّر تحميل
+# البيانات» appeared: nothing was memoized on this path at all.
+_stmt_payload_cache = {}     # (owner, mkey, basis_tag) -> (payload, ts)
+_stmt_compare_cache = {}     # (owner, mkey, basis_tag) -> (statement, ts)
+_stmt_cache_registered = [False]
+
+
+def _register_stmt_caches():
+    """Hook both caches into bot's _owner_cache_bust so every existing writer —
+    statement_edit, statement_publish, contract and registry changes, expense
+    verification — invalidates them without knowing they exist."""
+    if _stmt_cache_registered[0]:
+        return
+    try:
+        reg = getattr(_B(), "_owner_extra_caches", None)
+        if reg is None:
+            return                       # older bot.py: fall back to no memo
+        if _stmt_payload_cache not in reg:
+            reg.append(_stmt_payload_cache)
+            reg.append(_stmt_compare_cache)
+        _stmt_cache_registered[0] = True
+    except Exception as e:
+        print("stmt cache register error:", e)
+
+
+def _basis_tag(settings):
+    """A stable, total key fragment for the «بدون خصم ٣٪» alternate basis."""
+    if settings is None:
+        return "normal"
+    for name, val in PUBLISH_BASES.items():
+        if val == settings:
+            return name
+    try:
+        return "custom:" + json.dumps(settings, sort_keys=True)
+    except Exception:
+        return "custom:" + repr(sorted(settings.items()))
+
+
+def _link_tag(owner):
+    """The receipt-proxy rewrite swaps every receipt_url for an owner-scoped proxy
+    URL built from the owner's LIVE link token — and a link can be created or
+    revoked without any statement data changing. So link identity belongs in the
+    cache key, not in the invalidation path."""
+    try:
+        lk = (getattr(_B(), "_owner_links", None) or {}).get(owner) or {}
+        return str(lk.get("token") or "") if lk.get("active") else ""
+    except Exception:
+        return ""
+
+
+def _stmt_ttl(mkey):
+    try:
+        return _B()._owner_ttl_for(mkey)
+    except Exception:
+        return 1800
+
+
+def _stmt_cache_get(cache, key, mkey):
+    hit = cache.get(key)
+    if hit and (time.time() - hit[1]) < _stmt_ttl(mkey):
+        return hit[0]
+    return None
+
+
 def statement_payload(owner, mkey, settings=None):
+    """Memoized front door for the editor view. A cold open used to run up to
+    THREE full owner-month computations; now a warm open runs none.
+
+    Only successful payloads are cached, and every cached entry is dropped by
+    _owner_cache_bust the instant an edit, a publish, a contract change or an
+    expense verification touches this owner-month."""
+    _register_stmt_caches()
+    key = (owner, mkey, _basis_tag(settings) + "|" + _link_tag(owner))
+    hit = _stmt_cache_get(_stmt_payload_cache, key, mkey)
+    if hit is not None:
+        return hit
+
+    def _go():
+        o = _statement_payload_compute(owner, mkey, settings=settings)
+        if isinstance(o, dict) and o.get("ok"):
+            _stmt_payload_cache[key] = (o, time.time())
+        return o
+    B = _B()
+    # Expired but present -> serve it stamped and refresh behind the reader.
+    expired = _stmt_payload_cache.get(key)
+    if expired is not None and getattr(B, "OWNER_SWR", False):
+        B.kick_refresh(("stmt",) + key, _go)
+        return B.stale_stamp(expired[0], expired[1])
+    runner = getattr(B, "run_bounded", None)
+    if runner is None:
+        return _go()
+    ok, val = runner(("stmt",) + key, _go)
+    if ok:
+        return val
+    # Never present a partial STATEMENT as if it were whole. Say it is still
+    # working and let the screen retry itself.
+    return {"ok": False, "reason": "still_computing", "retry_after": 20,
+            "owner": owner, "month": mkey,
+            "message_ar": "لسه نحسب الكشف — بيتحدث لحاله بعد ثواني.",
+            "message_en": "Still computing — this will refresh itself shortly."}
+
+
+def _statement_payload_compute(owner, mkey, settings=None):
     """Everything the editor view needs. `settings` = the read-only alternate
     basis for the «بدون خصم ٣٪» toggle; it changes what this screen SHOWS and
     nothing else (publish recomputes on its own, without it)."""
@@ -1551,8 +1655,12 @@ def statement_payload(owner, mkey, settings=None):
         ref = live
         if pub_basis != "normal":
             try:
-                ref = compute_owner_statement(owner, mkey,
-                                              settings=PUBLISH_BASES[pub_basis]) or live
+                _ck = (owner, mkey, pub_basis)
+                ref = _stmt_cache_get(_stmt_compare_cache, _ck, mkey)
+                if ref is None:
+                    ref = compute_owner_statement(
+                        owner, mkey, settings=PUBLISH_BASES[pub_basis]) or live
+                    _stmt_compare_cache[_ck] = (ref, time.time())
             except Exception as e:                  # never let this break the screen
                 print("stale-compare error:", e)
                 ref = None
@@ -1974,6 +2082,70 @@ def statement_recompute_diff(owner, mkey):
 # ====================== v2.2 slice 3: the owner profile ======================
 
 def owner_profile(owner):
+    """Single-flighted and time-boxed front door: five simultaneous openers cost
+    ONE build, and a cold build that blows the budget returns the months that DID
+    complete instead of hanging until the proxy kills the request."""
+    B = _B()
+    runner = getattr(B, "run_bounded", None)
+    if runner is None:
+        sf = getattr(B, "single_flight", None)
+        return sf(("prof", owner), lambda: _owner_profile_compute(owner)) if sf else \
+            _owner_profile_compute(owner)
+    ok, val = runner(("prof", owner), lambda: _owner_profile_compute(owner))
+    if ok:
+        return val
+    return _partial_profile(owner)
+
+
+def _partial_profile(owner):
+    """What we can honestly show right now: the header, plus only the months
+    already computed. Flagged `partial` so the screen says so rather than
+    implying the missing months are empty."""
+    B = _B()
+    det = owner_detail(owner)
+    if not det.get("ok"):
+        return det
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    y, m = int(cur[:4]), int(cur[5:7])
+    months = []
+    cache = getattr(B, "_owner_portal_cache", {}) or {}
+    for i in range(12):
+        ty, tm = y, m - i
+        while tm <= 0:
+            tm += 12
+            ty -= 1
+        k = "%04d-%02d" % (ty, tm)
+        hit = cache.get((owner, k))
+        rep = hit[0] if hit else None
+        if rep is None:
+            continue
+        srec = stmt_rec(owner, k) or {}
+        pub = srec.get("published") or {}
+        unit_nets = {}
+        for pa in (rep or {}).get("apartments") or []:
+            unit_nets[str(pa.get("apartment") or "")] = pa.get("owner_net")
+        months.append({"m": k, "state": "running" if k == cur else "closed",
+                       "net": rep.get("owner_net"),
+                       "status": srec.get("status") or "draft",
+                       "published_version": pub.get("version"),
+                       "flagged": False, "anomalies": [], "unit_nets": unit_nets})
+    return {"ok": True, "partial": True, "owner": owner,
+            "profile": det.get("profile") or {},
+            "units": det.get("units") or [],
+            "versions": (det.get("versions") or [])[:20],
+            "months": months,
+            "link": {"exists": False, "active": False, "url": "",
+                     "opened_at": "", "opens": 0},
+            "wa_template": wa_template(),
+            "default_month": api._month_key_or_prev(None),
+            "month_meta": {},
+            "message_ar": "نعرض لك الشهور الجاهزة — الباقي لسه يتحدّث. حدّث الصفحة بعد شوي.",
+            "message_en": "Showing the months that are ready — the rest is still "
+                          "computing. Refresh shortly."}
+
+
+def _owner_profile_compute(owner):
     """Everything the owner-profile page renders: header (profile + link),
     apartment chips (with live contract terms), and the 12-month grid with
     per-month net / status / anomaly flag / per-unit nets. Reads the memoized
@@ -1997,25 +2169,46 @@ def owner_profile(owner):
             tm += 12
             ty -= 1
         mkeys.append("%04d-%02d" % (ty, tm))
-    # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
+    # the grid, plus the 3 months the deviation check looks back on
+    ext_keys = mkeys + _prev_months(mkeys[-1], 3)
+    # perf: ONE span pull covers the whole grid (12 months) PLUS the 3 extra months
+    # the deviation check looks back on, so the page costs one paginated Hostaway pull
+    # instead of ~15. Best-effort — a miss just falls back to the per-month path.
     try:
-        pcache = getattr(B, "_owner_portal_cache", {}) or {}
-        warm = [k for k in mkeys if (owner, k) not in pcache]
-        if len(warm) > 1:
-            with ThreadPoolExecutor(max_workers=4) as ex:
-                list(ex.map(lambda k: B._owner_month_report(owner, k), warm))
+        _old = _prev_months(mkeys[-1], 3)[-1]
+        _lo = date(int(_old[:4]), int(_old[5:7]), 1)
+        _cy, _cm = int(cur[:4]), int(cur[5:7])
+        _hi = date(_cy + (_cm // 12), (_cm % 12) + 1, 1) - timedelta(days=1)
+        B.prewarm_span(_lo, _hi)
     except Exception as e:
-        print("owner_profile warmup error:", e)
-    for k in mkeys:
+        print("owner_profile prewarm error:", e)
+    # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
+    # The parallel warm-up pool that used to live here spawned threads from INSIDE
+    # a to_thread worker to hide 12 serial network pulls. The span pull removed the
+    # pulls, so the pool now only buys thread-churn and a context that does not
+    # inherit the request's Hostaway priority. Dropped deliberately.
+    # Compute each month ONCE, then derive the 3-month average from that series.
+    # owner_anomalies used to re-fetch three reports per month — 36 redundant
+    # lookups for data this function was already holding.
+    reps = {}
+    for k in ext_keys:
         try:
-            rep = B._owner_month_report(owner, k)
+            reps[k] = B._owner_month_report(owner, k)
         except Exception as e:
             print("owner_profile month %s error: %s" % (k, e))
-            rep = None
+            reps[k] = None
+    net_by = {}
+    for k in ext_keys:
+        r = reps.get(k)
+        if r is not None and r.get("owner_net") is not None:
+            net_by[k] = float(r["owner_net"])
+    for k in mkeys:
+        rep = reps.get(k)
         srec = stmt_rec(owner, k) or {}
         pub = srec.get("published") or {}
         try:
-            anomalies = owner_anomalies(owner, k, rep) if rep is not None else []
+            prior_nets = [net_by[pm] for pm in _prev_months(k, 3) if pm in net_by]
+            anomalies = owner_anomalies(owner, k, rep, prior_nets=prior_nets) if rep is not None else []
         except Exception:
             anomalies = []
         unit_nets = {}
@@ -2083,8 +2276,14 @@ def _prev_months(mkey, n=3):
     return out
 
 
-def owner_anomalies(owner, mkey, rep):
-    """Pre-send checks for one owner-month. `rep` = the month's report (memoized)."""
+def owner_anomalies(owner, mkey, rep, prior_nets=None):
+    """Pre-send checks for one owner-month. `rep` = the month's report (memoized).
+
+    `prior_nets` = the three preceding months' owner_net values when the CALLER
+    already holds them (owner_profile builds the whole series anyway). Supplying
+    them skips three _owner_month_report lookups per month — 36 across the grid.
+    prior_nets=None reproduces the original behaviour exactly, which is what
+    cycle_board still relies on."""
     B = _B()
     out = []
     if rep is None:
@@ -2092,14 +2291,17 @@ def owner_anomalies(owner, mkey, rep):
                  "ar": "ما انحسب كشف", "en": "No statement computed"}]
     net = float(rep.get("owner_net") or 0)
     # 1) net deviation vs the owner's own 3-month average
-    prior = []
-    for pm in _prev_months(mkey, 3):
-        try:
-            pr = B._owner_month_report(owner, pm)
-        except Exception:
-            pr = None
-        if pr is not None and pr.get("owner_net") is not None:
-            prior.append(float(pr["owner_net"]))
+    if prior_nets is not None:
+        prior = [float(n) for n in prior_nets if n is not None]
+    else:
+        prior = []
+        for pm in _prev_months(mkey, 3):
+            try:
+                pr = B._owner_month_report(owner, pm)
+            except Exception:
+                pr = None
+            if pr is not None and pr.get("owner_net") is not None:
+                prior.append(float(pr["owner_net"]))
     if prior:
         avg = sum(prior) / len(prior)
         if abs(avg) > 1 and abs(net - avg) / abs(avg) * 100.0 > ANOM_NET_DEV_PCT:

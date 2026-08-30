@@ -40,6 +40,8 @@ import asyncio
 import hashlib
 import statistics
 import hmac
+import atexit
+import contextvars
 import threading
 import urllib.parse
 import secrets as _secrets_mod
@@ -933,14 +935,39 @@ _ha_bucket_times = deque()          # timestamps of calls in the trailing 10s wi
 _ha_inflight = threading.Semaphore(HOSTAWAY_MAX_INFLIGHT)
 _ha_throttle_stats = {"waited": 0, "wait_s": 0.0, "calls": 0, "429s": 0}
 
-def _ha_throttle_acquire():
-    """Block until this thread may issue a Hostaway call. Sliding 10s window."""
+# A background warmer and a human waiting on a page used to be treated
+# identically. Reserve part of the 11/10s bucket for whoever is actually waiting:
+# background callers may fill it only to (max - reserve), user-facing callers may
+# use all of it. This is what removes most of the erratic multi-minute tail.
+HOSTAWAY_USER_RESERVE = int(os.environ.get("HOSTAWAY_USER_RESERVE", "4"))
+_ha_priority = contextvars.ContextVar("ha_priority", default="background")
+
+def current_priority():
+    try:
+        return _ha_priority.get()
+    except Exception:
+        return "background"
+
+def set_priority(p):
+    """Returns the token; callers in plain threads just ignore it."""
+    try:
+        return _ha_priority.set(p)
+    except Exception:
+        return None
+
+def _ha_throttle_acquire(priority=None):
+    """Block until this thread may issue a Hostaway call. Sliding 10s window.
+    `priority` defaults to the ambient one (set per web request by _guarded and
+    propagated into to_thread workers by contextvars)."""
+    p = priority or current_priority()
+    cap = (HOSTAWAY_MAX_PER_10S if p == "user"
+           else max(1, HOSTAWAY_MAX_PER_10S - HOSTAWAY_USER_RESERVE))
     while True:
         with _ha_bucket_lock:
             now = time.time()
             while _ha_bucket_times and now - _ha_bucket_times[0] >= 10.0:
                 _ha_bucket_times.popleft()
-            if len(_ha_bucket_times) < HOSTAWAY_MAX_PER_10S:
+            if len(_ha_bucket_times) < cap:
                 _ha_bucket_times.append(now)
                 _ha_throttle_stats["calls"] += 1
                 return
@@ -954,6 +981,129 @@ def _ha_throttle_acquire():
 _ha_session = requests.Session()
 _ha_session.mount("https://", requests.adapters.HTTPAdapter(
     pool_connections=8, pool_maxsize=16, max_retries=0))
+
+# ---- single-flight -------------------------------------------------------------
+# Nothing used to coalesce concurrent identical owner work. When the statement
+# editor failed and Wejdan pressed «حاول مرة ثانية», the first computation was
+# still running and a second identical one started beside it — doubling the
+# Hostaway load and halving the chance either finished. The error card was
+# actively teaching the user to make the outage worse.
+SINGLE_FLIGHT_WAIT = float(os.environ.get("SINGLE_FLIGHT_WAIT", "120"))
+
+_flight_lock = threading.Lock()
+_flights = {}                       # key -> {"event", "result", "error"}
+
+def single_flight(key, fn):
+    """Run fn() once per key. Concurrent callers with the same key block on the
+    first one and receive its result; exceptions propagate to every waiter.
+
+    If the leader exceeds SINGLE_FLIGHT_WAIT the waiter computes for itself
+    rather than hanging forever — availability beats purity when a leader wedges."""
+    with _flight_lock:
+        slot = _flights.get(key)
+        leader = slot is None
+        if leader:
+            slot = {"event": threading.Event(), "result": None, "error": None}
+            _flights[key] = slot
+    if not leader:
+        if not slot["event"].wait(SINGLE_FLIGHT_WAIT):
+            return fn()
+        if slot["error"] is not None:
+            raise slot["error"]
+        return slot["result"]
+    try:
+        slot["result"] = fn()
+        return slot["result"]
+    except BaseException as e:
+        slot["error"] = e
+        raise
+    finally:
+        slot["event"].set()
+        with _flight_lock:
+            if _flights.get(key) is slot:
+                _flights.pop(key, None)
+
+# ---- stale-while-revalidate + a bounded cold path -------------------------------
+# A spinner that never ends is the worst of the three outcomes. Last night's
+# numbers, LABELLED as last night's, beat a blank page — and both beat a lie.
+OWNER_SWR = os.environ.get("OWNER_SWR", "1") == "1"
+OWNER_COMPUTE_BUDGET_S = float(os.environ.get("OWNER_COMPUTE_BUDGET_S", "25"))
+
+# The warmer must not compete with a human. _guarded bumps this for the life of
+# every web request; the warm loop sleeps out a tick while any are in flight.
+_user_inflight = {"n": 0}
+_user_inflight_lock = threading.Lock()
+
+def user_request_begin():
+    with _user_inflight_lock:
+        _user_inflight["n"] += 1
+
+def user_request_end():
+    with _user_inflight_lock:
+        _user_inflight["n"] = max(0, _user_inflight["n"] - 1)
+
+def user_requests_inflight():
+    return _user_inflight["n"]
+
+_swr_lock = threading.Lock()
+_swr_running = set()
+
+def kick_refresh(key, fn):
+    """Recompute behind the reader. Coalesced: one refresh per key at a time."""
+    with _swr_lock:
+        if key in _swr_running:
+            return False
+        _swr_running.add(key)
+
+    def _run():
+        try:
+            single_flight(key, fn)
+        except Exception as e:
+            print("swr refresh error:", e)
+        finally:
+            with _swr_lock:
+                _swr_running.discard(key)
+    threading.Thread(target=_run, name="swr-" + str(key[:2]), daemon=True).start()
+    return True
+
+def stale_stamp(payload, built_ts):
+    """A COPY stamped with its real age — never mutate the cached object."""
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out["stale"] = True
+    out["refreshing"] = True
+    out["stale_age_s"] = int(max(0, time.time() - (built_ts or 0)))
+    try:
+        out["computed_at"] = datetime.fromtimestamp(built_ts, TZ).isoformat(timespec="seconds")
+    except Exception:
+        pass
+    return out
+
+def run_bounded(key, fn, budget_s=None):
+    """Single-flighted fn with a deadline. Returns (True, value) when it finished
+    in time, or (False, None) — in which case the work CONTINUES in the background
+    so the caller's automatic retry lands on a warm cache instead of hanging until
+    the proxy kills the request."""
+    budget = OWNER_COMPUTE_BUDGET_S if budget_s is None else budget_s
+    box = {}
+    done = threading.Event()
+    _prio = current_priority()          # a human is waiting on this one
+
+    def _run():
+        set_priority(_prio)
+        try:
+            box["v"] = single_flight(key, fn)
+        except BaseException as e:
+            box["e"] = e
+        finally:
+            done.set()
+    threading.Thread(target=_run, name="bounded", daemon=True).start()
+    if not done.wait(budget):
+        return False, None
+    if "e" in box:
+        raise box["e"]
+    return True, box.get("v")
 
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
@@ -37956,6 +38106,8 @@ def _month_bounds(mkey):
 _MONEY_RULES_VERSION = 4        # 4 = honest cleaning type/amount through aggregation (was always "mixed")
                                 # 3 = cancelled reservations never auto-count (v2.2.3)
 
+_owner_partial_cache_boot = {}
+
 def _owner_portal_cache_load():
     out = {}
     try:
@@ -37974,35 +38126,84 @@ def _owner_portal_cache_load():
             o, _, m = str(k).partition("|")
             if o and m:
                 out[(o, m)] = (v["rep"], ts)
+        # the editor's first-N-days comparison partials — a bare {} before, so
+        # every restart recomputed them over a DIFFERENT window key
+        for k, v in (raw.get("partials") or {}).items():
+            try:
+                o, m, nd = str(k).split("|")
+                ts = float(v.get("ts") or 0)
+                if now - ts <= 6 * 3600:
+                    _owner_partial_cache_boot[(o, m, int(nd))] = (v.get("net"), ts)
+            except Exception:
+                continue
     except Exception as e:
         print("owner portal cache load error:", e)
     return out
 
 _owner_portal_cache = _owner_portal_cache_load()    # (owner, month) -> (payload_report, built_ts)
-_owner_partial_cache = {}   # (owner, mkey, ndays) -> (net, ts) — the editor's first-N-days compare
+_owner_partial_cache = dict(_owner_partial_cache_boot)   # (owner, mkey, ndays) -> (net, ts)
 
-_owner_portal_cache_save_state = {"lock": threading.Lock(), "ts": 0.0}
+# A debounced write must not lose the last 60 seconds on a Railway restart.
+atexit.register(lambda: _owner_portal_cache_flush())
 
-def _owner_portal_cache_save(force=False):
-    """Atomic, locked, lightly throttled — parallel month warm-ups all call this."""
+_owner_portal_cache_save_state = {"lock": threading.Lock(), "ts": 0.0,
+                                   "dirty": False, "timer": None}
+
+OWNER_CACHE_FLUSH_S = float(os.environ.get("OWNER_CACHE_FLUSH_S", "60"))
+
+def _owner_portal_cache_flush():
+    """Serialize the whole cache ONCE. Up to 400 owner-month reports, each carrying
+    every reservation and expense line, then an md5 over the full payload inside
+    _save_json — tens of megabytes of work holding the GIL, on a network-attached
+    volume. It used to run after EVERY report built; during a 12-month warm that
+    fired constantly."""
     st = _owner_portal_cache_save_state
     with st["lock"]:
-        now = time.time()
-        if not force and now - st["ts"] < 5:
-            return
-        st["ts"] = now
+        st["timer"] = None
+        st["dirty"] = False
+        st["ts"] = time.time()
         try:
             _save_json("owner_portal_cache.json",
                        {"rules": _MONEY_RULES_VERSION,
                         "entries": {"%s|%s" % k: {"rep": v[0], "ts": v[1]}
-                                    for k, v in _owner_portal_cache.items()}})
+                                    for k, v in _owner_portal_cache.items()},
+                        "partials": {"%s|%s|%s" % k: {"net": v[0], "ts": v[1]}
+                                     for k, v in _owner_partial_cache.items()}})
         except Exception as e:
             print("owner portal cache save error:", e)
+
+def _owner_portal_cache_save(force=False):
+    """Coalesce writes onto a timer instead of rewriting everything per report.
+    force=True flushes now — deletions must never be lost."""
+    if force:
+        return _owner_portal_cache_flush()
+    st = _owner_portal_cache_save_state
+    with st["lock"]:
+        st["dirty"] = True
+        if st.get("timer") is not None:
+            return                       # a flush is already scheduled
+        t = threading.Timer(OWNER_CACHE_FLUSH_S, _owner_portal_cache_flush)
+        t.daemon = True
+        st["timer"] = t
+        t.start()
 
 def _exp_mkey(d):
     """'YYYY-MM-DD…' → 'YYYY-MM' for month-scoped cache busts; junk → None (= all months)."""
     s = str(d or "")[:7]
     return s if re.fullmatch(r"20\d{2}-\d{2}", s) else None
+
+# Caches keyed (owner, mkey, ...) that must follow the SAME invalidation as the
+# month reports. finance/owners.py registers its statement caches here, so every
+# existing _owner_cache_bust caller busts them too — an edit that is not visible
+# on the very next read is a correctness bug, not a caching trade-off.
+_owner_extra_caches = []
+
+OWNER_CUR_MONTH_TTL = int(os.environ.get("OWNER_CUR_MONTH_TTL", "1800"))
+
+def _owner_ttl_for(mkey):
+    """The current month still moves; a closed month does not."""
+    cur_key = datetime.now(TZ).date().isoformat()[:7]
+    return OWNER_CUR_MONTH_TTL if mkey == cur_key else 6 * 3600
 
 def _owner_cache_bust(owner=None, lid=None, mkey=None):
     """v2.2 Finding 2: drop memoized owner-month reports the moment underlying
@@ -38044,6 +38245,14 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
             if mkey and k[1] != mkey:
                 continue
             _owner_partial_cache.pop(k, None)
+        # registered statement caches follow the identical scoping
+        for _cache in _owner_extra_caches:
+            for k in list(_cache.keys()):
+                if targeted and k[0] not in owners:
+                    continue
+                if mkey and k[1] != mkey:
+                    continue
+                _cache.pop(k, None)
         if n:
             _owner_portal_cache_save(force=True)    # deletions must never be lost
         return n
@@ -38052,6 +38261,24 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
         return 0
 
 def _owner_month_report(owner, mkey):
+    """Cache fast-path, then ONE compute per (owner, month) no matter how many
+    threads ask at once. Five simultaneous openers used to mean five identical
+    Hostaway storms."""
+    now = time.time()
+    hit = _owner_portal_cache.get((owner, mkey))
+    ttl = _owner_ttl_for(mkey)
+    if hit and (now - hit[1] < ttl):
+        return hit[0]
+    if hit and OWNER_SWR:
+        # Expired but present: hand back last night's numbers, stamped with their
+        # real age, and refresh behind the reader.
+        kick_refresh(("omr", owner, mkey),
+                     lambda: _owner_month_report_compute(owner, mkey))
+        return stale_stamp(hit[0], hit[1])
+    return single_flight(("omr", owner, mkey),
+                         lambda: _owner_month_report_compute(owner, mkey))
+
+def _owner_month_report_compute(owner, mkey):
     """The aggregated owner report for one month — the SAME object the PDF renders.
     Memoized: closed months 6h, the current month 15 min."""
     now = time.time()
@@ -38112,8 +38339,13 @@ def _owner_warm_reports():
             return 0
         def _warm_month(mkey):
             c = 0
+            half = _owner_ttl_for(mkey) / 2.0
+            now_ts = time.time()
             for o in owners:                     # serial within a month: first owner pulls
                 try:                             # the shared window, the rest reuse it
+                    prev = _owner_portal_cache.get((o, mkey))
+                    if prev and (now_ts - prev[1]) < half:
+                        continue                 # still fresh — recomputing burns API budget
                     if _owner_month_report(o, mkey) is not None:
                         c += 1
                 except Exception as e:
@@ -38128,11 +38360,15 @@ def _owner_warm_reports():
         print("owner warm build error:", e)
         return 0
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=int(os.environ.get("OWNER_WARM_MIN", "20")))
 async def owner_warm_loop():
-    """Keep «دورة الشهر» fast: the current-month report cache TTL is only 15 min and a
-    restart starts cold, so refresh in the background (first run right after boot)."""
+    """Keep «دورة الشهر» fast without fighting its own TTL. At 10 minutes against a
+    15-minute TTL this used to recompute the current month for EVERY owner forever,
+    burning the shared API budget on data nobody had asked for. Now: 20 minutes, a
+    half-TTL freshness skip, and it yields entirely while a human is waiting."""
     try:
+        if user_requests_inflight() > 0:
+            return                               # a person is waiting — not now
         n = await asyncio.to_thread(_owner_warm_reports)
         if n:
             print("owner warm: %d owner-month report(s) ready" % n)
@@ -63302,6 +63538,89 @@ _res_window_cache = {}   # (start_iso, end_iso) -> (rows, fetched_ts)
 
 _res_window_degraded = {}   # (start_iso, end_iso) -> ts of last cache-fallback (M3)
 
+# ---- span cache: ONE coarse pull that many month-windows slice from -------------
+# A 15-month owner profile used to cost 15 independent paginated pulls (~60 calls)
+# against a global ceiling of 11 calls / 10s. One span pull covers the whole grid.
+_res_span_cache = {}            # (span_start_iso, span_end_iso) -> (rows, ts)
+RES_SPAN_TTL = 900
+
+def _span_enabled():
+    """Prewarm only where a REAL Hostaway pull is possible. With no credentials —
+    which is exactly the test environment — this stays off, so the monkeypatched
+    fetch_reservations_window seam remains the single source of rows and nothing
+    new reaches the network. RES_SPAN_ENABLED=1/0 forces it either way."""
+    v = os.environ.get("RES_SPAN_ENABLED", "")
+    if v in ("1", "0"):
+        return v == "1"
+    return bool(HOSTAWAY_API_KEY and HOSTAWAY_ACCOUNT_ID)
+
+def _res_rows_in(rows, lo_iso, hi_iso):
+    """The SAME predicate the window query expresses: arrivalDate in [lo, hi].
+    Slicing must return exactly what the API would have, or statements drift."""
+    out = []
+    for r in rows or []:
+        a = (r.get("arrivalDate") or "")[:10]
+        if a and lo_iso <= a <= hi_iso:
+            out.append(r)
+    return out
+
+def fetch_reservations_span(start, end, pad_days=45):
+    """One paginated pull covering [start - pad, end], cached under a MONTH-COARSE
+    key so every month inside the span is served from it. Returns [] on failure —
+    a failed span NEVER poisons the cache, so fetch_reservations_window falls back
+    to its own pull and its own degradation marking."""
+    lo = (start.replace(day=1) - timedelta(days=pad_days))
+    hi = end
+    key = (lo.isoformat(), hi.isoformat())
+    hit = _res_span_cache.get(key)
+    if hit and (time.time() - hit[1]) < RES_SPAN_TTL:
+        return hit[0]
+    return single_flight(("span",) + key, lambda: _fetch_span_uncached(lo, hi, key))
+
+def _fetch_span_uncached(lo, hi, key):
+    out, offset, limit = [], 0, 200
+    for page in range(40):
+        try:
+            data = api_get("/reservations", params={
+                "arrivalStartDate": lo.isoformat(), "arrivalEndDate": hi.isoformat(),
+                "limit": limit, "offset": offset})
+        except Exception as e:
+            print("span reservations fetch error:", e)
+            return []                      # no caching, no degradation mark — caller retries
+        rows = data.get("result", []) or []
+        out.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+    _res_span_cache[key] = (out, time.time())
+    if len(_res_span_cache) > 8:
+        for k in sorted(_res_span_cache, key=lambda k: _res_span_cache[k][1])[:4]:
+            _res_span_cache.pop(k, None)
+    return out
+
+def _span_slice(start, end, pad_days):
+    """Any live span that FULLY contains this window -> slice it in memory."""
+    if not _span_enabled():
+        return None
+    lo_iso = (start - timedelta(days=pad_days)).isoformat()
+    hi_iso = end.isoformat()
+    now = time.time()
+    for (s_lo, s_hi), (rows, ts) in list(_res_span_cache.items()):
+        if (now - ts) < RES_SPAN_TTL and s_lo <= lo_iso and hi_iso <= s_hi:
+            return _res_rows_in(rows, lo_iso, hi_iso)
+    return None
+
+def prewarm_span(start, end, pad_days=45):
+    """Called ONCE before a multi-month grid. Best-effort: any failure just means
+    the per-month path runs exactly as it does today."""
+    if not _span_enabled():
+        return False
+    try:
+        return bool(fetch_reservations_span(start, end, pad_days))
+    except Exception as e:
+        print("prewarm_span error:", e)
+        return False
+
 def fetch_reservations_window(start, end, pad_days=45):
     """Every reservation whose stay can touch [start, end] — a TARGETED Hostaway
     query (CLAUDE.md trap #4). The full-history pull stops at REVENUE_MAX_PAGES
@@ -63316,6 +63635,11 @@ def fetch_reservations_window(start, end, pad_days=45):
     hit = _res_window_cache.get(key)
     if hit and (time.time() - hit[1]) < 900:
         return hit[0]
+    sliced = _span_slice(start, end, pad_days)   # a live span already covers this window
+    if sliced is not None:
+        _res_window_cache[key] = (sliced, time.time())
+        _res_window_degraded.pop(key, None)      # it came from a HEALTHY pull
+        return sliced
     out, offset, limit = [], 0, 200
     a_start = (start - timedelta(days=pad_days)).isoformat()
     a_end = end.isoformat()

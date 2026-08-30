@@ -15,3 +15,4 @@ Pillow>=10.2
 # renderer's frozen visual-regression test. Versions pinned to what was verified locally.
 playwright~=1.61
 PyMuPDF~=1.28
+brotli>=1.1.0

@@ -32,6 +32,11 @@ import asyncio
 import pathlib
 from datetime import datetime, timezone, timedelta
 
+import gzip
+try:
+    import brotli as _brotli
+except ImportError:                 # optional: gzip is the fallback
+    _brotli = None
 from aiohttp import web
 
 from . import api
@@ -40,7 +45,7 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.12"  # تقرير الفترة المخصّصة يتبع الأساس المنشور للمالك
+ERP_VERSION = "2.7.13"  # تقرير الفترة المخصّصة يتبع الأساس المنشور للمالك
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -262,6 +267,17 @@ def _guarded(handler, write=False):
             return api.jres({"error": "unauthorized"}, 401)
         if not api.can_finance(request):
             return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+        # Whoever is waiting on a page outranks housekeeping. contextvars are
+        # propagated into asyncio.to_thread workers, so the Hostaway throttle sees
+        # this without a signature change across hundreds of call sites.
+        try:
+            api.B.set_priority("user")
+        except Exception:
+            pass
+        try:
+            api.B.user_request_begin()
+        except Exception:
+            pass
         try:
             before = (getattr(api.B, "_save_failures", None) or {}).get("count", 0) if write else 0
             resp = await handler(request)
@@ -276,7 +292,83 @@ def _guarded(handler, write=False):
             return resp
         except Exception as e:
             return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+        finally:
+            try:
+                api.B.user_request_end()
+            except Exception:
+                pass
     return wrapped
+
+
+# ---- static assets: gzip once, cache forever -----------------------------------
+# erp.js is ~395 KB and erp.css ~41 KB, both served uncompressed on every cold
+# load, over a link that is often mobile. The URL already carries ?v=<commit>, so
+# the bytes for a given URL can never change — which makes `immutable` correct
+# rather than merely optimistic.
+_STATIC_CACHE = {}          # filename -> {"raw", "gz", "ctype", "mtime"}
+_STATIC_TYPES = {".js": "application/javascript; charset=utf-8",
+                 ".css": "text/css; charset=utf-8",
+                 ".map": "application/json; charset=utf-8",
+                 ".svg": "image/svg+xml", ".png": "image/png",
+                 ".webp": "image/webp", ".ico": "image/x-icon",
+                 ".woff2": "font/woff2", ".json": "application/json; charset=utf-8"}
+
+
+def _static_entry(path):
+    """Compress ONCE per file per mtime, in memory — never per request."""
+    st = path.stat()
+    hit = _STATIC_CACHE.get(path.name)
+    if hit and hit["mtime"] == st.st_mtime:
+        return hit
+    raw = path.read_bytes()
+    ext = path.suffix.lower()
+    gz = br = None
+    if ext in (".js", ".css", ".svg", ".json", ".map") and len(raw) > 1024:
+        try:
+            gz = gzip.compress(raw, 9)
+        except Exception:
+            gz = None
+        # brotli takes erp.js under 80 KB where gzip stalls at ~99 KB. ~0.3s once
+        # per file per deploy, and every current browser advertises `br`. Optional:
+        # if the library is missing we simply serve gzip.
+        if _brotli is not None:
+            try:
+                br = _brotli.compress(raw, quality=11)
+            except Exception:
+                br = None
+    entry = {"raw": raw, "gz": gz, "br": br, "mtime": st.st_mtime,
+             "ctype": _STATIC_TYPES.get(ext, "application/octet-stream")}
+    _STATIC_CACHE[path.name] = entry
+    return entry
+
+
+async def _h_erp_static(request):
+    name = request.match_info.get("filename") or ""
+    # No traversal: basename only, and it must resolve inside the static dir.
+    if "/" in name or "\\" in name or name.startswith("."):
+        return web.Response(status=404, text="not found")
+    root = (_DIR / "static").resolve()
+    path = (root / name).resolve()
+    if not str(path).startswith(str(root)) or not path.is_file():
+        return web.Response(status=404, text="not found")
+    try:
+        entry = _static_entry(path)
+    except Exception:
+        return web.Response(status=404, text="not found")
+    headers = {"Cache-Control": "public, max-age=31536000, immutable",
+               "Vary": "Accept-Encoding"}
+    accept = (request.headers.get("Accept-Encoding") or "").lower()
+    body, enc = entry["raw"], None
+    if entry.get("br") is not None and "br" in accept:
+        body, enc = entry["br"], "br"
+    elif entry.get("gz") is not None and "gzip" in accept:
+        body, enc = entry["gz"], "gzip"
+    if enc:
+        headers["Content-Encoding"] = enc
+    # A client that advertises neither still gets the plain bytes.
+    return web.Response(body=body, headers=headers,
+                        content_type=entry["ctype"].split(";")[0],
+                        charset="utf-8" if "charset" in entry["ctype"] else None)
 
 
 async def _h_api_bank(request):
@@ -549,7 +641,9 @@ async def _h_api_owner_detail(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    return api.jres(OW.owner_detail(owner))
+    # owner_detail reads the registry and the terms store and can touch the
+    # listings map — it belongs off the event loop like every neighbour here.
+    return api.jres(await asyncio.to_thread(OW.owner_detail, owner))
 
 
 async def _h_api_owner_profile(request):
@@ -753,6 +847,11 @@ async def _h_api_stmt_get(request):
     mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_payload, owner, mkey,
                                    _nofee_asked(request.query))
+    if data.get("reason") == "still_computing":
+        # Accepted, not finished. 404 would be a lie the screen renders as
+        # «تعذّر تحميل البيانات» — and would send the accountant to a retry button
+        # for something that is already on its way.
+        return api.jres(data, 202)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
@@ -1317,5 +1416,5 @@ def mount(app, botmod):
     app.router.add_post("/erp/api/tp/person-save", _tp_finance(_h_tp_person_save))
     app.router.add_post("/erp/api/tp/holder-save", _tp_finance(_h_tp_holder_save))
     app.router.add_get("/fin/receipt/{expense_id}", _h_receipt_proxy)   # owner-token scoped (public route)
-    app.router.add_static("/erp/static/", path=str(_DIR / "static"), name="erp-static")
+    app.router.add_get("/erp/static/{filename}", _h_erp_static)
     return True

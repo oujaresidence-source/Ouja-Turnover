@@ -66,7 +66,11 @@ class _FakeResponse:
 
 class ThrottleWindowTest(unittest.TestCase):
     """The bucket must never let more than HOSTAWAY_MAX_PER_10S calls sit in one
-    10-second window, and must actually block (not drop) the overflow."""
+    10-second window, and must actually block (not drop) the overflow.
+
+    These exercise the USER lane, i.e. the real Hostaway ceiling. Background
+    callers are deliberately held below it — that reserve is covered in
+    tests/test_hostaway_priority_lane.py."""
 
     def setUp(self):
         bot._ha_bucket_times.clear()
@@ -79,7 +83,7 @@ class ThrottleWindowTest(unittest.TestCase):
         with mock.patch.object(bot, "time", clock), \
              mock.patch.object(bot, "HOSTAWAY_MAX_PER_10S", cap):
             for _ in range(cap + 3):
-                bot._ha_throttle_acquire()
+                bot._ha_throttle_acquire(priority="user")
                 # checked after EVERY acquire, not just at the end
                 self.assertLessEqual(len(bot._ha_bucket_times), cap)
         self.assertGreaterEqual(len(clock.slept), 1,
@@ -90,17 +94,17 @@ class ThrottleWindowTest(unittest.TestCase):
         with mock.patch.object(bot, "time", clock), \
              mock.patch.object(bot, "HOSTAWAY_MAX_PER_10S", 5):
             for _ in range(5):
-                bot._ha_throttle_acquire()
+                bot._ha_throttle_acquire(priority="user")
         self.assertEqual(clock.slept, [], "a call under budget must not be delayed")
 
     def test_window_slides_so_old_calls_stop_counting(self):
         clock = _FakeClock()
         with mock.patch.object(bot, "time", clock), \
              mock.patch.object(bot, "HOSTAWAY_MAX_PER_10S", 2):
-            bot._ha_throttle_acquire()
-            bot._ha_throttle_acquire()
+            bot._ha_throttle_acquire(priority="user")
+            bot._ha_throttle_acquire(priority="user")
             clock.t += 11.0                      # both are now outside the window
-            bot._ha_throttle_acquire()
+            bot._ha_throttle_acquire(priority="user")
         self.assertEqual(clock.slept, [], "expired timestamps must be evicted, not counted")
         self.assertEqual(len(bot._ha_bucket_times), 1)
 

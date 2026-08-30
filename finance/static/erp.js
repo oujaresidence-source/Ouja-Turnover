@@ -88,6 +88,9 @@
       empty_today: 'قائمة الشغل صافية — ما عليك شي اليوم ✓',
       empty_today_sub: 'كل الموافقات والتصنيفات والمطابقات خالصة.',
       load_err: 'تعذّر تحميل البيانات', retry: 'حاول مرة ثانية',
+      working_h: 'لسه نجهّز الأرقام', working_sub: 'الشهور كثيرة والسحب طويل شوي — بتوصل لحالها، ما يحتاج تسوّين شي.',
+      stale_note: 'الأرقام محسوبة {t} — جاري التحديث', stale_now: 'قبل شوي', stale_min: 'قبل {n} دقيقة', stale_hr: 'قبل {n} ساعة',
+
       conf: 'تطابق', journal: 'قيد', sar: 'ر.س',
       stale: 'قديم', failed: 'فشل', src_bank: 'البنك', src_daftra: 'دافترة', src_contracts: 'العقود',
       /* --- bank --- */
@@ -464,6 +467,9 @@
       empty_today: 'Work queue is clear ✓',
       empty_today_sub: 'Approvals, classification and matching are all done.',
       load_err: 'Could not load the data', retry: 'Try again',
+      working_h: 'Still working', working_sub: 'This is a long pull across several months — it will arrive on its own.',
+      stale_note: 'Figures from {t} — refreshing', stale_now: 'a moment ago', stale_min: '{n} min ago', stale_hr: '{n} h ago',
+
       conf: 'match', journal: 'journal', sar: 'SAR',
       stale: 'stale', failed: 'failed', src_bank: 'Bank', src_daftra: 'Daftra', src_contracts: 'Contracts',
       bk_upload: 'Import Al Rajhi statement', bk_drop: 'Drop the statement file here or click to choose',
@@ -775,19 +781,63 @@
   function t(k) { var v = T[store.lang][k]; return v === undefined ? (T.ar[k] || k) : v; }
 
   /* ---------------- API ---------------- */
+  /* A bare fetch with no timeout is why the Owners skeleton hung forever instead
+     of failing honestly. Every request now has a deadline, identical in-flight
+     GETs share one promise, and the rejection says WHICH of the three things went
+     wrong so the UI can tell them apart. */
+  var API_TIMEOUT_MS = 30000;
+  var API_RETRY_MS = 3000;
+  var _inflight = {};
+
+  function _apiOnce(path, method, headers, body, timeoutMs) {
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timedOut = false;
+    var timer = setTimeout(function () { timedOut = true; if (ctl) ctl.abort(); }, timeoutMs);
+    var init = { method: method, headers: headers, body: body };
+    if (ctl) init.signal = ctl.signal;
+    return fetch(path, init).then(function (r) {
+      clearTimeout(timer);
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (!r.ok) throw { kind: 'http', status: r.status, body: j };
+        return j;
+      });
+    }, function (err) {
+      clearTimeout(timer);
+      if (timedOut) throw { kind: 'timeout', status: 0, body: null };
+      throw { kind: 'network', status: 0, body: null,
+              detail: String((err && err.message) || err) };
+    });
+  }
+
   function api(path, opts) {
     var o = opts || {};
+    var method = o.method || 'GET';
     var headers = { 'X-Token': store.token };
     var body;
     if (o.form) { body = o.form; }
     else if (o.body) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(o.body); }
-    return fetch(path, { method: o.method || 'GET', headers: headers, body: body })
-      .then(function (r) {
-        return r.json().catch(function () { return null; }).then(function (j) {
-          if (!r.ok) throw { status: r.status, body: j };
-          return j;
-        });
-      });
+    var timeoutMs = o.timeout || API_TIMEOUT_MS;
+    var isGet = (method === 'GET');
+    var key = method + ' ' + path + ' ' + (o.body ? JSON.stringify(o.body) : '');
+
+    /* A second identical GET rides the first one. This is what makes «حاول مرة
+       ثانية» a no-op while a request for the same key is already running. */
+    if (isGet && _inflight[key]) return _inflight[key];
+
+    var p = _apiOnce(path, method, headers, body, timeoutMs).catch(function (e) {
+      var retryable = isGet && !o.noRetry &&
+        (e.kind === 'timeout' || e.kind === 'network' ||
+         (e.kind === 'http' && e.status >= 500));
+      if (!retryable) throw e;                       /* never auto-retry a POST */
+      return new Promise(function (res) { setTimeout(res, API_RETRY_MS); })
+        .then(function () { return _apiOnce(path, method, headers, body, timeoutMs); });
+    });
+    if (isGet) {
+      _inflight[key] = p;
+      var clear = function () { delete _inflight[key]; };
+      p.then(clear, clear);
+    }
+    return p;
   }
 
   /* ---------------- toasts ---------------- */
@@ -888,6 +938,50 @@
     for (var i = 0; i < (rows || 5); i++) s += '<div class="sk sk-row"></div>';
     return s + '</div>';
   }
+  /* Three honest loading states replace the two dishonest ones (a skeleton that
+     never resolves, and an error card for work that is merely slow). */
+  function agoText(sec) {
+    var s = Math.max(0, sec || 0);
+    if (s < 90) return t('stale_now');
+    if (s < 5400) return t('stale_min').replace('{n}', String(Math.round(s / 60)));
+    return t('stale_hr').replace('{n}', String(Math.round(s / 3600)));
+  }
+  function workingCard(sub) {
+    return '<div class="card state-card"><div class="state-ico">\u23F3</div>' +
+      '<div class="state-h">' + esc(t('working_h')) + '</div>' +
+      '<div class="state-sub">' + esc(sub || t('working_sub')) + '</div></div>';
+  }
+  function staleChip(d) {
+    if (!d || !d.stale) return '';
+    return '<div class="stale-chip"><span class="dot"></span>' +
+      esc(t('stale_note').replace('{t}', agoText(d.stale_age_s))) + '</div>';
+  }
+  function withNotice(d) {
+    var html = staleChip(d);
+    if (!html && d && d.partial) {
+      var msg = (store.lang === 'ar' ? d.message_ar : d.message_en) || '';
+      if (msg) html = '<div class="stale-chip"><span class="dot"></span>' + esc(msg) + '</div>';
+    }
+    if (!html) return;
+    var v = $('#view');
+    if (v) v.insertAdjacentHTML('afterbegin', html);
+  }
+  /* After 8s of silence the skeleton becomes a calm "still working" state. Not an
+     error — nothing has failed — and not a spinner that will never stop. */
+  function slowGuard(ms) {
+    var g = { done: false };
+    g.timer = setTimeout(function () {
+      if (!g.done) $('#view').innerHTML = workingCard();
+    }, ms || 8000);
+    g.cancel = function () { g.done = true; clearTimeout(g.timer); };
+    return g;
+  }
+  var _refreshTimer = null;
+  function schedRefresh(fn, ms) {
+    if (_refreshTimer) clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(function () { _refreshTimer = null; fn(); }, ms || 15000);
+  }
+
   function errorCard(retryAct, detail) {
     return '<div class="card state-card"><div class="state-ico">⚠️</div>' +
       '<div class="state-h">' + esc(t('load_err')) + '</div>' +
@@ -4582,9 +4676,23 @@
   function loadProfile(owner, unit) {
     prUI.unit = unit || '';
     $('#view').innerHTML = skeleton(6);
+    var guard = slowGuard();
     api('/erp/api/owners/profile?owner=' + encodeURIComponent(owner))
-      .then(renderProfile)
-      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+      .then(function (d) {
+        guard.cancel();
+        renderProfile(d);
+        withNotice(d);
+        /* Stale or partial: swap in the fresh numbers once, quietly. The numbers
+           themselves are never animated — a figure that moves under the eye while
+           you are reading it is worse than one that simply changes. */
+        if (d && (d.stale || d.partial)) {
+          schedRefresh(function () { loadProfile(owner, prUI.unit); });
+        }
+      })
+      .catch(function (e) {
+        guard.cancel();
+        $('#view').innerHTML = errorCard('retry_owners', srvMsg(e));
+      });
   }
 
   function loadManage(owner) {        // old hash alias → the profile
@@ -5027,10 +5135,27 @@
   function loadStmtEd(owner, m, unit) {
     seUI.unit = unit || '';
     $('#view').innerHTML = skeleton(6);
+    var guard = slowGuard();
     api('/erp/api/owners/statement?owner=' + encodeURIComponent(owner) + (m ? '&m=' + encodeURIComponent(m) : '') +
         (seUI.nofee ? '&nofee=1' : ''))
-      .then(renderStmt)
-      .catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+      .then(function (d) {
+        guard.cancel();
+        /* Still computing is not a failure. Say so calmly and retry ourselves —
+           the accountant should not have to press anything. */
+        if (d && d.ok === false && d.reason === 'still_computing') {
+          $('#view').innerHTML = workingCard();
+          schedRefresh(function () { loadStmtEd(owner, m, seUI.unit); },
+                       (d.retry_after || 20) * 1000);
+          return;
+        }
+        renderStmt(d);
+        withNotice(d);
+        if (d && d.stale) schedRefresh(function () { loadStmtEd(owner, m, seUI.unit); });
+      })
+      .catch(function (e) {
+        guard.cancel();
+        $('#view').innerHTML = errorCard('retry_owners', srvMsg(e));
+      });
   }
 
   function seEdit(body, btn) {
