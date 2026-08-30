@@ -1604,13 +1604,30 @@ def statement_payload(owner, mkey, settings=None):
     hit = _stmt_cache_get(_stmt_payload_cache, key, mkey)
     if hit is not None:
         return hit
+
     def _go():
         o = _statement_payload_compute(owner, mkey, settings=settings)
         if isinstance(o, dict) and o.get("ok"):
             _stmt_payload_cache[key] = (o, time.time())
         return o
-    sf = getattr(_B(), "single_flight", None)
-    return sf(("stmt",) + key, _go) if sf is not None else _go()
+    B = _B()
+    # Expired but present -> serve it stamped and refresh behind the reader.
+    expired = _stmt_payload_cache.get(key)
+    if expired is not None and getattr(B, "OWNER_SWR", False):
+        B.kick_refresh(("stmt",) + key, _go)
+        return B.stale_stamp(expired[0], expired[1])
+    runner = getattr(B, "run_bounded", None)
+    if runner is None:
+        return _go()
+    ok, val = runner(("stmt",) + key, _go)
+    if ok:
+        return val
+    # Never present a partial STATEMENT as if it were whole. Say it is still
+    # working and let the screen retry itself.
+    return {"ok": False, "reason": "still_computing", "retry_after": 20,
+            "owner": owner, "month": mkey,
+            "message_ar": "لسه نحسب الكشف — بيتحدث لحاله بعد ثواني.",
+            "message_en": "Still computing — this will refresh itself shortly."}
 
 
 def _statement_payload_compute(owner, mkey, settings=None):
@@ -2066,11 +2083,67 @@ def statement_recompute_diff(owner, mkey):
 # ====================== v2.2 slice 3: the owner profile ======================
 
 def owner_profile(owner):
-    """Single-flighted front door: five simultaneous openers cost ONE build."""
-    sf = getattr(_B(), "single_flight", None)
-    if sf is None:
-        return _owner_profile_compute(owner)
-    return sf(("prof", owner), lambda: _owner_profile_compute(owner))
+    """Single-flighted and time-boxed front door: five simultaneous openers cost
+    ONE build, and a cold build that blows the budget returns the months that DID
+    complete instead of hanging until the proxy kills the request."""
+    B = _B()
+    runner = getattr(B, "run_bounded", None)
+    if runner is None:
+        sf = getattr(B, "single_flight", None)
+        return sf(("prof", owner), lambda: _owner_profile_compute(owner)) if sf else \
+            _owner_profile_compute(owner)
+    ok, val = runner(("prof", owner), lambda: _owner_profile_compute(owner))
+    if ok:
+        return val
+    return _partial_profile(owner)
+
+
+def _partial_profile(owner):
+    """What we can honestly show right now: the header, plus only the months
+    already computed. Flagged `partial` so the screen says so rather than
+    implying the missing months are empty."""
+    B = _B()
+    det = owner_detail(owner)
+    if not det.get("ok"):
+        return det
+    today = datetime.now(B.TZ).date()
+    cur = today.isoformat()[:7]
+    y, m = int(cur[:4]), int(cur[5:7])
+    months = []
+    cache = getattr(B, "_owner_portal_cache", {}) or {}
+    for i in range(12):
+        ty, tm = y, m - i
+        while tm <= 0:
+            tm += 12
+            ty -= 1
+        k = "%04d-%02d" % (ty, tm)
+        hit = cache.get((owner, k))
+        rep = hit[0] if hit else None
+        if rep is None:
+            continue
+        srec = stmt_rec(owner, k) or {}
+        pub = srec.get("published") or {}
+        unit_nets = {}
+        for pa in (rep or {}).get("apartments") or []:
+            unit_nets[str(pa.get("apartment") or "")] = pa.get("owner_net")
+        months.append({"m": k, "state": "running" if k == cur else "closed",
+                       "net": rep.get("owner_net"),
+                       "status": srec.get("status") or "draft",
+                       "published_version": pub.get("version"),
+                       "flagged": False, "anomalies": [], "unit_nets": unit_nets})
+    return {"ok": True, "partial": True, "owner": owner,
+            "profile": det.get("profile") or {},
+            "units": det.get("units") or [],
+            "versions": (det.get("versions") or [])[:20],
+            "months": months,
+            "link": {"exists": False, "active": False, "url": "",
+                     "opened_at": "", "opens": 0},
+            "wa_template": wa_template(),
+            "default_month": api._month_key_or_prev(None),
+            "month_meta": {},
+            "message_ar": "نعرض لك الشهور الجاهزة — الباقي لسه يتحدّث. حدّث الصفحة بعد شوي.",
+            "message_en": "Showing the months that are ready — the rest is still "
+                          "computing. Refresh shortly."}
 
 
 def _owner_profile_compute(owner):

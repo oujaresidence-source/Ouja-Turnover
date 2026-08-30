@@ -996,6 +996,70 @@ def single_flight(key, fn):
             if _flights.get(key) is slot:
                 _flights.pop(key, None)
 
+# ---- stale-while-revalidate + a bounded cold path -------------------------------
+# A spinner that never ends is the worst of the three outcomes. Last night's
+# numbers, LABELLED as last night's, beat a blank page — and both beat a lie.
+OWNER_SWR = os.environ.get("OWNER_SWR", "1") == "1"
+OWNER_COMPUTE_BUDGET_S = float(os.environ.get("OWNER_COMPUTE_BUDGET_S", "25"))
+
+_swr_lock = threading.Lock()
+_swr_running = set()
+
+def kick_refresh(key, fn):
+    """Recompute behind the reader. Coalesced: one refresh per key at a time."""
+    with _swr_lock:
+        if key in _swr_running:
+            return False
+        _swr_running.add(key)
+
+    def _run():
+        try:
+            single_flight(key, fn)
+        except Exception as e:
+            print("swr refresh error:", e)
+        finally:
+            with _swr_lock:
+                _swr_running.discard(key)
+    threading.Thread(target=_run, name="swr-" + str(key[:2]), daemon=True).start()
+    return True
+
+def stale_stamp(payload, built_ts):
+    """A COPY stamped with its real age — never mutate the cached object."""
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out["stale"] = True
+    out["refreshing"] = True
+    out["stale_age_s"] = int(max(0, time.time() - (built_ts or 0)))
+    try:
+        out["computed_at"] = datetime.fromtimestamp(built_ts, TZ).isoformat(timespec="seconds")
+    except Exception:
+        pass
+    return out
+
+def run_bounded(key, fn, budget_s=None):
+    """Single-flighted fn with a deadline. Returns (True, value) when it finished
+    in time, or (False, None) — in which case the work CONTINUES in the background
+    so the caller's automatic retry lands on a warm cache instead of hanging until
+    the proxy kills the request."""
+    budget = OWNER_COMPUTE_BUDGET_S if budget_s is None else budget_s
+    box = {}
+    done = threading.Event()
+
+    def _run():
+        try:
+            box["v"] = single_flight(key, fn)
+        except BaseException as e:
+            box["e"] = e
+        finally:
+            done.set()
+    threading.Thread(target=_run, name="bounded", daemon=True).start()
+    if not done.wait(budget):
+        return False, None
+    if "e" in box:
+        raise box["e"]
+    return True, box.get("v")
+
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
     backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3.
@@ -38123,6 +38187,12 @@ def _owner_month_report(owner, mkey):
     ttl = 900 if mkey == cur_key else 6 * 3600
     if hit and (now - hit[1] < ttl):
         return hit[0]
+    if hit and OWNER_SWR:
+        # Expired but present: hand back last night's numbers, stamped with their
+        # real age, and refresh behind the reader.
+        kick_refresh(("omr", owner, mkey),
+                     lambda: _owner_month_report_compute(owner, mkey))
+        return stale_stamp(hit[0], hit[1])
     return single_flight(("omr", owner, mkey),
                          lambda: _owner_month_report_compute(owner, mkey))
 
