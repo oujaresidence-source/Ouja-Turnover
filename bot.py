@@ -63302,6 +63302,86 @@ _res_window_cache = {}   # (start_iso, end_iso) -> (rows, fetched_ts)
 
 _res_window_degraded = {}   # (start_iso, end_iso) -> ts of last cache-fallback (M3)
 
+# ---- span cache: ONE coarse pull that many month-windows slice from -------------
+# A 15-month owner profile used to cost 15 independent paginated pulls (~60 calls)
+# against a global ceiling of 11 calls / 10s. One span pull covers the whole grid.
+_res_span_cache = {}            # (span_start_iso, span_end_iso) -> (rows, ts)
+RES_SPAN_TTL = 900
+
+def _span_enabled():
+    """Prewarm only where a REAL Hostaway pull is possible. With no credentials —
+    which is exactly the test environment — this stays off, so the monkeypatched
+    fetch_reservations_window seam remains the single source of rows and nothing
+    new reaches the network. RES_SPAN_ENABLED=1/0 forces it either way."""
+    v = os.environ.get("RES_SPAN_ENABLED", "")
+    if v in ("1", "0"):
+        return v == "1"
+    return bool(HOSTAWAY_API_KEY and HOSTAWAY_ACCOUNT_ID)
+
+def _res_rows_in(rows, lo_iso, hi_iso):
+    """The SAME predicate the window query expresses: arrivalDate in [lo, hi].
+    Slicing must return exactly what the API would have, or statements drift."""
+    out = []
+    for r in rows or []:
+        a = (r.get("arrivalDate") or "")[:10]
+        if a and lo_iso <= a <= hi_iso:
+            out.append(r)
+    return out
+
+def fetch_reservations_span(start, end, pad_days=45):
+    """One paginated pull covering [start - pad, end], cached under a MONTH-COARSE
+    key so every month inside the span is served from it. Returns [] on failure —
+    a failed span NEVER poisons the cache, so fetch_reservations_window falls back
+    to its own pull and its own degradation marking."""
+    lo = (start.replace(day=1) - timedelta(days=pad_days))
+    hi = end
+    key = (lo.isoformat(), hi.isoformat())
+    hit = _res_span_cache.get(key)
+    if hit and (time.time() - hit[1]) < RES_SPAN_TTL:
+        return hit[0]
+    out, offset, limit = [], 0, 200
+    for page in range(40):
+        try:
+            data = api_get("/reservations", params={
+                "arrivalStartDate": lo.isoformat(), "arrivalEndDate": hi.isoformat(),
+                "limit": limit, "offset": offset})
+        except Exception as e:
+            print("span reservations fetch error:", e)
+            return []                      # no caching, no degradation mark — caller retries
+        rows = data.get("result", []) or []
+        out.extend(rows)
+        if len(rows) < limit:
+            break
+        offset += limit
+    _res_span_cache[key] = (out, time.time())
+    if len(_res_span_cache) > 8:
+        for k in sorted(_res_span_cache, key=lambda k: _res_span_cache[k][1])[:4]:
+            _res_span_cache.pop(k, None)
+    return out
+
+def _span_slice(start, end, pad_days):
+    """Any live span that FULLY contains this window -> slice it in memory."""
+    if not _span_enabled():
+        return None
+    lo_iso = (start - timedelta(days=pad_days)).isoformat()
+    hi_iso = end.isoformat()
+    now = time.time()
+    for (s_lo, s_hi), (rows, ts) in list(_res_span_cache.items()):
+        if (now - ts) < RES_SPAN_TTL and s_lo <= lo_iso and hi_iso <= s_hi:
+            return _res_rows_in(rows, lo_iso, hi_iso)
+    return None
+
+def prewarm_span(start, end, pad_days=45):
+    """Called ONCE before a multi-month grid. Best-effort: any failure just means
+    the per-month path runs exactly as it does today."""
+    if not _span_enabled():
+        return False
+    try:
+        return bool(fetch_reservations_span(start, end, pad_days))
+    except Exception as e:
+        print("prewarm_span error:", e)
+        return False
+
 def fetch_reservations_window(start, end, pad_days=45):
     """Every reservation whose stay can touch [start, end] — a TARGETED Hostaway
     query (CLAUDE.md trap #4). The full-history pull stops at REVENUE_MAX_PAGES
@@ -63316,6 +63396,11 @@ def fetch_reservations_window(start, end, pad_days=45):
     hit = _res_window_cache.get(key)
     if hit and (time.time() - hit[1]) < 900:
         return hit[0]
+    sliced = _span_slice(start, end, pad_days)   # a live span already covers this window
+    if sliced is not None:
+        _res_window_cache[key] = (sliced, time.time())
+        _res_window_degraded.pop(key, None)      # it came from a HEALTHY pull
+        return sliced
     out, offset, limit = [], 0, 200
     a_start = (start - timedelta(days=pad_days)).isoformat()
     a_end = end.isoformat()

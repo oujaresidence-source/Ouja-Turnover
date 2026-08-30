@@ -1997,6 +1997,17 @@ def owner_profile(owner):
             tm += 12
             ty -= 1
         mkeys.append("%04d-%02d" % (ty, tm))
+    # perf: ONE span pull covers the whole grid (12 months) PLUS the 3 extra months
+    # the deviation check looks back on, so the page costs one paginated Hostaway pull
+    # instead of ~15. Best-effort — a miss just falls back to the per-month path.
+    try:
+        _old = _prev_months(mkeys[-1], 3)[-1]
+        _lo = date(int(_old[:4]), int(_old[5:7]), 1)
+        _cy, _cm = int(cur[:4]), int(cur[5:7])
+        _hi = date(_cy + (_cm // 12), (_cm % 12) + 1, 1) - timedelta(days=1)
+        B.prewarm_span(_lo, _hi)
+    except Exception as e:
+        print("owner_profile prewarm error:", e)
     # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
     try:
         pcache = getattr(B, "_owner_portal_cache", {}) or {}
