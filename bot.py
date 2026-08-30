@@ -40,6 +40,7 @@ import asyncio
 import hashlib
 import statistics
 import hmac
+import contextvars
 import threading
 import urllib.parse
 import secrets as _secrets_mod
@@ -933,14 +934,39 @@ _ha_bucket_times = deque()          # timestamps of calls in the trailing 10s wi
 _ha_inflight = threading.Semaphore(HOSTAWAY_MAX_INFLIGHT)
 _ha_throttle_stats = {"waited": 0, "wait_s": 0.0, "calls": 0, "429s": 0}
 
-def _ha_throttle_acquire():
-    """Block until this thread may issue a Hostaway call. Sliding 10s window."""
+# A background warmer and a human waiting on a page used to be treated
+# identically. Reserve part of the 11/10s bucket for whoever is actually waiting:
+# background callers may fill it only to (max - reserve), user-facing callers may
+# use all of it. This is what removes most of the erratic multi-minute tail.
+HOSTAWAY_USER_RESERVE = int(os.environ.get("HOSTAWAY_USER_RESERVE", "4"))
+_ha_priority = contextvars.ContextVar("ha_priority", default="background")
+
+def current_priority():
+    try:
+        return _ha_priority.get()
+    except Exception:
+        return "background"
+
+def set_priority(p):
+    """Returns the token; callers in plain threads just ignore it."""
+    try:
+        return _ha_priority.set(p)
+    except Exception:
+        return None
+
+def _ha_throttle_acquire(priority=None):
+    """Block until this thread may issue a Hostaway call. Sliding 10s window.
+    `priority` defaults to the ambient one (set per web request by _guarded and
+    propagated into to_thread workers by contextvars)."""
+    p = priority or current_priority()
+    cap = (HOSTAWAY_MAX_PER_10S if p == "user"
+           else max(1, HOSTAWAY_MAX_PER_10S - HOSTAWAY_USER_RESERVE))
     while True:
         with _ha_bucket_lock:
             now = time.time()
             while _ha_bucket_times and now - _ha_bucket_times[0] >= 10.0:
                 _ha_bucket_times.popleft()
-            if len(_ha_bucket_times) < HOSTAWAY_MAX_PER_10S:
+            if len(_ha_bucket_times) < cap:
                 _ha_bucket_times.append(now)
                 _ha_throttle_stats["calls"] += 1
                 return
@@ -1045,8 +1071,10 @@ def run_bounded(key, fn, budget_s=None):
     budget = OWNER_COMPUTE_BUDGET_S if budget_s is None else budget_s
     box = {}
     done = threading.Event()
+    _prio = current_priority()          # a human is waiting on this one
 
     def _run():
+        set_priority(_prio)
         try:
             box["v"] = single_flight(key, fn)
         except BaseException as e:

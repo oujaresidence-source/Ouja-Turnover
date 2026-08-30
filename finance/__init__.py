@@ -262,6 +262,13 @@ def _guarded(handler, write=False):
             return api.jres({"error": "unauthorized"}, 401)
         if not api.can_finance(request):
             return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
+        # Whoever is waiting on a page outranks housekeeping. contextvars are
+        # propagated into asyncio.to_thread workers, so the Hostaway throttle sees
+        # this without a signature change across hundreds of call sites.
+        try:
+            api.B.set_priority("user")
+        except Exception:
+            pass
         try:
             before = (getattr(api.B, "_save_failures", None) or {}).get("count", 0) if write else 0
             resp = await handler(request)
