@@ -1997,6 +1997,8 @@ def owner_profile(owner):
             tm += 12
             ty -= 1
         mkeys.append("%04d-%02d" % (ty, tm))
+    # the grid, plus the 3 months the deviation check looks back on
+    ext_keys = mkeys + _prev_months(mkeys[-1], 3)
     # perf: ONE span pull covers the whole grid (12 months) PLUS the 3 extra months
     # the deviation check looks back on, so the page costs one paginated Hostaway pull
     # instead of ~15. Best-effort — a miss just falls back to the per-month path.
@@ -2011,22 +2013,34 @@ def owner_profile(owner):
     # v2.2.2 perf: warm missing months in parallel (cold grid was 12 serial pulls)
     try:
         pcache = getattr(B, "_owner_portal_cache", {}) or {}
-        warm = [k for k in mkeys if (owner, k) not in pcache]
+        warm = [k for k in ext_keys if (owner, k) not in pcache]
         if len(warm) > 1:
             with ThreadPoolExecutor(max_workers=4) as ex:
                 list(ex.map(lambda k: B._owner_month_report(owner, k), warm))
     except Exception as e:
         print("owner_profile warmup error:", e)
-    for k in mkeys:
+    # Compute each month ONCE, then derive the 3-month average from that series.
+    # owner_anomalies used to re-fetch three reports per month — 36 redundant
+    # lookups for data this function was already holding.
+    reps = {}
+    for k in ext_keys:
         try:
-            rep = B._owner_month_report(owner, k)
+            reps[k] = B._owner_month_report(owner, k)
         except Exception as e:
             print("owner_profile month %s error: %s" % (k, e))
-            rep = None
+            reps[k] = None
+    net_by = {}
+    for k in ext_keys:
+        r = reps.get(k)
+        if r is not None and r.get("owner_net") is not None:
+            net_by[k] = float(r["owner_net"])
+    for k in mkeys:
+        rep = reps.get(k)
         srec = stmt_rec(owner, k) or {}
         pub = srec.get("published") or {}
         try:
-            anomalies = owner_anomalies(owner, k, rep) if rep is not None else []
+            prior_nets = [net_by[pm] for pm in _prev_months(k, 3) if pm in net_by]
+            anomalies = owner_anomalies(owner, k, rep, prior_nets=prior_nets) if rep is not None else []
         except Exception:
             anomalies = []
         unit_nets = {}
@@ -2094,8 +2108,14 @@ def _prev_months(mkey, n=3):
     return out
 
 
-def owner_anomalies(owner, mkey, rep):
-    """Pre-send checks for one owner-month. `rep` = the month's report (memoized)."""
+def owner_anomalies(owner, mkey, rep, prior_nets=None):
+    """Pre-send checks for one owner-month. `rep` = the month's report (memoized).
+
+    `prior_nets` = the three preceding months' owner_net values when the CALLER
+    already holds them (owner_profile builds the whole series anyway). Supplying
+    them skips three _owner_month_report lookups per month — 36 across the grid.
+    prior_nets=None reproduces the original behaviour exactly, which is what
+    cycle_board still relies on."""
     B = _B()
     out = []
     if rep is None:
@@ -2103,14 +2123,17 @@ def owner_anomalies(owner, mkey, rep):
                  "ar": "ما انحسب كشف", "en": "No statement computed"}]
     net = float(rep.get("owner_net") or 0)
     # 1) net deviation vs the owner's own 3-month average
-    prior = []
-    for pm in _prev_months(mkey, 3):
-        try:
-            pr = B._owner_month_report(owner, pm)
-        except Exception:
-            pr = None
-        if pr is not None and pr.get("owner_net") is not None:
-            prior.append(float(pr["owner_net"]))
+    if prior_nets is not None:
+        prior = [float(n) for n in prior_nets if n is not None]
+    else:
+        prior = []
+        for pm in _prev_months(mkey, 3):
+            try:
+                pr = B._owner_month_report(owner, pm)
+            except Exception:
+                pr = None
+            if pr is not None and pr.get("owner_net") is not None:
+                prior.append(float(pr["owner_net"]))
     if prior:
         avg = sum(prior) / len(prior)
         if abs(avg) > 1 and abs(net - avg) / abs(avg) * 100.0 > ANOM_NET_DEV_PCT:

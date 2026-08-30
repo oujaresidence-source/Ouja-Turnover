@@ -83,7 +83,7 @@ class _Counter(object):
         return {"result": []}
 
 
-class OwnerPerfBudgetTest(unittest.TestCase):
+class _OwnerFixture(unittest.TestCase):
     def setUp(self):
         OW._terms_cache["v"] = None
         OW._stmt_cache["v"] = None
@@ -117,6 +117,8 @@ class OwnerPerfBudgetTest(unittest.TestCase):
         bot._listings["map"] = {}
         bot._listings["ts"] = 0
 
+
+class OwnerPerfBudgetTest(_OwnerFixture):
     # ---- G4 ----------------------------------------------------------------
     def test_g4_cold_profile_stays_within_ten_hostaway_calls(self):
         d = OW.owner_profile(OWNER)
@@ -154,6 +156,40 @@ class OwnerPerfBudgetTest(unittest.TestCase):
         self.assertEqual(nets_span, nets_plain,
                          "span slicing changed the numbers — that is a correctness bug")
         self.assertTrue(any(n for _, n in nets_span), "fixture produced no income at all")
+
+
+class AnomalyEquivalenceTest(_OwnerFixture):
+    """§4.2 — deriving the 3-month average from the grid must produce EXACTLY the
+    anomalies the old per-month _owner_month_report lookups produced."""
+
+    def test_derived_prior_nets_match_the_per_month_lookup(self):
+        OW.owner_profile(OWNER)          # warm every month report
+        mk = "2026-06"
+        rep = bot._owner_month_report(OWNER, mk)
+        self.assertIsNotNone(rep)
+
+        old_path = OW.owner_anomalies(OWNER, mk, rep)                 # prior_nets=None
+        priors = []
+        for pm in OW._prev_months(mk, 3):
+            pr = bot._owner_month_report(OWNER, pm)
+            if pr is not None and pr.get("owner_net") is not None:
+                priors.append(float(pr["owner_net"]))
+        new_path = OW.owner_anomalies(OWNER, mk, rep, prior_nets=priors)
+        self.assertEqual(old_path, new_path,
+                         "derived 3-month average changed the anomaly output")
+
+    def test_deviation_still_fires_when_it_should(self):
+        """Positive control: a net far from its 3-month average must still flag,
+        or this whole check has been silently disabled."""
+        rep = {"owner_net": 100.0, "apartments": [], "excluded_summary": {}}
+        flagged = OW.owner_anomalies(OWNER, "2026-06", rep,
+                                     prior_nets=[3000.0, 3000.0, 3000.0])
+        self.assertIn("net_deviation", {a["key"] for a in flagged})
+
+    def test_no_priors_means_no_deviation_check(self):
+        rep = {"owner_net": 100.0, "apartments": [], "excluded_summary": {}}
+        quiet = OW.owner_anomalies(OWNER, "2026-06", rep, prior_nets=[])
+        self.assertNotIn("net_deviation", {a["key"] for a in quiet})
 
 
 if __name__ == "__main__":
