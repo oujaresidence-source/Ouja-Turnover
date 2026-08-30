@@ -270,6 +270,10 @@ def _guarded(handler, write=False):
         except Exception:
             pass
         try:
+            api.B.user_request_begin()
+        except Exception:
+            pass
+        try:
             before = (getattr(api.B, "_save_failures", None) or {}).get("count", 0) if write else 0
             resp = await handler(request)
             if write:
@@ -283,6 +287,11 @@ def _guarded(handler, write=False):
             return resp
         except Exception as e:
             return api.jres({"error": "internal", "detail": str(e)[:300]}, 500)
+        finally:
+            try:
+                api.B.user_request_end()
+            except Exception:
+                pass
     return wrapped
 
 

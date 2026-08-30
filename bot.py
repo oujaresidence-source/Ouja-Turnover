@@ -1028,6 +1028,22 @@ def single_flight(key, fn):
 OWNER_SWR = os.environ.get("OWNER_SWR", "1") == "1"
 OWNER_COMPUTE_BUDGET_S = float(os.environ.get("OWNER_COMPUTE_BUDGET_S", "25"))
 
+# The warmer must not compete with a human. _guarded bumps this for the life of
+# every web request; the warm loop sleeps out a tick while any are in flight.
+_user_inflight = {"n": 0}
+_user_inflight_lock = threading.Lock()
+
+def user_request_begin():
+    with _user_inflight_lock:
+        _user_inflight["n"] += 1
+
+def user_request_end():
+    with _user_inflight_lock:
+        _user_inflight["n"] = max(0, _user_inflight["n"] - 1)
+
+def user_requests_inflight():
+    return _user_inflight["n"]
+
 _swr_lock = threading.Lock()
 _swr_running = set()
 
@@ -38211,8 +38227,7 @@ def _owner_month_report(owner, mkey):
     Hostaway storms."""
     now = time.time()
     hit = _owner_portal_cache.get((owner, mkey))
-    cur_key = datetime.now(TZ).date().isoformat()[:7]
-    ttl = 900 if mkey == cur_key else 6 * 3600
+    ttl = _owner_ttl_for(mkey)
     if hit and (now - hit[1] < ttl):
         return hit[0]
     if hit and OWNER_SWR:
@@ -38285,8 +38300,13 @@ def _owner_warm_reports():
             return 0
         def _warm_month(mkey):
             c = 0
+            half = _owner_ttl_for(mkey) / 2.0
+            now_ts = time.time()
             for o in owners:                     # serial within a month: first owner pulls
                 try:                             # the shared window, the rest reuse it
+                    prev = _owner_portal_cache.get((o, mkey))
+                    if prev and (now_ts - prev[1]) < half:
+                        continue                 # still fresh — recomputing burns API budget
                     if _owner_month_report(o, mkey) is not None:
                         c += 1
                 except Exception as e:
@@ -38301,11 +38321,15 @@ def _owner_warm_reports():
         print("owner warm build error:", e)
         return 0
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=int(os.environ.get("OWNER_WARM_MIN", "20")))
 async def owner_warm_loop():
-    """Keep «دورة الشهر» fast: the current-month report cache TTL is only 15 min and a
-    restart starts cold, so refresh in the background (first run right after boot)."""
+    """Keep «دورة الشهر» fast without fighting its own TTL. At 10 minutes against a
+    15-minute TTL this used to recompute the current month for EVERY owner forever,
+    burning the shared API budget on data nobody had asked for. Now: 20 minutes, a
+    half-TTL freshness skip, and it yields entirely while a human is waiting."""
     try:
+        if user_requests_inflight() > 0:
+            return                               # a person is waiting — not now
         n = await asyncio.to_thread(_owner_warm_reports)
         if n:
             print("owner warm: %d owner-month report(s) ready" % n)

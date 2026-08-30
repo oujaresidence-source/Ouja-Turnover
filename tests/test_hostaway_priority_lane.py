@@ -87,5 +87,39 @@ class PriorityLaneTest(unittest.TestCase):
                          "priority did not reach the worker thread")
 
 
+class WarmLoopYieldTest(unittest.TestCase):
+    """§4.6 — the warmer used to fight its own TTL and compete with humans.
+
+    At 10-minute runs against a 15-minute TTL, the current month expired between
+    every pass and was fully recomputed for EVERY owner, forever, in the
+    background — burning the shared API budget on data nobody had asked for."""
+
+    def test_the_ttl_now_outlives_the_warm_interval(self):
+        from datetime import datetime
+        cur = datetime.now(bot.TZ).date().isoformat()[:7]
+        ttl = bot._owner_ttl_for(cur)
+        interval_s = bot.owner_warm_loop.minutes * 60
+        self.assertGreater(ttl, interval_s,
+                           "the warm loop still outruns the cache TTL (%ss vs %ss)"
+                           % (ttl, interval_s))
+
+    def test_a_closed_month_keeps_the_long_ttl(self):
+        self.assertEqual(bot._owner_ttl_for("2026-01"), 6 * 3600)
+
+    def test_the_inflight_counter_is_balanced(self):
+        start = bot.user_requests_inflight()
+        bot.user_request_begin()
+        self.assertEqual(bot.user_requests_inflight(), start + 1)
+        bot.user_request_end()
+        self.assertEqual(bot.user_requests_inflight(), start)
+
+    def test_the_counter_never_goes_negative(self):
+        """An unbalanced end must not push it below zero — a negative counter would
+        make the warmer think nobody is ever waiting."""
+        for _ in range(5):
+            bot.user_request_end()
+        self.assertGreaterEqual(bot.user_requests_inflight(), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
