@@ -955,6 +955,47 @@ _ha_session = requests.Session()
 _ha_session.mount("https://", requests.adapters.HTTPAdapter(
     pool_connections=8, pool_maxsize=16, max_retries=0))
 
+# ---- single-flight -------------------------------------------------------------
+# Nothing used to coalesce concurrent identical owner work. When the statement
+# editor failed and Wejdan pressed «حاول مرة ثانية», the first computation was
+# still running and a second identical one started beside it — doubling the
+# Hostaway load and halving the chance either finished. The error card was
+# actively teaching the user to make the outage worse.
+SINGLE_FLIGHT_WAIT = float(os.environ.get("SINGLE_FLIGHT_WAIT", "120"))
+
+_flight_lock = threading.Lock()
+_flights = {}                       # key -> {"event", "result", "error"}
+
+def single_flight(key, fn):
+    """Run fn() once per key. Concurrent callers with the same key block on the
+    first one and receive its result; exceptions propagate to every waiter.
+
+    If the leader exceeds SINGLE_FLIGHT_WAIT the waiter computes for itself
+    rather than hanging forever — availability beats purity when a leader wedges."""
+    with _flight_lock:
+        slot = _flights.get(key)
+        leader = slot is None
+        if leader:
+            slot = {"event": threading.Event(), "result": None, "error": None}
+            _flights[key] = slot
+    if not leader:
+        if not slot["event"].wait(SINGLE_FLIGHT_WAIT):
+            return fn()
+        if slot["error"] is not None:
+            raise slot["error"]
+        return slot["result"]
+    try:
+        slot["result"] = fn()
+        return slot["result"]
+    except BaseException as e:
+        slot["error"] = e
+        raise
+    finally:
+        slot["event"].set()
+        with _flight_lock:
+            if _flights.get(key) is slot:
+                _flights.pop(key, None)
+
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
     backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3.
@@ -38073,6 +38114,19 @@ def _owner_cache_bust(owner=None, lid=None, mkey=None):
         return 0
 
 def _owner_month_report(owner, mkey):
+    """Cache fast-path, then ONE compute per (owner, month) no matter how many
+    threads ask at once. Five simultaneous openers used to mean five identical
+    Hostaway storms."""
+    now = time.time()
+    hit = _owner_portal_cache.get((owner, mkey))
+    cur_key = datetime.now(TZ).date().isoformat()[:7]
+    ttl = 900 if mkey == cur_key else 6 * 3600
+    if hit and (now - hit[1] < ttl):
+        return hit[0]
+    return single_flight(("omr", owner, mkey),
+                         lambda: _owner_month_report_compute(owner, mkey))
+
+def _owner_month_report_compute(owner, mkey):
     """The aggregated owner report for one month — the SAME object the PDF renders.
     Memoized: closed months 6h, the current month 15 min."""
     now = time.time()
@@ -63360,6 +63414,9 @@ def fetch_reservations_span(start, end, pad_days=45):
     hit = _res_span_cache.get(key)
     if hit and (time.time() - hit[1]) < RES_SPAN_TTL:
         return hit[0]
+    return single_flight(("span",) + key, lambda: _fetch_span_uncached(lo, hi, key))
+
+def _fetch_span_uncached(lo, hi, key):
     out, offset, limit = [], 0, 200
     for page in range(40):
         try:

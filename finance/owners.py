@@ -1604,10 +1604,13 @@ def statement_payload(owner, mkey, settings=None):
     hit = _stmt_cache_get(_stmt_payload_cache, key, mkey)
     if hit is not None:
         return hit
-    out = _statement_payload_compute(owner, mkey, settings=settings)
-    if isinstance(out, dict) and out.get("ok"):
-        _stmt_payload_cache[key] = (out, time.time())
-    return out
+    def _go():
+        o = _statement_payload_compute(owner, mkey, settings=settings)
+        if isinstance(o, dict) and o.get("ok"):
+            _stmt_payload_cache[key] = (o, time.time())
+        return o
+    sf = getattr(_B(), "single_flight", None)
+    return sf(("stmt",) + key, _go) if sf is not None else _go()
 
 
 def _statement_payload_compute(owner, mkey, settings=None):
@@ -2063,6 +2066,14 @@ def statement_recompute_diff(owner, mkey):
 # ====================== v2.2 slice 3: the owner profile ======================
 
 def owner_profile(owner):
+    """Single-flighted front door: five simultaneous openers cost ONE build."""
+    sf = getattr(_B(), "single_flight", None)
+    if sf is None:
+        return _owner_profile_compute(owner)
+    return sf(("prof", owner), lambda: _owner_profile_compute(owner))
+
+
+def _owner_profile_compute(owner):
     """Everything the owner-profile page renders: header (profile + link),
     apartment chips (with live contract terms), and the 12-month grid with
     per-month net / status / anomaly flag / per-unit nets. Reads the memoized

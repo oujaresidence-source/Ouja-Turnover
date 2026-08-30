@@ -15,6 +15,8 @@ Run: python3 -m unittest tests.test_owner_perf_budget -v
 import os
 import shutil
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -190,6 +192,78 @@ class AnomalyEquivalenceTest(_OwnerFixture):
         rep = {"owner_net": 100.0, "apartments": [], "excluded_summary": {}}
         quiet = OW.owner_anomalies(OWNER, "2026-06", rep, prior_nets=[])
         self.assertNotIn("net_deviation", {a["key"] for a in quiet})
+
+
+class SingleFlightTest(_OwnerFixture):
+    """G6 — five simultaneous openers must cost ONE compute, not five.
+
+    This is what makes «حاول مرة ثانية» safe: before it, pressing retry while the
+    first computation was still running started a second identical one beside it."""
+
+    def test_five_concurrent_profile_loads_compute_once(self):
+        real = OW._owner_profile_compute
+        computes = []
+        lock = threading.Lock()
+
+        def slow(owner):
+            with lock:
+                computes.append(owner)
+            time.sleep(0.2)
+            return real(owner)
+        OW._owner_profile_compute = slow
+        try:
+            results = [None] * 5
+            errors = []
+
+            def run(i):
+                try:
+                    results[i] = OW.owner_profile(OWNER)
+                except Exception as e:      # pragma: no cover
+                    errors.append(e)
+
+            threads = [threading.Thread(target=run, args=(i,)) for i in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+        finally:
+            OW._owner_profile_compute = real
+
+        self.assertEqual(errors, [], "a waiter blew up")
+        self.assertEqual(len(computes), 1,
+                         "expected exactly ONE underlying compute, got %d" % len(computes))
+        nets = [[(m["m"], m["net"]) for m in r["months"]] for r in results]
+        for n in nets[1:]:
+            self.assertEqual(n, nets[0], "waiters got different numbers from the leader")
+
+    def test_a_failing_leader_propagates_to_every_waiter(self):
+        """An exception must reach all five, not just the leader — otherwise four
+        callers silently receive None and render an empty page."""
+        boom = RuntimeError("hostaway down")
+
+        def explode(owner):
+            time.sleep(0.15)
+            raise boom
+        real = OW._owner_profile_compute
+        OW._owner_profile_compute = explode
+        try:
+            seen = []
+
+            def run():
+                try:
+                    OW.owner_profile(OWNER)
+                    seen.append("no-error")
+                except RuntimeError as e:
+                    seen.append(str(e))
+            threads = [threading.Thread(target=run) for _ in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+        finally:
+            OW._owner_profile_compute = real
+        self.assertEqual(seen, ["hostaway down"] * 5,
+                         "the leader's failure did not reach every waiter: %r" % seen)
 
 
 if __name__ == "__main__":
