@@ -80,6 +80,15 @@ except Exception as _schedule_err:     # pragma: no cover
     _schedule = None
     _HAS_SCHEDULE = False
 
+# Unit onboarding & handover gate — additive, isolated, never takes down the bot/dashboard.
+try:
+    import onboarding as _onb
+    _HAS_ONB = True
+except Exception as _onb_err:     # pragma: no cover
+    print("[onboarding] import failed (onboarding disabled, bot unaffected):", _onb_err)
+    _onb = None
+    _HAS_ONB = False
+
 # Promise Keeper (متتبع الوعود) — durable ledger + accountability for promises made to guests.
 try:
     import promises as _pk
@@ -6538,6 +6547,16 @@ SCHEDULE_NOTIFY_DRYRUN = os.environ.get("SCHEDULE_NOTIFY_DRYRUN", "1") in ("1", 
 SCHEDULE_DIGEST_HOUR   = int(os.environ.get("SCHEDULE_DIGEST_HOUR", "8"))       # 08:00 Riyadh
 SCHEDULE_OPS_CHANNEL   = os.environ.get("SCHEDULE_OPS_CHANNEL", "team-calendar")  # ops summary channel
 
+# ============= «ضم الوحدات» unit onboarding & handover gate =============
+# The account-management process (7 stages, 63 tasks) as a surface that enforces itself. The
+# unit cannot be PUBLISHED to operations until every piece of context ops will need is filled
+# in. ONB_NOTIFY_DRYRUN=1 (the default) computes and prints but opens no Discord room and
+# sends no ping; flip it to 0 when the owner is ready for the tickets to appear.
+ONB_ENABLED        = os.environ.get("ONB_ENABLED", "1") in ("1", "true", "True", "yes")
+ONB_NOTIFY_DRYRUN  = os.environ.get("ONB_NOTIFY_DRYRUN", "1") in ("1", "true", "True", "yes")
+ONB_OPS_CHANNEL    = os.environ.get("ONB_OPS_CHANNEL", "تسليم-الوحدات")
+ONB_CATEGORY       = os.environ.get("ONB_CATEGORY", "ضم الوحدات")
+
 # ============= «تنسيق الحفلات» decoration orders =============
 # A guest tapping «أنا مهتم» in the guide records an INTEREST only — no ticket, no thread, no
 # task, nobody assigned. Only the DEC supervisor opens a request (owner rule, 2026-07-26).
@@ -7075,6 +7094,86 @@ async def _decor_deliver(payload):
         await ch.send(text)
     except Exception as e:
         print("[decor] post failed (non-fatal):", e)
+
+# ===================== «ضم الوحدات» — the delegation ticket =====================
+# ONE ROOM PER PROJECT, never per task. A project carries 63 tasks; a channel per task would
+# hit Discord's 50-per-category cap on the very first apartment — the exact failure that
+# pushed «تنسيق الحفلات» onto threads. _make_channel_spill rolls a full category into «... ٢»
+# so a ticket never stops opening.
+
+def _onb_notify(payload):
+    """HOST.notify hook for «ضم الوحدات» — schedules the async post. Never raises into a
+    request handler: a Discord problem must not stop the account manager from assigning work.
+    (The route treats a raise as 'not announced' and leaves notified_at NULL so the next save
+    retries the ping — so failing loudly here would be wrong twice over.)"""
+    if not (ONB_ENABLED and _HAS_ONB):
+        return
+    try:
+        asyncio.create_task(_onb_deliver(payload))
+    except RuntimeError:
+        pass
+
+async def _onb_category(guild):
+    """«ضم الوحدات» — its own category, spelling-tolerant like _tk_category, created on first
+    use and parked just under the maintenance category."""
+    want = _tk_cat_norm(ONB_CATEGORY)
+    for cat in guild.categories:
+        if _tk_cat_norm(cat.name) == want:
+            return cat
+    cat = await guild.create_category(ONB_CATEGORY)
+    try:
+        maint = next((c for c in guild.categories
+                      if _tk_cat_norm(c.name) == _tk_cat_norm(MAINT_CATEGORY)), None)
+        if maint is not None:
+            await cat.edit(position=maint.position + 1)
+    except Exception as e:
+        print("[onboarding] category position skipped (non-fatal):", e)
+    return cat
+
+async def _onb_room(guild, project):
+    """The project's own room, reused forever after. If the stored channel was deleted by a
+    human, make a new one and overwrite the id — never crash on a missing room."""
+    tid = project.get("thread_id")
+    if tid and str(tid).isdigit():
+        ch = guild.get_channel(int(tid))
+        if ch is not None:
+            return ch
+    seq = await asyncio.to_thread(_next_counter, "onb_ticket")
+    slug = re.sub(r"^ouja-", "", channel_name(project.get("unit_name") or ""))[:40]
+    cat = await _onb_category(guild)
+    ch = await _make_channel_spill(guild, cat, "ضم-%03d-%s" % (seq, slug),
+                                   "ouja-onb:%s" % project.get("id"))
+    await asyncio.to_thread(_onb.db.set_thread_id, project["id"], ch.id)
+    await ch.send("🏠 %s · %s%sملف ضم الوحدة — كل تكت وتحديث بيوصل هنا."
+                  % (project.get("unit_name") or "", project.get("ref") or "", chr(10)))
+    return ch
+
+async def _onb_deliver(payload):
+    """kind='assign'  → ONE card per person in the project's room, mentioning them, carrying
+                        the link that opens their full context on a phone with no login.
+       kind='publish' → the handover summary, posted into the same room.
+       kind='gate'    → deliberately ignored (the refusal is already on the screen). It exists
+                        so the payload contract does not have to widen later."""
+    kind = payload.get("kind")
+    text = payload.get("text") or ""
+    if kind == "gate":
+        return
+    if ONB_NOTIFY_DRYRUN:
+        print("[onboarding] DRYRUN %s:%s%s" % (kind, chr(10), text))
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    try:
+        project = await asyncio.to_thread(_onb.db.project, payload.get("project_id"))
+        if not project:
+            return
+        ch = await _onb_room(guild, project)
+        if ch is None:
+            return
+        await ch.send(text)
+    except Exception as e:
+        print("[onboarding] post failed (non-fatal):", e)
 
 # ===================== «تنسيق الحفلات» — the whole workflow, inside Discord =====================
 # The owner wanted the team to never need the dashboard. So every action the dashboard tab
@@ -22735,7 +22834,9 @@ function renderDesignOpsSummary(){
 }
 function renderPmoOpsSummary(){
   var p=D.pmo||{}, rows=safeArr(p.projects||p.items), s=p.summary||{};
-  var pending=rows.filter(function(x){return x.needs_approval||x.waiting_owner||x.status==='pending';}).length;
+  // A PMO list row carries `signoff`, not needs_approval/waiting_owner/status — filtering on
+  // those made this tile permanently read 0. See the polarity note on the sign-off button.
+  var pending=rows.filter(function(x){return !!x.signoff;}).length;
   putHtml('pmoOpsSummary', opsStrip([
     {label:labelText('المشاريع','Projects'),value:safeNum(s.total||rows.length),sub:labelText('من المعادلة للتسليم','from scope to handover'),tone:'info'},
     {label:labelText('قيد العمل','In progress'),value:safeNum(s.in_progress||s.active),sub:labelText('تابع النسبة والمرحلة','track progress and stage'),tone:'warn'},
@@ -24064,6 +24165,7 @@ function go(id){
   if(id==='studio'){ window.location.href='/studio?token='+encodeURIComponent(tok()); return; }   // Ouja Studio is its own page
   if(id==='ownrep'){ window.location.href='/owner-report?token='+encodeURIComponent(tok()); return; }   // Owner Report wizard is its own page
   if(id==='monthlylab'){ window.location.href='/monthly-lab?token='+encodeURIComponent(tok()); return; }   // «التسعير الشهري» is its own page — a bad token there can never touch DASHBOARD_HTML
+  if(id==='onb'){ window.location.href='/onboarding?token='+encodeURIComponent(tok()); return; }   // «ضم الوحدات» is its own page — a form this size does not belong in DASHBOARD_HTML
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -28616,7 +28718,12 @@ function _pmoRenderCards(){
       + '<button class="btn ghost xs" onclick="pmoOpen(&#39;'+esc(p.id)+'&#39;)">'+(ar?'افتح':'Open')+'</button>'
       + '<button class="btn ghost xs" onclick="pmoCopyOwnerById(&#39;'+esc(p.id)+'&#39;)">'+(ar?'انسخ رابط المالك':'Copy owner link')+'</button>'
       // Item 56: one-click sign-off toggle.
-      + '<button class="btn '+(p.signoff?'red':'ghost')+' xs" onclick="pmoToggleSignoff(&#39;'+esc(p.id)+'&#39;,'+(p.signoff?'true':'false')+')">'+(p.signoff?(ar?'✓ اعتُمد':'✓ signed off'):(ar?'⏳ يحتاج اعتمادك':'⏳ needs sign-off'))+'</button>'
+      // POLARITY, and it is genuinely counter-intuitive: signoff:true means "STILL NEEDS
+      // Faisal's approval", not "approved". The pill above reads it that way; this button used
+      // to read it backwards, so one card said both things at once. The stored meaning is kept
+      // as-is (flipping it would rewrite history on existing projects) — the label is what
+      // changed.
+      + '<button class="btn '+(p.signoff?'red':'ghost')+' xs" onclick="pmoToggleSignoff(&#39;'+esc(p.id)+'&#39;,'+(p.signoff?'true':'false')+')">'+(p.signoff?(ar?'⏳ يحتاج اعتمادك':'⏳ needs sign-off'):(ar?'✓ ما يحتاج اعتماد':'✓ no sign-off needed'))+'</button>'
       + '</div></div>';
   }
   h += '</div>';
@@ -29033,9 +29140,18 @@ async function pmoCommitTasks(){
   var ar=(L==='ar');
   var items=_pmoEq.filter(function(it){return (it.name||'').trim();});
   if(!items.length){ toast(ar?'ما فيه بنود':'No items'); return; }
+  // Cancel is ALWAYS the safe path now. This used to resolve Cancel to mode:"replace", which
+  // deletes every existing task with no undo — so Escape, a click outside, and every reflex a
+  // person has all landed on the irreversible branch. The default is "add"; replacing needs a
+  // second, explicit confirmation that names what will be destroyed.
   var mode='add';
-  if((_pmoP.tasks||[]).length){
-    mode = confirm(ar?'في مهام موجودة. اضغط "موافق" لإضافة الجديدة فوقها، أو "إلغاء" لاستبدال الكل.':'Tasks exist. OK = add on top, Cancel = replace all.') ? 'add':'replace';
+  var _have=(_pmoP.tasks||[]).length;
+  if(_have){
+    var _keep = confirm(ar?('في '+_have+' مهمة موجودة. اضغط "موافق" لإضافة الجديدة فوقها. لو تبي تستبدل الكل اضغط "إلغاء".'):('There are '+_have+' existing tasks. OK = add on top. Cancel if you want to replace them all.'));
+    if(!_keep){
+      if(confirm(ar?('تأكيد: بيتحذفون '+_have+' مهمة نهائيًا وما فيه تراجع. متأكد؟'):('Confirm: this permanently deletes '+_have+' tasks with no undo. Are you sure?'))) mode='replace';
+      else { toast(ar?'ما تغيّر شي':'Nothing changed'); return; }
+    }
   }
   var r=await post('/api/pmo/commit-tasks',{id:_pmoP.id, items:items, mode:mode});
   if(r.ok){ _pmoP=r.project; pmoCloseOv(); _renderPmoProject(); toast(ar?('✓ أُنشئت '+r.added+' مهمة'):('✓ Created '+r.added+' tasks')); }
@@ -42755,7 +42871,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "wifi", "listings", "quality", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio"]},
@@ -42792,6 +42908,7 @@ NAV_DEF = {
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
         {"id": "ownrep", "ic": "finance", "tk": "ownrep"},
         {"id": "design", "ic": "design", "tk": "design"},
+        {"id": "onb", "ic": "cleanteams", "tk": "onb"},
         {"id": "pmo", "ic": "pmo", "tk": "pmo"},
         {"id": "expenses", "ic": "expenses", "tk": "expenses", "badge": "expenses"},
         {"id": "finance", "ic": "finance", "tk": "finance"},
@@ -42822,6 +42939,7 @@ NAV_DEF = {
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
+            "onb": "ضم الوحدات",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
             "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
@@ -42843,6 +42961,7 @@ NAV_DEF = {
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
+            "onb": "Unit onboarding",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
             "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
@@ -52776,6 +52895,16 @@ async def _api_pmo_list(request):
         tasks = p.get("tasks") or []
         _spent = sum((t.get("cost") or 0) * (t.get("qty") or 1)
                      for t in tasks if isinstance(t.get("cost"), (int, float)))
+        # A persisted milestone_index past the end of the list used to raise IndexError and
+        # 500 this endpoint — which kills the page for EVERY project, not just the bad one.
+        # Clamp into range; a stale index shows the last milestone instead of taking the
+        # tab down.
+        _ms = p.get("milestones") or _pmo_default_milestones()
+        try:
+            _mi = int(p.get("milestone_index", 0) or 0)
+        except (TypeError, ValueError):
+            _mi = 0
+        _mi = max(0, min(_mi, len(_ms) - 1)) if _ms else 0
         out.append({
             "id": p["id"], "ref": p.get("ref"),
             "budget": p.get("budget"), "spent": round(_spent) if _spent else None,  # item 55
@@ -52784,8 +52913,7 @@ async def _api_pmo_list(request):
             "client_name": (p.get("client") or {}).get("name", ""),
             "district": (p.get("unit") or {}).get("district", ""),
             "progress": _pmo_progress(tasks),
-            "milestone": (p.get("milestones") or _pmo_default_milestones())[p.get("milestone_index", 0)]
-                         if (p.get("milestones") or _pmo_default_milestones()) else None,
+            "milestone": _ms[_mi] if _ms else None,
             "handover_date": p.get("handover_date", ""),
             "status_label": _pmo_status_label(p),
             "task_count": len(tasks),
@@ -61045,6 +61173,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
     "/api/cp/lead",                          # public /cp meeting request — validated + rate-limited in cp/routes.py
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
+    "/api/onb/t/submit",                     # assigned employee updates a task — link token in body
     "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
     # The «قاعدة المعرفة» share link. Owner's explicit decision (2026-08-03): whoever
     # holds the link reads AND edits, with no name asked. The token is checked inside
@@ -61065,6 +61194,7 @@ _ROLE_CREATE_RULES = [
 ]
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
+    ("/api/onb/", "onb"),                    # /api/onb/t/submit is exempt above (employee link)
     ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
     ("/api/pricing/strategy-toggle", "strat"),
     ("/api/strategy/", "strat"),
@@ -61114,6 +61244,9 @@ _ROLE_WRITE_RULES = [
 # endpoints (stay/elite/monthly/guide/schedule day+week/clean-feedback) are intentionally
 # absent so they keep working for every logged-in (or anonymous public) visitor.
 _ROLE_READ_RULES = [
+    # NOTE: the assigned employee's phone link reads /api/onb-t/{token} — deliberately OUTSIDE
+    # this prefix, because it is anonymous and this rule would 403 it. Its token is its auth.
+    ("/api/onb/", "onb"),
     ("/api/revenue", "rev"),
     ("/api/pricing2", "pricing"),
     ("/api/pricing", "pricing"),
@@ -61663,6 +61796,30 @@ async def start_web_server():
                     print("[schedule] auto-link skipped:", _ale)
             except Exception as _se3:
                 print("[schedule] wiring failed (schedule disabled, bot unaffected):", _se3)
+
+        # ---- «ضم الوحدات» unit onboarding & handover gate — additive; reuses brain.db + auth ----
+        # Wired AFTER schedule on purpose: the employee picker reads schedule.owners, the ONLY
+        # legal source of "who works here" (free text is why pmo's assignee data is unusable).
+        if _HAS_ONB and ONB_ENABLED:
+            try:
+                _onb.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "state_dir": STATE_DIR,
+                    "tz": TZ, "now": now_riyadh,
+                    "listings": _schedule_hostaway_listings,
+                    "pmo_projects": (lambda: _pmo_projects),
+                    "notify": _onb_notify,
+                    "log_event": log_event,
+                    "discord_ids": (lambda: dict(ASSIGNMENTS.get("discord_ids", {}) or {})),
+                    # env PUBLIC_BASE_URL -> auto-captured public base -> the site base, so the
+                    # employee link always renders with zero setup.
+                    "public_base": _dispatch_base_url,
+                })
+                _onb.register_routes(app)
+                print("[onboarding] wired + routes registered (/onboarding, /api/onb/*) — dryrun=%s"
+                      % ONB_NOTIFY_DRYRUN)
+            except Exception as _oe:
+                print("[onboarding] wiring failed (onboarding disabled, bot unaffected):", _oe)
 
         # ---- B2B company profile «/business» — public data room; renders from nightly snapshot ----
         if _HAS_BUSINESS:
