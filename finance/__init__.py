@@ -771,6 +771,11 @@ async def _h_api_stmt_get(request):
     mkey = api._month_key_or_prev(request.query.get("m"))
     data = await asyncio.to_thread(OW.statement_payload, owner, mkey,
                                    _nofee_asked(request.query))
+    if data.get("reason") == "still_computing":
+        # Accepted, not finished. 404 would be a lie the screen renders as
+        # «تعذّر تحميل البيانات» — and would send the accountant to a retry button
+        # for something that is already on its way.
+        return api.jres(data, 202)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 

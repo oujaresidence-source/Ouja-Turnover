@@ -775,3 +775,27 @@ textarea.in{width:100%;font-family:inherit}
 .tp-mck{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);white-space:nowrap}
 .tp-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 0 2px}
 .tp-filters .tpf{min-width:120px;max-width:180px}
+
+/* ---- stale / still-working notices (Owners) --------------------------------
+   A statement showing last night's numbers must SAY so. Quiet and factual, not an
+   alarm: this is information, not a failure. Reuses the existing yellow advisory
+   pair and the shared radius/spacing scale — no new colours, no new fonts. */
+.stale-chip{
+  display:flex;align-items:center;gap:var(--s-2);
+  margin:0 0 var(--s-3);padding:var(--s-2) var(--s-3);
+  background:var(--yellow-soft);color:var(--yellow);
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:12.5px;font-weight:600;line-height:1.45;
+}
+.stale-chip .dot{
+  width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;
+  animation:stale-pulse 1.8s var(--ease) infinite;
+}
+@keyframes stale-pulse{0%,100%{opacity:.35}50%{opacity:1}}
+/* The chip fades in; the numbers under it never move. A figure that animates
+   while you are reading it is worse than one that simply changes. */
+.stale-chip{animation:chip-in .22s var(--press) both}
+@keyframes chip-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .stale-chip,.stale-chip .dot{animation:none}
+}
