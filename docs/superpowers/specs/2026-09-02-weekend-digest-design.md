@@ -1,7 +1,7 @@
 # «وش صاير بالرياض» — the weekend digest — design spec
 
 Date: 2026-09-02 · Package: `digest/` · Branch: `feat/weekend-digest` (worktree
-`../ouja-wt-digest`, based on `origin/main` @ 0e4e64f) · Status: **P2 done — collectors on fixtures; awaiting approval for P3**
+`../ouja-wt-digest`, based on `origin/main` @ 0e4e64f) · Status: **P4 done — render golden locked (owner approved the look 2026-09-02), rank + art + build orchestrator; awaiting approval for P5**
 
 This spec is the decision record. The brief (pasted as the session's first message) is
 the requirement; this document says *how* it will be met inside this repo, and lists
@@ -324,7 +324,7 @@ tried in order:
 - **owned** — `digest/data/owned.json` maps a slug (a compound, a POI we photographed) to an
   image URL on `public_base`; fetched through `HOST.http.get_bytes`, Pillow `thumbnail((760,760),
   LANCZOS)`, JPEG q78, base64 — the `unit_tiles()` steps, verbatim.
-- **og** — `<meta property="og:image">` from the item's verified page, **same origin only**,
+- **og** — `<meta property="og:image">` from the item's verified page, **same site only** (same registrable domain: Platinumlist serves its own images from cdn.platinumlist.net — same publisher, which is what makes the claim defensible),
   `Content-Type: image/*`, long edge ≥ 800 px, ≤ 6 MB, fetched within 10 s. Stored with sha256.
 - **generated** — `art_generated.svg(seed, glyph, kind)` pure: navy field, gold rule, the
   glyph (a film's first letter, «ض» vs «م» halves for a fixture band) in Serif Display Black,

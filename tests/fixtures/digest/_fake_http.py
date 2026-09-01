@@ -14,10 +14,11 @@ def fixture(name):
 
 
 class FakeHttp(object):
-    def __init__(self, pages=None, redirects=None, head_status=None):
+    def __init__(self, pages=None, redirects=None, head_status=None, permissive_head=False):
         self.pages = dict(pages or {})
         self.redirects = dict(redirects or {})
         self.head_status = dict(head_status or {})   # url -> status override for head()
+        self.permissive_head = permissive_head       # offline dry runs: every https link "exists"
         self.calls = []
 
     def _final(self, url):
@@ -43,6 +44,8 @@ class FakeHttp(object):
         final, (status, ctype, _) = self._lookup(url)
         if url in self.head_status:
             status = self.head_status[url]
+        elif self.permissive_head and status == 404 and url.lower().startswith("https://"):
+            status, ctype = 200, "text/html"
         return status, final, ctype
 
     def get_bytes(self, url, timeout=25, max_bytes=6000000):

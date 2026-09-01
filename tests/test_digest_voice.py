@@ -65,6 +65,11 @@ class Numerals(unittest.TestCase):
         self.assertEqual(voice.to_arabic_indic("3 سبتمبر · أكشن"), "٣ سبتمبر · أكشن")
         self.assertEqual(voice.to_arabic_indic("بدون أرقام"), "بدون أرقام")
 
+    def test_prose_digits_leaves_latin_runs_alone(self):
+        self.assertEqual(voice.prose_digits("Fall 2: Deadpoint"), "Fall 2: Deadpoint")
+        self.assertEqual(voice.prose_digits("الجمعة 9:00م"), "الجمعة ٩:٠٠م")
+        self.assertEqual(voice.prose_digits(""), "")
+
     def test_western_digits_in_prose_detector(self):
         self.assertEqual(voice.western_digits_in_prose("٣ سبتمبر"), [])
         self.assertEqual(voice.western_digits_in_prose("3 سبتمبر و 2026"), ["3", "2026"])

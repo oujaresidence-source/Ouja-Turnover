@@ -52,8 +52,19 @@ def is_clean(text):
     return not slop_hits(text)
 
 
+_ARABIC_LETTER = re.compile("[؀-ۿ]")
+
+
 def to_arabic_indic(text):
     return (text or "").translate(_AR)
+
+
+def prose_digits(text):
+    """The prose rule, applied honestly: Arabic text gets Arabic-Indic digits; a
+    Latin-only run (a film title like «Fall 2») keeps its Western digits — the
+    renderer sets it inside <span dir=ltr>, which the guard exempts."""
+    t = text or ""
+    return to_arabic_indic(t) if _ARABIC_LETTER.search(t) else t
 
 
 def western_digits_in_prose(text):
@@ -99,8 +110,8 @@ def polish(item, kind="card", seed=0, model_call=None, model=None):
         return out
     if not isinstance(got, dict):
         return out
-    ttl = to_arabic_indic((got.get("ttl") or "").strip())
-    sub = to_arabic_indic((got.get("sub") or "").strip())
+    ttl = prose_digits((got.get("ttl") or "").strip())
+    sub = prose_digits((got.get("sub") or "").strip())
     if kind == "card":
         if not (title_ok(ttl) and sub_ok(sub) and is_clean(ttl) and is_clean(sub)):
             return out

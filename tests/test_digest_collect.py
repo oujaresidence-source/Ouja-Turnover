@@ -119,7 +119,7 @@ class Cinema(unittest.TestCase):
         self.assertTrue(cands[0]["new_this_week"])
         self.assertEqual(cands[0]["release_iso"], "2026-09-02")
         self.assertEqual(cands[0]["ttl"], "Fall 2: Deadpoint")
-        self.assertEqual(cands[0]["sub"], "٢ سبتمبر · مغامرات ودراما")
+        self.assertEqual(cands[0]["sub"], "يعرض حاليًا · مغامرات ودراما")   # released Wed 2 Sept → showing
         self.assertEqual(cands[0]["age"], 12)
         rel = [c["release_iso"] for c in cands]
         self.assertEqual(rel, sorted(rel, reverse=True))
@@ -131,7 +131,7 @@ class Cinema(unittest.TestCase):
         for c in cands:
             with self.subTest(c=c["ttl"]):
                 self.assertEqual(c["chip"], "سينما")
-                self.assertRegex(c["sub"], "^[٠-٩]{1,2} \\S+( · .+)?$")
+                self.assertRegex(c["sub"], "^([٠-٩]{1,2} \\S+|يعرض حاليًا)( · .+)?$")
                 self.assertEqual(c["art_hint"], {})          # no posters: generated art only
                 self.assertTrue(c["url"].startswith("https://elcinema.com/work/"))
                 self.assertLessEqual(len(c["sub"].split()), 10)
@@ -142,6 +142,7 @@ class Cinema(unittest.TestCase):
         thu = [c for c in cands if c["release_iso"] == "2026-08-27"]
         self.assertTrue(thu)
         self.assertTrue(all(c["day"] == "thu" for c in thu))
+        self.assertTrue(all(c["sub"].startswith("٢٧ أغسطس") for c in thu))      # inside the window → dated
         self.assertFalse(any(c["release_iso"] > "2026-08-29" for c in cands))
 
 

@@ -74,11 +74,15 @@ def parse(html, week, now, page_url=NOW_URL):
             continue                                   # not yet showing that weekend
         genres = _GENRE_RX.findall(row)
         age = _AGE_RX.search(row)
-        sub = "%s · %s" % (ar_date(release), _genres_ar(genres)) if genres else ar_date(release)
+        # a date in the copy must fall inside Thu–Sat (the guard enforces it): a film
+        # releasing that weekend carries its date, one already showing says so instead.
         if release >= week.thu:
             dk = {0: "thu", 1: "fri", 2: "sat"}[(release - week.thu).days]
+            lead = ar_date(release)
         else:
             dk = "thu"
+            lead = "يعرض حاليًا"
+        sub = "%s · %s" % (lead, _genres_ar(genres)) if genres else lead
         cands.append(base.make(
             "cinema", base.short_title(title), sub, "سينما", url, dk, SOURCE, page_url, fetched,
             category="cinema", district="", raw_conf=base.TIER_PRIMARY,

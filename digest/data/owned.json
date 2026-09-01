@@ -1,0 +1,4 @@
+{
+  "_comment": "Ouja's own photography for «يستاهل» places and covers, keyed by the worth.json slug: {slug: {url: <image on our public site>, credit: 'Ouja'}}. Empty until the owner catalogues photos of places (we photograph apartments, not parks — yet). An owner copy at $STATE_DIR/digest/owned.json wins over this file.",
+  "images": {}
+}
