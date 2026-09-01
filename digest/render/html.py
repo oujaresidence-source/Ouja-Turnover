@@ -225,7 +225,7 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .grid{display:grid;gap:22pt;align-content:start;flex:1 1 auto;min-height:0}
 .g2,.g2h{grid-template-columns:1fr 1fr}
 .g3v,.g3,.g1{grid-template-columns:1fr}
-.g1{grid-auto-rows:max-content}
+.g1{grid-auto-rows:max-content;align-items:start;flex:0 0 auto}
 .card{background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:6mm;display:flex;flex-direction:column;gap:14pt;min-height:0}
 .card .body{display:flex;flex-direction:column;gap:10pt;flex:1 1 auto;min-height:0}
 .g3v .card,.g3 .card{flex-direction:row;align-items:stretch;gap:26pt}
@@ -242,11 +242,6 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .art-portrait{aspect-ratio:3/4}
 .art svg,.art img{width:100%%;height:100%%;display:block;object-fit:cover}
 .ttl{font-family:%(serif)s;font-weight:700;font-size:36pt;line-height:1.2}
-.card-big{min-height:760pt;padding:10mm}
-.card-big .ttl{font-size:70pt;line-height:1.1}
-.card-big .big-sub{font-size:26pt;line-height:1.55;margin-block-start:10pt;max-width:520pt}
-.card-big .row{align-items:flex-end}
-.card-big .qr{width:38mm;height:38mm;flex-basis:38mm}
 .sub{font-weight:400;font-size:19pt;line-height:1.5;color:var(--ink)}
 .row{display:flex;justify-content:space-between;align-items:flex-end;margin-block-start:auto;gap:12pt}
 .row.end{justify-content:flex-start;margin-block-start:26pt;align-items:center;gap:18pt}
