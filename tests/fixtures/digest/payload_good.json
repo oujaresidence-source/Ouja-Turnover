@@ -1,0 +1,137 @@
+{
+  "issue": "١٢",
+  "issue_no": 12,
+  "week_of": "2026-09-03",
+  "dateLabel": "٣–٥ سبتمبر",
+  "generated_at": "2026-09-02T13:00:00+03:00",
+  "verified_urls": [
+    "https://riyadh.platinumlist.net/event/noor-riyadh-2026",
+    "https://riyadh.platinumlist.net/event/diriyah-biennale",
+    "https://riyadh.platinumlist.net/event/souq-alawwal",
+    "https://ksa.voxcinemas.com/movies/the-long-night",
+    "https://ksa.voxcinemas.com/movies/sand-and-salt",
+    "https://ksa.voxcinemas.com/movies/little-lantern",
+    "https://www.visitsaudi.com/en/riyadh/attractions/wadi-hanifah",
+    "https://jdwel.com/2026-27-saudi-league-fixtures/"
+  ],
+  "sections": [
+    {
+      "title": "فعاليات ومعارض",
+      "key": "events",
+      "layout": "g3v",
+      "items": [
+        {
+          "ttl": "نور الرياض يرجع",
+          "sub": "أعمال ضوئية في سبع مناطق، الدخول مجاني",
+          "chip": "حطين",
+          "url": "https://riyadh.platinumlist.net/event/noor-riyadh-2026",
+          "art": {"kind": "generated", "sha256": "", "src": ""},
+          "day": "thu",
+          "source": {"name": "Platinumlist", "url": "https://riyadh.platinumlist.net/calendar/2026-09", "fetched_at": "2026-09-02T12:40:00+03:00"},
+          "confidence": 0.92,
+          "tags": {"category": "exhibition", "district": "حطين"}
+        },
+        {
+          "ttl": "بينالي الدرعية",
+          "sub": "فن معاصر في جاكس، آخر أسبوعين",
+          "chip": "الدرعية",
+          "url": "https://riyadh.platinumlist.net/event/diriyah-biennale",
+          "art": {"kind": "generated", "sha256": "", "src": ""},
+          "day": "fri",
+          "source": {"name": "Platinumlist", "url": "https://riyadh.platinumlist.net/calendar/2026-09", "fetched_at": "2026-09-02T12:40:00+03:00"},
+          "confidence": 0.88,
+          "tags": {"category": "exhibition", "district": "الدرعية"}
+        },
+        {
+          "ttl": "سوق الأول",
+          "sub": "حرف ومأكولات شعبية، من العصر للعشاء",
+          "chip": "الرياض",
+          "url": "https://riyadh.platinumlist.net/event/souq-alawwal",
+          "art": {"kind": "none", "sha256": "", "src": ""},
+          "day": "sat",
+          "source": {"name": "Platinumlist", "url": "https://riyadh.platinumlist.net/calendar/2026-09", "fetched_at": "2026-09-02T12:40:00+03:00"},
+          "confidence": 0.81,
+          "tags": {"category": "market", "district": "الرياض"}
+        }
+      ]
+    },
+    {
+      "title": "جديد في السينما",
+      "key": "cinema",
+      "layout": "g3",
+      "items": [
+        {
+          "ttl": "الليلة الطويلة",
+          "sub": "٣ سبتمبر · أكشن وجريمة",
+          "chip": "سينما",
+          "url": "https://ksa.voxcinemas.com/movies/the-long-night",
+          "art": {"kind": "generated", "sha256": "", "src": ""},
+          "day": "thu",
+          "source": {"name": "VOX Cinemas", "url": "https://ksa.voxcinemas.com/movies/comingsoon", "fetched_at": "2026-09-02T12:41:00+03:00"},
+          "confidence": 0.95,
+          "tags": {"category": "cinema", "district": ""}
+        },
+        {
+          "ttl": "رمل وملح",
+          "sub": "٣ سبتمبر · دراما",
+          "chip": "سينما",
+          "url": "https://ksa.voxcinemas.com/movies/sand-and-salt",
+          "art": {"kind": "generated", "sha256": "", "src": ""},
+          "day": "thu",
+          "source": {"name": "VOX Cinemas", "url": "https://ksa.voxcinemas.com/movies/comingsoon", "fetched_at": "2026-09-02T12:41:00+03:00"},
+          "confidence": 0.95,
+          "tags": {"category": "cinema", "district": ""}
+        },
+        {
+          "ttl": "الفانوس الصغير",
+          "sub": "٤ سبتمبر · أنيميشن عائلي",
+          "chip": "سينما",
+          "url": "https://ksa.voxcinemas.com/movies/little-lantern",
+          "art": {"kind": "generated", "sha256": "", "src": ""},
+          "day": "fri",
+          "source": {"name": "VOX Cinemas", "url": "https://ksa.voxcinemas.com/movies/comingsoon", "fetched_at": "2026-09-02T12:41:00+03:00"},
+          "confidence": 0.95,
+          "tags": {"category": "cinema", "district": ""}
+        }
+      ]
+    },
+    {
+      "title": "يستاهل الزيارة",
+      "key": "worth",
+      "layout": "g1",
+      "items": [
+        {
+          "ttl": "وادي حنيفة",
+          "sub": "مشي على الماء قبل المغرب، وموقف قريب",
+          "chip": "الدرعية",
+          "url": "https://www.visitsaudi.com/en/riyadh/attractions/wadi-hanifah",
+          "art": {"kind": "none", "sha256": "", "src": ""},
+          "day": "fri",
+          "source": {"name": "Ouja", "url": "https://www.visitsaudi.com/en/riyadh/attractions/wadi-hanifah", "fetched_at": "2026-09-02T12:42:00+03:00"},
+          "confidence": 0.9,
+          "tags": {"category": "park", "district": "الدرعية"}
+        }
+      ]
+    },
+    {
+      "title": "مباريات الأسبوع",
+      "key": "fixtures",
+      "layout": "fix",
+      "comp": "دوري روشن السعودي",
+      "items": [
+        {"home": "الشباب", "away": "الهلال", "when": "الجمعة ٩:٠٠م", "day": "fri",
+         "url": "https://jdwel.com/2026-27-saudi-league-fixtures/",
+         "source": {"name": "jdwel", "url": "https://jdwel.com/2026-27-saudi-league-fixtures/", "fetched_at": "2026-09-02T12:43:00+03:00"},
+         "confidence": 0.9},
+        {"home": "النصر", "away": "الفيحاء", "when": "السبت ٨:٣٠م", "day": "sat",
+         "url": "https://jdwel.com/2026-27-saudi-league-fixtures/",
+         "source": {"name": "jdwel", "url": "https://jdwel.com/2026-27-saudi-league-fixtures/", "fetched_at": "2026-09-02T12:43:00+03:00"},
+         "confidence": 0.9}
+      ]
+    }
+  ],
+  "dropped": [
+    {"ttl": "مؤتمر التقنية المالية", "reason": "فعالية للشركات، ما لها تذاكر عامة"}
+  ],
+  "alternates": {}
+}
