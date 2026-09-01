@@ -302,6 +302,15 @@ except Exception as _studio_err:        # pragma: no cover
     _studio = None
     _HAS_STUDIO = False
 
+# Weekend digest «وش صاير بالرياض» — Wednesday poster + approval buttons; additive.
+try:
+    import digest as _digest
+    _HAS_DIGEST = True
+except Exception as _digest_err:        # pragma: no cover
+    print("[digest] import failed (digest disabled, bot unaffected):", _digest_err)
+    _digest = None
+    _HAS_DIGEST = False
+
 # B2B company profile «/business» — public data room; server-rendered from a nightly snapshot.
 try:
     import business as _business
@@ -6596,6 +6605,13 @@ STUDIO_OPS_CHANNEL    = os.environ.get("STUDIO_OPS_CHANNEL", "ouja-studio")     
 STUDIO_WEB_SEARCH     = os.environ.get("STUDIO_WEB_SEARCH", "1") == "1"
 STUDIO_DAILY_SIGNAL_IDEAS = int(os.environ.get("STUDIO_DAILY_SIGNAL_IDEAS", "4") or 4)
 
+# ============= Weekend digest «وش صاير بالرياض» — Wednesday poster, one-tap approval =============
+DIGEST_ENABLED = os.environ.get("DIGEST_ENABLED", "1") == "1"
+DIGEST_DRYRUN  = os.environ.get("DIGEST_DRYRUN", "1") in ("1", "true", "True", "yes")   # 1 = build, never post
+DIGEST_CHANNEL = os.environ.get("DIGEST_CHANNEL", "نشرة-الاسبوع")
+DIGEST_DAY     = int(os.environ.get("DIGEST_DAY", "2") or 2)      # 2 = Wednesday (Mon=0)
+DIGEST_HOUR    = int(os.environ.get("DIGEST_HOUR", "13") or 13)   # never before 13:00 — digest.schedule clamps it
+
 # ============= Finance Chat «مساعد المركز المالي» — KB-grounded ERP chatbot =============
 FINCHAT_ENABLED       = os.environ.get("FINCHAT_ENABLED", "1") == "1"
 FINCHAT_ESC_CHANNEL   = os.environ.get("FINCHAT_ESC_CHANNEL", "finance-help")
@@ -8039,6 +8055,223 @@ async def cp_snapshot_loop():
               "dropped", rep.get("dropped"), rep.get("error") or "")
     except Exception as e:
         print("[cp] snapshot loop error:", e)
+
+# ============= Weekend digest «وش صاير بالرياض» =============
+# Wednesday DIGEST_HOUR Riyadh: build the poster (digest.build), post the story PNG +
+# the Najdi summary + five buttons to #DIGEST_CHANNEL. Nothing publishes without the
+# owner's tap; DIGEST_DRYRUN=1 (default) builds the files and prints what it would post.
+# The weekly-job house style: a 30-minute tick + digest.schedule.should_fire (weekday,
+# hour, and a latch PERSISTED in digest_issues so a redeploy cannot post twice).
+
+def _digest_may_press(interaction):
+    """Server admins only. Fails CLOSED — these buttons publish to guests."""
+    try:
+        perms = getattr(interaction.user, "guild_permissions", None)
+        return bool(perms is not None and (perms.administrator or perms.manage_guild))
+    except Exception:
+        return False
+
+def _digest_actor(interaction):
+    u = interaction.user
+    return getattr(u, "display_name", None) or getattr(u, "name", "") or "—"
+
+async def _digest_deny(interaction):
+    await interaction.response.send_message("هذي الأزرار لفيصل والإدارة فقط.", ephemeral=True)
+
+def _digest_load_json(name):
+    return _load_json(name, None)
+
+def _digest_files(issue_no):
+    """discord.File objects for the issue's PNG (+ PDF when final=True)."""
+    out = []
+    try:
+        root = _digest.build._out_root(None)
+        for name in ("digest-%s.png" % issue_no, "digest-%s.pdf" % issue_no):
+            p = os.path.join(root, str(issue_no), name)
+            if os.path.isfile(p):
+                with open(p, "rb") as fh:
+                    out.append(discord.File(io.BytesIO(fh.read()), filename=name))
+    except Exception as e:
+        print("[digest] files error:", e)
+    return out
+
+async def _digest_post_final(row):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    ch = await ensure_channel(guild, DIGEST_CHANNEL, await get_category(guild))
+    if ch is None:
+        return
+    files = _digest_files(row["issue_no"])
+    await ch.send("✅ العدد %s معتمد ومنشور — الملفات مرفقة." % row["issue_no"], files=files)
+
+def _digest_publish(row):
+    """The `publisher` handed to digest.approval.act — called from a worker thread ONLY
+    when DIGEST_DRYRUN is off and the owner pressed approve."""
+    try:
+        asyncio.run_coroutine_threadsafe(_digest_post_final(row), bot.loop).result(timeout=90)
+    except Exception as e:
+        print("[digest] publish error:", e)
+
+def _digest_caps():
+    return {"http": _digest.net_live, "model_call": claude_json, "model": CLAUDE_MODEL_PREMIUM,
+            "search": claude_search_json, "load_json": _digest_load_json,
+            "public_base": _dispatch_base_url, "dry_run": DIGEST_DRYRUN, "publisher": _digest_publish}
+
+async def _digest_refresh_message(message, issue_id):
+    """Re-render the Discord post from the stored issue: new text, new PNG, buttons only
+    while the issue is still a preview."""
+    try:
+        row = await asyncio.to_thread(_digest.db.issue, issue_id)
+        if not row:
+            return
+        p = row.get("payload") or {}
+        body = _digest.notify.build_message(p, row["issue_no"], p.get("dropped"), _dispatch_base_url()) or _digest.notify.status_line(row)
+        if row["status"] != "preview":
+            body = "%s\n%s" % (_digest.notify.status_line(row), body)
+        files = [f for f in _digest_files(row["issue_no"]) if f.filename.endswith(".png")]
+        view = DigestView() if row["status"] in ("preview", "failed") else None
+        await message.edit(content=body[:1900], attachments=files, view=view)
+    except Exception as e:
+        print("[digest] refresh error:", e)
+
+async def _digest_do(interaction, issue, action, section=None, slot=None, rank=None):
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+    caps = _digest_caps()
+    try:
+        res = await asyncio.to_thread(
+            _digest.approval.act, issue["id"], action, _digest_actor(interaction), now_riyadh(), caps["http"],
+            section, slot, rank, caps["model_call"], caps["model"], caps["search"], caps["load_json"],
+            caps["public_base"], caps["dry_run"], caps["publisher"], None)
+    except Exception as e:
+        return await interaction.followup.send("ما صار: %s" % e, ephemeral=True)
+    await interaction.followup.send(res["message"], ephemeral=True)
+    await _digest_refresh_message(interaction.message, issue["id"])
+
+class _DigestPickSelect(discord.ui.Select):
+    """One ephemeral menu: for «بدائل» every (slot → alternate) pair, for «احذف» every slot."""
+    def __init__(self, issue, action):
+        self.issue, self.action = issue, action
+        p = issue.get("payload") or {}
+        opts = []
+        for s in p.get("sections") or []:
+            for i, it in enumerate(s.get("items") or []):
+                ttl = it.get("ttl") or ("%s × %s" % (it.get("home", ""), it.get("away", "")))
+                if action == "drop":
+                    opts.append(discord.SelectOption(label=("%s · %s" % (s.get("title", ""), ttl))[:100], value="%s|%d|0" % (s["key"], i)))
+                else:
+                    for j, alt in enumerate((p.get("alternates") or {}).get("%s.%d" % (s["key"], i)) or []):
+                        opts.append(discord.SelectOption(label=("%s ← %s" % (alt.get("ttl", ""), ttl))[:100], value="%s|%d|%d" % (s["key"], i, j + 1)))
+        opts = opts[:25] or [discord.SelectOption(label="ما فيه خيارات", value="none")]
+        super().__init__(placeholder="اختر…", options=opts, row=0)
+
+    async def callback(self, interaction):
+        v = self.values[0] if self.values else "none"
+        if v == "none":
+            return await interaction.response.send_message("ما فيه شي أختاره.", ephemeral=True)
+        section, slot, rank = v.split("|")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # the button message (not this ephemeral one) is what gets refreshed
+        msg = self.view.origin
+        class _Proxy(object):
+            pass
+        px = _Proxy()
+        px.message = msg
+        px.user = interaction.user
+        px.response = interaction.response
+        px.followup = interaction.followup
+        await _digest_do(px, self.issue, self.action, section, int(slot), int(rank) if self.action == "alt" else None)
+
+class _DigestPickView(discord.ui.View):
+    def __init__(self, issue, action, origin):
+        super().__init__(timeout=600)
+        self.origin = origin
+        self.add_item(_DigestPickSelect(issue, action))
+
+class DigestView(discord.ui.View):
+    """The five persistent buttons under the Wednesday post. The message IS the id
+    (digest_issues.msg_id), so the view carries no state and survives restarts."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _issue(self, interaction):
+        if not _digest_may_press(interaction):
+            await _digest_deny(interaction)
+            return None
+        issue = await asyncio.to_thread(_digest.db.issue_by_msg, interaction.message.id)
+        if not issue:
+            await interaction.response.send_message("ما لقيت العدد لهالرسالة.", ephemeral=True)
+        return issue
+
+    @discord.ui.button(label="اعتمد وانشر", emoji="✅", style=discord.ButtonStyle.success, custom_id="ouja_dg_approve", row=0)
+    async def approve(self, interaction, button):
+        issue = await self._issue(interaction)
+        if issue:
+            await _digest_do(interaction, issue, "approve")
+
+    @discord.ui.button(label="بدائل", emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="ouja_dg_alt", row=0)
+    async def alt(self, interaction, button):
+        issue = await self._issue(interaction)
+        if issue:
+            await interaction.response.send_message("اختر العنصر والبديل:", view=_DigestPickView(issue, "alt", interaction.message), ephemeral=True)
+
+    @discord.ui.button(label="غيّر الصيغة", emoji="✍️", style=discord.ButtonStyle.secondary, custom_id="ouja_dg_rephrase", row=0)
+    async def rephrase(self, interaction, button):
+        issue = await self._issue(interaction)
+        if issue:
+            await _digest_do(interaction, issue, "rephrase")
+
+    @discord.ui.button(label="احذف العنصر", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="ouja_dg_drop", row=1)
+    async def drop(self, interaction, button):
+        issue = await self._issue(interaction)
+        if issue:
+            await interaction.response.send_message("اختر العنصر اللي تحذفه:", view=_DigestPickView(issue, "drop", interaction.message), ephemeral=True)
+
+    @discord.ui.button(label="ابنِ من جديد", emoji="🔄", style=discord.ButtonStyle.secondary, custom_id="ouja_dg_rebuild", row=1)
+    async def rebuild(self, interaction, button):
+        issue = await self._issue(interaction)
+        if issue:
+            await _digest_do(interaction, issue, "rebuild")
+
+async def _digest_build_and_post(now):
+    """Build this week's issue and (unless dry-run) post it with the buttons."""
+    caps = _digest_caps()
+    rep = await asyncio.to_thread(
+        _digest.build.build_issue, now, caps["http"], caps["search"], caps["load_json"], DIGEST_DRYRUN, None,
+        caps["model_call"], caps["model"], caps["public_base"])
+    p = rep.get("payload") or {}
+    body = _digest.notify.build_message(p, rep["issue_no"], rep.get("dropped"), _dispatch_base_url())
+    if rep["status"] != "preview":
+        body = "⚠️ العدد %s ما اكتمل: %s" % (rep["issue_no"], "; ".join(rep.get("errors") or [])[:600])
+    if DIGEST_DRYRUN:
+        print("[digest] (dryrun) built issue", rep["issue_no"], "status", rep["status"], "— would post:", chr(10), body)
+        return rep
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return rep
+    ch = await ensure_channel(guild, DIGEST_CHANNEL, await get_category(guild))
+    if ch is None:
+        return rep
+    files = [f for f in _digest_files(rep["issue_no"]) if f.filename.endswith(".png")]
+    view = DigestView() if rep["status"] in ("preview", "failed") else None
+    msg = await ch.send(body[:1900], files=files, view=view)
+    await asyncio.to_thread(_digest.db.set_issue, rep["issue_id"], msg_id=msg.id, channel_id=ch.id)
+    print("[digest] posted issue", rep["issue_no"], "to #%s" % DIGEST_CHANNEL)
+    return rep
+
+@tasks.loop(minutes=30)
+async def digest_loop():
+    if not (DIGEST_ENABLED and _HAS_DIGEST):
+        return
+    try:
+        now = now_riyadh()
+        existing = await asyncio.to_thread(_digest.build.existing_week_of, now)
+        if not _digest.schedule.should_fire(now, DIGEST_DAY, DIGEST_HOUR, existing):
+            return
+        await _digest_build_and_post(now)
+    except Exception as e:
+        print("[digest] loop error:", e)
 
 @tasks.loop(time=dt_time(hour=STUDIO_DIGEST_HOUR, minute=0, tzinfo=TZ))
 async def studio_digest_loop():
@@ -18630,7 +18863,7 @@ _sessions = {}              # session_token -> {user_id, expires_at}
 _USER_TABS = [
     "home", "brain", "gaps", "inbox", "today", "calendar", "clean_center", "cphotos",
     "promises", "pricing", "plab", "strat", "clean", "cleanteams", "listings",
-    "tickets", "schedule", "reviews", "users", "quote", "studio", "weekly", "ownrep",
+    "tickets", "schedule", "reviews", "users", "quote", "studio", "digest", "weekly", "ownrep",
     "design", "pmo", "expenses", "finance", "erp", "fb", "guests", "gw", "guide",
     "quality", "rev", "learn", "log", "cp",
 ]
@@ -42874,7 +43107,7 @@ NAV_DEF = {
                                   "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
-        {"tk": "cat_content", "ids": ["studio"]},
+        {"tk": "cat_content", "ids": ["studio", "digest"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
         {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "cp", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["kb", "users", "learn", "train", "log"]},
@@ -42905,6 +43138,7 @@ NAV_DEF = {
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
         {"id": "studio", "ic": "design", "tk": "studio"},
+        {"id": "digest", "ic": "design", "tk": "digest", "href": "/digest"},
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
         {"id": "ownrep", "ic": "finance", "tk": "ownrep"},
         {"id": "design", "ic": "design", "tk": "design"},
@@ -42944,6 +43178,7 @@ NAV_DEF = {
             "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
+            "digest": "نشرة الأسبوع",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
             "cat_content": "المحتوى والتسويق",
@@ -42966,6 +43201,7 @@ NAV_DEF = {
             "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
+            "digest": "Weekend Digest",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
             "cat_content": "Content & Marketing",
@@ -61196,6 +61432,7 @@ _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
     ("/api/onb/", "onb"),                    # /api/onb/t/submit is exempt above (employee link)
     ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
+    ("/api/digest/", "digest"),              # weekend digest actions — login + «digest» tab
     ("/api/pricing/strategy-toggle", "strat"),
     ("/api/strategy/", "strat"),
     ("/api/pricing", "pricing"),             # /api/pricing/* and /api/pricing2/*
@@ -61268,6 +61505,7 @@ _ROLE_READ_RULES = [
     ("/api/cp/admin/", "cp"),
     ("/api/promises", "promises"),
     ("/api/decor/", "decor"),
+    ("/api/digest/", "digest"),
     ("/api/inbox", "inbox"),
     ("/api/brain/", "brain"),
     ("/api/coverage/", "coverage"),
@@ -62388,6 +62626,24 @@ async def start_web_server():
                 print("[studio] wired + routes registered (/studio, /api/studio/*)")
             except Exception as _ste:
                 print("[studio] wiring failed (studio disabled, bot unaffected):", _ste)
+
+        # ---- Weekend digest «وش صاير بالرياض» — additive; reuses brain.db + existing auth ----
+        if _HAS_DIGEST and DIGEST_ENABLED:
+            try:
+                _digest.wire({
+                    "state_path": _state_path, "load_json": _digest_load_json, "save_json": _save_json,
+                    "dash_auth": _dash_auth, "req_role": _req_role, "json_response": _json, "web": web,
+                    "claude_json": claude_json, "claude_search": claude_search_json,
+                    "http": _digest.net_live,                 # the package's ONE socket
+                    "listings": get_listings_map, "public_base": _dispatch_base_url,
+                    "model_fast": CLAUDE_MODEL, "model_premium": CLAUDE_MODEL_PREMIUM,
+                    "tz": TZ, "now": now_riyadh,
+                    "dryrun": DIGEST_DRYRUN, "publisher": _digest_publish,
+                })
+                _digest.register_routes(app)
+                print("[digest] wired + routes registered (/digest, /api/digest/*) · dryrun=%s" % DIGEST_DRYRUN)
+            except Exception as _dge:
+                print("[digest] wiring failed (digest disabled, bot unaffected):", _dge)
 
         app.router.add_post("/api/pricing/bulk", _api_pricing_bulk)
         app.router.add_get("/api/events", _api_events_list)
@@ -70316,6 +70572,8 @@ async def on_ready():
         bot.add_view(DecorLeadView())    # «تنسيق الحفلات» interest buttons
         bot.add_view(DecorOrderView())   # request-room buttons (the room id IS the order id)
         bot.add_view(DecorPanelView())   # «افتح طلب تنسيق» panel button
+    if _HAS_DIGEST:
+        bot.add_view(DigestView())       # «وش صاير بالرياض» approve / alternates / drop buttons
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -70416,6 +70674,8 @@ async def on_ready():
         _pending.append(schedule_digest_loop)   # morning team-calendar ops summary (default 08:00 Riyadh)
     if _HAS_STUDIO and STUDIO_ENABLED and not studio_digest_loop.is_running():
         _pending.append(studio_digest_loop)     # morning Ouja Studio content digest (default 09:00 Riyadh, dry-run)
+    if _HAS_DIGEST and DIGEST_ENABLED and not digest_loop.is_running():
+        _pending.append(digest_loop)            # weekend digest: Wednesday 13:00 Riyadh, dry-run by default
     if _HAS_BUSINESS and not business_snapshot_loop.is_running():
         _pending.append(business_snapshot_loop)  # nightly 03:00 Riyadh: refresh /business snapshot
         _pending.append(cp_snapshot_loop)        # nightly 03:20 Riyadh: refresh /cp figures

@@ -16,3 +16,5 @@ Pillow>=10.2
 playwright~=1.61
 PyMuPDF~=1.28
 brotli>=1.1.0
+# weekend digest «وش صاير بالرياض» — offline QR codes printed on every card (pure Python).
+segno~=1.6

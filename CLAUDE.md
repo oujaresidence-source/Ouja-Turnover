@@ -309,3 +309,55 @@ rules that matter into controls. **A prompt is a preference; code is a control.*
   if you see failures, they are yours) **and**
   `python3 eval_musaed.py --selftest`. `bot`'s firewall and `eval_musaed`'s gates are pinned to the
   same verdicts by `TestDetectorParity` — change one, change both.
+
+## Weekend digest «وش صاير بالرياض» — the `digest/` package
+A Wednesday 13:00 (Riyadh) poster: events, cinema, Roshn fixtures, one «يستاهل الزيارة»,
+rendered to an 810×1440 pt PDF + 1080×1920 story PNG + JSON in the KAFD memo's design system,
+posted to Discord with approve / alternates / rephrase / drop / rebuild buttons. Spec:
+`docs/superpowers/specs/2026-09-02-weekend-digest-design.md`.
+- **Nothing publishes without the owner's tap.** `DIGEST_DRYRUN=1` (default) builds the files
+  and prints what it would post; `tests/test_digest_approval.py` proves the publisher is never
+  called in dry-run. Flip to `0` only from Railway, after a real dry-run week.
+- **The loop is a 30-minute tick + `digest.schedule.should_fire`** (Wednesday, `DIGEST_HOUR`
+  clamped to ≥13, and a latch PERSISTED in `digest_issues.week_of UNIQUE`). Do not turn it into a
+  `@tasks.loop(time=…)` — a redeploy re-runs a loop's first iteration.
+- **Only `digest/net_live.py` opens a socket**, wired as `HOST.http`; every collector, the link
+  verifier and the artwork fetcher take it as an argument, and `tests/test_digest_nonetwork.py`
+  greps the package to keep it that way. The identity is
+  `Mozilla/5.0 (compatible; OujaDigest/1.0; +https://oujares.com)` — honest, never a spoofed
+  browser; sites behind a challenge page (jdwel, timeoutriyadh) are simply not sources.
+- **Sources that actually work (verified 2026-09-02):** Platinumlist `/ar/calendar/this-weekend`,
+  elcinema `/now/sa/` (VOX is unreachable), saff.com.sa `championship.php?id=415` (cp1256 despite
+  its utf-8 header) cross-checked against kooora's JSON-LD. Fixtures in `tests/fixtures/digest/`.
+- **Every url is verified twice** (collection + right before render) and must have appeared in a
+  fetched page or the search tool's opened-pages list — never constructed. A dead link drops the
+  item and is reported; the QR is printed from the FINAL url.
+- **The guard runs before Chromium** (`digest/guard.py`): stale source, a date outside Thu–Sat in
+  prose (a film released before Thursday must say «يعرض حاليًا», not its date), a Western numeral in
+  Arabic prose (Latin runs keep theirs), >4-word title, >10-word sub, a banned phrase
+  (`digest/voice.py: BANNED`), an unverified url, a section over its cap, an empty/placeholder card.
+- **The look is FROZEN** by `digest/render/golden_fingerprint.json` (text md5 + browser-measured
+  geometry md5 + pixels with ≤3/255 tolerance; owner approved 2026-09-02). If
+  `tests/test_digest_frozen.py` fails, revert the change — never regenerate the golden to pass.
+  Regeneration needs the owner's word and `--write-golden --i-have-owner-approval`.
+- **Zero-backslash files** (same trap as `DASHBOARD_HTML`): `digest/page.py`, `digest/notify.py`,
+  `digest/render/html.py`, `digest/render/audit.py`, `digest/art_generated.py`. Tests enforce it.
+- Colours only from `digest/render/tokens.py`; fonts from `fonts/Thmanyah{Sans,SerifDisplay}-*.woff2`
+  (byte-identical to `monthly_public/static/fonts/`; NOT the older `ThmanyahDisplay-*` cut).
+- Offline cold start: `python3 -m digest.build --dry-run --week 2026-09-03 --fixtures`.
+- Env: `DIGEST_ENABLED`(1), `DIGEST_DRYRUN`(1), `DIGEST_CHANNEL`(نشرة-الاسبوع), `DIGEST_DAY`(2),
+  `DIGEST_HOUR`(13). Buttons: admins / manage_guild only, fail CLOSED. `/api/digest/*` is behind
+  login + the «digest» permission tab; `/digest/file/{n}/{pdf|png|json}` serves the outputs.
+
+## Session skills installed for the digest work (2026-09-02) — when each fires
+All live in `.claude/skills/` (gitignored — re-clone if missing; see the brief in the spec):
+- `superpowers` — the process: brainstorm → plan → TDD → build → verify; every phase.
+- `one-skill-to-rule-them-all` — orchestration; session start and each phase boundary.
+- `ui-ux-pro-max` — the poster/PDF visual system; any commit touching `digest/render/*`.
+- `impeccable` — audit → critique → polish → harden; after the first render of every surface.
+- `stop-slop` — kills marketing copy; on every generated Arabic string (`digest/voice.py` is its code form).
+- `unlazy` — no stubs, no TODOs, no partial implementations; every commit.
+- `marketingskills` — the ranking model (`digest/rank.py`) and story caption craft.
+- `claude-mem` — persists rulings (palette, tone, rejected candidates) across sessions.
+- `vercel-labs/skills` — skill discovery plumbing, once at setup.
+The earlier "Design skills are INSTALLED" blocks above still apply (impeccable, emil-design-eng, superpowers).
