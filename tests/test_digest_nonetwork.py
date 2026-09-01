@@ -72,12 +72,13 @@ class PureModulesRunWithSocketsBlocked(unittest.TestCase):
                 from digest import notify                    # noqa: F401
             except ImportError:
                 notify = None
+            import json
             if rhtml is not None:
-                import json
                 p = json.load(open(os.path.join(ROOT, "tests", "fixtures", "digest", "payload_good.json"), encoding="utf-8"))
                 self.assertIn("<html", rhtml.build_pages(p, {}))
             if notify is not None:
-                self.assertTrue(notify.build_message({"sections": [], "dropped": []}, 1, [], "https://x"))
+                p2 = json.load(open(os.path.join(ROOT, "tests", "fixtures", "digest", "payload_good.json"), encoding="utf-8"))
+                self.assertIn("العدد", notify.build_message(p2, 12, p2.get("dropped"), "https://x"))
 
 
 if __name__ == "__main__":
