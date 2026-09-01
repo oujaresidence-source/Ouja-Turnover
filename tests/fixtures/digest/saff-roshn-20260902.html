@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="ar">
+
+<head>
+
+<meta http-equiv="Content-Language" content="ar-sa">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+
+
+    <title>«·« Õ«œ «·”⁄ÊœÌ ·ﬂ—… «·ﬁœ„</title>
+        <link rel="stylesheet" href="assets/css/bootstrap5.css">
+    <link rel="stylesheet" href="assets/css/style.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+    <script src="https://unpkg.com/gijgo@1.9.13/js/gijgo.min.js" type="text/javascript"></script>
+    <link href="https://unpkg.com/gijgo@1.9.13/css/gijgo.min.css" rel="stylesheet" type="text/css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script>
+function opentbl(txt)
+{
+    if(document.getElementById(txt).style.display=="none")
+    {
+        document.getElementById(txt).style.display="";
+    }
+    else
+    {
+        document.getElementById(txt).style.display="none";
+    }
+}
+
+
+
+    </script>
+
+
+
+
+</head>
+
+<body>
+    <div style="background: url(assets/images/2970.jpg) no-repeat top center; background-size:cover; " dir="ltr">
+    <nav class="navbar navbar-expand-md navbar-light bg-transparent" style="background-color:#CCCCCC;color:white;font-size:9pt;">
+    <br><hr><a class='a_link' href='./en/index.php' style='color:white'>English</a>/<a class='a_link' href='./index.php' style='color:white'>«·⁄—»Ì…</a>    </nav>
+        <!-- navigation -->
+        <nav class="navbar navbar-expand-md navbar-light bg-transparent " style="background-color:#CCCCCC;padding:0px">
+            <div class="container" style="width:100%;padding:0px 0px 10px 0px">
+                <button type="button" class="navbar-toggler mb-3" data-toggle="collapse" data-target="#navbarCollapse">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <div  class="collapse navbar-collapse " id="navbarCollapse" style="text-align:center" dir="rtl">
+                    <div class="navbar-nav d-flex flex-row-lg-reverse flex-column-sm-reverse text-center"    dir="rtl">
+                                            <a href="about.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">⁄‰ «·« Õ«œ</a>
+                                        <a href="newscenter.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">„—ﬂ“ «·√Œ»«—</a>
+                                        <a href="nationalteams.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·„‰ Œ»«  «·Êÿ‰Ì…</a>
+                                        <a href="championships.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·»ÿÊ·« </a>
+                                        <a href="teams.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·√‰œÌ…</a>
+                                        <a href="files.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·„·›« </a>
+                                        <a href="calendar.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·—Ê“‰«„…</a>
+                                        <a href="media.php" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·≈⁄·«„</a>
+                                        <a href="./privclub" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·√ﬂ«œÌ„Ì«  Ê«·√‰œÌ… «·Œ«’…</a>
+                                        <a href="https://saudi2034bid.com/" class="nav-item nav-link" style="font-family:AL-Sayf Bold;font-size:13pt">«·”⁄ÊœÌ… 2034</a>
+                                    </div>
+                </div>
+
+                <a href="index.php" class="navbar-brand2" style="width:270px;padding-right:15pt;text-align:right">
+                    <img class="img-fluid" src="assets/images/logo.png" alt="logo"  style="width:100%;margin-left:10px" />
+                </a>
+
+            </div>
+        </nav>
+        </div>
+        <!-- navigation -->
+        <div align="right" dir="rtl" style="background-color:#DDDDDD">
+    <!-- calender section -->
+    <div class="row m-0 my-4">
+
+        <div class="col-sm-9">
+         <style>
+
+
+
+        .user-row {
+            padding: 12px 0;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* Football icon */
+        .open-popup {
+            display: inline;
+            margin-left: 8px;
+
+            color: #007aff;
+            cursor: pointer;
+
+            font-size: 18px;
+        }
+
+        .open-popup:hover {
+            color: #0056b3;
+        }
+
+
+        /* Popup */
+
+        #popup {
+            width: 400px;
+            height: 300px;
+
+            max-width: calc(100vw - 30px);
+            max-height: calc(100vh - 30px);
+
+            padding: 0;
+
+            border: 0;
+            border-radius: 16px;
+
+            overflow: hidden;
+
+            background: white;
+
+            box-shadow:
+                0 10px 40px rgba(0, 0, 0, 0.35);
+        }
+
+
+        /* Dark background */
+
+        #popup::backdrop {
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+
+        /* Popup header */
+
+        .popup-header {
+            height: 45px;
+
+            background: #f5f5f5;
+
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+
+        /* Close button */
+
+        .close-popup {
+            width: 45px;
+            height: 45px;
+
+            border: 0;
+            background: transparent;
+
+            font-size: 28px;
+            color: #555;
+
+            cursor: pointer;
+        }
+
+        .close-popup:hover {
+            color: #000;
+        }
+
+
+        /* Page inside popup */
+
+        #popupFrame {
+            width: 100%;
+            height: calc(100% - 45px);
+
+            border: 0;
+            display: block;
+        }
+
+
+        /* iPhone */
+
+        @media (max-width: 500px) {
+
+            #popup {
+                width: calc(100vw - 30px);
+                height: 400px;
+            }
+
+        }
+
+    </style>
+
+
+<script language="javascript">
+
+var txtm='';
+var txtx='';
+var txtz='';
+var txt_mid=0;
+function getdetm(txty,txt,fg)
+{
+
+try{ xmlHttp = new XMLHttpRequest();
+		}catch(error){
+		try{
+			xmlHttp = new ActiveXObject("Microsoft.XMLHTTP");
+			}catch(error){ xmlHttp = null; return false;
+			}
+		}
+
+
+txtm='td_id_'+txty;
+txtz='tr_id_'+txty;
+txtx='table_id_'+txty;
+txt_mid=txty;
+document.getElementById(txtx).style.display='';
+xmlHttp.open('get','matchestodayresult.php?mid='+txty+'&mcode='+txt+'&fg='+fg);
+xmlHttp.setRequestHeader("Content-Type", "application/x-www-form-urlencoded;charset=iso-8859-1");
+xmlHttp.onreadystatechange = handleInfodetm;
+xmlHttp.send(null);
+
+}
+
+function handleInfodetm()
+{
+
+
+    var val=txt_mid;
+    txt='fixture_td_1_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_2_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_3_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_4_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_5_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_6_'+val;
+    if(document.getElementById(txt))
+    {
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    }
+document.getElementById(txtz).style.display='';
+if(xmlHttp.readyState == 1)
+{
+document.getElementById(txtm).innerHTML = 'loading ..';
+}
+
+else if(xmlHttp.readyState == 4)
+{
+var response = xmlHttp.responseText;
+
+document.getElementById(txtm).innerHTML = response;
+}
+
+}
+
+
+
+var txtm2='';
+var txtx2='';
+var txtz2='';
+var txt2_mid=0;
+function getdetm2(txty,txt,fg)
+{
+
+try{ xmlHttp = new XMLHttpRequest();
+		}catch(error){
+		try{
+			xmlHttp = new ActiveXObject("Microsoft.XMLHTTP");
+			}catch(error){ xmlHttp = null; return false;
+			}
+		}
+
+
+txtm2='td2_id_'+txty;
+txtz2='tr2_id_'+txty;
+txtx2='table2_id_'+txty;
+txt2_mid=txty;
+document.getElementById(txtx2).style.display='';
+xmlHttp.open('get','matchestodayresult.php?mid='+txty+'&mcode='+txt+'&fg='+fg);
+xmlHttp.setRequestHeader("Content-Type", "application/x-www-form-urlencoded;charset=iso-8859-1");
+xmlHttp.onreadystatechange = handleInfodetm2;
+xmlHttp.send(null);
+
+}
+
+function handleInfodetm2()
+{
+
+
+    var val=txt2_mid;
+    var txt='fixture2_table_'+val;
+
+
+
+
+    txt='fixture2_td_1_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_2_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_3_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_4_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_6_'+val;
+    if(document.getElementById(txt))
+    {
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    }
+document.getElementById(txtz2).style.display='';
+if(xmlHttp.readyState == 1)
+{
+document.getElementById(txtm2).innerHTML = 'loading ..';
+}
+
+else if(xmlHttp.readyState == 4)
+{
+var response = xmlHttp.responseText;
+
+document.getElementById(txtm2).innerHTML = response;
+}
+
+}
+
+</script>
+
+           <br>
+            <div class="p-3 rounded" style="background-color:white" dir="rtl" >
+
+            
+            <p align="left">
+<select size="1"  style="padding-right:3px;padding-left:3px;height:30px;border:0px solid black;background-color:#146F45;color:white" onchange="if(this.value=='all'){document.location.href='championship.php?id=415&season=all'}else{document.location.href='championship.php?id='+this.value}" >
+<option  value="1">„Ê”„ 2019-2020</option>
+    <option  value="50">„Ê”„ 2020-2021</option>
+    <option  value="72">„Ê”„ 2021-2022</option>
+    <option  value="122">„Ê”„ 2022-2023</option>
+    <option  value="181">„Ê”„ 2023-2024</option>
+    <option  value="251">„Ê”„ 2024-2025</option>
+    <option  value="333">„Ê”„ 2025-2026</option>
+    <option selected value="415">„Ê”„ 2026-2027</option>
+    
+<option  value="all">ﬂ· «·„Ê«”„</option>
+</select>
+            </p>
+            
+            <p align="center"><img src="uploadcenter/saffchamplarge1661278136.png" width="300"></p>
+            <p align="center" style="font-size:22pt">œÊ—Ì —Ê‘‰ «·”⁄ÊœÌ</p>
+
+
+<script language="javascript">
+document.title=document.title+" - œÊ—Ì —Ê‘‰ «·”⁄ÊœÌ";
+</script>
+<div id="fixtures" style="text-align:center">
+    <input type="button" value="&lt;&lt;" style="height:30px;border:0px solid black;background-color:#146F45;color:white" onclick="document.location.href='championship.php?id=415&round=0&week=4#fixtures'">
+    <select size="1" name="weekgo"  style="padding-right:3px;padding-left:3px;height:30px;border:0px solid black;background-color:#146F45;color:white" onchange="document.location.href='championship.php?id=415&'+this.value+'#fixtures'">
+    <option value="round=0&week=1">«·ÃÊ·…: 1</option>
+        <option value="round=0&week=2">«·ÃÊ·…: 2</option>
+        <option value="round=0&week=3">«·ÃÊ·…: 3</option>
+        <option value="round=0&week=4">«·ÃÊ·…: 4</option>
+        <option selected value="round=0&week=5">«·ÃÊ·…: 5</option>
+        <option value="round=0&week=6">«·ÃÊ·…: 6</option>
+        <option value="round=0&week=7">«·ÃÊ·…: 7</option>
+        <option value="round=0&week=8">«·ÃÊ·…: 8</option>
+        <option value="round=0&week=9">«·ÃÊ·…: 9</option>
+        <option value="round=0&week=10">«·ÃÊ·…: 10</option>
+        <option value="round=0&week=11">«·ÃÊ·…: 11</option>
+        <option value="round=0&week=12">«·ÃÊ·…: 12</option>
+        <option value="round=0&week=13">«·ÃÊ·…: 13</option>
+        <option value="round=0&week=14">«·ÃÊ·…: 14</option>
+        <option value="round=0&week=15">«·ÃÊ·…: 15</option>
+        <option value="round=0&week=16">«·ÃÊ·…: 16</option>
+        <option value="round=0&week=17">«·ÃÊ·…: 17</option>
+        <option value="round=0&week=18">«·ÃÊ·…: 18</option>
+        <option value="round=0&week=19">«·ÃÊ·…: 19</option>
+        <option value="round=0&week=20">«·ÃÊ·…: 20</option>
+        <option value="round=0&week=21">«·ÃÊ·…: 21</option>
+        <option value="round=0&week=22">«·ÃÊ·…: 22</option>
+        <option value="round=0&week=23">«·ÃÊ·…: 23</option>
+        <option value="round=0&week=24">«·ÃÊ·…: 24</option>
+        <option value="round=0&week=25">«·ÃÊ·…: 25</option>
+        <option value="round=0&week=26">«·ÃÊ·…: 26</option>
+        <option value="round=0&week=27">«·ÃÊ·…: 27</option>
+        <option value="round=0&week=28">«·ÃÊ·…: 28</option>
+        <option value="round=0&week=29">«·ÃÊ·…: 29</option>
+        <option value="round=0&week=30">«·ÃÊ·…: 30</option>
+        <option value="round=0&week=31">«·ÃÊ·…: 31</option>
+        <option value="round=0&week=32">«·ÃÊ·…: 32</option>
+        <option value="round=0&week=33">«·ÃÊ·…: 33</option>
+        <option value="round=0&week=34">«·ÃÊ·…: 34</option>
+    <option  value="type=all">«·ÃœÊ· ﬂ«„·«</option>
+
+</select>
+    <input type="button" value="&gt;&gt;" style="height:30px;border:0px solid black;background-color:#146F45;color:white" onclick="document.location.href='championship.php?id=415&round=0&week=6#fixtures'">
+    
+</div>
+<br>
+<div class="d-none d-lg-block"  >
+<div class="row m-0 justify-content-center align-items-center " style="text-align:center" >
+<table class="table-striped" style="width:100%" >
+
+                <thead >
+                    <tr class="bg-green text-white ">
+<th >«·ÌÊ„ Ê«· «—ÌŒ</th>
+<th >«·Êﬁ </th>
+<th colspan="3">«·„»«—«…</th>
+
+<th>«·„·⁄»</th>
+
+
+</tr>
+                 </thead>
+                <tbody>
+<tr>
+<td bgcolor="#F2F2F2" style="border:1px solid black" rowspan="6">
+<a href='calendar.php?calendar_date=2026-09-03' style='color:black'>
+«·Œ„Ì” 03-09-2026</a>
+</td>
+<td id="fixture_td_1_33040" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >18:55</td>
+<td id="fixture_td_2_33040" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=37' style='color:black'><img src="uploadcenter/saffteamsmall1661203654.png" width="25" height="25" border="0"><br>«·›ÌÕ«¡</a></td>
+<td id="fixture_td_3_33040" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33040" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=67' style='color:black'><img src="uploadcenter/saffteamsmallD5k291787207108.png" width="25" height="25" border="0"><br>«·Œ·Êœ</a></td>
+<td id="fixture_td_5_33040" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·„Ã„⁄… «·—Ì«÷Ì… («·„Ã„⁄…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33041" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >19:30</td>
+<td id="fixture_td_2_33041" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=149' style='color:black'><img src="uploadcenter/saffteamsmallk3HfI1736767098.png" width="25" height="25" border="0"><br>‰ÌÊ„</a></td>
+<td id="fixture_td_3_33041" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33041" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=72' style='color:black'><img src="uploadcenter/saffteamsmall1566292050.png" width="25" height="25" border="0"><br>«·Œ·ÌÃ</a></td>
+<td id="fixture_td_5_33041" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” «œ „œÌ‰… «·„·ﬂ Œ«·œ «·—Ì«÷Ì… ( »Êﬂ)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33042" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >21:00</td>
+<td id="fixture_td_2_33042" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=5' style='color:black'><img src="uploadcenter/saffteamsmallOrZip1757757661.png" width="25" height="25" border="0"><br>«·œ—⁄Ì…</a></td>
+<td id="fixture_td_3_33042" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33042" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=76' style='color:black'><img src="uploadcenter/saffteamsmall1717872503.png" width="25" height="25" border="0"><br>«·ﬁ«œ”Ì…</a></td>
+<td id="fixture_td_5_33042" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«·√Ê· »«—ﬂ («·—Ì«÷)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td bgcolor="#E8E8E7" style="border:1px solid black" rowspan="6">
+<a href='calendar.php?calendar_date=2026-09-04' style='color:black'>
+«·Ã„⁄… 04-09-2026</a>
+</td>
+<td id="fixture_td_1_33043" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >19:00</td>
+<td id="fixture_td_2_33043" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=125' style='color:black'><img src="uploadcenter/saffteamsmall1667133437.png" width="25" height="25" border="0"><br>√»Â«</a></td>
+<td id="fixture_td_3_33043" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33043" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=71' style='color:black'><img src="uploadcenter/saffteamsmall1661384351.png" width="25" height="25" border="0"><br>«·« ›«ﬁ</a></td>
+<td id="fixture_td_5_33043" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” «œ „œÌ‰… «·√„Ì— ”·ÿ«‰ »‰ ⁄»œ«·⁄“Ì“ «·—Ì«÷Ì… (√»Â«)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#E8E8E7"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33044" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >21:00</td>
+<td id="fixture_td_2_33044" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=4' style='color:black'><img src="uploadcenter/saffteamsmall1629064138.png" width="25" height="25" border="0"><br>«·‘»«»</a></td>
+<td id="fixture_td_3_33044" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33044" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=1' style='color:black'><img src="uploadcenter/saffteamsmall1661266882.png" width="25" height="25" border="0"><br>«·Â·«·</a></td>
+<td id="fixture_td_5_33044" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” « ‘ ÃÌ «—Ì‰« («·—Ì«÷)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#E8E8E7"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33045" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >21:00</td>
+<td id="fixture_td_2_33045" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=104' style='color:black'><img src="uploadcenter/saffteamsmallHy6F61756329988.png" width="25" height="25" border="0"><br>«·√Â·Ì</a></td>
+<td id="fixture_td_3_33045" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33045" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=3' style='color:black'><img src="uploadcenter/saffteamsmall1581536401.png" width="25" height="25" border="0"><br>«·—Ì«÷</a></td>
+<td id="fixture_td_5_33045" bgcolor="#E8E8E7" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·√„Ì— ⁄»œ«··Â «·›Ì’· «·—Ì«÷Ì… (Ãœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#E8E8E7"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td bgcolor="#F2F2F2" style="border:1px solid black" rowspan="6">
+<a href='calendar.php?calendar_date=2026-09-05' style='color:black'>
+«·”»  05-09-2026</a>
+</td>
+<td id="fixture_td_1_33046" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >18:50</td>
+<td id="fixture_td_2_33046" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=39' style='color:black'><img src="uploadcenter/saffteamsmall0WKIZ1786063856.png" width="25" height="25" border="0"><br>«·›Ì’·Ì</a></td>
+<td id="fixture_td_3_33046" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33046" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=66' style='color:black'><img src="uploadcenter/saffteamsmall1628756061.png" width="25" height="25" border="0"><br>«·Õ“„</a></td>
+<td id="fixture_td_5_33046" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·„Ã„⁄… «·—Ì«÷Ì… («·„Ã„⁄…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33047" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >18:55</td>
+<td id="fixture_td_2_33047" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=56' style='color:black'><img src="uploadcenter/saffteamsmall1661203635.png" width="25" height="25" border="0"><br>«· ⁄«Ê‰</a></td>
+<td id="fixture_td_3_33047" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33047" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=141' style='color:black'><img src="uploadcenter/saffteamsmall1661266908.png" width="25" height="25" border="0"><br>«·› Õ</a></td>
+<td id="fixture_td_5_33047" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„·⁄» ‰«œÌ «· ⁄«Ê‰ (»—Ìœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+<tr>
+<td id="fixture_td_1_33048" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >21:00</td>
+<td id="fixture_td_2_33048" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=103' style='color:black'><img src="uploadcenter/saffteamsmall1566200867.png" width="25" height="25" border="0"><br>«·« Õ«œ</a></td>
+<td id="fixture_td_3_33048" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">-</td>
+<td id="fixture_td_4_33048" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=2' style='color:black'><img src="uploadcenter/saffteamsmallfkCLO1747742996.png" width="25" height="25" border="0"><br>«·‰’—</a></td>
+<td id="fixture_td_5_33048" bgcolor="#F2F2F2" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„·⁄» «·≈‰„«¡ »„œÌ‰… «·„·ﬂ ⁄»œ«··Â «·—Ì«÷Ì… (Ãœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor="#F2F2F2"  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+
+
+
+
+</tbody>
+</table>
+</div>
+    </div>
+<script language="javascript">
+function showdet(val)
+{
+    var txt='fixture_table_'+val;
+    document.getElementById(txt).style.display="";
+    
+
+    
+    txt='fixture_td_1_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    
+    txt='fixture_td_2_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    
+    txt='fixture_td_3_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_4_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_5_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture_td_6_'+val;
+    if(document.getElementById(txt))
+    {
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    }
+    
+}
+function showdet2(val)
+{
+    var txt='fixture2_table_'+val;
+    document.getElementById(txt).style.display="";
+
+
+
+    txt='fixture2_td_1_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_2_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_3_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+
+    txt='fixture2_td_4_'+val;
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    
+    txt='fixture2_td_6_'+val;
+    if(document.getElementById(txt))
+    {
+    document.getElementById(txt).innerHTML="";
+    document.getElementById(txt).style.margin="0";
+    document.getElementById(txt).style.padding="0";
+    }
+
+}
+</script>
+<div class="d-block d-lg-none" id="match_week_4" >
+<div class="row m-0 justify-content-center align-items-center " style="text-align:center" >
+<table class="table-striped" style="width:100%" >
+
+<tr>
+<td colspan="4" bgcolor="#146F45" style="color:white">
+<a href='calendar.php?calendar_date=2026-09-03' style='color:white'>
+«·Œ„Ì” 03-09-2026</a>
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33040" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=37' style='color:black'><img src="uploadcenter/saffteamsmall1661203654.png" width="25" height="25" border="0"><br>«·›ÌÕ«¡</a></td>
+<td id="fixture2_td_2_33040" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">18:55</td>
+<td id="fixture2_td_3_33040" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=67' style='color:black'><img src="uploadcenter/saffteamsmallD5k291787207108.png" width="25" height="25" border="0"><br>«·Œ·Êœ</a></td>
+<td id="fixture2_td_4_33040" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·„Ã„⁄… «·—Ì«÷Ì… («·„Ã„⁄…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33041" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=149' style='color:black'><img src="uploadcenter/saffteamsmallk3HfI1736767098.png" width="25" height="25" border="0"><br>‰ÌÊ„</a></td>
+<td id="fixture2_td_2_33041" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">19:30</td>
+<td id="fixture2_td_3_33041" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=72' style='color:black'><img src="uploadcenter/saffteamsmall1566292050.png" width="25" height="25" border="0"><br>«·Œ·ÌÃ</a></td>
+<td id="fixture2_td_4_33041" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” «œ „œÌ‰… «·„·ﬂ Œ«·œ «·—Ì«÷Ì… ( »Êﬂ)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33042" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=5' style='color:black'><img src="uploadcenter/saffteamsmallOrZip1757757661.png" width="25" height="25" border="0"><br>«·œ—⁄Ì…</a></td>
+<td id="fixture2_td_2_33042" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">21:00</td>
+<td id="fixture2_td_3_33042" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=76' style='color:black'><img src="uploadcenter/saffteamsmall1717872503.png" width="25" height="25" border="0"><br>«·ﬁ«œ”Ì…</a></td>
+<td id="fixture2_td_4_33042" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«·√Ê· »«—ﬂ («·—Ì«÷)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td colspan="4" bgcolor="#146F45" style="color:white">
+<a href='calendar.php?calendar_date=2026-09-04' style='color:white'>
+«·Ã„⁄… 04-09-2026</a>
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33043" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=125' style='color:black'><img src="uploadcenter/saffteamsmall1667133437.png" width="25" height="25" border="0"><br>√»Â«</a></td>
+<td id="fixture2_td_2_33043" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">19:00</td>
+<td id="fixture2_td_3_33043" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=71' style='color:black'><img src="uploadcenter/saffteamsmall1661384351.png" width="25" height="25" border="0"><br>«·« ›«ﬁ</a></td>
+<td id="fixture2_td_4_33043" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” «œ „œÌ‰… «·√„Ì— ”·ÿ«‰ »‰ ⁄»œ«·⁄“Ì“ «·—Ì«÷Ì… (√»Â«)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33044" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=4' style='color:black'><img src="uploadcenter/saffteamsmall1629064138.png" width="25" height="25" border="0"><br>«·‘»«»</a></td>
+<td id="fixture2_td_2_33044" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">21:00</td>
+<td id="fixture2_td_3_33044" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=1' style='color:black'><img src="uploadcenter/saffteamsmall1661266882.png" width="25" height="25" border="0"><br>«·Â·«·</a></td>
+<td id="fixture2_td_4_33044" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >«” « ‘ ÃÌ «—Ì‰« («·—Ì«÷)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33045" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=104' style='color:black'><img src="uploadcenter/saffteamsmallHy6F61756329988.png" width="25" height="25" border="0"><br>«·√Â·Ì</a></td>
+<td id="fixture2_td_2_33045" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">21:00</td>
+<td id="fixture2_td_3_33045" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=3' style='color:black'><img src="uploadcenter/saffteamsmall1581536401.png" width="25" height="25" border="0"><br>«·—Ì«÷</a></td>
+<td id="fixture2_td_4_33045" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·√„Ì— ⁄»œ«··Â «·›Ì’· «·—Ì«÷Ì… (Ãœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td colspan="4" bgcolor="#146F45" style="color:white">
+<a href='calendar.php?calendar_date=2026-09-05' style='color:white'>
+«·”»  05-09-2026</a>
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33046" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=39' style='color:black'><img src="uploadcenter/saffteamsmall0WKIZ1786063856.png" width="25" height="25" border="0"><br>«·›Ì’·Ì</a></td>
+<td id="fixture2_td_2_33046" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">18:50</td>
+<td id="fixture2_td_3_33046" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=66' style='color:black'><img src="uploadcenter/saffteamsmall1628756061.png" width="25" height="25" border="0"><br>«·Õ“„</a></td>
+<td id="fixture2_td_4_33046" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„œÌ‰… «·„Ã„⁄… «·—Ì«÷Ì… («·„Ã„⁄…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33047" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=56' style='color:black'><img src="uploadcenter/saffteamsmall1661203635.png" width="25" height="25" border="0"><br>«· ⁄«Ê‰</a></td>
+<td id="fixture2_td_2_33047" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">18:55</td>
+<td id="fixture2_td_3_33047" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=141' style='color:black'><img src="uploadcenter/saffteamsmall1661266908.png" width="25" height="25" border="0"><br>«·› Õ</a></td>
+<td id="fixture2_td_4_33047" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„·⁄» ‰«œÌ «· ⁄«Ê‰ (»—Ìœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+<tr>
+<td id="fixture2_td_1_33048" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=103' style='color:black'><img src="uploadcenter/saffteamsmall1566200867.png" width="25" height="25" border="0"><br>«·« Õ«œ</a></td>
+<td id="fixture2_td_2_33048" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" width="55">21:00</td>
+<td id="fixture2_td_3_33048" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" ><a href='team.php?id=2' style='color:black'><img src="uploadcenter/saffteamsmallfkCLO1747742996.png" width="25" height="25" border="0"><br>«·‰’—</a></td>
+<td id="fixture2_td_4_33048" bgcolor="" style="border-left:1px solid black;border-right:1px solid black;border-top:1px solid black;" >„·⁄» «·≈‰„«¡ »„œÌ‰… «·„·ﬂ ⁄»œ«··Â «·—Ì«÷Ì… (Ãœ…)</td>
+</tr>
+<tr >
+<td colspan="5" bgcolor=""  style="border-left:1px solid black;border-right:1px solid black;border-bottom:1px solid black; margin:0;padding:0">
+</td>
+</tr>
+
+
+
+
+</table>
+</div>
+    </div>
+            </div>
+
+              <br>
+            <div id="standing" class="p-2 rounded" style="background-color:white">
+
+
+
+            <p align="center" style="font-size:22pt"> — Ì» œÊ—Ì —Ê‘‰ «·”⁄ÊœÌ</p>
+
+
+  
+<table border="0" class="table-striped" style="width:100%;table-layout:fixed" >
+                <thead >
+                    <tr class="bg-green text-white">
+                        <th style="width:20px"></th>
+                        <th style="width:20px"></th>
+                        <th style="width:30px"></th>
+                        <th style="width:90px" ></th>
+                        <th style="text-align:center">·⁄»</th>
+                        <th style="text-align:center">›«“</th>
+                        <th style="text-align:center"> ⁄«œ·</th>
+                        <th style="text-align:center">Œ”—</th>
+                        <th class="d-none d-sm-table-cell" style="text-align:center">·Â</th>
+                        <th class="d-none d-sm-table-cell" style="text-align:center">⁄·ÌÂ</th>
+                        <th style="text-align:center">›«—ﬁ</th>
+                        <th style="text-align:center">‰ﬁ«ÿ</th>
+                    </tr>
+                 </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">1</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=1" style="color:black"><img src="uploadcenter/saffteamsmall1661266882.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=1" style="color:black">«·Â·«·</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">0</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">15</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">3</td>
+                        <td style="text-align:center">+12</td>
+                        <td style="text-align:center">12</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">2</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=2" style="color:black"><img src="uploadcenter/saffteamsmallfkCLO1747742996.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=2" style="color:black">«·‰’—</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">0</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">12</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">3</td>
+                        <td style="text-align:center">+9</td>
+                        <td style="text-align:center">12</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">3</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=76" style="color:black"><img src="uploadcenter/saffteamsmall1717872503.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=76" style="color:black">«·ﬁ«œ”Ì…</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">3</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">1</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">8</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">3</td>
+                        <td style="text-align:center">+5</td>
+                        <td style="text-align:center">9</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">4</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=67" style="color:black"><img src="uploadcenter/saffteamsmallD5k291787207108.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=67" style="color:black">«·Œ·Êœ</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">0</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">8</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td style="text-align:center">+3</td>
+                        <td style="text-align:center">8</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">5</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=103" style="color:black"><img src="uploadcenter/saffteamsmall1566200867.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=103" style="color:black">«·« Õ«œ</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">0</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">3</td>
+                        <td style="text-align:center">+2</td>
+                        <td style="text-align:center">8</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">6</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=5" style="color:black"><img src="uploadcenter/saffteamsmallOrZip1757757661.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=5" style="color:black">«·œ—⁄Ì…</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">1</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">2</td>
+                        <td style="text-align:center">+3</td>
+                        <td style="text-align:center">7</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">7</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=104" style="color:black"><img src="uploadcenter/saffteamsmallHy6F61756329988.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=104" style="color:black">«·√Â·Ì</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">6</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">6</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">6</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">8</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=149" style="color:black"><img src="uploadcenter/saffteamsmallk3HfI1736767098.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=149" style="color:black">‰ÌÊ„</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">4</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">6</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">9</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=71" style="color:black"><img src="uploadcenter/saffteamsmall1661384351.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=71" style="color:black">«·« ›«ﬁ</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">7</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">8</td>
+                        <td style="text-align:center">-1</td>
+                        <td style="text-align:center">6</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">10</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=66" style="color:black"><img src="uploadcenter/saffteamsmall1628756061.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=66" style="color:black">«·Õ“„</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">6</td>
+                        <td style="text-align:center">-1</td>
+                        <td style="text-align:center">4</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">11</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=37" style="color:black"><img src="uploadcenter/saffteamsmall1661203654.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=37" style="color:black">«·›ÌÕ«¡</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">4</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">7</td>
+                        <td style="text-align:center">-3</td>
+                        <td style="text-align:center">4</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">12</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=3" style="color:black"><img src="uploadcenter/saffteamsmall1581536401.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=3" style="color:black">«·—Ì«÷</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">6</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">11</td>
+                        <td style="text-align:center">-5</td>
+                        <td style="text-align:center">4</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">13</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=4" style="color:black"><img src="uploadcenter/saffteamsmall1629064138.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=4" style="color:black">«·‘»«»</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">3</td>
+                        <td style="text-align:center">1</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">7</td>
+                        <td style="text-align:center">-2</td>
+                        <td style="text-align:center">3</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">14</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=72" style="color:black"><img src="uploadcenter/saffteamsmall1566292050.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=72" style="color:black">«·Œ·ÌÃ</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">3</td>
+                        <td style="text-align:center">1</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">6</td>
+                        <td style="text-align:center">-4</td>
+                        <td style="text-align:center">3</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"></td>
+                        <td style="padding:0px;text-align:center">15</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=56" style="color:black"><img src="uploadcenter/saffteamsmall1661203635.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=56" style="color:black">«· ⁄«Ê‰</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">3</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td style="text-align:center">-2</td>
+                        <td style="text-align:center">2</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"><i class="fa fa-circle" style="color:#FF0000" aria-hidden="true"></i>&nbsp;</td>
+                        <td style="padding:0px;text-align:center">16</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=141" style="color:black"><img src="uploadcenter/saffteamsmall1661266908.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=141" style="color:black">«·› Õ</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">2</td>
+                        <td style="text-align:center">2</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">1</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">5</td>
+                        <td style="text-align:center">-4</td>
+                        <td style="text-align:center">2</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"><i class="fa fa-circle" style="color:#FF0000" aria-hidden="true"></i>&nbsp;</td>
+                        <td style="padding:0px;text-align:center">17</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=125" style="color:black"><img src="uploadcenter/saffteamsmall1667133437.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=125" style="color:black">√»Â«</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">3</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">4</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">10</td>
+                        <td style="text-align:center">-6</td>
+                        <td style="text-align:center">1</td>
+                    </tr>
+
+
+                    <tr>
+                        <td style="padding:0px;text-align:center"><i class="fa fa-circle" style="color:#FF0000" aria-hidden="true"></i>&nbsp;</td>
+                        <td style="padding:0px;text-align:center">18</td>
+                        <td style="text-align:center" style="width:30px"><a href="team.php?id=39" style="color:black"><img src="uploadcenter/saffteamsmall0WKIZ1786063856.png" alt="" width="30" /></a></td>
+                        <td style="text-align:center" style="width:90px"><a href="team.php?id=39" style="color:black">«·›Ì’·Ì</a></td>
+                        <td style="text-align:center">4</td>
+                        <td style="text-align:center">0</td>
+                        <td style="text-align:center">1</td>
+                        <td style="text-align:center">3</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">4</td>
+                        <td class="d-none d-sm-table-cell" style="text-align:center">10</td>
+                        <td style="text-align:center">-6</td>
+                        <td style="text-align:center">1</td>
+                    </tr>
+
+
+</tbody>
+</table>
+<br>
+
+
+
+
+            </table>
+            
+            
+
+              </div>
+
+              <br>
+<br>
+<dialog id="popup">
+
+    <div class="popup-header">
+
+        <button
+            type="button"
+            class="close-popup"
+            id="closePopup"
+        >
+            &times;
+        </button>
+
+    </div>
+
+
+    <iframe
+        id="popupFrame"
+        src=""
+        title="Popup page"
+    ></iframe>
+
+</dialog>
+
+
+
+<script>
+
+    const popup = document.getElementById("popup");
+
+    const popupFrame = document.getElementById("popupFrame");
+
+    const closePopup = document.getElementById("closePopup");
+
+
+    /*
+     * Football icon clicked
+     */
+
+    document.querySelectorAll(".open-popup").forEach(function(icon) {
+
+        icon.addEventListener("click", function() {
+
+            // Get dynamic URL
+            const url = this.dataset.url;
+
+            // Load page
+            popupFrame.src = url;
+
+            // Open popup
+            popup.showModal();
+
+        });
+
+    });
+
+
+    /*
+     * Close button
+     */
+
+    closePopup.addEventListener("click", function() {
+
+        popup.close();
+
+        // Clear iframe
+        popupFrame.src = "";
+
+    });
+
+
+    /*
+     * Click / tap outside popup
+     */
+
+    popup.addEventListener("click", function(event) {
+
+        const rect = popup.getBoundingClientRect();
+
+
+        const clickedOutside =
+            event.clientX < rect.left ||
+            event.clientX > rect.right ||
+            event.clientY < rect.top ||
+            event.clientY > rect.bottom;
+
+
+        if (clickedOutside) {
+
+            popup.close();
+
+            popupFrame.src = "";
+
+        }
+
+    });
+
+</script>
+        </div>
+
+        <div class="col-sm-3" >
+        <br>
+            <div class="row m-0">
+                <div class="col-sm-4">
+                    <img class="img-fluid rounded" src="uploadcenter/saffnews3QjGl1787827089.jpeg" alt="">
+                </div>
+                <div class="col-sm-8">
+                    <p class="text-green mb-1 font-14" dir="rtl" align="right">»Ì«‰ ’Õ›Ì</p>
+                    <p class="mb-1 font-12" dir="rtl" align="right">—Õ¯Û» „Ã·” ≈œ«—… «·« Õ«œ «·”⁄ÊœÌ ·ﬂ—… «·ﬁœ„° Œ·«· «Ã „«⁄Â «·–Ì ⁄ıﬁœ «·...</p>
+                    <span class="text-green font-14"><a class="a_link" href="news.php?id=4324" style="color:#146f45;font-size:8pt">√ﬁ—√ «·„“Ìœ</a></span>
+                </div>
+                <hr class="w-100" />
+                <div class="col-sm-4">
+                    <img class="img-fluid rounded" src="uploadcenter/saffnews5gA6G1788208919.jpeg" alt="">
+                </div>
+                <div class="col-sm-8">
+                    <p class="text-green mb-1 font-14" dir="rtl" align="right">√Œ÷— «·’«·«  Ì €·¯» ⁄·Ï «·Ã“«∆— ÊœÌ«</p>
+                    <p class="mb-1 font-12" dir="rtl" align="right"> €·¯» «·„‰ Œ» «·Êÿ‰Ì «·√Ê· ·ﬂ—… ﬁœ„ «·’«·«  ⁄·Ï ‰ŸÌ—Â „‰ Œ» «·Ã“«∆— »‰...</p>
+                    <span class="text-green font-14"><a class="a_link" href="news.php?id=4334" style="color:#146f45;font-size:8pt">√ﬁ—√ «·„“Ìœ</a></span>
+                </div>
+                <hr class="w-100" />
+                <div class="col-sm-4">
+                    <img class="img-fluid rounded" src="uploadcenter/saffnews36Z6L1788179290.jpeg" alt="">
+                </div>
+                <div class="col-sm-8">
+                    <p class="text-green mb-1 font-14" dir="rtl" align="right"> ﬁ‰Ì… VAR  œŒ· „‰«›”«  ﬂ—… «·ﬁœ„ «·‰”«∆Ì… «·”⁄ÊœÌ… ··„—… «·√Ê·Ï</p>
+                    <p class="mb-1 font-12" dir="rtl" align="right"> ‘Âœ „‰«›”«  ﬂ—… «·ﬁœ„ «·‰”«∆Ì… ›Ì «·« Õ«œ «·”⁄ÊœÌ ·ﬂ—… «·ﬁœ„  ÿ»Ìﬁ  ﬁ...</p>
+                    <span class="text-green font-14"><a class="a_link" href="news.php?id=4333" style="color:#146f45;font-size:8pt">√ﬁ—√ «·„“Ìœ</a></span>
+                </div>
+                            </div>
+
+
+        </div>
+
+    </div>
+    <!-- calender section -->
+    </div>
+    <footer class="bg-light p-4 mt-5">
+        <div class="row m-0" dir="rtl">
+            <div class="col-sm-4" >
+                <p align="right"><img src="assets/images/logo.png" width=300/></p>
+                <h3 align="right"></h3>
+                <p align="right">«·⁄‰Ê«‰: ÕÌ «·Ì«”„Ì‰° ÿ—Ìﬁ «·„·ﬂ ⁄»œ«·⁄“Ì“ - «·—Ì«÷</p>
+                <p align="right">«·»—Ìœ «·√·ﬂ —Ê‰Ì: info@saff.com.sa</p>
+                <p align="right">Â« ›: <span dir="ltr">+966 11 8292888</span></p>
+                <p align="right">›«ﬂ”: <span dir="ltr">+966 11 8292828</span></p>
+
+            </div>
+            <div class="col-sm-2 d-none d-lg-block" align="right" >
+                <h2>—Ê«»ÿ ”—Ì⁄…</h2>
+                <ul class="quick_links">
+                    <li><a href="about.php">⁄‰ «·« Õ«œ</a></li>
+                    <li><a href="newscenter.php">„—ﬂ“ «·√Œ»«—</a></li>
+                    <li><a href="nationalteams.php">«·„‰ Œ»«  «·Êÿ‰Ì…</a></li>
+                    <li><a href="championships.php">«·»ÿÊ·« </a></li>
+                    <li><a href="teams.php">«·√‰œÌ…</a></li>
+                    <li><a href="files.php">«·„·›« </a></li>
+                </ul>
+            </div>
+            <div class="col-sm-6">
+                <div class="map">
+
+                        
+
+                        
+                </div>
+                <h2 class="float-left mt-3 mr-5"></h2>
+                <ul class="social_links mt-3">
+                    <li><a href="https://twitter.com/saudiff" target="_blank"><i class="fa fa-twitter" aria-hidden="true" ></i></a></li>
+                    <li><a href="https://www.youtube.com/channel/UCrwiKSUY5AV2bgMkHq693Kg" target="_blank"><i class="fa fa-youtube" aria-hidden="true"></i></a></li>
+                    <li><a href="https://www.facebook.com/saudiFF1956" target="_blank"><i class="fa fa-facebook" aria-hidden="true" ></i></a></li>
+                </ul>
+            </div>
+        </div>
+    </footer>
+    <div class="bg-green p-3 text-white" dir="rtl" align="right">Ã„Ì⁄ «·ÕﬁÊﬁ „Õ›ÊŸ… ·œÏ «·« Õ«œ «·”⁄ÊœÌ ·ﬂ—… «·ﬁœ„ 2026    </div>
+
+
+</body>
+
+</html>
+
+
