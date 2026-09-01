@@ -12,8 +12,6 @@ THIS FILE CONTAINS ZERO BACKSLASH CHARACTERS (the DASHBOARD_HTML trap)."""
 import html as _html
 import re
 
-import segno
-
 from .. import art_generated
 from ..dates import AR_DAY, RIYADH, ar_date, ar_digits
 from . import fonts, tokens
@@ -39,6 +37,7 @@ def bidi(s):
 def qr_svg(url):
     """Offline QR (segno): navy modules, error correction M, quiet zone 4, as inline SVG
     with a viewBox so CSS decides the printed size (>= 22 mm)."""
+    import segno                       # lazy: a missing library fails the BUILD, not the routes
     q = segno.make(url, error="m")
     w, h = q.symbol_size(scale=1, border=4)
     s = q.svg_inline(scale=1, border=4, dark=tokens.TOKENS["ink"], light=None)

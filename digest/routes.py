@@ -10,9 +10,33 @@ import asyncio
 import os
 import traceback
 
-from . import approval, build, db, notify
+from . import db
 from .host import HOST
 from .page import DIGEST_PAGE_HTML
+
+# The build/render chain (approval → build → render → segno/Pillow) is imported LAZILY:
+# a missing library must degrade the digest to "page up, build unavailable", never take
+# every /digest route down. `_heavy()` records the failure for /digest/health.
+_HEAVY = {"ok": None, "error": ""}
+
+
+def _heavy():
+    from . import approval, build, notify
+    _HEAVY["ok"], _HEAVY["error"] = True, ""
+    return approval, build, notify
+
+
+def render_ready():
+    """True only when the whole build chain AND its libraries (segno, Pillow,
+    Playwright) import in this container — the real readiness probe."""
+    try:
+        _heavy()
+        import segno  # noqa: F401
+        from PIL import Image  # noqa: F401
+        import playwright.sync_api  # noqa: F401
+    except Exception as e:
+        _HEAVY["ok"], _HEAVY["error"] = False, "%s: %s" % (type(e).__name__, e)
+    return bool(_HEAVY["ok"])
 
 FILE_KINDS = {"pdf": ("digest-%s.pdf", "application/pdf"), "png": ("digest-%s.png", "image/png"),
               "json": ("digest-%s.json", "application/json"), "html": ("digest-%s.html", "text/html")}
@@ -55,6 +79,7 @@ def _who(request):
 def _issue_view(row):
     if not row:
         return None
+    approval, _build, notify = _heavy()
     p = row.get("payload") or {}
     return {
         "id": row["id"], "issue_no": row["issue_no"], "week_of": row["week_of"], "status": row["status"],
@@ -78,7 +103,17 @@ async def page(request):
 
 async def api_status(request):
     row = await asyncio.to_thread(db.latest_issue)
-    return HOST.json_response({"ok": True, "issue": _issue_view(row), "dryrun": bool(getattr(HOST, "dryrun", True))})
+    ready = render_ready()
+    return HOST.json_response({"ok": True, "issue": _issue_view(row) if ready else None, "dryrun": bool(getattr(HOST, "dryrun", True)),
+                               "render_ready": ready, "render_error": _HEAVY["error"]})
+
+
+async def health(request):
+    """PUBLIC and harmless: booleans + the import error class/message when the
+    build chain cannot load in this container. No data, no secrets."""
+    ready = render_ready()
+    return HOST.json_response({"ok": True, "routes": True, "render_ready": ready, "render_error": _HEAVY["error"],
+                               "dryrun": bool(getattr(HOST, "dryrun", True))})
 
 
 async def api_issue(request):
@@ -90,6 +125,7 @@ async def api_issue(request):
 
 
 async def api_act(request):
+    approval, build, _notify = _heavy()
     b = await _body(request)
     action = (b.get("action") or "").strip()
     if action not in approval.ACTIONS:
@@ -112,6 +148,7 @@ async def api_act(request):
 
 
 async def api_build(request):
+    _approval, build, _notify = _heavy()
     now = HOST.require("now")()
     if await asyncio.to_thread(build.already_built, now):
         row = await asyncio.to_thread(db.latest_issue)
@@ -129,6 +166,7 @@ async def api_file(request):
     kind = request.match_info.get("kind", "")
     if kind not in FILE_KINDS or not n.isdigit():
         return HOST.json_response({"ok": False, "error": "not found"}, 404)
+    _approval, build, _notify = _heavy()
     name, ctype = FILE_KINDS[kind]
     path = os.path.join(build._out_root(None), n, name % n)
     if not os.path.isfile(path):
@@ -138,6 +176,7 @@ async def api_file(request):
 
 def register(app):
     app.router.add_get("/digest", _safe(page))
+    app.router.add_get("/digest/health", health)
     app.router.add_get("/api/digest/status", _safe(api_status))
     app.router.add_get("/api/digest/issue/{n}", _safe(api_issue))
     app.router.add_post("/api/digest/act", _safe(api_act))

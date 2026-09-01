@@ -109,7 +109,7 @@ class Routes(unittest.TestCase):
         r = _run(routes._safe(routes.api_file)(_Req("/digest/file/../x/pdf", match={"n": "../x", "kind": "pdf"})))
         self.assertEqual(r.status, 404)
 
-    def test_register_adds_the_six_routes(self):
+    def test_register_adds_the_seven_routes(self):
         calls = []
 
         class R(object):
@@ -123,8 +123,46 @@ class Routes(unittest.TestCase):
             router = R()
 
         routes.register(App())
-        self.assertEqual(sorted(calls), sorted([("GET", "/digest"), ("GET", "/api/digest/status"), ("GET", "/api/digest/issue/{n}"),
+        self.assertEqual(sorted(calls), sorted([("GET", "/digest"), ("GET", "/digest/health"), ("GET", "/api/digest/status"), ("GET", "/api/digest/issue/{n}"),
                                                 ("POST", "/api/digest/act"), ("POST", "/api/digest/build"), ("GET", "/digest/file/{n}/{kind}")]))
+
+    def test_routes_survive_a_missing_library(self):
+        """The container lesson (2026-09-02): with segno absent, register() must still add
+        every route, /digest/health must say render_ready=false and name the error."""
+        import importlib
+        saved = sys.modules.get("segno")
+        sys.modules["segno"] = None
+        try:
+            for m in [k for k in list(sys.modules) if k.startswith("digest.render") or k in ("digest.build", "digest.approval", "digest.notify", "digest.routes")]:
+                del sys.modules[m]
+            r2 = importlib.import_module("digest.routes")
+            calls = []
+
+            class R(object):
+                def add_get(self, p, h):
+                    calls.append(p)
+
+                def add_post(self, p, h):
+                    calls.append(p)
+
+            class App(object):
+                router = R()
+
+            r2.register(App())
+            self.assertIn("/digest", calls)
+            self.assertIn("/digest/health", calls)
+            HOST.json_response = lambda data, status=200: _Resp(data, status)
+            r = _run(r2.health(_Req("/digest/health")))
+            self.assertTrue(r.data["routes"])
+            self.assertFalse(r.data["render_ready"])
+            self.assertIn("segno", r.data["render_error"])
+        finally:
+            if saved is not None:
+                sys.modules["segno"] = saved
+            else:
+                sys.modules.pop("segno", None)
+            for m in [k for k in list(sys.modules) if k.startswith("digest.render") or k in ("digest.build", "digest.approval", "digest.notify", "digest.routes")]:
+                del sys.modules[m]
 
 
 if __name__ == "__main__":
