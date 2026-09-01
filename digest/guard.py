@@ -20,7 +20,6 @@ from .dates import AR_MONTHS, RIYADH, in_week
 
 MAX_SOURCE_AGE_DAYS = 7
 PROSE_CLASSES = ("claim", "sub", "ttl", "eyebrow", "when", "kicker", "lede")
-FOOT_CLASSES = ("foot",)
 PLACEHOLDER_WORDS = ("قريباً", "قريبا", "placeholder", "lorem", "TBD", "TODO")
 OFF_WINDOW_DAYS = ("الأحد", "الاثنين", "الإثنين", "الثلاثاء", "الأربعاء", "اثنين", "إثنين", "ثلاثاء", "أربعاء")
 
