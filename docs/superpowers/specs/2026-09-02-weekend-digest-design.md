@@ -1,7 +1,7 @@
 # «وش صاير بالرياض» — the weekend digest — design spec
 
 Date: 2026-09-02 · Package: `digest/` · Branch: `feat/weekend-digest` (worktree
-`../ouja-wt-digest`, based on `origin/main` @ 0e4e64f) · Status: **P4 done — render golden locked (owner approved the look 2026-09-02), rank + art + build orchestrator; awaiting approval for P5**
+`../ouja-wt-digest`, based on `origin/main` @ 0e4e64f) · Status: **P5 done — bot.py wired (dry-run on), routes + page + buttons; awaiting approval for P6 (live dry-run week, then push)**
 
 This spec is the decision record. The brief (pasted as the session's first message) is
 the requirement; this document says *how* it will be met inside this repo, and lists
