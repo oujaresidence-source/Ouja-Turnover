@@ -139,20 +139,23 @@ def _clashes(c, chosen, strict=True):
 
 
 def _pick_events(ranked, cap, floor):
+    """Tier 1: no shared district AND no shared category. Tier 2 (fill the remaining
+    slots): no shared category — many good Riyadh venues cluster in one district, and a
+    family show next to a concert in the same district is still a spread. Tier 3 (any)
+    only to reach the floor: two concerts beat an empty digest."""
     chosen = []
-    for strict in (True, False, None):
+    for strict in (True, False):
         for c in ranked:
             if len(chosen) >= cap:
                 break
-            if c in chosen:
-                continue
-            if strict is None or not _clashes(c, chosen, strict):
+            if c not in chosen and not _clashes(c, chosen, strict):
                 chosen.append(c)
-        if len(chosen) >= floor and strict is not None:
-            # spread satisfied at this strictness — stop relaxing
-            break
-        if strict is None:
-            break
+    if len(chosen) < floor:
+        for c in ranked:
+            if len(chosen) >= floor:
+                break
+            if c not in chosen:
+                chosen.append(c)
     return chosen[:cap]
 
 

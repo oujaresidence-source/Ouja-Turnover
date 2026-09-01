@@ -223,7 +223,9 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .toc div{display:flex;justify-content:space-between;align-items:baseline;padding-block:14pt;border-block-start:1px solid var(--ink-3);font-size:20pt}
 .toc .n{font-family:%(serif)s;font-weight:700;color:var(--gold-2);font-size:24pt}
 .grid{display:grid;gap:22pt;align-content:start;flex:1 1 auto;min-height:0}
-.g2,.g2h{grid-template-columns:1fr 1fr}
+.g2{grid-template-columns:1fr 1fr}
+.g2h{grid-template-columns:1fr}
+.g2h .card .art{aspect-ratio:21/9}
 .g3v,.g3,.g1{grid-template-columns:1fr}
 .g1{grid-auto-rows:max-content;align-items:start;flex:0 0 auto}
 .card{background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:6mm;display:flex;flex-direction:column;gap:14pt;min-height:0}
