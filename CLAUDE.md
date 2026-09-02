@@ -315,9 +315,10 @@ A Wednesday 13:00 (Riyadh) poster: events, cinema, Roshn fixtures, one «يست�
 rendered to an 810×1440 pt PDF + 1080×1920 story PNG + JSON in the KAFD memo's design system,
 posted to Discord with approve / alternates / rephrase / drop / rebuild buttons. Spec:
 `docs/superpowers/specs/2026-09-02-weekend-digest-design.md`.
-- **Nothing publishes without the owner's tap.** `DIGEST_DRYRUN=1` (default) builds the files
-  and prints what it would post; `tests/test_digest_approval.py` proves the publisher is never
-  called in dry-run. Flip to `0` only from Railway, after a real dry-run week.
+- **Nothing publishes without the owner's tap.** The Wednesday post is a PREVIEW with buttons;
+  `digest.approval` is the only path to «published». `DIGEST_DRYRUN` defaults to `0` (owner ruling
+  2026-09-03 — he does not want to touch Railway); set `1` to build silently and print instead of
+  posting. `tests/test_digest_approval.py` proves the publisher is never called in dry-run.
 - **The loop is a 30-minute tick + `digest.schedule.should_fire`** (Wednesday, `DIGEST_HOUR`
   clamped to ≥13, and a latch PERSISTED in `digest_issues.week_of UNIQUE`). Do not turn it into a
   `@tasks.loop(time=…)` — a redeploy re-runs a loop's first iteration.
@@ -345,7 +346,7 @@ posted to Discord with approve / alternates / rephrase / drop / rebuild buttons.
 - Colours only from `digest/render/tokens.py`; fonts from `fonts/Thmanyah{Sans,SerifDisplay}-*.woff2`
   (byte-identical to `monthly_public/static/fonts/`; NOT the older `ThmanyahDisplay-*` cut).
 - Offline cold start: `python3 -m digest.build --dry-run --week 2026-09-03 --fixtures`.
-- Env: `DIGEST_ENABLED`(1), `DIGEST_DRYRUN`(1), `DIGEST_CHANNEL`(نشرة-الاسبوع), `DIGEST_DAY`(2),
+- Env: `DIGEST_ENABLED`(1), `DIGEST_DRYRUN`(**0**), `DIGEST_CHANNEL`(نشرة-الاسبوع), `DIGEST_DAY`(2),
   `DIGEST_HOUR`(13). Buttons: admins / manage_guild only, fail CLOSED. `/api/digest/*` is behind
   login + the «digest» permission tab; `/digest/file/{n}/{pdf|png|json}` serves the outputs.
 

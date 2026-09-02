@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault("DIGEST_DRYRUN", "1")
+os.environ.pop("DIGEST_DRYRUN", None)      # the clean-env default is what we assert
 import bot  # noqa: E402
 
 
@@ -33,7 +33,9 @@ class _Interaction(object):
 class Contract(unittest.TestCase):
     def test_import_and_flags(self):
         self.assertTrue(bot._HAS_DIGEST)
-        self.assertTrue(bot.DIGEST_DRYRUN)
+        # Owner ruling 2026-09-03: live by default — the Wednesday post carries the buttons and
+        # NOTHING publishes without his tap (digest.approval gates it). DIGEST_DRYRUN=1 still works.
+        self.assertFalse(bot.DIGEST_DRYRUN)
         self.assertEqual(bot.DIGEST_DAY, 2)
         self.assertEqual(bot.DIGEST_HOUR, 13)
         self.assertEqual(bot.DIGEST_CHANNEL, "نشرة-الاسبوع")

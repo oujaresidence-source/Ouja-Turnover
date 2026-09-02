@@ -6607,7 +6607,7 @@ STUDIO_DAILY_SIGNAL_IDEAS = int(os.environ.get("STUDIO_DAILY_SIGNAL_IDEAS", "4")
 
 # ============= Weekend digest «وش صاير بالرياض» — Wednesday poster, one-tap approval =============
 DIGEST_ENABLED = os.environ.get("DIGEST_ENABLED", "1") == "1"
-DIGEST_DRYRUN  = os.environ.get("DIGEST_DRYRUN", "1") in ("1", "true", "True", "yes")   # 1 = build, never post
+DIGEST_DRYRUN  = os.environ.get("DIGEST_DRYRUN", "0") in ("1", "true", "True", "yes")   # owner 2026-09-03: live by default (posting a PREVIEW + buttons; publishing still needs his tap). Set 1 to build silently.
 DIGEST_CHANNEL = os.environ.get("DIGEST_CHANNEL", "نشرة-الاسبوع")
 DIGEST_DAY     = int(os.environ.get("DIGEST_DAY", "2") or 2)      # 2 = Wednesday (Mon=0)
 DIGEST_HOUR    = int(os.environ.get("DIGEST_HOUR", "13") or 13)   # never before 13:00 — digest.schedule clamps it
