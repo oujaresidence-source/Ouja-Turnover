@@ -341,6 +341,10 @@ posted to Discord with approve / alternates / rephrase / drop / rebuild buttons.
   geometry md5 + pixels with ≤3/255 tolerance; owner approved 2026-09-02). If
   `tests/test_digest_frozen.py` fails, revert the change — never regenerate the golden to pass.
   Regeneration needs the owner's word and `--write-golden --i-have-owner-approval`.
+- **Every `_digest.<name>` bot.py touches must resolve on the package** (2026-09-03 outage: the
+  wiring did `_digest.net_live` but `digest/__init__` never imported it → AttributeError → caught →
+  every /digest route silently gone while the bot ran). Light modules are imported eagerly, the
+  build chain via PEP 562 `__getattr__`; `tests/test_digest_bot_contract.py` greps bot.py for the names.
 - **Zero-backslash files** (same trap as `DASHBOARD_HTML`): `digest/page.py`, `digest/notify.py`,
   `digest/render/html.py`, `digest/render/audit.py`, `digest/art_generated.py`. Tests enforce it.
 - Colours only from `digest/render/tokens.py`; fonts from `fonts/Thmanyah{Sans,SerifDisplay}-*.woff2`

@@ -58,6 +58,49 @@ class Contract(unittest.TestCase):
         self.assertTrue(bot._digest_may_press(_Interaction(_User(_Perms(manage=True)))))
         self.assertFalse(bot._digest_may_press(object()))
 
+    def test_every_package_attribute_bot_uses_resolves(self):
+        """The 2026-09-03 outage: bot.py wired `_digest.net_live` but the package never
+        imported it → AttributeError inside the wiring → caught → every route gone."""
+        import re
+        import digest
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot.py"), encoding="utf-8").read()
+        names = sorted(set(re.findall(r"_digest[.]([a-z_]+)", src)))
+        self.assertTrue(names)
+        missing = [n for n in names if not hasattr(digest, n)]
+        self.assertEqual(missing, [])
+        # and the sub-attributes the loop/buttons call
+        for dotted in ("build.existing_week_of", "build.build_issue", "build._out_root", "schedule.should_fire",
+                       "approval.act", "notify.build_message", "notify.status_line", "db.issue", "db.issue_by_msg",
+                       "db.set_issue", "net_live.get_text"):
+            obj = digest
+            for part in dotted.split("."):
+                obj = getattr(obj, part)
+            self.assertTrue(callable(obj), dotted)
+
+    def test_wiring_block_runs_without_error(self):
+        """Execute the exact caps dict bot.py builds, against a throwaway app."""
+        calls = []
+
+        class R(object):
+            def add_get(self, p, h): calls.append(p)
+            def add_post(self, p, h): calls.append(p)
+
+        class App(object):
+            router = R()
+
+        import digest
+        digest.wire({
+            "state_path": bot._state_path, "load_json": bot._digest_load_json, "save_json": bot._save_json,
+            "dash_auth": bot._dash_auth, "req_role": bot._req_role, "json_response": bot._json, "web": bot.web,
+            "claude_json": bot.claude_json, "claude_search": bot.claude_search_json,
+            "http": bot._digest.net_live, "listings": bot.get_listings_map, "public_base": bot._dispatch_base_url,
+            "model_fast": bot.CLAUDE_MODEL, "model_premium": bot.CLAUDE_MODEL_PREMIUM,
+            "tz": bot.TZ, "now": bot.now_riyadh, "dryrun": bot.DIGEST_DRYRUN, "publisher": bot._digest_publish,
+        })
+        digest.register_routes(App())
+        self.assertIn("/digest", calls)
+        self.assertIn("/digest/health", calls)
+
     def test_role_rules_and_nav(self):
         self.assertIn(("/api/digest/", "digest"), bot._ROLE_WRITE_RULES)
         self.assertIn(("/api/digest/", "digest"), bot._ROLE_READ_RULES)
