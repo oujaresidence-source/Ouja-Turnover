@@ -1,6 +1,6 @@
 # Digest P7 — the owner's first-issue feedback (2026-09-03): root causes, research, rules
 
-Status: **planned, awaiting approval.** Owner's words: «لا تعتذر، افهم ليه صار كذا عندك بالكود، عدله،
+Status: **built 2026-09-03 (owner «تمام»), pushed to main.** Golden regenerated with the owner's word. Verified live run: 3 events with venues named + uncropped images, 3 films with posters, club logos on the fixtures page, Bujairi as the place (King Salman Park / zoo / Boulevard excluded with reasons). Owner's words: «لا تعتذر، افهم ليه صار كذا عندك بالكود، عدله،
 سو ريسيرتش، جب لي سيد ودفة عشان يفهم وش صاير بالدنيا، وحط رولز عشان ما يعود يهج».
 
 ## 1. Why each fault happened — in the code, not in luck
