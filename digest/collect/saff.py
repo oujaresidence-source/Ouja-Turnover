@@ -21,6 +21,8 @@ RIYADH_CLUBS = ("الهلال", "النصر", "الشباب", "الرياض", "�
 _TOKEN_RX = re.compile(
     r"calendar_date=(\d{4}-\d{2}-\d{2})"
     r"|<td id=\"fixture_td_(\d)_(\d+)\"[^>]*>(.*?)</td>", re.S)
+_CLUB_RX = re.compile(r"team\.php\?id=(\d+)'[^>]*><img src=\"(uploadcenter/[^\"]+\.png)\"[^>]*><br>([^<]+)</a>")
+LOGO_BASE = "https://saff.com.sa/"
 _CITY_RX = re.compile(r"\(([^()]+)\)\s*$")
 
 
@@ -31,10 +33,23 @@ def _cell(inner):
     return base.text(t)
 
 
+def club_logos(html):
+    """-> {club name: {"id": str, "logo": absolute url}} from the schedule page (the FA's
+    own 400×400 PNGs — the owner's rule 2026-09-03: logos, not typographic bands)."""
+    out = {}
+    for tid, path, name in _CLUB_RX.findall(html or ""):
+        name = base.text(name)
+        if name and name not in out:
+            out[name] = {"id": tid, "logo": LOGO_BASE + path}
+    return out
+
+
 def parse(html, week, now, page_url=SCHEDULE_URL):
     """-> (fixtures, dropped). Fixture = {home, away, when, day, kickoff_iso, stadium,
-    city, url, source, ...} filtered to the week and to Riyadh-region interest."""
+    city, url, source, home_logo, away_logo, ...} filtered to the week and to
+    Riyadh-region interest."""
     fetched = base.now_iso(now)
+    logos = club_logos(html)
     rows = {}
     order = []
     current_date = None
@@ -93,6 +108,8 @@ def parse(html, week, now, page_url=SCHEDULE_URL):
             "comp": COMP,
             "raw_conf": base.TIER_PRIMARY,
             "match_id": mid,
+            "home_logo": (logos.get(home) or {}).get("logo", ""),
+            "away_logo": (logos.get(away) or {}).get("logo", ""),
         })
     out.sort(key=lambda f: f["kickoff_iso"])
     return out, dropped

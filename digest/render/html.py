@@ -45,20 +45,44 @@ def qr_svg(url):
     return '<div class="qr" data-url="%s">%s</div>' % (esc(url), s)
 
 
+def _ratio_style(art, fallback):
+    """The box takes the IMAGE's ratio (owner rule 2026-09-03: never crop). Falls back
+    to the layout's default ratio when the payload carries no size."""
+    w, h = int(art.get("w") or 0), int(art.get("h") or 0)
+    if w > 0 and h > 0:
+        return ' style="aspect-ratio:%d/%d"' % (w, h)
+    return ' style="aspect-ratio:%s"' % fallback
+
+
 def _art(item, section_key, issue, slot, art_map):
     """-> inner HTML for the card's artwork, or '' for a type-only card."""
     art = item.get("art") or {}
     kind = art.get("kind") or "none"
     override = (art_map or {}).get((section_key, slot))
-    if override and override.get("kind") in ("owned", "og") and override.get("src"):
-        return '<div class="art"><img src="%s" alt=""></div>' % esc(override["src"])
-    if kind in ("owned", "og") and art.get("src"):
-        return '<div class="art"><img src="%s" alt=""></div>' % esc(art["src"])
-    if kind == "generated" or section_key == "cinema":
+    if override and override.get("kind") in ("owned", "og", "poster") and override.get("src"):
+        art = dict(art, **override)
+        kind = override["kind"]
+    if kind in ("owned", "og", "poster") and art.get("src"):
+        cls = "art art-photo" + (" art-poster" if kind == "poster" else "")
+        return '<div class="%s"%s><img src="%s" alt=""></div>' % (cls, _ratio_style(art, "2/3" if kind == "poster" else "16/9"), esc(art["src"]))
+    if kind == "generated":
         seed = "%s|%s|%s" % (issue, section_key, slot)
         shape = "portrait" if section_key == "cinema" else "square"
-        return '<div class="art art-%s">%s</div>' % (shape, art_generated.svg(seed, item.get("ttl", ""), shape, label=item.get("ttl", "")))
+        w, h = art_generated.KINDS[shape]
+        return '<div class="art art-%s" style="aspect-ratio:%d/%d">%s</div>' % (shape, w, h, art_generated.svg(seed, item.get("ttl", ""), shape, label=item.get("ttl", "")))
     return ""
+
+
+def _ratings(item):
+    r = item.get("ratings") or {}
+    bits = []
+    if r.get("imdb") is not None:
+        bits.append('<span class="rk">IMDb</span> <span class="rv">%s</span>' % esc(ar_digits("%.1f" % float(r["imdb"])).replace(".", "٫")))
+    if r.get("rt") is not None:
+        bits.append('<span class="rk">RT</span> <span class="rv">%s٪</span>' % esc(ar_digits(str(int(r["rt"])))))
+    if not bits:
+        return ""
+    return '<div class="rate">%s</div>' % " · ".join(bits)
 
 
 def _card(item, section_key, issue, slot, art_map, big=False):
@@ -70,6 +94,9 @@ def _card(item, section_key, issue, slot, art_map, big=False):
     parts.append('<div class="ttl">%s</div>' % bidi(item.get("ttl", "")))
     if item.get("sub"):
         parts.append('<div class="sub%s">%s</div>' % (" big-sub" if big else "", bidi(item.get("sub", ""))))
+    parts.append(_ratings(item))
+    if big and item.get("hook"):
+        parts.append('<div class="hook">%s</div>' % bidi(item.get("hook", "")))
     parts.append('<div class="row"><div class="meta"><span class="chip">%s</span><span class="day">%s</span></div>%s</div>'
                  % (esc(item.get("chip", "")), esc(AR_DAY.get(item.get("day", ""), "")), qr_svg(item.get("url", ""))))
     parts.append("</div></div>")
@@ -140,24 +167,33 @@ def page_cinema(payload, sec, issue, checked, n, art_map):
         '<section class="page cinema"><div class="eyebrow">%s</div>'
         '<h1 class="claim">%s</h1>'
         '<div class="grid g3">%s</div>%s</section>'
-    ) % (esc(sec.get("title", "")), bidi(claim), cards, _foot(_sources_of(sec), checked, n, extra="التذاكر من صفحة الفيلم"))
+    ) % (esc(sec.get("title", "")), bidi(claim), cards,
+         _foot(_sources_of(sec), checked, n, extra="التقييمات من IMDb وRotten Tomatoes كما فُتحت وقت الطباعة" if any((it.get("ratings") or {}).get("sources") for it in items) else "التذاكر من صفحة الفيلم"))
 
 
 def page_fixtures(payload, sec, issue, checked, n, art_map):
     items = sec["items"]
     head = next((it for it in items if it.get("in_riyadh")), items[0])
     claim = sec.get("claim") or "%s: %s و%s" % (head.get("when", ""), head.get("home", ""), head.get("away", ""))
-    band = art_generated.svg("%s|fixtures|band" % issue, (head.get("home", ""), head.get("away", "")), "band",
-                             label="%s – %s" % (head.get("home", ""), head.get("away", "")))
+    lg = head.get("logos") or {}
+    if lg.get("home") and lg.get("away"):
+        band = ('<div class="lband"><div class="club"><img src="%s" alt=""><span>%s</span></div>'
+                '<span class="vsbig">×</span><div class="club"><img src="%s" alt=""><span>%s</span></div></div>'
+                % (esc(lg["home"]), esc(head.get("home", "")), esc(lg["away"]), esc(head.get("away", ""))))
+    else:
+        band = '<div class="band">%s</div>' % art_generated.svg("%s|fixtures|band" % issue, (head.get("home", ""), head.get("away", "")), "band",
+                                                                label="%s – %s" % (head.get("home", ""), head.get("away", "")))
     rows = []
     for it in items:
+        l2 = it.get("logos") or {}
+        home = ('<img class="tl" src="%s" alt="">' % esc(l2["home"]) if l2.get("home") else "") + esc(it.get("home", ""))
+        away = esc(it.get("away", "")) + ('<img class="tl" src="%s" alt="">' % esc(l2["away"]) if l2.get("away") else "")
         rows.append('<tr><td class="when">%s</td><td class="teams">%s <span class="vs">×</span> %s</td><td class="where">%s</td></tr>'
-                    % (esc(it.get("when", "")), esc(it.get("home", "")), esc(it.get("away", "")),
-                       esc(it.get("stadium", "") or it.get("city", "") or "")))
+                    % (esc(it.get("when", "")), home, away, esc(it.get("stadium", "") or it.get("city", "") or "")))
     return (
         '<section class="page fixtures"><div class="eyebrow">%s · %s</div>'
         '<h1 class="claim">%s</h1>'
-        '<div class="band">%s</div>'
+        '%s'
         '<table class="fix"><thead><tr><th>متى</th><th>المباراة</th><th>وين</th></tr></thead><tbody>%s</tbody></table>'
         '<div class="row end">%s<div class="hint">جدول الجولة كامل على صفحة الاتحاد السعودي</div></div>%s</section>'
     ) % (esc(sec.get("title", "")), esc(sec.get("comp", "")), bidi(claim), band, "".join(rows),
@@ -224,15 +260,18 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .grid{display:grid;gap:22pt;align-content:start;flex:1 1 auto;min-height:0}
 .g2{grid-template-columns:1fr 1fr}
 .g2h{grid-template-columns:1fr}
-.g2h .card .art{aspect-ratio:21/9}
+.g2h .card .art{width:auto;height:260pt;max-width:100%%;align-self:flex-start}
+.g2h .card{padding-block-end:8mm}
 .g3v,.g3,.g1{grid-template-columns:1fr}
 .g1{grid-auto-rows:max-content;align-items:start;flex:0 0 auto}
 .card{background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:6mm;display:flex;flex-direction:column;gap:14pt;min-height:0}
 .card .body{display:flex;flex-direction:column;gap:10pt;flex:1 1 auto;min-height:0}
 .g3v .card,.g3 .card{flex-direction:row;align-items:stretch;gap:26pt}
 .g3v .card .art{flex:0 0 210pt;width:210pt;height:210pt}
+.g3v .card .art-photo{flex:0 0 260pt;width:260pt;height:auto;align-self:flex-start}
 .g3 .card .art{flex:0 0 180pt;width:180pt;height:240pt}
-.g2 .card .art,.g2h .card .art{width:100%%}
+.g3 .card .art-poster{flex:0 0 170pt;width:170pt;height:auto;align-self:flex-start}
+.g2 .card .art{width:100%%}
 .card-big{padding:10mm}
 .card-big .ttl{font-size:64pt;line-height:1.1}
 .card-big .big-sub{font-size:26pt;line-height:1.55;margin-block-start:6pt;max-width:520pt}
@@ -241,7 +280,18 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .card-big .art{aspect-ratio:4/3}
 .art{border-radius:2mm;overflow:hidden;background:var(--ink);aspect-ratio:1/1;flex:0 0 auto}
 .art-portrait{aspect-ratio:3/4}
-.art svg,.art img{width:100%%;height:100%%;display:block;object-fit:cover}
+.art svg,.art img{width:100%%;height:100%%;display:block;object-fit:contain}
+.art-photo{background:var(--ink)}
+.g3v .card .art-photo,.g3 .card .art-poster{height:auto}
+.rate{display:flex;gap:10pt;font-size:15pt;color:var(--mute);letter-spacing:.02em}
+.rate .rk{font-weight:700;color:var(--gold)}
+.rate .rv{font-weight:500;color:var(--ink)}
+.hook{font-size:22pt;line-height:1.5;color:var(--mute);max-width:560pt}
+.lband{display:flex;align-items:center;justify-content:space-around;gap:20pt;background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:26pt 20pt;margin-block-end:30pt}
+.lband .club{display:flex;flex-direction:column;align-items:center;gap:12pt;font-family:%(serif)s;font-weight:700;font-size:30pt}
+.lband .club img{width:170pt;height:170pt;object-fit:contain}
+.lband .vsbig{font-size:36pt;color:var(--gold)}
+.fix .tl{width:26pt;height:26pt;object-fit:contain;vertical-align:middle;margin-inline:6pt}
 .ttl{font-family:%(serif)s;font-weight:700;font-size:36pt;line-height:1.2}
 .sub{font-weight:400;font-size:19pt;line-height:1.5;color:var(--ink)}
 .row{display:flex;justify-content:space-between;align-items:flex-end;margin-block-start:auto;gap:12pt}

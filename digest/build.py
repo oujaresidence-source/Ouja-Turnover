@@ -18,7 +18,7 @@ import sys
 from datetime import datetime
 
 from . import art, dates, db, links, rank, schema, voice
-from .collect import base, elcinema, kooora, platinumlist, saff, search_secondary, worth
+from .collect import base, elcinema, kooora, platinumlist, ratings, saff, search_secondary, worth
 from .host import HOST
 from .render import build as render_build
 
@@ -108,21 +108,23 @@ def _collect(week, now, http, search, load_json, report):
             f["agreement"] = base.AGREE_YES if cc else base.AGREE_NO
             by["fixtures"].append(f)
 
-    places_list = worth.load()
+    dataset = worth.load()
     try:
-        override = load_json("digest_worth.json") if load_json else None
+        override = load_json("digest_riyadh.json") if load_json else None
         if isinstance(override, dict) and isinstance(override.get("places"), list):
-            places_list = override["places"]
+            dataset = override
     except Exception:
         pass
     resolved = {}
     if search is not None:
-        for p in places_list:
-            if not (p.get("url") or "").strip() and p.get("slug"):
+        for p in dataset.get("places") or []:
+            if p.get("status") == "open" and not (p.get("url") or "").strip() and p.get("slug"):
                 u = run("search-worth", lambda: search_secondary.resolve_place_url(p, search, worth.SEARCH_DOMAINS)) or ""
                 if u:
                     resolved[p["slug"]] = u
-    by["worth"] += worth.candidates(week, now, places_list, resolved_urls=resolved)
+    wc, w_ineligible = worth.candidates(week, now, dataset, resolved_urls=resolved)
+    by["worth"] += wc
+    report["ineligible_places"] = w_ineligible
 
     for section, cands in by.items():
         for c in cands:
@@ -149,16 +151,24 @@ def _verify_and_prune(by, http, report, reason="الرابط ما يفتح"):
 
 
 def _polish(cands, model_call, model, seed=0):
+    """Owner rule (2026-09-03): the sub is FACTS (day+date · place · price) built by the
+    collectors and never rewritten. Only the numerals are normalised here; the model's
+    one job is the section claim (see _claims)."""
     out = []
     for c in cands:
         if c.get("section") == "fixtures":
             out.append(c)
             continue
-        d = voice.polish(c, "card", seed=seed, model_call=model_call, model=model)
+        d = dict(c)
         d["ttl"] = voice.prose_digits(d.get("ttl", ""))
         d["sub"] = voice.prose_digits(d.get("sub", ""))
         out.append(d)
     return out
+
+
+def _claims(chosen, model_call, model, seed=0):
+    """-> {section: claim} — '' when the model is absent or its line breaks a rule."""
+    return {k: voice.polish_claim(k, v, model_call=model_call, model=model, seed=seed) for k, v in chosen.items() if v}
 
 
 def _clean_enough(c):
@@ -168,25 +178,39 @@ def _clean_enough(c):
 
 
 def _item_from(c, artinfo):
-    """Candidate → schema item (only the keys the contract knows, plus a few the
-    renderer uses: venue / in_riyadh / stadium / kickoff)."""
+    """Candidate → schema item (only the keys the contract knows, plus the ones the
+    renderer uses: venue / hook / ratings / logos / in_riyadh / stadium / kickoff)."""
     src = dict(c.get("source") or {})
     if c.get("section") == "fixtures":
-        return {"home": c["home"], "away": c["away"], "when": c["when"], "day": c["day"], "url": c["url"],
-                "stadium": c.get("stadium", ""), "city": c.get("city", ""), "in_riyadh": bool(c.get("in_riyadh")),
-                "kickoff_iso": c.get("kickoff_iso", ""), "source": src, "confidence": c["confidence"]}
-    return {"ttl": c["ttl"], "sub": c.get("sub", ""), "chip": c.get("chip") or "الرياض", "url": c["url"],
-            "art": {"kind": artinfo["kind"], "sha256": artinfo["sha256"], "src": artinfo["src"]},
-            "day": c["day"], "source": src, "confidence": c["confidence"],
-            "tags": dict(c.get("tags") or {}), "slug": c.get("slug"), "venue": c.get("venue", "")}
+        it = {"home": c["home"], "away": c["away"], "when": c["when"], "day": c["day"], "url": c["url"],
+              "stadium": c.get("stadium", ""), "city": c.get("city", ""), "in_riyadh": bool(c.get("in_riyadh")),
+              "kickoff_iso": c.get("kickoff_iso", ""), "source": src, "confidence": c["confidence"]}
+        if artinfo and artinfo.get("kind") == "logos":
+            it["logos"] = {"home": artinfo["home"], "away": artinfo["away"], "sha256": artinfo["sha256"]}
+        return it
+    art = {"kind": artinfo["kind"], "sha256": artinfo["sha256"], "src": artinfo["src"],
+           "w": int(artinfo.get("w") or 0), "h": int(artinfo.get("h") or 0)}
+    it = {"ttl": c["ttl"], "sub": c.get("sub", ""), "chip": c.get("chip") or "الرياض", "url": c["url"],
+          "art": art, "day": c["day"], "source": src, "confidence": c["confidence"],
+          "tags": dict(c.get("tags") or {}), "slug": c.get("slug"), "venue": c.get("venue", ""),
+          "hook": c.get("hook", ""), "price": c.get("price_ar") or c.get("price", ""), "hours": c.get("hours", "")}
+    if c.get("verified_on"):
+        it["verified_on"] = c["verified_on"]
+    if c.get("ratings"):
+        it["ratings"] = c["ratings"]
+    if c.get("imdb_id"):
+        it["imdb_id"] = c["imdb_id"]
+    return it
 
 
-def assemble(week, issue_no, now, chosen, verified, site_url, dropped, alternates):
+def assemble(week, issue_no, now, chosen, verified, site_url, dropped, alternates, claims=None):
     p = schema.empty_payload(week.iso, week.label_ar, issue_no, base.now_iso(now))
     for s in p["sections"]:
         items = chosen.get(s["key"]) or []
         s["items"] = items
         s["layout"] = schema.layout_for(s["key"], len(items))
+        if (claims or {}).get(s["key"]):
+            s["claim"] = claims[s["key"]]
         if s["key"] == "fixtures":
             s["comp"] = saff.COMP
     p["verified_urls"] = sorted(verified)
@@ -255,15 +279,27 @@ def build_issue(now, http, search=None, load_json=None, dry_run=True, out_root=N
         if site_url:
             verified.add(site_url)
 
+    # ratings for the three films — cited, never scraped (collect/ratings.py)
+    for c in chosen.get("cinema") or []:
+        if search is not None:
+            try:
+                c["ratings"] = ratings.fetch(c.get("name") or c.get("ttl"), c.get("imdb_id"), search, model=model)
+            except Exception:
+                c["ratings"] = {"imdb": None, "rt": None, "sources": []}
+    claims = _claims(chosen, model_call, model)
+
     owned = art.load_owned()
     items = {}
     for section, cands in chosen.items():
         items[section] = []
         for slot, c in enumerate(cands):
-            info = art.resolve(c, section, issue_no, slot, http, owned=owned) if section != "fixtures" else {"kind": "generated", "sha256": "", "src": ""}
+            if section == "fixtures":
+                info = art.logos_for(c, http) or {"kind": "generated", "sha256": "", "src": ""}
+            else:
+                info = art.resolve(c, section, issue_no, slot, http, owned=owned)
             items[section].append(_item_from(c, info))
 
-    payload = assemble(week, issue_no, now, items, verified, site_url, report["dropped"], picked["alternates"])
+    payload = assemble(week, issue_no, now, items, verified, site_url, report["dropped"], picked["alternates"], claims)
     for k, alts in picked["alternates"].items():
         section, slot = k.split(".")
         db.add_candidates(issue_id, section, int(slot), alts)
@@ -325,7 +361,11 @@ def apply_alternate(issue_id, section, slot, rank_no, http, now, who="owner", ou
     payload["verified_urls"] = sorted(set(payload.get("verified_urls") or []) | {alt["url"]})
     sec = schema.section(payload, section)
     old = sec["items"][slot]
-    info = art.resolve(alt, section, row["issue_no"], slot, http) if section != "fixtures" else {"kind": "generated", "sha256": "", "src": ""}
+    if section == "fixtures":
+        info = art.logos_for(alt, http) or {"kind": "generated", "sha256": "", "src": ""}
+    else:
+        info = art.resolve(alt, section, row["issue_no"], slot, http)
+    alt = _polish([alt], None, None)[0]
     sec["items"][slot] = _item_from(alt, info)
     sec["layout"] = schema.layout_for(section, len(sec["items"]))
     files = _rerender(issue_id, payload, now, out_root)
@@ -359,14 +399,14 @@ def rephrase(issue_id, now, model_call, model=None, who="owner", out_root=None):
     row = db.issue(issue_id)
     payload = row["payload"]
     seed = len([r for r in db.rulings_for(issue_id) if r["action"] == "rephrase"]) + 1
+    # Owner rule (2026-09-03): facts lines never change; «غيّر الصيغة» rewrites the page
+    # claims only, with a new seed so the model tries a different angle.
     for s in payload["sections"]:
-        if s["key"] == "fixtures":
+        if not s.get("items"):
             continue
-        new_items = []
-        for it in s["items"]:
-            d = voice.polish(it, "card", seed=seed, model_call=model_call, model=model)
-            new_items.append(dict(it, ttl=voice.prose_digits(d["ttl"]), sub=voice.prose_digits(d["sub"])) if _clean_enough(dict(d, section=s["key"])) else it)
-        s["items"] = new_items
+        c = voice.polish_claim(s["key"], s["items"], model_call=model_call, model=model, seed=seed)
+        if c:
+            s["claim"] = c
     files = _rerender(issue_id, payload, now, out_root)
     db.add_ruling(issue_id, who, "rephrase", detail={"seed": seed})
     return files

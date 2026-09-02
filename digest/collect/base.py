@@ -106,6 +106,12 @@ def short_title(name, max_words=4, strip=_STRIP):
     return out or (name or "")[:40]
 
 
+def short_place(name, max_words=3):
+    """A venue name trimmed to the facts line («مسرح بكر الشدي», not a full address)."""
+    words = [w for w in _WS.split(name or "") if w]
+    return " ".join(words[:max_words])
+
+
 def week_window(week, days_before=0):
     """(start, end) dates inclusive for 'this weekend', optionally reaching back."""
     return week.thu - timedelta(days=days_before), week.sat

@@ -131,10 +131,43 @@ def _check_urls(errs, markup, payload):
             errs.append("url not in the verified set: %s" % u)
 
 
+_PRICE_TOKENS = ("ريال", "مجاني", "حسب التذكرة", "حسب العرض")
+_DAY_WORDS = ("الخميس", "الجمعة", "السبت")
+MAX_ART_RATIO = 3.0
+
+
+def _check_facts(errs, payload):
+    """Owner rule (2026-09-03): every card says WHEN · WHERE · HOW MUCH, in that order."""
+    for key, i, it in schema.primaries(payload):
+        if key == "fixtures":
+            continue
+        where = "%s[%d]" % (key, i)
+        parts = [p.strip() for p in (it.get("sub") or "").split("·")]
+        if len(parts) < 3:
+            errs.append("%s: sub must be «اليوم والتاريخ · المكان · السعر» (got «%s»)" % (where, it.get("sub", "")))
+            continue
+        if not any(parts[0].startswith(d) for d in _DAY_WORDS):
+            errs.append("%s: sub must start with the day (got «%s»)" % (where, parts[0]))
+        if not parts[1]:
+            errs.append("%s: sub has no place" % where)
+        if not any(t in parts[-1] for t in _PRICE_TOKENS):
+            errs.append("%s: sub has no price (got «%s»)" % (where, parts[-1]))
+        art = it.get("art") or {}
+        w, h = art.get("w") or 0, art.get("h") or 0
+        if w and h and max(w, h) / float(min(w, h)) > MAX_ART_RATIO:
+            errs.append("%s: image ratio %.1f would need a crop — type-only instead" % (where, max(w, h) / float(min(w, h))))
+        r = it.get("ratings") or {}
+        if (r.get("imdb") is not None or r.get("rt") is not None) and not r.get("sources"):
+            errs.append("%s: a rating without an opened source page" % where)
+        if key == "worth" and not it.get("verified_on"):
+            errs.append("%s: a place without a verified_on date" % where)
+
+
 def scan(markup, payload, week, now):
     """Every reason this digest must not render; [] means clean."""
     errs = list(schema.validate(payload))
     _check_sources(errs, payload, now)
+    _check_facts(errs, payload)
     _check_dates(errs, markup, week)
     _check_numerals(errs, markup)
     _check_cards(errs, markup)

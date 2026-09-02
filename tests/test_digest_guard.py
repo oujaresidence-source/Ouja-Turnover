@@ -140,6 +140,22 @@ class Aborts(unittest.TestCase):
         self._hit(guard.scan(html_for(p, '<div class="card"><div class="ttl"></div></div>'), p, WEEK, NOW), "empty")
         self._hit(guard.scan(html_for(p, '<div class="card"><div class="ttl">قريباً</div></div>'), p, WEEK, NOW), "placeholder")
 
+    def test_every_card_needs_day_place_price(self):
+        p = good(); section(p, "events")["items"][0]["sub"] = "أعمال ضوئية في سبع مناطق"
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "اليوم والتاريخ")
+        p = good(); section(p, "events")["items"][0]["sub"] = "٣ سبتمبر · حطين · مجاني"
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "start with the day")
+        p = good(); section(p, "events")["items"][0]["sub"] = "الخميس ٣ سبتمبر · حطين · بالليل"
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "no price")
+
+    def test_extreme_image_ratio_and_unsourced_rating_and_unverified_place(self):
+        p = good(); section(p, "events")["items"][0]["art"].update({"kind": "og", "src": "data:image/jpeg;base64,x", "w": 2400, "h": 600})
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "crop")
+        p = good(); section(p, "cinema")["items"][0]["ratings"] = {"imdb": 7.0, "rt": None, "sources": []}
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "rating without")
+        p = good(); del section(p, "worth")["items"][0]["verified_on"]
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "verified_on")
+
     def test_assert_clean_raises_digest_error_naming_every_hit(self):
         p = good(); section(p, "events")["items"][0]["source"] = {}
         with self.assertRaises(guard.DigestError) as cm:

@@ -13,7 +13,7 @@ from datetime import date
 
 from . import base
 from .. import places
-from ..dates import AR_DAY, ar_digits, day_key
+from ..dates import AR_DAY, ar_date, ar_digits, day_key
 
 SOURCE = "Platinumlist"
 CALENDAR_URL = "https://riyadh.platinumlist.net/ar/calendar/this-weekend"
@@ -38,8 +38,17 @@ def _price_ar(txt):
         n = m.group(1).split(".")[0]
         return "من %s ريال" % ar_digits(n)
     if "مجان" in t or "free" in t.lower():
-        return "الدخول مجاني"
-    return ""
+        return "مجاني"
+    return "حسب التذكرة"
+
+
+def facts_line(cand, week):
+    """day+date · venue (or district) · price — the owner's rule (2026-09-03): every
+    card says when, where and how much, in that order, always."""
+    dk = cand.get("day", "thu")
+    d = {"thu": week.thu, "fri": week.fri, "sat": week.sat}[dk]
+    place = base.short_place(cand.get("venue") or (cand.get("tags") or {}).get("district") or cand.get("chip") or "الرياض")
+    return " · ".join(x for x in ("%s %s" % (AR_DAY[dk], ar_date(d)), place, cand.get("price_ar") or "حسب التذكرة") if x)
 
 
 def parse(html, week, now, page_url=CALENDAR_URL):
@@ -76,16 +85,14 @@ def parse(html, week, now, page_url=CALENDAR_URL):
             if any(k in price_txt.lower() for k in _SOLD_OUT):
                 dropped.append({"ttl": base.short_title(name), "reason": "التذاكر نفدت", "url": url})
                 continue
-            sub_bits = [AR_DAY[dk]]
-            p = _price_ar(price_txt)
-            if p:
-                sub_bits.append(p)
-            cands.append(base.make(
-                "events", base.short_title(name), " · ".join(sub_bits), places.DEFAULT_DISTRICT,
+            c = base.make(
+                "events", base.short_title(name), "", places.DEFAULT_DISTRICT,
                 url, dk, SOURCE, page_url, fetched,
                 category=base.category_of(name), district="",
                 raw_conf=base.TIER_PRIMARY,
-                extra={"name": name, "price": price_txt, "date_iso": iso}))
+                extra={"name": name, "price": price_txt, "price_ar": _price_ar(price_txt), "date_iso": iso})
+            c["sub"] = facts_line(c, week)
+            cands.append(c)
     return cands, dropped
 
 
@@ -106,8 +113,9 @@ def parse_event_page(html, page_url):
     return {"venue": venue, "og": og_url, "description": desc_txt}
 
 
-def enrich(cand, http):
-    """Open the event page for venue → district/coords and the og:image hint."""
+def enrich(cand, http, week=None):
+    """Open the event page for venue → district/coords and the og:image hint, then
+    rebuild the facts line so it names the venue."""
     try:
         status, final, ctype, html = http.get_text(cand["url"])
     except Exception:
@@ -127,6 +135,8 @@ def enrich(cand, http):
         cand["tags"]["category"] = base.category_of(cand.get("name", ""), info["description"])
     if info.get("og"):
         cand["art_hint"] = {"og": info["og"]}
+    if week is not None:
+        cand["sub"] = facts_line(cand, week)
     return cand
 
 
@@ -137,5 +147,5 @@ def fetch(week, http, now, enrich_top=8):
         return [], [{"ttl": SOURCE, "reason": "الصفحة ما ردت (%s)" % status}], ""
     cands, dropped = parse(html, week, now, final or CALENDAR_URL)
     for c in cands[:enrich_top]:
-        enrich(c, http)
+        enrich(c, http, week)
     return cands, dropped, html

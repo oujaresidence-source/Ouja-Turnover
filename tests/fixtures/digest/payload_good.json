@@ -23,13 +23,15 @@
       "items": [
         {
           "ttl": "نور الرياض يرجع",
-          "sub": "أعمال ضوئية في سبع مناطق، الدخول مجاني",
+          "sub": "الخميس ٣ سبتمبر · حطين · مجاني",
           "chip": "حطين",
           "url": "https://riyadh.platinumlist.net/event/noor-riyadh-2026",
           "art": {
             "kind": "generated",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 760,
+            "h": 760
           },
           "day": "thu",
           "source": {
@@ -45,13 +47,15 @@
         },
         {
           "ttl": "بينالي الدرعية",
-          "sub": "فن معاصر في جاكس، آخر أسبوعين",
+          "sub": "الجمعة ٤ سبتمبر · جاكس، الدرعية · مجاني",
           "chip": "الدرعية",
           "url": "https://riyadh.platinumlist.net/event/diriyah-biennale",
           "art": {
             "kind": "generated",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 760,
+            "h": 760
           },
           "day": "fri",
           "source": {
@@ -67,13 +71,15 @@
         },
         {
           "ttl": "سوق الأول",
-          "sub": "حرف ومأكولات شعبية، من العصر للعشاء",
+          "sub": "السبت ٥ سبتمبر · الرياض · حسب التذكرة",
           "chip": "الرياض",
           "url": "https://riyadh.platinumlist.net/event/souq-alawwal",
           "art": {
             "kind": "none",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 0,
+            "h": 0
           },
           "day": "sat",
           "source": {
@@ -96,13 +102,15 @@
       "items": [
         {
           "ttl": "الليلة الطويلة",
-          "sub": "٣ سبتمبر · أكشن وجريمة",
+          "sub": "الخميس ٣ سبتمبر · أكشن وجريمة · حسب العرض",
           "chip": "سينما",
           "url": "https://ksa.voxcinemas.com/movies/the-long-night",
           "art": {
             "kind": "generated",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 600,
+            "h": 800
           },
           "day": "thu",
           "source": {
@@ -114,17 +122,27 @@
           "tags": {
             "category": "cinema",
             "district": ""
+          },
+          "ratings": {
+            "imdb": 7.2,
+            "rt": 81,
+            "sources": [
+              "https://www.imdb.com/title/tt0000001/",
+              "https://www.rottentomatoes.com/m/the_long_night"
+            ]
           }
         },
         {
           "ttl": "رمل وملح",
-          "sub": "٣ سبتمبر · دراما",
+          "sub": "الخميس ٣ سبتمبر · دراما · حسب العرض",
           "chip": "سينما",
           "url": "https://ksa.voxcinemas.com/movies/sand-and-salt",
           "art": {
             "kind": "generated",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 600,
+            "h": 800
           },
           "day": "thu",
           "source": {
@@ -136,17 +154,26 @@
           "tags": {
             "category": "cinema",
             "district": ""
+          },
+          "ratings": {
+            "imdb": 6.4,
+            "rt": null,
+            "sources": [
+              "https://www.imdb.com/title/tt0000002/"
+            ]
           }
         },
         {
           "ttl": "الفانوس الصغير",
-          "sub": "٤ سبتمبر · أنيميشن عائلي",
+          "sub": "الجمعة ٤ سبتمبر · أنيميشن عائلي · حسب العرض",
           "chip": "سينما",
           "url": "https://ksa.voxcinemas.com/movies/little-lantern",
           "art": {
             "kind": "generated",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 600,
+            "h": 800
           },
           "day": "fri",
           "source": {
@@ -169,13 +196,15 @@
       "items": [
         {
           "ttl": "وادي حنيفة",
-          "sub": "مشي على الماء قبل المغرب، وموقف قريب",
+          "sub": "الجمعة ٤ سبتمبر · الدرعية · مجاني",
           "chip": "الدرعية",
           "url": "https://www.visitsaudi.com/en/riyadh/attractions/wadi-hanifah",
           "art": {
             "kind": "none",
             "sha256": "",
-            "src": ""
+            "src": "",
+            "w": 0,
+            "h": 0
           },
           "day": "fri",
           "source": {
@@ -187,7 +216,9 @@
           "tags": {
             "category": "park",
             "district": "الدرعية"
-          }
+          },
+          "verified_on": "2026-09-02",
+          "hook": "مشي على الماء قبل المغرب، وموقف قريب"
         }
       ]
     },

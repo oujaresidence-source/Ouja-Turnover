@@ -23,8 +23,11 @@ from . import art_generated
 HERE = os.path.dirname(os.path.abspath(__file__))
 OWNED_SEED = os.path.join(HERE, "data", "owned.json")
 MIN_LONG_EDGE = 800
+MIN_POSTER_EDGE = 600        # elcinema serves 640×960
+MIN_LOGO_EDGE = 200          # the FA's club PNGs are 400×400
 MAX_BYTES = 6000000
-GENERATED_ONLY = ("cinema", "fixtures")
+MAX_RATIO = 3.0              # wider than 3:1 → type-only rather than a crop (owner rule 2026-09-03)
+GENERATED_ONLY = ("fixtures",)
 
 
 def site_of(url):
@@ -65,27 +68,45 @@ def thumb_jpeg_b64(raw):
     return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
 
 
-def image_ok(raw, ctype):
+def image_size(raw):
+    try:
+        from PIL import Image
+        return Image.open(io.BytesIO(raw)).size
+    except Exception:
+        return None
+
+
+def image_ok(raw, ctype, min_edge=MIN_LONG_EDGE):
     if not (ctype or "").lower().startswith("image/"):
         return False
     if not raw or len(raw) > MAX_BYTES:
         return False
-    try:
-        from PIL import Image
-        im = Image.open(io.BytesIO(raw))
-        return max(im.size) >= MIN_LONG_EDGE
-    except Exception:
+    size = image_size(raw)
+    if not size:
         return False
+    w, h = size
+    if max(w, h) < min_edge:
+        return False
+    return max(w, h) / float(max(1, min(w, h))) <= MAX_RATIO
 
 
-def _fetch_image(url, http):
+def _fetch_image(url, http, min_edge=MIN_LONG_EDGE, keep_png=False):
     try:
         status, final, ctype, raw = http.get_bytes(url, timeout=10, max_bytes=MAX_BYTES + 1)
     except Exception:
         return None
-    if status != 200 or not image_ok(raw, ctype):
+    if status != 200 or not image_ok(raw, ctype, min_edge):
         return None
-    return {"src": thumb_jpeg_b64(raw), "sha256": hashlib.sha256(raw).hexdigest(), "origin": final or url}
+    w, h = image_size(raw)
+    if keep_png:
+        src = "data:%s;base64," % ((ctype or "image/png").split(";")[0]) + base64.b64encode(raw).decode("ascii")
+    else:
+        src = thumb_jpeg_b64(raw)
+    return {"src": src, "sha256": hashlib.sha256(raw).hexdigest(), "origin": final or url, "w": w, "h": h}
+
+
+def _pack(kind, got):
+    return {"kind": kind, "src": got["src"], "sha256": got["sha256"], "origin": got["origin"], "w": got["w"], "h": got["h"]}
 
 
 def owned_for(item, owned, http):
@@ -94,9 +115,7 @@ def owned_for(item, owned, http):
     if not entry or not entry.get("url"):
         return None
     got = _fetch_image(entry["url"], http)
-    if not got:
-        return None
-    return {"kind": "owned", "src": got["src"], "sha256": got["sha256"], "origin": got["origin"]}
+    return _pack("owned", got) if got else None
 
 
 def og_for(item, http):
@@ -106,19 +125,53 @@ def og_for(item, http):
     if not same_site(og, item.get("url", "")):
         return None
     got = _fetch_image(og, http)
-    if not got:
+    return _pack("og", got) if got else None
+
+
+def poster_for(item, http):
+    """The film's poster from the film page's own site (elcinema, 640×960)."""
+    url = (item.get("art_hint") or {}).get("poster") or ""
+    if not url or not url.lower().startswith("https://"):
         return None
-    return {"kind": "og", "src": got["src"], "sha256": got["sha256"], "origin": got["origin"]}
+    if not same_site(url, item.get("url", "")):
+        return None
+    got = _fetch_image(url, http, min_edge=MIN_POSTER_EDGE)
+    return _pack("poster", got) if got else None
+
+
+def logos_for(fixture, http):
+    """Both club logos from the FA's site (same site as the fixture url). -> {"kind":
+    "logos", "home": datauri, "away": datauri, "sha256"} or None when either is missing."""
+    out = {"kind": "logos", "home": "", "away": "", "sha256": "", "src": "", "origin": ""}
+    hashes = []
+    for side in ("home", "away"):
+        url = fixture.get(side + "_logo") or ""
+        if not (url and url.lower().startswith("https://") and same_site(url, fixture.get("url", ""))):
+            return None
+        got = _fetch_image(url, http, min_edge=MIN_LOGO_EDGE, keep_png=True)
+        if not got:
+            return None
+        out[side] = got["src"]
+        hashes.append(got["sha256"])
+    out["sha256"] = hashlib.sha256("|".join(hashes).encode("ascii")).hexdigest()
+    return out
 
 
 def generated_for(item, section, issue_no, slot):
     shape = "portrait" if section == "cinema" else "square"
+    w, h = art_generated.KINDS[shape]
     svg = art_generated.svg("%s|%s|%s" % (issue_no, section, slot), item.get("ttl", ""), shape, label=item.get("ttl", ""))
-    return {"kind": "generated", "src": "", "sha256": art_generated.sha256_of(svg), "origin": ""}
+    return {"kind": "generated", "src": "", "sha256": art_generated.sha256_of(svg), "origin": "", "w": w, "h": h}
 
 
 def resolve(item, section, issue_no, slot, http, owned=None):
-    """-> {"kind", "src", "sha256", "origin"} — A → B → C → D."""
+    """-> {"kind", "src", "sha256", "origin", "w", "h"}.
+    cinema:  poster → generated.   events/worth: owned → og → generated.   fixtures: logos (build.py)."""
+    if section == "cinema":
+        got = poster_for(item, http)
+        if got:
+            return got
+        return generated_for(item, section, issue_no, slot)
     if section in GENERATED_ONLY:
         return generated_for(item, section, issue_no, slot)
     got = owned_for(item, owned if owned is not None else load_owned(), http)
@@ -130,4 +183,4 @@ def resolve(item, section, issue_no, slot, http, owned=None):
     try:
         return generated_for(item, section, issue_no, slot)
     except Exception:
-        return {"kind": "none", "src": "", "sha256": "", "origin": ""}
+        return {"kind": "none", "src": "", "sha256": "", "origin": "", "w": 0, "h": 0}

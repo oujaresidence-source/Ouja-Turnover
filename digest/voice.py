@@ -72,7 +72,8 @@ def western_digits_in_prose(text):
 
 
 def word_count(s):
-    return len([w for w in _WS.split((s or "").strip()) if w])
+    """Words = whitespace tokens that are not bare separators («·», «–», «-»)."""
+    return len([w for w in _WS.split((s or "").strip()) if w and w not in ("·", "–", "-", "—", "×")])
 
 
 def title_ok(t):
@@ -93,6 +94,38 @@ PROMPT_SYSTEM = (
     "الأرقام في النص بالأرقام العربية (٣ سبتمبر). العنوان ٤ كلمات أو أقل، السطر الثاني ١٠ كلمات أو أقل. "
     "رجّع JSON فقط بالشكل {\"ttl\": \"...\", \"sub\": \"...\"}."
 )
+
+
+CLAIM_SYSTEM = (
+    "أنت تكتب عنوان صفحة واحد لنشرة «وش صاير بالرياض» لضيوف عوجا. نجدي، جملة فيها فعل أو ادّعاء، "
+    "٦ كلمات أو أقل. محدّد لا عام: اسم، مكان، يوم، سعر — حقيقة من اللي أعطيك، لا تخترع ولا تضيف. "
+    "ممنوع الصفات التسويقية: اكتشف · لا تفوّت · تجربة استثنائية · لا مثيل لها · وجهتك المثالية · "
+    "أجواء ساحرة · على بُعد خطوات · انغمس · استمتع بـ · نقلة نوعية · سحر. الأرقام بالعربية. "
+    "رجّع JSON فقط: {\"claim\": \"...\"}."
+)
+MAX_CLAIM_WORDS = 6
+
+
+def claim_ok(t):
+    return 0 < word_count(t) <= MAX_CLAIM_WORDS and is_clean(t)
+
+
+def polish_claim(section_key, items, model_call=None, model=None, seed=0):
+    """The ONE thing the model writes: the page headline, from the facts. Returns ''
+    when there is no model or its answer breaks a rule (the renderer then uses its
+    deterministic fallback)."""
+    if model_call is None or not items:
+        return ""
+    facts = [{k: it.get(k) for k in ("ttl", "sub", "chip", "hook", "home", "away", "when") if it.get(k)} for it in items[:4]]
+    user = "القسم: %s · محاولة %d · الحقائق: %s" % (section_key, int(seed) + 1, json.dumps(facts, ensure_ascii=False))
+    try:
+        got = model_call(CLAIM_SYSTEM, user, max_tokens=200, model=model)
+    except Exception:
+        return ""
+    if not isinstance(got, dict):
+        return ""
+    t = prose_digits((got.get("claim") or "").strip())
+    return t if claim_ok(t) else ""
 
 
 def polish(item, kind="card", seed=0, model_call=None, model=None):

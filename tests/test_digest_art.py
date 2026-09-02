@@ -28,12 +28,43 @@ class Fallback(unittest.TestCase):
             it["slug"] = slug
         return it
 
-    def test_cinema_and_fixtures_never_touch_the_network(self):
+    def test_fixtures_never_touch_the_network_via_resolve(self):
         http = FakeHttp()
-        for section in ("cinema", "fixtures"):
-            got = art.resolve(self._item(), section, 12, 0, http)
-            self.assertEqual(got["kind"], "generated")
+        got = art.resolve(self._item(), "fixtures", 12, 0, http)
+        self.assertEqual(got["kind"], "generated")
         self.assertEqual(http.calls, [])
+
+    def test_cinema_uses_the_film_pages_poster_same_site_only(self):
+        good = "https://media0106.elcinema.com/uploads/_640x_abc.jpg"
+        http = FakeHttp(pages={good: (200, "image/jpeg", _png(640, 960))})
+        it = {"ttl": "Fall 2", "url": "https://elcinema.com/work/2099766/", "art_hint": {"poster": good}}
+        got = art.resolve(it, "cinema", 12, 0, http)
+        self.assertEqual(got["kind"], "poster")
+        self.assertEqual((got["w"], got["h"]), (640, 960))
+        it2 = dict(it, art_hint={"poster": "https://images.example/p.jpg"})
+        self.assertEqual(art.resolve(it2, "cinema", 12, 0, FakeHttp(pages={"https://images.example/p.jpg": (200, "image/jpeg", _png(640, 960))}))["kind"], "generated")
+        self.assertEqual(art.resolve(dict(it, art_hint={}), "cinema", 12, 0, http)["kind"], "generated")
+
+    def test_no_crop_rule_rejects_extreme_ratios_and_records_size(self):
+        wide = "https://cdn.platinumlist.net/upload/banner.jpg"
+        http = FakeHttp(pages={wide: (200, "image/jpeg", _png(2400, 600))})
+        self.assertEqual(art.resolve(self._item(og=wide), "events", 12, 0, http, owned={})["kind"], "generated")
+        ok = "https://cdn.platinumlist.net/upload/e.jpg"
+        http = FakeHttp(pages={ok: (200, "image/jpeg", _png(1200, 630))})
+        got = art.resolve(self._item(og=ok), "events", 12, 0, http, owned={})
+        self.assertEqual((got["kind"], got["w"], got["h"]), ("og", 1200, 630))
+
+    def test_club_logos_from_the_fa_site_only(self):
+        h = "https://saff.com.sa/uploadcenter/saffteamsmall1.png"
+        a = "https://saff.com.sa/uploadcenter/saffteamsmall2.png"
+        http = FakeHttp(pages={h: (200, "image/png", _png(400, 400)), a: (200, "image/png", _png(400, 400))})
+        fx = {"url": "https://saff.com.sa/championship.php?id=415", "home_logo": h, "away_logo": a}
+        got = art.logos_for(fx, http)
+        self.assertEqual(got["kind"], "logos")
+        self.assertTrue(got["home"].startswith("data:image/png;base64,"))
+        self.assertTrue(got["sha256"])
+        self.assertIsNone(art.logos_for(dict(fx, away_logo="https://elsewhere.example/x.png"), http))
+        self.assertIsNone(art.logos_for(dict(fx, away_logo=""), http))
 
     def test_og_same_site_big_enough_is_used_and_hashed(self):
         raw = _png(900, 600)

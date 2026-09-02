@@ -74,12 +74,18 @@ class Platinumlist(unittest.TestCase):
         self.assertIn("نفدت", dropped[0]["reason"])
         self.assertIn("adonis", dropped[0]["url"])
 
-    def test_price_becomes_arabic_indic_sub(self):
+    def test_facts_line_day_date_place_price(self):
         cands, _ = platinumlist.parse(self.html, WEEK, NOW)
         spacetoon = [c for c in cands if "107433" in c["url"]][0]
         self.assertEqual(spacetoon["day"], "thu")
-        self.assertEqual(spacetoon["sub"], "الخميس · من ١٥٠ ريال")
+        self.assertEqual(spacetoon["sub"], "الخميس ٣ سبتمبر · الرياض · من ١٥٠ ريال")
         self.assertEqual(spacetoon["tags"]["category"], "family")
+
+    def test_film_page_gives_poster_and_imdb_id(self):
+        html = '<meta property="og:image" content="https://media0106.elcinema.com/uploads/_320x_abc.jpg"><a href="https://www.imdb.com/title/tt31192372">IMDb</a>'
+        info = elcinema.parse_film_page(html)
+        self.assertEqual(info["poster"], "https://media0106.elcinema.com/uploads/_640x_abc.jpg")
+        self.assertEqual(info["imdb_id"], "tt31192372")
 
     def test_event_page_gives_venue_and_same_origin_og(self):
         info = platinumlist.parse_event_page(fixture("platinumlist-event-107433-20260902.html"), "")
@@ -100,6 +106,7 @@ class Platinumlist(unittest.TestCase):
         self.assertEqual(sp["tags"]["district"], "حطين")
         self.assertIsNotNone(sp.get("latlng"))
         self.assertEqual(sp["art_hint"]["og"][:29], "https://cdn.platinumlist.net/")
+        self.assertEqual(sp["sub"], "الخميس ٣ سبتمبر · مسرح بكر الشدي · من ١٥٠ ريال")   # venue named after enrichment
         self.assertEqual(len([c for c in http.calls if c[0] == "get_text"]), 2)
 
     def test_dead_calendar_reports_not_crashes(self):
@@ -119,7 +126,7 @@ class Cinema(unittest.TestCase):
         self.assertTrue(cands[0]["new_this_week"])
         self.assertEqual(cands[0]["release_iso"], "2026-09-02")
         self.assertEqual(cands[0]["ttl"], "Fall 2: Deadpoint")
-        self.assertEqual(cands[0]["sub"], "يعرض حاليًا · مغامرات ودراما")   # released Wed 2 Sept → showing
+        self.assertEqual(cands[0]["sub"], "الخميس ٣ سبتمبر · مغامرات ودراما · حسب العرض")   # facts line: day+date · genre · price
         self.assertEqual(cands[0]["age"], 12)
         rel = [c["release_iso"] for c in cands]
         self.assertEqual(rel, sorted(rel, reverse=True))
@@ -131,10 +138,10 @@ class Cinema(unittest.TestCase):
         for c in cands:
             with self.subTest(c=c["ttl"]):
                 self.assertEqual(c["chip"], "سينما")
-                self.assertRegex(c["sub"], "^([٠-٩]{1,2} \\S+|يعرض حاليًا)( · .+)?$")
+                self.assertRegex(c["sub"], "^(الخميس|الجمعة|السبت) [٠-٩]{1,2} \\S+ · .+ · حسب العرض$")
                 self.assertEqual(c["art_hint"], {})          # no posters: generated art only
                 self.assertTrue(c["url"].startswith("https://elcinema.com/work/"))
-                self.assertLessEqual(len(c["sub"].split()), 10)
+                self.assertLessEqual(base.word_count(c["sub"]) if hasattr(base, "word_count") else len([w for w in c["sub"].split() if w != "·"]), 10)
 
     def test_release_inside_window_sets_the_day(self):
         w = dates.week_for(datetime(2026, 8, 26, 13, tzinfo=TZ))   # Thu 08-27 .. Sat 08-29
@@ -142,7 +149,9 @@ class Cinema(unittest.TestCase):
         thu = [c for c in cands if c["release_iso"] == "2026-08-27"]
         self.assertTrue(thu)
         self.assertTrue(all(c["day"] == "thu" for c in thu))
-        self.assertTrue(all(c["sub"].startswith("٢٧ أغسطس") for c in thu))      # inside the window → dated
+        self.assertTrue(all(c["sub"].startswith("الخميس ٢٧ أغسطس") for c in thu))      # inside the window → dated
+        old = [c for c in cands if c["release_iso"] < "2026-08-27"]
+        self.assertTrue(all(c["release_label"] == "يعرض حاليًا" for c in old))
         self.assertFalse(any(c["release_iso"] > "2026-08-29" for c in cands))
 
 
@@ -169,6 +178,16 @@ class Fixtures(unittest.TestCase):
         for f in fx:
             self.assertRegex(f["when"], "^(الخميس|الجمعة|السبت) [٠-٩]{1,2}:[٠-٩]{2}[صم]$")
 
+    def test_club_logos_come_from_the_schedule_page(self):
+        fx, _ = saff.parse(self.html, WEEK, NOW)
+        sh = [f for f in fx if f["home"] == "الشباب"][0]
+        self.assertEqual(sh["home_logo"], "https://saff.com.sa/uploadcenter/saffteamsmall1629064138.png")
+        self.assertTrue(sh["away_logo"].startswith("https://saff.com.sa/uploadcenter/"))
+        logos = saff.club_logos(self.html)
+        self.assertGreaterEqual(len(logos), 12)                       # the whole league, 18 clubs
+        for club in saff.RIYADH_CLUBS:
+            self.assertIn(club, logos)
+
     def test_kooora_cross_check(self):
         events = kooora.parse(fixture("kooora-roshn-20260902.html"))
         self.assertEqual(len(events), 6)
@@ -187,23 +206,61 @@ class Fixtures(unittest.TestCase):
 
 
 class Worth(unittest.TestCase):
-    def test_seed_entries_need_a_url_to_be_eligible(self):
-        places_list = worth.load()
-        self.assertGreaterEqual(len(places_list), 10)
-        cands = worth.candidates(WEEK, NOW, places_list)
-        self.assertTrue(cands)
-        self.assertTrue(all(c["url"].startswith("https://") for c in cands))
-        self.assertLess(len(cands), len(places_list))            # some entries have no url yet
-        resolved = {"wadi-hanifah": "https://www.visitsaudi.com/ar/x"}
-        more = worth.candidates(WEEK, NOW, places_list, resolved_urls=resolved)
-        self.assertEqual(len(more), len(cands) + 1)
+    """The dataset rules (owner, 2026-09-03, after King Salman Park slipped in as a guess)."""
 
-    def test_seed_copy_obeys_the_caps(self):
-        for p in worth.load():
+    def test_only_open_verified_linked_places_are_eligible(self):
+        cands, dropped = worth.candidates(WEEK, NOW)
+        names = [c["ttl"] for c in cands]
+        self.assertIn("البجيري", names)
+        self.assertNotIn("٣٠", [c for c in cands if c["ttl"] == "البجيري"][0]["sub"])   # no calendar date inside a price
+        self.assertIn("المتحف الوطني", names)
+        self.assertNotIn("حديقة الملك سلمان", names)
+        self.assertNotIn("حديقة حيوان الرياض", names)
+        self.assertNotIn("بوليفارد وورلد", names)
+        reasons = {d["ttl"]: d["reason"] for d in dropped}
+        self.assertEqual(reasons["حديقة الملك سلمان"], "مو مفتوح")
+        self.assertEqual(reasons["حديقة حيوان الرياض"], "حالته غير مؤكدة")
+        self.assertEqual(reasons["بوليفارد وورلد"], "موسم غير مؤكد")
+        self.assertEqual(reasons["وادي حنيفة"], "بدون صفحة رسمية")
+        for c in cands:
+            self.assertTrue(c["url"].startswith("https://"))
+            self.assertTrue(c["verified_on"])
+            parts = [p.strip() for p in c["sub"].split("·")]
+            self.assertEqual(len(parts), 3)
+            self.assertTrue(parts[0].startswith("الجمعة"))
+
+    def test_verification_expires_after_90_days(self):
+        ds = {"calendar": [], "places": [{"slug": "x", "ttl": "مكان", "status": "open", "url": "https://x.example/", "verified_on": "2026-05-01", "district": "العليا", "price": "مجاني"}]}
+        cands, dropped = worth.candidates(WEEK, NOW, ds)
+        self.assertEqual(cands, [])
+        self.assertEqual(dropped[0]["reason"], "التحقق قديم")
+
+    def test_seasonal_only_inside_a_confirmed_window(self):
+        place = {"slug": "bw", "ttl": "بوليفارد", "status": "seasonal", "season": "rs", "url": "https://x.example/", "verified_on": "2026-09-01", "district": "حطين", "price": "حسب التذكرة"}
+        ds = {"calendar": [{"key": "rs", "window": ["2026-09-01", "2026-09-30"], "confirmed": True}], "places": [place]}
+        self.assertEqual(len(worth.candidates(WEEK, NOW, ds)[0]), 1)
+        ds["calendar"][0]["confirmed"] = False
+        self.assertEqual(worth.candidates(WEEK, NOW, ds)[1][0]["reason"], "موسم غير مؤكد")
+        ds["calendar"][0]["confirmed"] = True
+        ds["calendar"][0]["window"] = ["2026-10-01", "2026-12-31"]
+        self.assertEqual(worth.candidates(WEEK, NOW, ds)[1][0]["reason"], "خارج موسمه")
+
+    def test_expected_or_unknown_never_render(self):
+        for st in ("not_open", "unknown", "expected", "under_construction", ""):
+            ds = {"calendar": [], "places": [{"slug": "x", "ttl": "مكان", "status": st, "url": "https://x.example/", "verified_on": "2026-09-01"}]}
+            self.assertEqual(worth.candidates(WEEK, NOW, ds)[0], [], st)
+
+    def test_dataset_seed_is_well_formed(self):
+        ds = worth.load()
+        self.assertGreaterEqual(len(ds["places"]), 10)
+        self.assertTrue(any(p["slug"] == "king-salman-park" and p["status"] == "not_open" for p in ds["places"]))
+        for p in ds["places"]:
             with self.subTest(p=p["slug"]):
-                self.assertLessEqual(len(p["ttl"].split()), 4)
-                self.assertLessEqual(len(p["sub"].split()), 10)
-                self.assertTrue(p["district"])
+                self.assertIn(p["status"], ("open", "seasonal", "not_open", "unknown"))
+                if p["status"] == "open":
+                    self.assertLessEqual(len(p["ttl"].split()), 4)
+                    self.assertTrue(p.get("district"))
+        self.assertTrue(any(c["key"] == "riyadh_season" and c["confirmed"] is False for c in ds["calendar"]))
 
 
 class Secondary(unittest.TestCase):

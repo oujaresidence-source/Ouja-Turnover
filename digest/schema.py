@@ -11,7 +11,7 @@ MAX_TITLE_WORDS = 4
 MAX_SUB_WORDS = 10
 MIN_PRIMARY_CONFIDENCE = 0.75
 DAYS = ("thu", "fri", "sat")
-ART_KINDS = ("owned", "og", "generated", "none")
+ART_KINDS = ("owned", "og", "poster", "generated", "none")
 
 SECTIONS = {
     "events":   {"title": "فعاليات ومعارض", "min": 2, "max": 4, "exact": None},
@@ -30,7 +30,8 @@ _WS = re.compile(r"\s+")
 
 
 def word_count(s):
-    return len([w for w in _WS.split((s or "").strip()) if w])
+    """Words = whitespace tokens that are not bare separators («·», «–», «-»)."""
+    return len([w for w in _WS.split((s or "").strip()) if w and w not in ("·", "–", "-", "—", "×")])
 
 
 def layout_for(key, n):

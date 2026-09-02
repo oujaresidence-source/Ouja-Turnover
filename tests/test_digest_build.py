@@ -76,7 +76,9 @@ class Collect(Base):
         self.assertGreaterEqual(len(by["events"]), 5)
         self.assertGreaterEqual(len(by["cinema"]), 10)
         self.assertGreaterEqual(len(by["fixtures"]), 4)
-        self.assertGreaterEqual(len(by["worth"]), 4)
+        self.assertGreaterEqual(len(by["worth"]), 5)
+        self.assertTrue(rep.get("ineligible_places"))
+        self.assertTrue(all(len(c["sub"].split("·")) == 3 for c in by["events"] + by["cinema"] + by["worth"]))
         self.assertEqual(rep["errors"], [])
         self.assertTrue(all("confidence" in c for cands in by.values() for c in cands))
         thu = [f for f in by["fixtures"] if f["home"] == "الدرعية"][0]
