@@ -11,7 +11,7 @@ from ..dates import AR_DAY, ar_date
 SOURCE = "Apple Podcasts"
 FEED_URL = "https://rss.marketingtools.apple.com/api/v2/sa/podcasts/top/10/podcasts.json"
 LOOKUP_URL = "https://itunes.apple.com/lookup?id=%s&country=sa&entity=podcastEpisode&limit=1"
-SHORT_URL = "https://podcasts.apple.com/sa/podcast/id%s"     # stable, short → a clean QR
+SHORT_URL = "https://podcasts.apple.com/sa/podcast/id%s"     # stable, short → a clean link
 ARTWORK_SIZE = "600x600"
 FRESH_DAYS = 7
 

@@ -127,7 +127,7 @@ class Cinema(unittest.TestCase):
         self.assertEqual(cands[0]["release_iso"], "2026-09-02")
         self.assertEqual(cands[0]["ttl"], "Fall 2: Deadpoint")
         self.assertEqual(cands[0]["sub"], "الخميس ٣ سبتمبر · muvi، مغامرات ودراما · حسب العرض")   # day+date · Saudi chain + genre · price
-        self.assertEqual(cands[0]["url"], elcinema.TICKETS_URL)                     # the QR goes to a SAUDI cinema
+        self.assertEqual(cands[0]["url"], elcinema.TICKETS_URL)                     # the link goes to a SAUDI cinema
         self.assertTrue(cands[0]["info_url"].startswith("https://elcinema.com/work/"))
         self.assertEqual(cands[0]["age"], 12)
         rel = [c["release_iso"] for c in cands]
@@ -302,7 +302,7 @@ class PodcastFresh(unittest.TestCase):
                                podcast.LOOKUP_URL % "1702294864": (200, "application/json", fixture("itunes-lookup-1702294864-20260903.json"))})
         cands, dropped, _ = podcast.fetch(WEEK, http, NOW, enrich_top=1)
         c = [x for x in cands if x["show_id"] == "1702294864"][0]
-        self.assertEqual(c["url"], "https://podcasts.apple.com/sa/podcast/id1702294864")      # short → clean QR
+        self.assertEqual(c["url"], "https://podcasts.apple.com/sa/podcast/id1702294864")      # short → clean link
         self.assertEqual(c["episode_released"], "2026-09-01")
         self.assertTrue(c["fresh"])
         self.assertTrue(c["hook"].startswith("حلقة جديدة:"))

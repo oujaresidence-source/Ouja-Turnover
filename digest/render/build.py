@@ -7,7 +7,7 @@ run the layout audit, print. The sync Playwright API is greenlet-bound, so all b
 work is pinned to a one-worker pool (the owner_report lesson). Chromium is launched per
 build and closed in `finally` — one digest a week does not justify a resident browser.
 
-No network: fonts are file://, artwork is inline SVG or data URIs, QR codes are local."""
+No network: fonts are file://, artwork is inline SVG or data URIs, links are plain <a href>."""
 
 import hashlib
 import json

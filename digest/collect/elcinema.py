@@ -15,7 +15,7 @@ from ..dates import AR_DAY, AR_MONTHS, ar_date
 
 SOURCE = "elcinema"
 NOW_URL = "https://elcinema.com/now/sa/"
-# The QR must send a guest to a SAUDI cinema, not the Egyptian info site (owner 2026-09-03).
+# The card link must send a guest to a SAUDI cinema, not the Egyptian info site (owner 2026-09-03).
 # muvi's Arabic movie finder is the one Saudi chain that answers a plain request (VOX,
 # AMC, Empire, Reel all refuse); it lists films and showtimes by date.
 TICKETS_URL = "https://www.muvicinemas.com/ar/movie-finder"

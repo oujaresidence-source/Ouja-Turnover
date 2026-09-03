@@ -2,13 +2,13 @@
 """digest.render.poster — the ONE tall poster (the reference format: the Ministry of
 Industry's «ما وراء الخميس»). 540 CSS px wide, rendered at 2× → 1080 px, height by
 content. Header (brand, date pill, section pills), occasion strip, photo cards with a
-district pill and a QR in the corners and the facts line beneath, cinema posters with
+district pill and the site name in the corners (no QR, owner 2026-09-03) and the facts line beneath, cinema posters with
 the IMDb badge, the place, the podcast, the fixtures block with logos, the verse strip,
 the saying, and the footer. Our tokens, not theirs. Pure; ZERO backslashes here."""
 
 from ..dates import AR_DAY, ar_digits
 from . import fonts, tokens
-from .html import NL, _ratings, bidi, esc, qr_svg
+from .html import NL, _host, _ratings, bidi, esc
 
 PILLS = {"events": "فعاليات", "cinema": "سينما", "fixtures": "مباريات", "worth": "أماكن", "podcast": "بودكاست"}
 
@@ -31,7 +31,7 @@ def _photo_card(item, section_key, wide=False):
         '<div class="pimg"%s>%s<span class="pill">%s</span>%s</div>'
         '<div class="pttl">%s</div><div class="psub">%s</div>%s'
         '</div>'
-    ) % (" wide" if wide else "", ratio, img, esc(item.get("chip", "")), qr_svg(item.get("url", "")),
+    ) % (" wide" if wide else "", ratio, img, esc(item.get("chip", "")), ('<span class="lnk" dir="ltr">%s</span>' % esc(_host(item["url"]))) if item.get("url") else "",
          bidi(item.get("ttl", "")), bidi(item.get("sub", "")), _ratings(item) if section_key == "cinema" else "")
 
 
@@ -74,8 +74,7 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .pimg img{width:100%%;height:100%%;display:block;object-fit:contain}
 .pimg .ph{width:100%%;height:100%%;display:flex;align-items:center;justify-content:center;font-family:%(serif)s;font-weight:900;font-size:64px;color:var(--paper)}
 .pill{position:absolute;inset-block-start:8px;inset-inline-start:8px;background:var(--paper);color:var(--ink);border-radius:999px;padding:3px 9px;font-size:10px;font-weight:600}
-.pimg .qr{position:absolute;inset-block-end:8px;inset-inline-end:8px;width:52px;height:52px;background:var(--paper);border-radius:6px;padding:2px}
-.qr svg{width:100%%;height:100%%;display:block;shape-rendering:crispEdges}
+.pimg .lnk{position:absolute;inset-block-end:8px;inset-inline-end:8px;background:var(--paper);color:var(--ink);border-radius:999px;padding:3px 9px;font-size:9px;font-weight:600;max-width:70%%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pttl{font-family:%(serif)s;font-weight:700;font-size:16px;line-height:1.25;margin-top:4px}
 .psub{font-size:11px;line-height:1.45;color:var(--mute)}
 .rate{display:flex;gap:8px;align-items:center;margin-top:2px}
@@ -97,7 +96,8 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .verse .t{font-family:%(serif)s;font-weight:700;font-size:19px;line-height:1.8}
 .verse .qm{color:var(--gold-2);font-weight:400}
 .verse .r{font-size:11px;color:var(--gold-2);margin-top:6px;letter-spacing:.04em}
-.say{text-align:center;padding:6px 10px}
+.say{text-align:center;background:var(--white);border:1px solid var(--gold);border-radius:14px;padding:10px 16px 14px}
+.say .qmk{font-family:%(serif)s;font-weight:900;font-size:44px;line-height:.6;color:var(--gold-2);height:22px}
 .say .t{font-family:%(serif)s;font-weight:700;font-size:17px;line-height:1.6}
 .say .b{font-size:11px;color:var(--mute);margin-top:4px}
 .credit{font-size:9px;color:var(--mute);text-align:center}
@@ -135,7 +135,7 @@ def build_poster(payload, art_map=None):
                       % (esc(v["text"]), esc(v.get("ref_ar", ""))))
     sy = payload.get("saying") or {}
     if sy.get("text"):
-        blocks.append('<div class="say"><div class="t">%s</div><div class="b">%s</div></div>' % (esc(sy["text"]), esc(sy.get("by", ""))))
+        blocks.append('<div class="say"><div class="qmk">“</div><div class="t">%s</div><div class="b">%s</div></div>' % (esc(sy["text"]), esc(sy.get("by", ""))))
     credits = []
     for s in sections:
         for it in s.get("items") or []:

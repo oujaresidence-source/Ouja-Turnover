@@ -3,11 +3,11 @@
 owner_report/renderer/audit_layout.py and extended). `.page{overflow:hidden}` means an
 overflow leaves no trace in the PDF, so the page is measured in the live browser:
 nothing may cross the footer, nothing may be wider than the page, every card has a
-title that fits, every QR prints at >= 22 mm, no SVG text is clipped.
+title that fits, every link pill is tall enough to tap (>= 9 mm), no SVG text is clipped.
 
 JS is passed as plain strings: ZERO backslashes in this file."""
 
-QR_MIN_MM = 22
+LINK_MIN_MM = 9
 
 OVERFLOW_JS = """
 () => {
@@ -33,10 +33,10 @@ OVERFLOW_JS = """
         if (r.right > cr.right + 1 || r.left < cr.left - 1) out.push('page ' + (i + 1) + ': card ' + (j + 1) + ' content wider than the card: ' + el.className);
       });
     });
-    page.querySelectorAll('.qr').forEach((q, j) => {
+    page.querySelectorAll('.lnk').forEach((q, j) => {
       const r = q.getBoundingClientRect();
-      const mm = r.width / 96 * 25.4;
-      if (page.classList.contains('page') && mm < %(qr)d - 0.5) out.push('page ' + (i + 1) + ': QR ' + (j + 1) + ' prints at ' + mm.toFixed(1) + 'mm (< %(qr)dmm)');
+      const mm = r.height / 96 * 25.4;
+      if (page.classList.contains('page') && mm < %(qr)d - 0.5) out.push('page ' + (i + 1) + ': link ' + (j + 1) + ' prints at ' + mm.toFixed(1) + 'mm tall (< %(qr)dmm)');
     });
   });
   document.querySelectorAll('svg text').forEach((t, i) => {
@@ -48,10 +48,10 @@ OVERFLOW_JS = """
   });
   return out;
 }
-""" % {"qr": QR_MIN_MM}
+""" % {"qr": LINK_MIN_MM}
 
 LAYOUT_JS = """
-() => Array.from(document.querySelectorAll('.page, .page > *, .card, .claim, .ttl, .qr, .art, .band, table.fix')).map(el => {
+() => Array.from(document.querySelectorAll('.page, .page > *, .card, .claim, .ttl, .lnk, .art, .band, table.fix')).map(el => {
   const r = el.getBoundingClientRect();
   return [el.tagName.toLowerCase() + '.' + (el.className || ''), Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
 })

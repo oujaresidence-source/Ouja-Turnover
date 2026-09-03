@@ -126,9 +126,9 @@ class Aborts(unittest.TestCase):
         html = html_for(p, '<a href="https://evil.example/x">y</a>')
         self._hit(guard.scan(html, p, WEEK, NOW), "verified")
 
-    def test_qr_payload_is_checked_too(self):
+    def test_link_data_url_is_checked_too(self):
         p = good()
-        html = html_for(p, '<svg class="qr" data-url="https://evil.example/qr"></svg>')
+        html = html_for(p, '<a class="lnk" data-url="https://evil.example/qr">x</a>')
         self._hit(guard.scan(html, p, WEEK, NOW), "verified")
 
     def test_section_over_cap_aborts(self):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""digest.links — the link rule (brief §5.2). Every url becomes a printed QR code, so:
+"""digest.links — the link rule (brief §5.2). Every url becomes a printed link, so:
   1. a url may only enter a candidate if it appeared in a fetched page or in the
      search tool's list of opened pages (`provenance_ok`) — never constructed;
   2. HEAD (ranged-GET fallback) must return 200 + text/html;
@@ -10,7 +10,7 @@ Network only through the injected `http` (HOST.http / FakeHttp)."""
 from urllib.parse import urlsplit
 
 HTML_TYPES = ("text/html", "application/xhtml+xml")
-KEEP_SHORT_HOSTS = ("podcasts.apple.com",)     # the redirect only adds a slug; the short form is the clean QR
+KEEP_SHORT_HOSTS = ("podcasts.apple.com",)     # the redirect only adds a slug; the short form is the clean link
 
 
 def origin(url):

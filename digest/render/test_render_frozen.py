@@ -84,6 +84,14 @@ def compare(cand, golden, golden_dir=GOLDEN_DIR):
     return fails
 
 
+def pdf_link_count(pdf_path):
+    """Clickable link annotations in the finished PDF (owner 2026-09-03: links, not QRs —
+    a «اضغط هنا» that Chromium dropped while printing would be dead text)."""
+    import fitz
+    doc = fitz.open(str(pdf_path))
+    return sum(len([l for l in pg.get_links() if l.get("uri")]) for pg in doc)
+
+
 def render_reference(tmp):
     from . import build
     res = build.render(build.reference_payload(), {}, tmp, "ref", run_audit=True)
@@ -106,6 +114,9 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as tmp:
         res = render_reference(tmp)
         fp = fingerprint(res["pdf"], res["layout"])
+        if pdf_link_count(res["pdf"]) < 3:
+            print("✗ the PDF carries fewer than 3 clickable links — «اضغط هنا» would be dead text")
+            return 2
         if write:
             if GOLDEN_JSON.exists() and not approved:
                 print("✗ a golden already exists. The look is FROZEN; regenerate only with the owner's word:")

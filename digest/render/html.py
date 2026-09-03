@@ -34,15 +34,23 @@ def bidi(s):
     return esc(t)
 
 
-def qr_svg(url):
-    """Offline QR (segno): navy modules, error correction M, quiet zone 4, as inline SVG
-    with a viewBox so CSS decides the printed size (>= 22 mm)."""
-    import segno                       # lazy: a missing library fails the BUILD, not the routes
-    q = segno.make(url, error="m")
-    w, h = q.symbol_size(scale=1, border=4)
-    s = q.svg_inline(scale=1, border=4, dark=tokens.TOKENS["ink"], light=None)
-    s = s.replace("<svg ", '<svg viewBox="0 0 %d %d" ' % (w, h), 1)
-    return '<div class="qr" data-url="%s">%s</div>' % (esc(url), s)
+def _host(url):
+    """'https://www.muvicinemas.com/ar/x' -> 'muvicinemas.com' (what a reader can retype)."""
+    u = str(url or "")
+    u = u.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0].lower()
+    if u.startswith("www."):
+        u = u[4:]
+    return u[:28]
+
+
+def link_pill(url):
+    """A tappable link instead of a QR (owner 2026-09-03): «اضغط هنا» + the site name.
+    Chromium keeps <a href> as a clickable annotation in the PDF; on the PNG the site
+    name is what the reader retypes. data-url keeps the guard's url scan unchanged."""
+    if not url:
+        return ""
+    return ('<a class="lnk" href="%s" data-url="%s"><span class="lk">اضغط هنا ↗</span>'
+            '<span class="lh" dir="ltr">%s</span></a>' % (esc(url), esc(url), esc(_host(url))))
 
 
 def _ratio_style(art, fallback):
@@ -93,7 +101,7 @@ def _ratings(item):
 
 
 def _card(item, section_key, issue, slot, art_map, big=False):
-    """[art][body: ttl, sub, row(meta + qr)] — CSS decides whether art sits above
+    """[art][body: ttl, sub, row(meta + link)] — CSS decides whether art sits above
     (grid cards) or beside (list cards) the body."""
     parts = ['<div class="card%s">' % (" card-big" if big else "")]
     parts.append(_art(item, section_key, issue, slot, art_map))
@@ -105,7 +113,7 @@ def _card(item, section_key, issue, slot, art_map, big=False):
     if big and item.get("hook"):
         parts.append('<div class="hook">%s</div>' % bidi(item.get("hook", "")))
     parts.append('<div class="row"><div class="meta"><span class="chip">%s</span><span class="day">%s</span></div>%s</div>'
-                 % (esc(item.get("chip", "")), esc(AR_DAY.get(item.get("day", ""), "")), qr_svg(item.get("url", ""))))
+                 % (esc(item.get("chip", "")), esc(AR_DAY.get(item.get("day", ""), "")), link_pill(item.get("url", ""))))
     parts.append("</div></div>")
     return "".join(parts)
 
@@ -207,7 +215,7 @@ def page_fixtures(payload, sec, issue, checked, n, art_map):
         '<table class="fix"><thead><tr><th>متى</th><th>المباراة</th><th>وين</th></tr></thead><tbody>%s</tbody></table>'
         '<div class="row end">%s<div class="hint">جدول الجولة كامل على صفحة الاتحاد السعودي</div></div>%s</section>'
     ) % (esc(sec.get("title", "")), esc(sec.get("comp", "")), bidi(claim), band, "".join(rows),
-         qr_svg(head.get("url", "")), _foot(_sources_of(sec), checked, n, extra="التوقيت بتوقيت الرياض"))
+         link_pill(head.get("url", "")), _foot(_sources_of(sec), checked, n, extra="التوقيت بتوقيت الرياض"))
 
 
 def page_worth(payload, sec, issue, checked, n, art_map):
@@ -234,19 +242,21 @@ def page_podcast(payload, sec, issue, checked, n, art_map):
 
 
 def page_words(payload, checked, n):
-    """«آية الأسبوع» + «حكمة الأسبوع» — a statement page, no image."""
+    """«آية الأسبوع» + «حكمة الأسبوع» — two halves that FILL the page (owner 2026-09-03: the
+    old version left two thirds of the paper empty). Top: navy block, the verse centered.
+    Bottom: paper, the saying centered under a gold quotation mark. No image, no new facts."""
     v = payload.get("verse") or {}
     sy = payload.get("saying") or {}
     parts = ['<section class="page words">']
     if v:
-        parts.append('<div class="eyebrow">آية الأسبوع</div>')
-        parts.append('<div class="verse"><span class="qm">﴿</span>%s<span class="qm">﴾</span></div>' % esc(v.get("text", "")))
-        parts.append('<div class="vref">%s</div>' % esc(v.get("ref_ar", "")))
+        parts.append('<div class="wtop"><div class="eyebrow">آية الأسبوع</div><div class="orn">۞</div>'
+                     '<div class="verse"><span class="qm">﴿</span>%s<span class="qm">﴾</span></div>'
+                     '<div class="vref">%s</div></div>' % (esc(v.get("text", "")), esc(v.get("ref_ar", ""))))
     if sy:
-        parts.append('<div class="eyebrow eyebrow-2">حكمة الأسبوع</div>')
-        parts.append('<div class="saying">%s</div>' % esc(sy.get("text", "")))
-        parts.append('<div class="sby">%s</div>' % esc(sy.get("by", "")))
-    parts.append(_foot(["القرآن الكريم" if v else "عوجا"], checked, n, extra="نص الآية من api.alquran.cloud بالرسم العثماني" if v else ""))
+        parts.append('<div class="wbot%s"><div class="eyebrow">حكمة الأسبوع</div><div class="qmark">“</div>'
+                     '<div class="saying">%s</div><div class="sby">%s</div></div>'
+                     % ("" if v else " alone", esc(sy.get("text", "")), esc(sy.get("by", ""))))
+    parts.append(_foot(["القرآن الكريم" if v else "عوجا"], checked, n, extra="نص الآية من api.alquran.cloud" if v else ""))
     parts.append("</section>")
     return "".join(parts)
 
@@ -274,7 +284,7 @@ def page_back(payload, checked, n):
         '%s'
         '<div class="row end">%s<div class="hint">شققنا وعروض الأسبوع على موقع عوجا</div></div>%s</section>'
     ) % (srcs and "".join(srcs) or "", ('<div class="drops"><div class="h">حذفناه</div>%s</div>' % drops) if drops else "",
-         qr_svg(site) if site else "", _foot(["عوجا"], checked, n, extra=SITE_LABEL))
+         link_pill(site) if site else "", _foot(["عوجا"], checked, n, extra=SITE_LABEL))
 
 
 def css_pages():
@@ -316,7 +326,8 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .card-big .ttl{font-size:54pt;line-height:1.1}
 .card-big .big-sub{font-size:26pt;line-height:1.55;margin-block-start:6pt;max-width:520pt}
 .card-big .row{margin-block-start:16pt}
-.card-big .qr{width:30mm;height:30mm;flex-basis:30mm}
+.card-big .lnk{padding:12pt 24pt}
+.card-big .lk{font-size:19pt}
 .card-big .art{width:auto;height:240pt;max-width:100%%;align-self:flex-start}
 .art{border-radius:2mm;overflow:hidden;background:var(--ink);aspect-ratio:1/1;flex:0 0 auto}
 .art-portrait{aspect-ratio:3/4}
@@ -332,13 +343,19 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .rt-logo{background:var(--red);color:var(--paper);font-weight:700;font-size:11pt;padding:3pt 7pt;border-radius:4pt;direction:ltr}
 .rt-v{font-weight:500;font-size:15pt;color:var(--ink)}
 .occasion{align-self:flex-start;margin-block-start:26pt;font-family:%(serif)s;font-weight:700;font-size:26pt;color:var(--gold-2);border:1px solid var(--gold);border-radius:999pt;padding:10pt 24pt}
-.words{justify-content:flex-start}
-.verse{font-family:%(serif)s;font-weight:700;font-size:44pt;line-height:1.75;color:var(--ink);margin:36pt 0 14pt;max-width:660pt}
-.verse .qm{color:var(--gold);font-weight:400;margin-inline:6pt}
-.vref{font-size:18pt;color:var(--mute);letter-spacing:.04em;margin-block-end:60pt}
-.eyebrow-2{margin-block-start:40pt}
-.saying{font-family:%(serif)s;font-weight:700;font-size:34pt;line-height:1.6;color:var(--ink);margin:30pt 0 10pt;max-width:640pt}
-.sby{font-size:16pt;color:var(--mute)}
+.words{padding:0 0 100pt;gap:0}
+.wtop{flex:0 0 700pt;background:linear-gradient(180deg,var(--ink-2) 0%%,var(--ink) 100%%);color:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60pt 70pt}
+.wtop .eyebrow{align-self:center;color:var(--gold-2);margin-block-end:28pt}
+.orn{color:var(--gold);font-size:40pt;line-height:1;margin-block-end:22pt}
+.verse{font-family:%(serif)s;font-weight:700;font-size:48pt;line-height:1.8;color:var(--paper);max-width:660pt;margin:0 0 22pt}
+.verse .qm{color:var(--gold);font-weight:400;margin-inline:8pt}
+.vref{font-size:21pt;color:var(--gold-2);letter-spacing:.04em}
+.wbot{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:50pt 70pt 40pt}
+.wbot.alone{padding-block-start:84pt}
+.wbot .eyebrow{align-self:center;margin-block-end:22pt}
+.qmark{font-family:%(serif)s;font-weight:900;font-size:130pt;line-height:.55;color:var(--gold-2);height:60pt}
+.saying{font-family:%(serif)s;font-weight:700;font-size:46pt;line-height:1.55;color:var(--ink);max-width:640pt;margin:0 0 18pt}
+.sby{font-size:19pt;color:var(--mute);letter-spacing:.04em;padding-block-start:14pt;border-block-start:1px solid var(--line)}
 .hook{font-size:20pt;line-height:1.45;color:var(--mute);max-width:560pt}
 .lband{display:flex;align-items:center;justify-content:space-around;gap:20pt;background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:26pt 20pt;margin-block-end:30pt}
 .lband .club{display:flex;flex-direction:column;align-items:center;gap:12pt;font-family:%(serif)s;font-weight:700;font-size:30pt}
@@ -352,9 +369,11 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .row.end .hint{font-size:15pt;color:var(--mute);max-width:300pt;line-height:1.5}
 .meta{display:flex;gap:10pt;align-items:center;font-weight:500;font-size:14pt;letter-spacing:.06em;color:var(--mute)}
 .chip{border:1px solid var(--line);border-radius:999pt;padding:5pt 12pt}
-.qr{width:30mm;height:30mm;flex:0 0 30mm;background:var(--paper);border-radius:1.5mm;padding:0}
-.qr svg{width:100%%;height:100%%;display:block;shape-rendering:crispEdges}
-.navy .qr{background:var(--paper)}
+.lnk{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3pt;flex:0 0 auto;text-decoration:none;color:var(--ink);background:var(--paper);border:1.5px solid var(--gold);border-radius:999pt;padding:9pt 18pt;min-height:12mm;max-width:230pt}
+.lk{font-weight:600;font-size:15pt;line-height:1.1;white-space:nowrap}
+.lh{font-size:11pt;line-height:1.1;color:var(--mute);letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190pt}
+.navy .lnk{background:transparent;color:var(--paper)}
+.navy .lh{color:var(--gold-2)}
 .band{border-radius:3mm;overflow:hidden;aspect-ratio:2/1;margin-block-end:30pt;background:var(--ink);flex:0 0 auto}
 .band svg{width:100%%;height:100%%;display:block}
 table.fix{width:100%%;border-collapse:collapse;font-variant-numeric:tabular-nums}

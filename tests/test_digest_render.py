@@ -83,12 +83,14 @@ class Offline(unittest.TestCase):
         for u in re.findall(r'(?:href|data-url)="([^"]+)"', self.html):
             self.assertIn(u, verified)
 
-    def test_qr_is_deterministic_and_local(self):
-        a = rhtml.qr_svg("https://oujares.com")
-        self.assertEqual(a, rhtml.qr_svg("https://oujares.com"))
-        self.assertIn('data-url="https://oujares.com"', a)
-        self.assertIn("viewBox=", a)
-        self.assertIn(tokens.TOKENS["ink"].lower(), a.lower())
+    def test_link_pill_is_a_real_anchor_with_the_site_name(self):
+        a = rhtml.link_pill("https://www.muvicinemas.com/ar/movie-finder?x=1")
+        self.assertIn('href="https://www.muvicinemas.com/ar/movie-finder?x=1"', a)
+        self.assertIn('data-url="https://www.muvicinemas.com/ar/movie-finder?x=1"', a)
+        self.assertIn("اضغط هنا", a)
+        self.assertIn(">muvicinemas.com<", a)
+        self.assertEqual(rhtml.link_pill(""), "")
+        self.assertNotIn('class="qr"', self.html)   # no QR anywhere in the book (generated art is inline SVG, that is fine)
 
     def test_latin_runs_are_ltr_spans(self):
         p = ref(); section(p, "cinema")["items"][0]["ttl"] = "Fall 2: Deadpoint"
