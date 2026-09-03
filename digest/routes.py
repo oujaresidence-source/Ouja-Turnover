@@ -39,6 +39,7 @@ def render_ready():
     return bool(_HEAVY["ok"])
 
 FILE_KINDS = {"pdf": ("digest-%s.pdf", "application/pdf"), "png": ("digest-%s.png", "image/png"),
+              "poster": ("digest-%s.poster.png", "image/png"),
               "json": ("digest-%s.json", "application/json"), "html": ("digest-%s.html", "text/html")}
 
 

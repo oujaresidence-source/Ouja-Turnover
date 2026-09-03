@@ -30,6 +30,11 @@ _WS = re.compile(r"\s+")
 _TAG = re.compile(r"<[^>]+>")
 
 
+def word_count(s):
+    """Words = whitespace tokens that are not bare separators (same rule as schema)."""
+    return len([w for w in _WS.split((s or "").strip()) if w and w not in ("·", "–", "-", "—", "×")])
+
+
 def text(fragment):
     """Tags stripped, entities decoded, whitespace collapsed."""
     return _WS.sub(" ", _html.unescape(_TAG.sub(" ", fragment or ""))).strip()

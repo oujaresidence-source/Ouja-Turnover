@@ -13,7 +13,9 @@
     "https://ksa.voxcinemas.com/movies/little-lantern",
     "https://www.visitsaudi.com/en/riyadh/attractions/wadi-hanifah",
     "https://jdwel.com/2026-27-saudi-league-fixtures/",
-    "https://oujares.com"
+    "https://oujares.com",
+    "https://podcasts.apple.com/sa/podcast/%D8%B3%D9%88%D8%A7%D9%84%D9%81-%D8%B7%D8%B1%D9%8A%D9%82-%D8%A7%D8%A8%D9%88-%D8%B7%D9%84%D8%A7%D9%84-%D8%A7%D9%84%D8%AD%D9%85%D8%B1%D8%A7%D9%86%D9%8A/id1702294864",
+    "https://api.alquran.cloud/v1/ayah/94:5/quran-simple"
   ],
   "sections": [
     {
@@ -255,6 +257,39 @@
           "confidence": 0.9
         }
       ]
+    },
+    {
+      "title": "بودكاست الأسبوع",
+      "key": "podcast",
+      "layout": "g1",
+      "items": [
+        {
+          "ttl": "سوالف طريق",
+          "sub": "الجمعة ٤ سبتمبر · ابو طلال الحمراني · مجاني",
+          "chip": "بودكاست",
+          "url": "https://podcasts.apple.com/sa/podcast/%D8%B3%D9%88%D8%A7%D9%84%D9%81-%D8%B7%D8%B1%D9%8A%D9%82-%D8%A7%D8%A8%D9%88-%D8%B7%D9%84%D8%A7%D9%84-%D8%A7%D9%84%D8%AD%D9%85%D8%B1%D8%A7%D9%86%D9%8A/id1702294864",
+          "art": {
+            "kind": "generated",
+            "sha256": "",
+            "src": "",
+            "w": 760,
+            "h": 760
+          },
+          "day": "fri",
+          "source": {
+            "name": "Apple Podcasts",
+            "url": "https://rss.marketingtools.apple.com/api/v2/sa/podcasts/top/10/podcasts.json",
+            "fetched_at": "2026-09-02T12:44:00+03:00"
+          },
+          "confidence": 1.0,
+          "tags": {
+            "category": "podcast",
+            "district": ""
+          },
+          "artist": "ابو طلال الحمراني",
+          "hook": "الأكثر استماعاً في السعودية هالأسبوع"
+        }
+      ]
     }
   ],
   "dropped": [
@@ -264,5 +299,25 @@
     }
   ],
   "alternates": {},
-  "site_url": "https://oujares.com"
+  "site_url": "https://oujares.com",
+  "verse": {
+    "key": "94:5-6",
+    "text": "فَإِنَّ مَعَ الْعُسْرِ يُسْرًا إِنَّ مَعَ الْعُسْرِ يُسْرًا",
+    "surah_ar": "سُورَةُ الشَّرۡحِ",
+    "ayahs": [
+      5,
+      6
+    ],
+    "ref_ar": "سُورَةُ الشَّرۡحِ · ٥–٦",
+    "source": {
+      "name": "القرآن الكريم",
+      "url": "https://api.alquran.cloud/v1/ayah/94:5/quran-simple",
+      "fetched_at": "2026-09-02T12:45:00+03:00"
+    }
+  },
+  "saying": {
+    "id": "s02",
+    "text": "الطيب ما يضيع",
+    "by": "مثل نجدي"
+  }
 }

@@ -8086,7 +8086,7 @@ def _digest_files(issue_no):
     out = []
     try:
         root = _digest.build._out_root(None)
-        for name in ("digest-%s.png" % issue_no, "digest-%s.pdf" % issue_no):
+        for name in ("digest-%s.poster.png" % issue_no, "digest-%s.png" % issue_no, "digest-%s.pdf" % issue_no):
             p = os.path.join(root, str(issue_no), name)
             if os.path.isfile(p):
                 with open(p, "rb") as fh:
@@ -8129,7 +8129,7 @@ async def _digest_refresh_message(message, issue_id):
         body = _digest.notify.build_message(p, row["issue_no"], p.get("dropped"), _dispatch_base_url()) or _digest.notify.status_line(row)
         if row["status"] != "preview":
             body = "%s\n%s" % (_digest.notify.status_line(row), body)
-        files = [f for f in _digest_files(row["issue_no"]) if f.filename.endswith(".png")]
+        files = [f for f in _digest_files(row["issue_no"]) if f.filename.endswith(".poster.png")] or [f for f in _digest_files(row["issue_no"]) if f.filename.endswith(".png")]
         view = DigestView() if row["status"] in ("preview", "failed") else None
         await message.edit(content=body[:1900], attachments=files, view=view)
     except Exception as e:
@@ -8253,7 +8253,7 @@ async def _digest_build_and_post(now):
     ch = await ensure_channel(guild, DIGEST_CHANNEL, await get_category(guild))
     if ch is None:
         return rep
-    files = [f for f in _digest_files(rep["issue_no"]) if f.filename.endswith(".png")]
+    files = [f for f in _digest_files(rep["issue_no"]) if f.filename.endswith(".poster.png")] or [f for f in _digest_files(rep["issue_no"]) if f.filename.endswith(".png")]
     view = DigestView() if rep["status"] in ("preview", "failed") else None
     msg = await ch.send(body[:1900], files=files, view=view)
     await asyncio.to_thread(_digest.db.set_issue, rep["issue_id"], msg_id=msg.id, channel_id=ch.id)

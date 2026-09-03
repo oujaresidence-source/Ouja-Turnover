@@ -74,15 +74,20 @@ def _art(item, section_key, issue, slot, art_map):
 
 
 def _ratings(item):
+    """IMDb badge (the yellow lozenge everybody knows) + a smaller RT badge. Drawn only
+    when the build opened the source page (guard rule 11)."""
     r = item.get("ratings") or {}
+    if not r.get("sources"):
+        return ""
     bits = []
     if r.get("imdb") is not None:
-        bits.append('<span class="rk">IMDb</span> <span class="rv">%s</span>' % esc(ar_digits("%.1f" % float(r["imdb"])).replace(".", "٫")))
+        bits.append('<span class="imdb"><span class="imdb-logo">IMDb</span><span class="imdb-v">%s</span><span class="imdb-of">/١٠</span></span>'
+                    % esc(ar_digits("%.1f" % float(r["imdb"])).replace(".", "٫")))
     if r.get("rt") is not None:
-        bits.append('<span class="rk">RT</span> <span class="rv">%s٪</span>' % esc(ar_digits(str(int(r["rt"])))))
+        bits.append('<span class="rt"><span class="rt-logo">RT</span><span class="rt-v">%s٪</span></span>' % esc(ar_digits(str(int(r["rt"])))))
     if not bits:
         return ""
-    return '<div class="rate">%s</div>' % " · ".join(bits)
+    return '<div class="rate">%s</div>' % "".join(bits)
 
 
 def _card(item, section_key, issue, slot, art_map, big=False):
@@ -135,15 +140,18 @@ def _section(payload, key):
 def page_cover(payload, checked, n, contents=()):
     issue = payload.get("issue", "")
     toc = "".join('<div><span>%s</span><span class="n">%s</span></div>' % (esc(t), ar_digits("%02d" % pn)) for t, pn in contents)
+    oc = payload.get("occasion") or {}
+    strip = ('<div class="occasion">%s</div>' % esc(oc.get("banner_ar", ""))) if oc.get("banner_ar") else ""
     return (
         '<section class="page navy cover">'
         '<div class="eyebrow">عوجا · نشرة نهاية الأسبوع · العدد %s</div>'
+        '%s'
         '<div class="num">%s</div>'
         '<h1 class="claim">وش صاير بالرياض</h1>'
         '<div class="lede">فعاليات، سينما، مباريات، ومكان يستاهل. كل رابط فيه تحققنا منه قبل الطباعة.</div>'
         '<div class="toc">%s</div>'
         '%s</section>'
-    ) % (esc(issue), esc(payload.get("dateLabel", "")), toc, _foot(["عوجا"], checked, n, extra="امسح أي رمز وتوصل للصفحة الرسمية"))
+    ) % (esc(issue), strip, esc(payload.get("dateLabel", "")), toc, _foot(["عوجا"], checked, n, extra="امسح أي رمز وتوصل للصفحة الرسمية"))
 
 
 def page_events(payload, sec, issue, checked, n, art_map):
@@ -211,6 +219,35 @@ def page_worth(payload, sec, issue, checked, n, art_map):
          _card(it, "worth", issue, 0, art_map, big=True), _foot(_sources_of(sec), checked, n))
 
 
+def page_podcast(payload, sec, issue, checked, n, art_map):
+    it = sec["items"][0]
+    claim = sec.get("claim") or "بودكاست تسمعه في الطريق"
+    return (
+        '<section class="page podcast"><div class="eyebrow">%s</div>'
+        '<h1 class="claim">%s</h1>'
+        '<div class="grid g1">%s</div>%s</section>'
+    ) % (esc(sec.get("title", "")), bidi(claim), _card(dict(it, hook=it.get("hook") or ("مع %s" % it.get("artist", "")) if it.get("artist") else it), "podcast", issue, 0, art_map, big=True),
+         _foot(_sources_of(sec), checked, n, extra="الأكثر استماعاً في السعودية هالأسبوع"))
+
+
+def page_words(payload, checked, n):
+    """«آية الأسبوع» + «حكمة الأسبوع» — a statement page, no image."""
+    v = payload.get("verse") or {}
+    sy = payload.get("saying") or {}
+    parts = ['<section class="page words">']
+    if v:
+        parts.append('<div class="eyebrow">آية الأسبوع</div>')
+        parts.append('<div class="verse"><span class="qm">﴿</span>%s<span class="qm">﴾</span></div>' % esc(v.get("text", "")))
+        parts.append('<div class="vref">%s</div>' % esc(v.get("ref_ar", "")))
+    if sy:
+        parts.append('<div class="eyebrow eyebrow-2">حكمة الأسبوع</div>')
+        parts.append('<div class="saying">%s</div>' % esc(sy.get("text", "")))
+        parts.append('<div class="sby">%s</div>' % esc(sy.get("by", "")))
+    parts.append(_foot(["القرآن الكريم" if v else "عوجا"], checked, n, extra="نص الآية من api.alquran.cloud بالرسم العثماني" if v else ""))
+    parts.append("</section>")
+    return "".join(parts)
+
+
 def page_back(payload, checked, n):
     srcs = []
     seen = set()
@@ -273,20 +310,33 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .g3 .card .art-poster{flex:0 0 170pt;width:170pt;height:auto;align-self:flex-start}
 .g2 .card .art{width:100%%}
 .card-big{padding:10mm}
-.card-big .ttl{font-size:64pt;line-height:1.1}
+.card-big .ttl{font-size:54pt;line-height:1.1}
 .card-big .big-sub{font-size:26pt;line-height:1.55;margin-block-start:6pt;max-width:520pt}
-.card-big .row{margin-block-start:34pt}
-.card-big .qr{width:38mm;height:38mm;flex-basis:38mm}
-.card-big .art{aspect-ratio:4/3}
+.card-big .row{margin-block-start:16pt}
+.card-big .qr{width:30mm;height:30mm;flex-basis:30mm}
+.card-big .art{width:auto;height:240pt;max-width:100%%;align-self:flex-start}
 .art{border-radius:2mm;overflow:hidden;background:var(--ink);aspect-ratio:1/1;flex:0 0 auto}
 .art-portrait{aspect-ratio:3/4}
 .art svg,.art img{width:100%%;height:100%%;display:block;object-fit:contain}
 .art-photo{background:var(--ink)}
 .g3v .card .art-photo,.g3 .card .art-poster{height:auto}
-.rate{display:flex;gap:10pt;font-size:15pt;color:var(--mute);letter-spacing:.02em}
-.rate .rk{font-weight:700;color:var(--gold)}
-.rate .rv{font-weight:500;color:var(--ink)}
-.hook{font-size:22pt;line-height:1.5;color:var(--mute);max-width:560pt}
+.rate{display:flex;gap:12pt;align-items:center}
+.imdb{display:inline-flex;align-items:center;gap:8pt;font-family:%(sans)s}
+.imdb-logo{background:#F5C518;color:#0B1A2E;font-weight:700;font-size:13pt;letter-spacing:.02em;padding:3pt 8pt;border-radius:4pt;direction:ltr}
+.imdb-v{font-family:%(serif)s;font-weight:900;font-size:24pt;line-height:1;color:var(--ink)}
+.imdb-of{font-size:12pt;color:var(--mute)}
+.rt{display:inline-flex;align-items:center;gap:6pt}
+.rt-logo{background:var(--red);color:var(--paper);font-weight:700;font-size:11pt;padding:3pt 7pt;border-radius:4pt;direction:ltr}
+.rt-v{font-weight:500;font-size:15pt;color:var(--ink)}
+.occasion{align-self:flex-start;margin-block-start:26pt;font-family:%(serif)s;font-weight:700;font-size:26pt;color:var(--gold-2);border:1px solid var(--gold);border-radius:999pt;padding:10pt 24pt}
+.words{justify-content:flex-start}
+.verse{font-family:%(serif)s;font-weight:700;font-size:44pt;line-height:1.75;color:var(--ink);margin:36pt 0 14pt;max-width:660pt}
+.verse .qm{color:var(--gold);font-weight:400;margin-inline:6pt}
+.vref{font-size:18pt;color:var(--mute);letter-spacing:.04em;margin-block-end:60pt}
+.eyebrow-2{margin-block-start:40pt}
+.saying{font-family:%(serif)s;font-weight:700;font-size:34pt;line-height:1.6;color:var(--ink);margin:30pt 0 10pt;max-width:640pt}
+.sby{font-size:16pt;color:var(--mute)}
+.hook{font-size:20pt;line-height:1.45;color:var(--mute);max-width:560pt}
 .lband{display:flex;align-items:center;justify-content:space-around;gap:20pt;background:var(--white);border:1px solid var(--line);border-radius:3mm;padding:26pt 20pt;margin-block-end:30pt}
 .lband .club{display:flex;flex-direction:column;align-items:center;gap:12pt;font-family:%(serif)s;font-weight:700;font-size:30pt}
 .lband .club img{width:170pt;height:170pt;object-fit:contain}
@@ -328,16 +378,22 @@ def build_pages(payload, art_map=None):
     """The printable document: one <section class=page> per screen."""
     issue = payload.get("issue_no", payload.get("issue", ""))
     checked = _checked_label(payload)
-    order = (("events", page_events), ("cinema", page_cinema), ("fixtures", page_fixtures), ("worth", page_worth))
+    order = (("events", page_events), ("cinema", page_cinema), ("fixtures", page_fixtures), ("worth", page_worth), ("podcast", page_podcast))
     present = [(key, fn, _section(payload, key)) for key, fn in order]
     present = [(k, f, sec) for k, f, sec in present if sec]
     contents = [(sec.get("title", ""), i + 2) for i, (k, f, sec) in enumerate(present)]
-    contents.append(("وين جبنا الكلام", len(present) + 2))
+    has_words = bool(payload.get("verse") or payload.get("saying"))
+    if has_words:
+        contents.append(("آية وحكمة الأسبوع", len(present) + 2))
+    contents.append(("وين جبنا الكلام", len(present) + 2 + (1 if has_words else 0)))
     pages = [page_cover(payload, checked, 1, contents)]
     n = 1
     for key, fn, sec in present:
         n += 1
         pages.append(fn(payload, sec, issue, checked, n, art_map))
+    if has_words:
+        n += 1
+        pages.append(page_words(payload, checked, n))
     n += 1
     pages.append(page_back(payload, checked, n))
     return (

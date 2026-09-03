@@ -34,6 +34,9 @@ def fixture_http(permissive=True, **extra_pages):
         build.elcinema.NOW_URL: (200, "text/html", fixture("elcinema-now-sa-20260902.html")),
         build.saff.SCHEDULE_URL: (200, "text/html", saff_html),
         build.kooora.PAGE_URL: (200, "text/html", fixture("kooora-roshn-20260902.html")),
+        build.podcast.FEED_URL: (200, "application/json", fixture("apple-podcasts-sa-top10-20260903.json")),
+        build.verse.API % "94:5": (200, "application/json", fixture("quran-94-5-20260903.json")),
+        build.verse.API % "94:6": (200, "application/json", fixture("quran-94-6-20260903.json")),
     }
     pages.update(extra_pages)
     return FakeHttp(pages=pages, permissive_head=permissive)
@@ -134,6 +137,16 @@ class FullBuild(Base):
         self.assertTrue(ddb.candidates(rep["issue_id"], "events", 0))
         self.assertTrue([r for r in ddb.items(rep["issue_id"]) if r["state"] == "primary"])
         self.assertTrue(build.already_built(NOW))
+        p = rep["payload"]
+        self.assertEqual(p["verse"]["key"], "94:5-6")
+        self.assertIn("api.alquran.cloud", p["verse"]["source"]["url"])
+        self.assertTrue(p["saying"]["id"])
+        self.assertEqual(len(schema.section(p, "podcast")["items"]), 1)
+        self.assertTrue(os.path.isfile(rep["files"]["poster"]))
+        from PIL import Image
+        im = Image.open(rep["files"]["poster"])
+        self.assertEqual(im.size[0], 1080)
+        self.assertGreater(im.size[1], 1500)
 
     def test_alternate_swap_writes_a_ruling_and_rerenders(self):
         rep = build.build_issue(NOW, fixture_http(), out_root=self.tmp)

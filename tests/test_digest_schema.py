@@ -115,6 +115,28 @@ class Items(unittest.TestCase):
             schema.assert_valid(p)
 
 
+class Blocks(unittest.TestCase):
+    def test_verse_must_come_from_the_api(self):
+        p = good(); p["verse"]["source"]["url"] = "https://example.com/verse"
+        self.assertTrue(any("alquran" in e for e in schema.validate(p)))
+        p = good(); del p["verse"]["text"]
+        self.assertTrue(any("verse" in e for e in schema.validate(p)))
+        p = good(); del p["verse"]; del p["saying"]
+        self.assertEqual(schema.validate(p), [])
+
+    def test_saying_and_occasion_shapes(self):
+        p = good(); p["saying"] = {"text": "x"}
+        self.assertTrue(any("saying" in e for e in schema.validate(p)))
+        p = good(); p["occasion"] = {"key": "national_day"}
+        self.assertTrue(any("occasion" in e for e in schema.validate(p)))
+        p = good(); p["occasion"] = {"key": "national_day", "banner_ar": "اليوم الوطني", "date": "2026-09-23"}
+        self.assertEqual(schema.validate(p), [])
+
+    def test_podcast_section_is_one_card(self):
+        p = good(); s = section(p, "podcast"); s["items"] = s["items"] * 2
+        self.assertTrue(any("podcast" in e for e in schema.validate(p)))
+
+
 class Layouts(unittest.TestCase):
     def test_layout_follows_item_count(self):
         self.assertEqual(schema.layout_for("events", 2), "g2h")

@@ -35,11 +35,12 @@ class Offline(unittest.TestCase):
     def test_builds_a_document(self):
         self.assertTrue(self.html.startswith("<!doctype html>"))
         self.assertIn('<html lang="ar" dir="rtl">', self.html)
-        self.assertEqual(self.html.count('class="page'), 6)      # cover + 4 sections + back
+        self.assertEqual(self.html.count('class="page'), 8)      # cover + 5 sections + words + back
 
     def test_only_token_colours(self):
         hexes = {h.lower() for h in _HEX.findall(self.html)}
-        self.assertTrue(hexes.issubset(tokens.hexes()), hexes - tokens.hexes())
+        # #F5C518 is IMDb's yellow — the one foreign colour, on the badge only (owner asked for the logo look)
+        self.assertTrue(hexes.issubset(tokens.hexes() | {"#f5c518"}), hexes - tokens.hexes())
 
     def test_no_shadows_no_physical_properties(self):
         css = "".join(re.findall(r"<style>(.*?)</style>", self.html, re.S))
@@ -49,11 +50,13 @@ class Offline(unittest.TestCase):
 
     def test_every_page_has_one_eyebrow_one_claim_one_foot(self):
         pages = re.findall(r'<section class="page.*?</section>', self.html, re.S)
-        self.assertEqual(len(pages), 6)
+        self.assertEqual(len(pages), 8)
         for pg in pages:
+            self.assertEqual(pg.count('class="foot"'), 1)
+            if 'class="page words"' in pg:
+                continue                                    # the statement page: two eyebrows, no claim
             self.assertEqual(pg.count('class="eyebrow"'), 1)
             self.assertEqual(pg.count('class="claim"'), 1)
-            self.assertEqual(pg.count('class="foot"'), 1)
 
     def test_layout_follows_the_payload(self):
         self.assertIn('class="grid g3v"', self.html)
@@ -63,7 +66,7 @@ class Offline(unittest.TestCase):
     def test_empty_section_is_not_a_page(self):
         p = ref(); section(p, "cinema")["items"] = []
         h = rhtml.build_pages(p, {})
-        self.assertEqual(h.count('class="page'), 5)
+        self.assertEqual(h.count('class="page'), 7)
         self.assertNotIn('class="page cinema"', h)
         self.assertNotIn('<div class="eyebrow">جديد في السينما</div>', h)
 
@@ -91,6 +94,30 @@ class Offline(unittest.TestCase):
         p = ref(); section(p, "cinema")["items"][0]["ttl"] = "Fall 2: Deadpoint"
         h = rhtml.build_pages(p, {})
         self.assertIn('<span dir="ltr">Fall 2: Deadpoint</span>', h)
+
+    def test_imdb_badge_only_with_a_source(self):
+        self.assertIn('class="imdb-logo">IMDb', self.html)
+        p = ref(); section(p, "cinema")["items"][0]["ratings"]["sources"] = []
+        h = rhtml.build_pages(p, {})
+        self.assertLess(h.count('class="imdb-logo">IMDb'), self.html.count('class="imdb-logo">IMDb'))
+
+    def test_verse_and_saying_page(self):
+        self.assertIn('class="page words"', self.html)
+        self.assertIn("﴿", self.html)
+        self.assertIn("الطيب ما يضيع", self.html)
+
+    def test_poster_builds_offline(self):
+        from digest.render import poster
+        h = poster.build_poster(self.p, {})
+        self.assertIn('class="poster"', h)
+        self.assertIn('class="datepill"', h)
+        self.assertIn('class="pill"', h)
+        self.assertIn('class="verse"', h)
+        self.assertIn("سوالف طريق", h)
+        hexes = {x.lower() for x in _HEX.findall(h)}
+        self.assertTrue(hexes.issubset(tokens.hexes() | {"#f5c518"}), hexes - tokens.hexes())
+        with open(os.path.join(ROOT, "digest", "render", "poster.py"), encoding="utf-8") as fh:
+            self.assertNotIn(chr(92), fh.read())
 
     def test_story_builds(self):
         s = rhtml.build_story(self.p, {})
@@ -121,7 +148,7 @@ class Chromium(unittest.TestCase):
     def test_pdf_geometry(self):
         import fitz
         d = fitz.open(self.res["pdf"])
-        self.assertEqual(d.page_count, 6)
+        self.assertEqual(d.page_count, 8)
         for pg in d:
             self.assertEqual((round(pg.rect.width), round(pg.rect.height)), (810, 1440))
         self.assertIn("وش صاير بالرياض", d[0].get_text())
@@ -129,6 +156,13 @@ class Chromium(unittest.TestCase):
     def test_story_geometry(self):
         from PIL import Image
         self.assertEqual(Image.open(self.res["png"]).size, (1080, 1920))
+
+    def test_poster_geometry(self):
+        from PIL import Image
+        im = Image.open(self.res["poster"])
+        self.assertEqual(im.size[0], 1080)
+        self.assertGreater(im.size[1], 2000)
+        self.assertLess(im.size[1], 6000)
 
     def test_audit_clean_and_layout_fingerprint(self):
         self.assertEqual(self.res["audit"], [])

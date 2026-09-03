@@ -17,7 +17,7 @@ from .voice import normalize
 WEIGHTS = {"decision": 0.30, "confidence": 0.20, "proximity": 0.15,
            "audience": 0.15, "novelty": 0.10, "history": 0.10}
 
-DECISION_PRIOR = {"exhibition": 0.90, "museum": 0.85, "season": 0.80, "family": 0.75,
+DECISION_PRIOR = {"podcast": 0.80, "exhibition": 0.90, "museum": 0.85, "season": 0.80, "family": 0.75,
                   "concert": 0.70, "market": 0.60, "comedy": 0.65, "theatre": 0.65,
                   "park": 0.70, "sport": 0.75, "cinema": 0.70, "other": 0.40, "b2b": 0.10}
 DAY_FIT = {"thu": 1.0, "fri": 1.0, "sat": 0.85}
@@ -27,10 +27,11 @@ CATEGORY_AUDIENCE = {
     "season": ("family", "couples", "young"), "concert": ("young", "couples"), "market": ("family", "couples"),
     "comedy": ("young", "couples"), "theatre": ("couples", "family"), "park": ("family", "couples"),
     "sport": ("young", "family"), "cinema": ("family", "couples", "young"), "other": ("couples",), "b2b": (),
+    "podcast": ("young", "couples", "family"),
 }
 HISTORY_DROP, HISTORY_APPROVE = -0.5, 0.25
-CAPS = {"events": 4, "cinema": 3, "worth": 1, "fixtures": 6}
-MINS = {"events": 2, "cinema": 3, "worth": 0, "fixtures": 0}
+CAPS = {"events": 4, "cinema": 3, "worth": 1, "fixtures": 6, "podcast": 1}
+MINS = {"events": 2, "cinema": 3, "worth": 0, "fixtures": 0, "podcast": 0}
 ALTERNATES_PER_SLOT = 3
 
 

@@ -21,6 +21,11 @@ RETRY_ON = (429, 500, 502, 503, 504)
 TRIES = 3
 
 _session = None
+_pl_session = None
+# Platinumlist prices follow the visitor's currency and the Railway box is in the US
+# (2026-09-03: the poster said «حسب التذكرة» because the page said «54.64 USD»). Their
+# own cookie pins riyals when it is set on a FRESH session — proven, so it gets one.
+PIN_SAR_HOSTS = ("platinumlist.net",)
 
 
 def _s():
@@ -29,6 +34,19 @@ def _s():
         _session = requests.Session()
         _session.headers.update(HEADERS)
     return _session
+
+
+def _for(url):
+    global _pl_session
+    host = (url or "").split("//", 1)[-1].split("/", 1)[0].lower()
+    if any(host.endswith(h) for h in PIN_SAR_HOSTS):
+        if _pl_session is None:
+            _pl_session = requests.Session()
+            _pl_session.headers.update(HEADERS)
+            _pl_session.cookies.set("user_currency", "SAR", domain="riyadh.platinumlist.net")
+            _pl_session.cookies.set("user_currency", "SAR", domain="platinumlist.net")
+        return _pl_session
+    return _s()
 
 
 def _ctype(resp):
@@ -75,7 +93,7 @@ def _decode(r):
 
 def get_text(url, timeout=20):
     """-> (status, final_url, content_type, text)."""
-    r = _retrying(lambda: _s().get(url, timeout=timeout, allow_redirects=True))
+    r = _retrying(lambda: _for(url).get(url, timeout=timeout, allow_redirects=True))
     try:
         return r.status_code, r.url, _ctype(r), _decode(r)
     finally:
@@ -85,12 +103,12 @@ def get_text(url, timeout=20):
 def head(url, timeout=12):
     """-> (status, final_url, content_type). HEAD first; a 405/403/501 falls back to a
     one-byte ranged GET, because some CDNs refuse HEAD but serve the page fine."""
-    r = _retrying(lambda: _s().head(url, timeout=timeout, allow_redirects=True))
+    r = _retrying(lambda: _for(url).head(url, timeout=timeout, allow_redirects=True))
     try:
         if r.status_code in (403, 405, 501):
             r.close()
-            r = _retrying(lambda: _s().get(url, timeout=timeout, allow_redirects=True,
-                                           headers={"Range": "bytes=0-0"}, stream=True))
+            r = _retrying(lambda: _for(url).get(url, timeout=timeout, allow_redirects=True,
+                                                headers={"Range": "bytes=0-0"}, stream=True))
             status = 200 if r.status_code == 206 else r.status_code
             return status, r.url, _ctype(r)
         return r.status_code, r.url, _ctype(r)
@@ -100,7 +118,7 @@ def head(url, timeout=12):
 
 def get_bytes(url, timeout=25, max_bytes=6000000):
     """-> (status, final_url, content_type, bytes). Stops reading past max_bytes."""
-    r = _retrying(lambda: _s().get(url, timeout=timeout, allow_redirects=True, stream=True))
+    r = _retrying(lambda: _for(url).get(url, timeout=timeout, allow_redirects=True, stream=True))
     try:
         buf = bytearray()
         for chunk in r.iter_content(65536):

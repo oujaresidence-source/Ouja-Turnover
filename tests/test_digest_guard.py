@@ -156,6 +156,14 @@ class Aborts(unittest.TestCase):
         p = good(); del section(p, "worth")["items"][0]["verified_on"]
         self._hit(guard.scan(html_for(p), p, WEEK, NOW), "verified_on")
 
+    def test_saying_only_from_the_list_and_verse_only_fetched(self):
+        p = good(); p["saying"] = {"id": "s02", "text": "كلام مخترع", "by": "مثل"}
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "sayings.json")
+        p = good(); p["saying"] = {"id": "zz", "text": "الطيب ما يضيع", "by": "مثل"}
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "sayings.json")
+        p = good(); p["verse"]["source"]["fetched_at"] = ""
+        self._hit(guard.scan(html_for(p), p, WEEK, NOW), "fetch timestamp")
+
     def test_assert_clean_raises_digest_error_naming_every_hit(self):
         p = good(); section(p, "events")["items"][0]["source"] = {}
         with self.assertRaises(guard.DigestError) as cm:

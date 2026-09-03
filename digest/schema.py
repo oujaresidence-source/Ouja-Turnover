@@ -18,8 +18,10 @@ SECTIONS = {
     "cinema":   {"title": "جديد في السينما", "min": 0, "max": 3, "exact": (0, 3)},
     "worth":    {"title": "يستاهل الزيارة",  "min": 0, "max": 1, "exact": None},
     "fixtures": {"title": "مباريات الأسبوع", "min": 0, "max": 6, "exact": None},
+    "podcast":  {"title": "بودكاست الأسبوع", "min": 0, "max": 1, "exact": None},
 }
-SECTION_ORDER = ("events", "cinema", "worth", "fixtures")
+SECTION_ORDER = ("events", "cinema", "worth", "fixtures", "podcast")
+VERSE_API_HOST = "api.alquran.cloud"
 
 
 class SchemaError(ValueError):
@@ -43,6 +45,8 @@ def layout_for(key, n):
         return "g1"
     if key == "fixtures":
         return "fix"
+    if key == "podcast":
+        return "g1"
     return "g1"
 
 
@@ -144,6 +148,19 @@ def validate(payload):
     for d in payload.get("dropped") or []:
         if not (d.get("ttl") and d.get("reason")):
             errs.append("dropped entries need ttl and reason")
+    v = payload.get("verse")
+    if v:
+        src = (v.get("source") or {}).get("url", "")
+        if not (v.get("text") and v.get("ref_ar") and v.get("key")):
+            errs.append("verse: needs text, ref_ar and key")
+        if VERSE_API_HOST not in src:
+            errs.append("verse: text must come from the Quran API (%s), got %r" % (VERSE_API_HOST, src))
+    sy = payload.get("saying")
+    if sy and not (sy.get("id") and sy.get("text") and sy.get("by")):
+        errs.append("saying: needs id, text and by")
+    oc = payload.get("occasion")
+    if oc and not (oc.get("key") and oc.get("banner_ar") and oc.get("date")):
+        errs.append("occasion: needs key, banner_ar and date")
     return errs
 
 

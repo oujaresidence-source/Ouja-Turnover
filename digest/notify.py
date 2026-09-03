@@ -4,7 +4,7 @@ studio/notify.py pattern). Delivery + DRY-RUN gating live in bot.py. No network,
 host, no imports beyond the standard library. ZERO backslashes in this file."""
 
 NL = chr(10)
-SECTION_LINE = {"events": "🎨 فعاليات", "cinema": "🎬 سينما", "fixtures": "⚽ مباريات", "worth": "📍 يستاهل"}
+SECTION_LINE = {"events": "🎨 فعاليات", "cinema": "🎬 سينما", "fixtures": "⚽ مباريات", "worth": "📍 يستاهل", "podcast": "🎧 بودكاست"}
 
 
 def _items_line(section):
@@ -28,7 +28,13 @@ def build_message(payload, issue_no, dropped=None, base_url=""):
     if not lines:
         return ""
     L = ["**وش صاير بالرياض · العدد %s · %s**" % (payload.get("issue", issue_no), payload.get("dateLabel", ""))]
+    oc = payload.get("occasion") or {}
+    if oc.get("banner_ar"):
+        L.append("🇸🇦 " + oc["banner_ar"])
     L += lines
+    v = payload.get("verse") or {}
+    if v.get("text"):
+        L.append("📖 آية الأسبوع: ﴿%s﴾ — %s" % (v["text"], v.get("ref_ar", "")))
     drops = [d for d in (dropped if dropped is not None else payload.get("dropped") or []) if d.get("ttl")]
     if drops:
         L += ["", "حذفنا:"]

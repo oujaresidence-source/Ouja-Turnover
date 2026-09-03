@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "digest"))
 
 from digest import dates
-from digest.collect import base, platinumlist, elcinema, saff, kooora, worth, search_secondary
+from digest.collect import base, platinumlist, elcinema, saff, kooora, worth, search_secondary, podcast, verse
 from _fake_http import FakeHttp, fixture, HERE as FIX
 
 TZ = ZoneInfo("Asia/Riyadh")
@@ -261,6 +261,63 @@ class Worth(unittest.TestCase):
                     self.assertLessEqual(len(p["ttl"].split()), 4)
                     self.assertTrue(p.get("district"))
         self.assertTrue(any(c["key"] == "riyadh_season" and c["confirmed"] is False for c in ds["calendar"]))
+
+
+class Podcast(unittest.TestCase):
+    def test_top_chart_becomes_one_card_candidates(self):
+        cands, dropped = podcast.parse(fixture("apple-podcasts-sa-top10-20260903.json"), WEEK, NOW)
+        self.assertGreaterEqual(len(cands), 5)
+        self.assertEqual(dropped, [])
+        c = cands[0]
+        self.assertEqual(c["section"], "podcast")
+        self.assertTrue(c["url"].startswith("https://podcasts.apple.com/sa/"))
+        self.assertEqual(c["chart_rank"], 1)
+        parts = [x.strip() for x in c["sub"].split("·")]
+        self.assertEqual(len(parts), 3)
+        self.assertTrue(parts[0].startswith("الجمعة"))
+        self.assertEqual(parts[-1], "مجاني")
+        self.assertTrue(c["art_hint"]["artwork"].endswith("/600x600bb.png") or c["art_hint"]["artwork"].endswith("/600x600bb.jpg"))
+        self.assertLessEqual(base.word_count(c["ttl"]), 4)
+
+    def test_artwork_resize_rule(self):
+        self.assertEqual(podcast.artwork_url("https://is1-ssl.mzstatic.com/image/thumb/x/100x100bb.png"), "https://is1-ssl.mzstatic.com/image/thumb/x/600x600bb.png")
+        self.assertEqual(podcast.artwork_url(""), "")
+
+    def test_bad_feed_is_reported(self):
+        cands, dropped = podcast.parse("not json", WEEK, NOW)
+        self.assertEqual(cands, [])
+        self.assertTrue(dropped)
+
+
+class Verse(unittest.TestCase):
+    def test_text_comes_only_from_the_api(self):
+        http = FakeHttp(pages={verse.API % "94:5": (200, "application/json", fixture("quran-94-5-20260903.json")),
+                               verse.API % "94:6": (200, "application/json", fixture("quran-94-6-20260903.json"))})
+        v = verse.fetch("94:5-6", http, NOW)
+        self.assertEqual(v["key"], "94:5-6")
+        from digest.voice import normalize
+        self.assertIn("العسر", normalize(v["text"]))
+        self.assertEqual(v["ayahs"], [5, 6])
+        self.assertTrue(v["ref_ar"].endswith("٥–٦"))
+        self.assertIn("api.alquran.cloud", v["source"]["url"])
+        self.assertTrue(v["source"]["fetched_at"])
+
+    def test_api_down_means_no_verse(self):
+        self.assertIsNone(verse.fetch("94:5", FakeHttp(), NOW))
+        self.assertIsNone(verse.fetch("", FakeHttp(), NOW))
+
+    def test_key_rotates_by_issue(self):
+        keys = ["a", "b", "c"]
+        self.assertEqual([verse.pick_key(keys, n) for n in (1, 2, 3, 4)], ["a", "b", "c", "a"])
+
+
+class Prices(unittest.TestCase):
+    def test_any_currency_riyals_first(self):
+        self.assertEqual(platinumlist._price_ar("150.00 SAR"), "من ١٥٠ ريال")
+        self.assertEqual(platinumlist._price_ar("139 ر.س"), "من ١٣٩ ريال")
+        self.assertEqual(platinumlist._price_ar("54.64 USD"), "من ≈٢٠٥ ريال")      # the US-server case, marked ≈
+        self.assertEqual(platinumlist._price_ar("مجاناً"), "مجاني")
+        self.assertEqual(platinumlist._price_ar("بيعت جميع التذاكر"), "حسب التذكرة")
 
 
 class Secondary(unittest.TestCase):

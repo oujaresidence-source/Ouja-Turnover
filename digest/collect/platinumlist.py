@@ -31,14 +31,30 @@ _VENUE_IN_DESC = re.compile(r"(?:.*\s)?في\s+([^،.]{3,60}?)\s+في\s+الري�
 _VENUE_BLOCK = re.compile(r'buy-block__venue"[^>]*>(.{0,900}?)</div>\s*</div>', re.S)
 
 
+# Platinumlist's own rates are close to these; a converted price is marked «≈» and only
+# appears when the riyal view was unavailable (net_live pins SAR, so it should never be).
+_TO_SAR = {"USD": 3.75, "$": 3.75, "AED": 1.02, "EUR": 4.05, "€": 4.05, "GBP": 4.75, "£": 4.75, "KWD": 12.2, "QAR": 1.03, "BHD": 9.95, "OMR": 9.75, "EGP": 0.08}
+_MONEY_RX = re.compile(r"(?:(SAR|USD|AED|EUR|GBP|KWD|QAR|BHD|OMR|EGP|ر\.س|ريال|\$|€|£)\s*)?(\d+(?:[.,]\d+)?)\s*(SAR|USD|AED|EUR|GBP|KWD|QAR|BHD|OMR|EGP|ر\.س|ريال|\$|€|£)?", re.I)
+
+
 def _price_ar(txt):
     t = base.text(txt)
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:SAR|ر\.س|ريال)", t)
-    if m:
-        n = m.group(1).split(".")[0]
-        return "من %s ريال" % ar_digits(n)
     if "مجان" in t or "free" in t.lower():
         return "مجاني"
+    for m in _MONEY_RX.finditer(t):
+        cur = (m.group(1) or m.group(3) or "").upper()
+        if not cur:
+            continue
+        try:
+            n = float(m.group(2).replace(",", ""))
+        except ValueError:
+            continue
+        if cur in ("SAR", "ر.س", "ريال"):
+            return "من %s ريال" % ar_digits(int(round(n)))
+        rate = _TO_SAR.get(cur)
+        if rate:
+            sar = int(round(n * rate / 5.0) * 5)
+            return "من ≈%s ريال" % ar_digits(sar)
     return "حسب التذكرة"
 
 

@@ -12,13 +12,14 @@ Live (network on, still no posting):
     python3 -m digest.build --dry-run"""
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
 from datetime import datetime
 
 from . import art, dates, db, links, rank, schema, voice
-from .collect import base, elcinema, kooora, platinumlist, ratings, saff, search_secondary, worth
+from .collect import base, elcinema, kooora, platinumlist, podcast, ratings, saff, search_secondary, verse, worth
 from .host import HOST
 from .render import build as render_build
 
@@ -66,7 +67,7 @@ def _fold_title(t):
 
 def _collect(week, now, http, search, load_json, report):
     """-> {section: [cand]} plus report['dropped'] / report['errors'] filled in."""
-    by = {"events": [], "cinema": [], "worth": [], "fixtures": []}
+    by = {"events": [], "cinema": [], "worth": [], "fixtures": [], "podcast": []}
 
     def run(name, fn):
         try:
@@ -125,6 +126,13 @@ def _collect(week, now, http, search, load_json, report):
     wc, w_ineligible = worth.candidates(week, now, dataset, resolved_urls=resolved)
     by["worth"] += wc
     report["ineligible_places"] = w_ineligible
+    report["dataset"] = dataset
+
+    got = run("podcast", lambda: podcast.fetch(week, http, now))
+    if got:
+        cands, dropped, _ = got
+        by["podcast"] += cands
+        report["dropped"] += dropped
 
     for section, cands in by.items():
         for c in cands:
@@ -203,8 +211,47 @@ def _item_from(c, artinfo):
     return it
 
 
-def assemble(week, issue_no, now, chosen, verified, site_url, dropped, alternates, claims=None):
+def _sayings():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sayings.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("sayings") or []
+    except Exception:
+        return []
+
+
+def pick_saying(issue_no, sayings=None):
+    items = sayings if sayings is not None else _sayings()
+    if not items:
+        return None
+    s = items[(int(issue_no) - 1) % len(items)]
+    return {"id": s.get("id"), "text": s.get("text"), "by": s.get("by", "")}
+
+
+def pick_occasion(dataset, week, horizon_days=14):
+    """A CONFIRMED calendar entry starting within `horizon_days` of the weekend."""
+    from datetime import date, timedelta
+    for c in (dataset or {}).get("calendar") or []:
+        w = c.get("window")
+        if not (c.get("confirmed") and w and c.get("banner_ar")):
+            continue
+        try:
+            start = date.fromisoformat(w[0])
+        except (ValueError, TypeError):
+            continue
+        if week.thu - timedelta(days=2) <= start <= week.thu + timedelta(days=horizon_days):
+            return {"key": c["key"], "banner_ar": c["banner_ar"], "date": w[0], "ar": c.get("ar", "")}
+    return None
+
+
+def assemble(week, issue_no, now, chosen, verified, site_url, dropped, alternates, claims=None,
+             verse_block=None, saying=None, occasion=None):
     p = schema.empty_payload(week.iso, week.label_ar, issue_no, base.now_iso(now))
+    if verse_block:
+        p["verse"] = verse_block
+    if saying:
+        p["saying"] = saying
+    if occasion:
+        p["occasion"] = occasion
     for s in p["sections"]:
         items = chosen.get(s["key"]) or []
         s["items"] = items
@@ -279,16 +326,30 @@ def build_issue(now, http, search=None, load_json=None, dry_run=True, out_root=N
         if site_url:
             verified.add(site_url)
 
-    # ratings for the three films — cited, never scraped (collect/ratings.py)
+    # ratings for the three films — cited, never scraped (collect/ratings.py); the exact
+    # IMDb id from elcinema goes in the query so the tool opens the right page.
     for c in chosen.get("cinema") or []:
         if search is not None:
             try:
-                c["ratings"] = ratings.fetch(c.get("name") or c.get("ttl"), c.get("imdb_id"), search, model=model)
+                c["ratings"] = ratings.fetch(c.get("name") or c.get("ttl"), c.get("imdb_id"), search, model=model, max_uses=5)
             except Exception:
                 c["ratings"] = {"imdb": None, "rt": None, "sources": []}
     claims = _claims(chosen, model_call, model)
+    dataset = report.get("dataset") or {}
+    verse_block = None
+    try:
+        verse_block = verse.fetch(verse.pick_key((dataset.get("verses") or {}).get("keys"), issue_no), http, now)
+    except Exception as e:
+        report["errors"].append("verse: %s" % e)
+    saying = pick_saying(issue_no)
+    occasion = pick_occasion(dataset, week)
 
     owned = art.load_owned()
+    for c in chosen.get("worth") or []:
+        if not (c.get("art_hint") or {}).get("og"):
+            og = art.og_hint(c.get("url", ""), http)
+            if og:
+                c["art_hint"] = {"og": og}
     items = {}
     for section, cands in chosen.items():
         items[section] = []
@@ -299,7 +360,10 @@ def build_issue(now, http, search=None, load_json=None, dry_run=True, out_root=N
                 info = art.resolve(c, section, issue_no, slot, http, owned=owned)
             items[section].append(_item_from(c, info))
 
-    payload = assemble(week, issue_no, now, items, verified, site_url, report["dropped"], picked["alternates"], claims)
+    if verse_block:
+        verified.add(verse_block["source"]["url"])
+    payload = assemble(week, issue_no, now, items, verified, site_url, report["dropped"], picked["alternates"], claims,
+                       verse_block=verse_block, saying=saying, occasion=occasion)
     for k, alts in picked["alternates"].items():
         section, slot = k.split(".")
         db.add_candidates(issue_id, section, int(slot), alts)
@@ -452,6 +516,9 @@ def _fixture_http():
         elcinema.NOW_URL: (200, "text/html", fixture("elcinema-now-sa-20260902.html")),
         saff.SCHEDULE_URL: (200, "text/html", saff_html),
         kooora.PAGE_URL: (200, "text/html", fixture("kooora-roshn-20260902.html")),
+        podcast.FEED_URL: (200, "application/json", fixture("apple-podcasts-sa-top10-20260903.json")),
+        verse.API % "94:5": (200, "application/json", fixture("quran-94-5-20260903.json")),
+        verse.API % "94:6": (200, "application/json", fixture("quran-94-6-20260903.json")),
     }, permissive_head=True)
 
 

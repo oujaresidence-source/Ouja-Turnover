@@ -36,8 +36,17 @@ def site_of(url):
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
+# publisher CDNs that serve a site's OWN images from another registrable domain
+_SAME_PUBLISHER = {"apple.com": ("mzstatic.com",)}
+
+
 def same_site(a, b):
-    return bool(a and b) and site_of(a) == site_of(b)
+    if not (a and b):
+        return False
+    sa, sb = site_of(a), site_of(b)
+    if sa == sb:
+        return True
+    return sa in _SAME_PUBLISHER.get(sb, ()) or sb in _SAME_PUBLISHER.get(sa, ())
 
 
 def load_owned(override_path=None):
@@ -109,6 +118,29 @@ def _pack(kind, got):
     return {"kind": kind, "src": got["src"], "sha256": got["sha256"], "origin": got["origin"], "w": got["w"], "h": got["h"]}
 
 
+_OG_RX = None
+
+
+def og_hint(url, http):
+    """Open a page and return its own og:image (same site as the page) or ''. Used for
+    places, whose dataset rows carry a page but no artwork."""
+    import re
+    global _OG_RX
+    if _OG_RX is None:
+        _OG_RX = re.compile(r'property=["\']og:image["\']\s+content=["\']([^"\']+)["\']')
+    if not url:
+        return ""
+    try:
+        status, final, ctype, html = http.get_text(url)
+    except Exception:
+        return ""
+    if status != 200 or not html:
+        return ""
+    m = _OG_RX.search(html)
+    og = (m.group(1).strip() if m else "")
+    return og if (og.lower().startswith("https://") and same_site(og, url)) else ""
+
+
 def owned_for(item, owned, http):
     key = item.get("slug") or ""
     entry = owned.get(key) if key else None
@@ -125,6 +157,17 @@ def og_for(item, http):
     if not same_site(og, item.get("url", "")):
         return None
     got = _fetch_image(og, http)
+    return _pack("og", got) if got else None
+
+
+def artwork_for(item, http):
+    """Podcast artwork from Apple's own CDN (600×600)."""
+    url = (item.get("art_hint") or {}).get("artwork") or ""
+    if not url or not url.lower().startswith("https://"):
+        return None
+    if not same_site(url, item.get("url", "")):
+        return None
+    got = _fetch_image(url, http, min_edge=MIN_POSTER_EDGE)
     return _pack("og", got) if got else None
 
 
@@ -169,6 +212,11 @@ def resolve(item, section, issue_no, slot, http, owned=None):
     cinema:  poster → generated.   events/worth: owned → og → generated.   fixtures: logos (build.py)."""
     if section == "cinema":
         got = poster_for(item, http)
+        if got:
+            return got
+        return generated_for(item, section, issue_no, slot)
+    if section == "podcast":
+        got = artwork_for(item, http)
         if got:
             return got
         return generated_for(item, section, issue_no, slot)

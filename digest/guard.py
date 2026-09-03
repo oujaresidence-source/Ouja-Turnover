@@ -163,11 +163,36 @@ def _check_facts(errs, payload):
             errs.append("%s: a place without a verified_on date" % where)
 
 
+def _sayings_ids():
+    try:
+        import json
+        import os
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sayings.json")
+        with open(p, encoding="utf-8") as fh:
+            return {s.get("id"): s for s in json.load(fh).get("sayings") or []}
+    except Exception:
+        return {}
+
+
+def _check_blocks(errs, payload):
+    """Rules 9–11 (2026-09-03): a verse only from the API; a saying only from the list."""
+    sy = payload.get("saying")
+    if sy:
+        known = _sayings_ids()
+        ref = known.get(sy.get("id"))
+        if not ref or ref.get("text") != sy.get("text"):
+            errs.append("saying: not in digest/data/sayings.json verbatim — the model may not write one")
+    v = payload.get("verse")
+    if v and not (v.get("source") or {}).get("fetched_at"):
+        errs.append("verse: no fetch timestamp — must come from the API at build time")
+
+
 def scan(markup, payload, week, now):
     """Every reason this digest must not render; [] means clean."""
     errs = list(schema.validate(payload))
     _check_sources(errs, payload, now)
     _check_facts(errs, payload)
+    _check_blocks(errs, payload)
     _check_dates(errs, markup, week)
     _check_numerals(errs, markup)
     _check_cards(errs, markup)
