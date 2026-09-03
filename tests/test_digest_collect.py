@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "digest"))
 
 from digest import dates
-from digest.collect import base, platinumlist, elcinema, saff, kooora, worth, search_secondary, podcast, verse
+from digest.collect import base, platinumlist, elcinema, saff, kooora, worth, search_secondary, podcast, verse, commons
 from _fake_http import FakeHttp, fixture, HERE as FIX
 
 TZ = ZoneInfo("Asia/Riyadh")
@@ -126,7 +126,9 @@ class Cinema(unittest.TestCase):
         self.assertTrue(cands[0]["new_this_week"])
         self.assertEqual(cands[0]["release_iso"], "2026-09-02")
         self.assertEqual(cands[0]["ttl"], "Fall 2: Deadpoint")
-        self.assertEqual(cands[0]["sub"], "الخميس ٣ سبتمبر · مغامرات ودراما · حسب العرض")   # facts line: day+date · genre · price
+        self.assertEqual(cands[0]["sub"], "الخميس ٣ سبتمبر · muvi، مغامرات ودراما · حسب العرض")   # day+date · Saudi chain + genre · price
+        self.assertEqual(cands[0]["url"], elcinema.TICKETS_URL)                     # the QR goes to a SAUDI cinema
+        self.assertTrue(cands[0]["info_url"].startswith("https://elcinema.com/work/"))
         self.assertEqual(cands[0]["age"], 12)
         rel = [c["release_iso"] for c in cands]
         self.assertEqual(rel, sorted(rel, reverse=True))
@@ -138,9 +140,9 @@ class Cinema(unittest.TestCase):
         for c in cands:
             with self.subTest(c=c["ttl"]):
                 self.assertEqual(c["chip"], "سينما")
-                self.assertRegex(c["sub"], "^(الخميس|الجمعة|السبت) [٠-٩]{1,2} \\S+ · .+ · حسب العرض$")
-                self.assertEqual(c["art_hint"], {})          # no posters: generated art only
-                self.assertTrue(c["url"].startswith("https://elcinema.com/work/"))
+                self.assertRegex(c["sub"], "^(الخميس|الجمعة|السبت) [٠-٩]{1,2} \\S+ · muvi، .+ · حسب العرض$")
+                self.assertEqual(c["art_hint"], {})          # posters come from the film page in enrich()
+                self.assertEqual(c["url"], elcinema.TICKETS_URL)
                 self.assertLessEqual(base.word_count(c["sub"]) if hasattr(base, "word_count") else len([w for w in c["sub"].split() if w != "·"]), 10)
 
     def test_release_inside_window_sets_the_day(self):
@@ -187,6 +189,11 @@ class Fixtures(unittest.TestCase):
         self.assertGreaterEqual(len(logos), 12)                       # the whole league, 18 clubs
         for club in saff.RIYADH_CLUBS:
             self.assertIn(club, logos)
+
+    def test_large_logo_from_the_team_page(self):
+        http = FakeHttp(pages={"https://saff.com.sa/team.php?id=103": (200, "text/html", '<img src="uploadcenter/saffteamlarge1566200867.png">')})
+        self.assertEqual(saff.large_logo("103", http), "https://saff.com.sa/uploadcenter/saffteamlarge1566200867.png")
+        self.assertEqual(saff.large_logo("", http), "")
 
     def test_kooora_cross_check(self):
         events = kooora.parse(fixture("kooora-roshn-20260902.html"))
@@ -287,6 +294,41 @@ class Podcast(unittest.TestCase):
         cands, dropped = podcast.parse("not json", WEEK, NOW)
         self.assertEqual(cands, [])
         self.assertTrue(dropped)
+
+
+class PodcastFresh(unittest.TestCase):
+    def test_short_url_and_newest_episode(self):
+        http = FakeHttp(pages={podcast.FEED_URL: (200, "application/json", fixture("apple-podcasts-sa-top10-20260903.json")),
+                               podcast.LOOKUP_URL % "1702294864": (200, "application/json", fixture("itunes-lookup-1702294864-20260903.json"))})
+        cands, dropped, _ = podcast.fetch(WEEK, http, NOW, enrich_top=1)
+        c = [x for x in cands if x["show_id"] == "1702294864"][0]
+        self.assertEqual(c["url"], "https://podcasts.apple.com/sa/podcast/id1702294864")      # short → clean QR
+        self.assertEqual(c["episode_released"], "2026-09-01")
+        self.assertTrue(c["fresh"])
+        self.assertTrue(c["hook"].startswith("حلقة جديدة:"))
+        self.assertEqual(cands[0]["show_id"], "1702294864")                                     # fresh shows first
+
+    def test_stale_show_sinks(self):
+        old = {"section": "podcast", "show_id": "1", "chart_rank": 1, "fresh": False}
+        new = {"section": "podcast", "show_id": "2", "chart_rank": 5, "fresh": True}
+        self.assertEqual(sorted([old, new], key=lambda c: (0 if c.get("fresh") else 1, c.get("chart_rank", 99)))[0]["show_id"], "2")
+
+
+class Commons(unittest.TestCase):
+    def test_free_licence_photo_with_credit(self):
+        c = commons.parse(fixture("commons-at-turaif-20260903.json"))
+        self.assertIsNotNone(c)
+        self.assertIn("wikimedia.org", c["url"])
+        self.assertNotIn("?", c["url"])
+        self.assertGreaterEqual(c["w"], 800)
+        self.assertTrue(any(k in c["licence"].lower() for k in ("cc", "public")))
+        self.assertIn("Wikimedia Commons", c["credit"])
+
+    def test_non_free_or_small_is_refused(self):
+        import json
+        bad = {"query": {"pages": {"1": {"title": "x", "imageinfo": [{"url": "https://upload.wikimedia.org/a.jpg", "thumburl": "https://upload.wikimedia.org/a.jpg", "width": 2000, "height": 1000, "mime": "image/jpeg", "extmetadata": {"LicenseShortName": {"value": "CC BY-NC 2.0"}}}]},
+                                   "2": {"title": "y", "imageinfo": [{"url": "https://upload.wikimedia.org/b.jpg", "thumburl": "https://upload.wikimedia.org/b.jpg", "width": 300, "height": 200, "mime": "image/jpeg", "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}
+        self.assertIsNone(commons.parse(json.dumps(bad)))
 
 
 class Verse(unittest.TestCase):

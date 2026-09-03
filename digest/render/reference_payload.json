@@ -15,7 +15,8 @@
     "https://jdwel.com/2026-27-saudi-league-fixtures/",
     "https://oujares.com",
     "https://podcasts.apple.com/sa/podcast/%D8%B3%D9%88%D8%A7%D9%84%D9%81-%D8%B7%D8%B1%D9%8A%D9%82-%D8%A7%D8%A8%D9%88-%D8%B7%D9%84%D8%A7%D9%84-%D8%A7%D9%84%D8%AD%D9%85%D8%B1%D8%A7%D9%86%D9%8A/id1702294864",
-    "https://api.alquran.cloud/v1/ayah/94:5/quran-simple"
+    "https://api.alquran.cloud/v1/ayah/94:5/quran-simple",
+    "https://www.muvicinemas.com/ar/movie-finder"
   ],
   "sections": [
     {
@@ -104,9 +105,9 @@
       "items": [
         {
           "ttl": "الليلة الطويلة",
-          "sub": "الخميس ٣ سبتمبر · أكشن وجريمة · حسب العرض",
+          "sub": "الخميس ٣ سبتمبر · muvi، أكشن وجريمة · حسب العرض",
           "chip": "سينما",
-          "url": "https://ksa.voxcinemas.com/movies/the-long-night",
+          "url": "https://www.muvicinemas.com/ar/movie-finder",
           "art": {
             "kind": "generated",
             "sha256": "",
@@ -132,13 +133,14 @@
               "https://www.imdb.com/title/tt0000001/",
               "https://www.rottentomatoes.com/m/the_long_night"
             ]
-          }
+          },
+          "info_url": "https://ksa.voxcinemas.com/movies/the-long-night"
         },
         {
           "ttl": "رمل وملح",
-          "sub": "الخميس ٣ سبتمبر · دراما · حسب العرض",
+          "sub": "الخميس ٣ سبتمبر · muvi، دراما · حسب العرض",
           "chip": "سينما",
-          "url": "https://ksa.voxcinemas.com/movies/sand-and-salt",
+          "url": "https://www.muvicinemas.com/ar/movie-finder",
           "art": {
             "kind": "generated",
             "sha256": "",
@@ -163,13 +165,14 @@
             "sources": [
               "https://www.imdb.com/title/tt0000002/"
             ]
-          }
+          },
+          "info_url": "https://ksa.voxcinemas.com/movies/sand-and-salt"
         },
         {
           "ttl": "الفانوس الصغير",
-          "sub": "الجمعة ٤ سبتمبر · أنيميشن عائلي · حسب العرض",
+          "sub": "الجمعة ٤ سبتمبر · muvi، أنيميشن عائلي · حسب العرض",
           "chip": "سينما",
-          "url": "https://ksa.voxcinemas.com/movies/little-lantern",
+          "url": "https://www.muvicinemas.com/ar/movie-finder",
           "art": {
             "kind": "generated",
             "sha256": "",
@@ -187,7 +190,8 @@
           "tags": {
             "category": "cinema",
             "district": ""
-          }
+          },
+          "info_url": "https://ksa.voxcinemas.com/movies/little-lantern"
         }
       ]
     },

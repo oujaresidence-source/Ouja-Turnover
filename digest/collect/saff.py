@@ -110,9 +110,29 @@ def parse(html, week, now, page_url=SCHEDULE_URL):
             "match_id": mid,
             "home_logo": (logos.get(home) or {}).get("logo", ""),
             "away_logo": (logos.get(away) or {}).get("logo", ""),
+            "home_team_id": (logos.get(home) or {}).get("id", ""),
+            "away_team_id": (logos.get(away) or {}).get("id", ""),
         })
     out.sort(key=lambda f: f["kickoff_iso"])
     return out, dropped
+
+
+_LARGE_RX = re.compile(r"uploadcenter/saffteamlarge[^\"']+\.(?:png|jpg)")
+
+
+def large_logo(team_id, http):
+    """The FA's team page carries a larger logo than the schedule's thumbnail (الاتحاد's
+    schedule thumbnail is 50×50). -> absolute url or ''."""
+    if not team_id:
+        return ""
+    try:
+        status, final, ctype, html = http.get_text(LOGO_BASE + "team.php?id=%s" % team_id)
+    except Exception:
+        return ""
+    if status != 200:
+        return ""
+    m = _LARGE_RX.search(html or "")
+    return (LOGO_BASE + m.group(0)) if m else ""
 
 
 def fetch(week, http, now):

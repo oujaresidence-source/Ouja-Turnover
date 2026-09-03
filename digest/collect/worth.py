@@ -105,6 +105,7 @@ def candidates(week, now, dataset=None, resolved_urls=None):
             category=p2.get("category") or "other", district=p2.get("district") or "",
             raw_conf=base.TIER_PRIMARY,
             extra={"slug": p2.get("slug"), "venue": p2.get("ttl", ""), "hook": p2.get("hook", ""),
+                   "commons_query": p2.get("commons_query", ""),
                    "hours": p2.get("hours", ""), "price": p2.get("price", ""),
                    "latlng": (p2["lat"], p2["lng"]) if p2.get("lat") is not None else None,
                    "audience": list(p2.get("audience") or []), "verified_on": p2.get("verified_on", "")}))

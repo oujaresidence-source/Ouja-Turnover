@@ -73,7 +73,8 @@
       "category": "museum",
       "url": "https://tickets.bujairi.sa/en/d/3552/diriyah-access",
       "verified_on": "2026-09-03",
-      "verified_by": "diriyah.sa + tickets.bujairi.sa"
+      "verified_by": "diriyah.sa + tickets.bujairi.sa",
+      "commons_query": "Diriyah"
     },
     {
       "slug": "at-turaif",
@@ -93,7 +94,8 @@
       "category": "museum",
       "url": "https://tickets.bujairi.sa/en/d/3552/diriyah-access",
       "verified_on": "2026-09-03",
-      "verified_by": "diriyah.sa"
+      "verified_by": "diriyah.sa",
+      "commons_query": "At-Turaif District"
     },
     {
       "slug": "national-museum",
@@ -112,7 +114,8 @@
       "category": "museum",
       "url": "https://nationalmuseum.moc.gov.sa/",
       "verified_on": "2026-09-03",
-      "verified_by": "moc.gov.sa"
+      "verified_by": "moc.gov.sa",
+      "commons_query": "National Museum of Saudi Arabia"
     },
     {
       "slug": "kafd",
@@ -132,7 +135,8 @@
       "category": "park",
       "url": "https://kafd.sa/ar",
       "verified_on": "2026-09-03",
-      "verified_by": "kafd.sa"
+      "verified_by": "kafd.sa",
+      "commons_query": "King Abdullah Financial District"
     },
     {
       "slug": "sports-boulevard",
@@ -152,7 +156,8 @@
       "category": "park",
       "url": "https://sportsboulevard.sa/ar",
       "verified_on": "2026-09-03",
-      "verified_by": "sportsboulevard.sa"
+      "verified_by": "sportsboulevard.sa",
+      "commons_query": "Wadi Hanifah"
     },
     {
       "slug": "kingdom-centre",
@@ -172,7 +177,8 @@
       "category": "other",
       "url": "https://kingdomcentre.com.sa/",
       "verified_on": "2026-09-03",
-      "verified_by": "kingdomcentre.com.sa"
+      "verified_by": "kingdomcentre.com.sa",
+      "commons_query": "Kingdom Centre Riyadh"
     },
     {
       "slug": "edge-of-the-world",
@@ -192,7 +198,8 @@
       "category": "park",
       "url": "https://www.visitsaudi.com/ar/riyadh/attractions/edge-of-the-world",
       "verified_on": "2026-09-03",
-      "verified_by": "visitsaudi.com"
+      "verified_by": "visitsaudi.com",
+      "commons_query": "Edge of the World Riyadh"
     },
     {
       "slug": "wadi-hanifah",
@@ -213,7 +220,8 @@
       "url": "",
       "verified_on": "2026-09-03",
       "verified_by": "",
-      "note": "no official page answered on 2026-09-03 — ineligible until a url is added"
+      "note": "no official page answered on 2026-09-03 — ineligible until a url is added",
+      "commons_query": "Wadi Hanifah"
     },
     {
       "slug": "king-salman-park",

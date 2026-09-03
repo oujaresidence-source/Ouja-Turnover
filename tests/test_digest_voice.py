@@ -82,6 +82,13 @@ class Numerals(unittest.TestCase):
         self.assertFalse(voice.title_ok(""))
 
 
+class Weekend(unittest.TestCase):
+    def test_the_period_is_called_halweekend(self):
+        self.assertEqual(voice.weekend_wording("٣ فعاليات هذا الأسبوع في الرياض"), "٣ فعاليات هالويكند في الرياض")
+        self.assertEqual(voice.weekend_wording("الخميس الجاي فيه حفلة"), "هالويكند فيه حفلة")
+        self.assertIn("هالويكند", voice.CLAIM_SYSTEM)
+
+
 class Prompt(unittest.TestCase):
     def test_system_prompt_carries_the_bans_and_the_facts_rule(self):
         p = voice.PROMPT_SYSTEM

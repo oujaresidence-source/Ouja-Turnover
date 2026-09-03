@@ -101,9 +101,20 @@ CLAIM_SYSTEM = (
     "٦ كلمات أو أقل. محدّد لا عام: اسم، مكان، يوم، سعر — حقيقة من اللي أعطيك، لا تخترع ولا تضيف. "
     "ممنوع الصفات التسويقية: اكتشف · لا تفوّت · تجربة استثنائية · لا مثيل لها · وجهتك المثالية · "
     "أجواء ساحرة · على بُعد خطوات · انغمس · استمتع بـ · نقلة نوعية · سحر. الأرقام بالعربية. "
+    "الفترة اسمها «هالويكند» دايم — لا تقول «هذا الأسبوع» ولا «هالأسبوع» ولا «الخميس الجاي». "
     "رجّع JSON فقط: {\"claim\": \"...\"}."
 )
 MAX_CLAIM_WORDS = 6
+
+
+_WEEK_WORDS = ("هذا الأسبوع", "هالأسبوع", "هذا الاسبوع", "هالاسبوع", "الأسبوع الجاي", "الخميس الجاي", "الأسبوع القادم")
+
+
+def weekend_wording(t):
+    """The owner's word for the period is «هالويكند» (2026-09-03)."""
+    for w in _WEEK_WORDS:
+        t = (t or "").replace(w, "هالويكند")
+    return t
 
 
 def claim_ok(t):
@@ -124,7 +135,7 @@ def polish_claim(section_key, items, model_call=None, model=None, seed=0):
         return ""
     if not isinstance(got, dict):
         return ""
-    t = prose_digits((got.get("claim") or "").strip())
+    t = weekend_wording(prose_digits((got.get("claim") or "").strip()))
     return t if claim_ok(t) else ""
 
 

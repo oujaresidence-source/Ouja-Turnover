@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 
 from . import art, dates, db, links, rank, schema, voice
-from .collect import base, elcinema, kooora, platinumlist, podcast, ratings, saff, search_secondary, verse, worth
+from .collect import base, commons, elcinema, kooora, platinumlist, podcast, ratings, saff, search_secondary, verse, worth
 from .host import HOST
 from .render import build as render_build
 
@@ -194,10 +194,14 @@ def _item_from(c, artinfo):
               "stadium": c.get("stadium", ""), "city": c.get("city", ""), "in_riyadh": bool(c.get("in_riyadh")),
               "kickoff_iso": c.get("kickoff_iso", ""), "source": src, "confidence": c["confidence"]}
         if artinfo and artinfo.get("kind") == "logos":
-            it["logos"] = {"home": artinfo["home"], "away": artinfo["away"], "sha256": artinfo["sha256"]}
+            it["logos"] = {"home": artinfo["home"], "away": artinfo["away"], "sha256": artinfo["sha256"],
+                           "home_big": bool(artinfo.get("home_big")), "away_big": bool(artinfo.get("away_big"))}
         return it
     art = {"kind": artinfo["kind"], "sha256": artinfo["sha256"], "src": artinfo["src"],
            "w": int(artinfo.get("w") or 0), "h": int(artinfo.get("h") or 0)}
+    if artinfo.get("credit"):
+        art["credit"] = artinfo["credit"]
+        c["credit"] = artinfo["credit"]
     it = {"ttl": c["ttl"], "sub": c.get("sub", ""), "chip": c.get("chip") or "الرياض", "url": c["url"],
           "art": art, "day": c["day"], "source": src, "confidence": c["confidence"],
           "tags": dict(c.get("tags") or {}), "slug": c.get("slug"), "venue": c.get("venue", ""),
@@ -208,6 +212,9 @@ def _item_from(c, artinfo):
         it["ratings"] = c["ratings"]
     if c.get("imdb_id"):
         it["imdb_id"] = c["imdb_id"]
+    for k in ("new_this_week", "release_label", "episode", "episode_released", "artist", "credit", "info_url"):
+        if c.get(k) not in (None, ""):
+            it[k] = c[k]
     return it
 
 
@@ -350,12 +357,16 @@ def build_issue(now, http, search=None, load_json=None, dry_run=True, out_root=N
             og = art.og_hint(c.get("url", ""), http)
             if og:
                 c["art_hint"] = {"og": og}
+        if not (c.get("art_hint") or {}).get("og") and c.get("commons_query"):
+            found = commons.find(c["commons_query"], http)
+            if found:
+                c["commons"] = found
     items = {}
     for section, cands in chosen.items():
         items[section] = []
         for slot, c in enumerate(cands):
             if section == "fixtures":
-                info = art.logos_for(c, http) or {"kind": "generated", "sha256": "", "src": ""}
+                info = art.logos_for(c, http, large_lookup=lambda tid: saff.large_logo(tid, http)) or {"kind": "generated", "sha256": "", "src": ""}
             else:
                 info = art.resolve(c, section, issue_no, slot, http, owned=owned)
             items[section].append(_item_from(c, info))
@@ -426,7 +437,7 @@ def apply_alternate(issue_id, section, slot, rank_no, http, now, who="owner", ou
     sec = schema.section(payload, section)
     old = sec["items"][slot]
     if section == "fixtures":
-        info = art.logos_for(alt, http) or {"kind": "generated", "sha256": "", "src": ""}
+        info = art.logos_for(alt, http, large_lookup=lambda tid: saff.large_logo(tid, http)) or {"kind": "generated", "sha256": "", "src": ""}
     else:
         info = art.resolve(alt, section, row["issue_no"], slot, http)
     alt = _polish([alt], None, None)[0]

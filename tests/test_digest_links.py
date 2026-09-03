@@ -30,6 +30,12 @@ class Verify(unittest.TestCase):
         got = links.verify(["https://ok.example/old"], self.http)
         self.assertEqual(got, {"https://ok.example/old": "https://ok.example/new"})
 
+    def test_apple_short_url_is_kept_not_the_slug_redirect(self):
+        http = FakeHttp(pages={"https://podcasts.apple.com/sa/podcast/%D8%B3%D9%88/id1702294864": (200, "text/html", "<html>")},
+                        redirects={"https://podcasts.apple.com/sa/podcast/id1702294864": "https://podcasts.apple.com/sa/podcast/%D8%B3%D9%88/id1702294864"})
+        got = links.verify(["https://podcasts.apple.com/sa/podcast/id1702294864"], http)
+        self.assertEqual(got["https://podcasts.apple.com/sa/podcast/id1702294864"], "https://podcasts.apple.com/sa/podcast/id1702294864")
+
     def test_http_scheme_is_refused_before_any_call(self):
         got = links.verify(["http://ok.example/a"], self.http)
         self.assertEqual(got, {})

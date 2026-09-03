@@ -10,6 +10,7 @@ Network only through the injected `http` (HOST.http / FakeHttp)."""
 from urllib.parse import urlsplit
 
 HTML_TYPES = ("text/html", "application/xhtml+xml")
+KEEP_SHORT_HOSTS = ("podcasts.apple.com",)     # the redirect only adds a slug; the short form is the clean QR
 
 
 def origin(url):
@@ -42,6 +43,8 @@ def check_one(url, http):
     final = final or url
     if not final.lower().startswith("https://"):
         return None
+    if any(h in url.lower() for h in KEEP_SHORT_HOSTS) and same_origin(url, final):
+        return url
     return final
 
 

@@ -171,31 +171,62 @@ def artwork_for(item, http):
     return _pack("og", got) if got else None
 
 
+def commons_for(item, http):
+    """A free-licence Commons photo for a place (collect/commons.py picked it); the
+    credit travels with the art and is printed on the page."""
+    c = item.get("commons") or {}
+    url = c.get("url") or ""
+    if not url.lower().startswith("https://") or "wikimedia.org" not in url.lower():
+        return None
+    got = _fetch_image(url, http, min_edge=MIN_LONG_EDGE)
+    if not got:
+        return None
+    out = _pack("commons", got)
+    out["credit"] = c.get("credit", "")
+    out["page"] = c.get("page", "")
+    return out
+
+
 def poster_for(item, http):
     """The film's poster from the film page's own site (elcinema, 640×960)."""
     url = (item.get("art_hint") or {}).get("poster") or ""
     if not url or not url.lower().startswith("https://"):
         return None
-    if not same_site(url, item.get("url", "")):
+    if not same_site(url, item.get("info_url") or item.get("url", "")):
         return None
     got = _fetch_image(url, http, min_edge=MIN_POSTER_EDGE)
     return _pack("poster", got) if got else None
 
 
-def logos_for(fixture, http):
-    """Both club logos from the FA's site (same site as the fixture url). -> {"kind":
-    "logos", "home": datauri, "away": datauri, "sha256"} or None when either is missing."""
-    out = {"kind": "logos", "home": "", "away": "", "sha256": "", "src": "", "origin": ""}
+MIN_LOGO_SMALL = 40          # the table row tolerates the FA's 50×50 thumbnails
+
+
+def logos_for(fixture, http, large_lookup=None):
+    """Club logos from the FA's site (same site as the fixture url), PER SIDE: a missing
+    or tiny logo on one side never blanks the other (2026-09-03: الاتحاد's thumbnail is
+    50×50, so the whole الاتحاد × النصر row lost both). `large_lookup(team_id) -> url`
+    upgrades a small thumbnail from the team page. -> {"kind": "logos", "home", "away",
+    "home_big", "away_big", "sha256"} or None when neither side has a logo."""
+    out = {"kind": "logos", "home": "", "away": "", "home_big": False, "away_big": False, "sha256": "", "src": "", "origin": ""}
     hashes = []
     for side in ("home", "away"):
         url = fixture.get(side + "_logo") or ""
         if not (url and url.lower().startswith("https://") and same_site(url, fixture.get("url", ""))):
-            return None
-        got = _fetch_image(url, http, min_edge=MIN_LOGO_EDGE, keep_png=True)
+            continue
+        got = _fetch_image(url, http, min_edge=MIN_LOGO_SMALL, keep_png=True)
+        if got and max(got["w"], got["h"]) < MIN_LOGO_EDGE and large_lookup:
+            big = large_lookup(fixture.get(side + "_team_id"))
+            if big and same_site(big, fixture.get("url", "")):
+                got2 = _fetch_image(big, http, min_edge=MIN_LOGO_EDGE, keep_png=True)
+                if got2:
+                    got = got2
         if not got:
-            return None
+            continue
         out[side] = got["src"]
+        out[side + "_big"] = max(got["w"], got["h"]) >= MIN_LOGO_EDGE
         hashes.append(got["sha256"])
+    if not hashes:
+        return None
     out["sha256"] = hashlib.sha256("|".join(hashes).encode("ascii")).hexdigest()
     return out
 
@@ -226,6 +257,9 @@ def resolve(item, section, issue_no, slot, http, owned=None):
     if got:
         return got
     got = og_for(item, http)
+    if got:
+        return got
+    got = commons_for(item, http)
     if got:
         return got
     try:

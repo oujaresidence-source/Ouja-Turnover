@@ -15,6 +15,11 @@ from ..dates import AR_DAY, AR_MONTHS, ar_date
 
 SOURCE = "elcinema"
 NOW_URL = "https://elcinema.com/now/sa/"
+# The QR must send a guest to a SAUDI cinema, not the Egyptian info site (owner 2026-09-03).
+# muvi's Arabic movie finder is the one Saudi chain that answers a plain request (VOX,
+# AMC, Empire, Reel all refuse); it lists films and showtimes by date.
+TICKETS_URL = "https://www.muvicinemas.com/ar/movie-finder"
+TICKETS_NAME = "muvi"
 ORIGIN = "https://elcinema.com"
 NEW_WINDOW_DAYS = 6
 
@@ -90,11 +95,11 @@ def parse(html, week, now, page_url=NOW_URL):
         # cinema chain page («السينما»), price «حسب العرض» (elcinema lists no prices).
         sub = " · ".join(x for x in (
             "%s %s" % (AR_DAY[dk], ar_date({"thu": week.thu, "fri": week.fri, "sat": week.sat}[dk])),
-            _genres_ar(genres) or lead, "حسب العرض") if x)
+            "%s، %s" % (TICKETS_NAME, _genres_ar(genres) or lead), "حسب العرض") if x)
         cands.append(base.make(
-            "cinema", base.short_title(title), sub, "سينما", url, dk, SOURCE, page_url, fetched,
+            "cinema", base.short_title(title), sub, "سينما", TICKETS_URL, dk, SOURCE, page_url, fetched,
             category="cinema", district="", raw_conf=base.TIER_PRIMARY,
-            extra={"name": title, "release_iso": release.isoformat(),
+            extra={"name": title, "release_iso": release.isoformat(), "info_url": url,
                    "new_this_week": release >= new_from, "release_label": lead,
                    "genres": [base.text(g) for g in genres][:3],
                    "age": int(age.group(1)) if age else None}))
@@ -114,9 +119,9 @@ def parse_film_page(html):
 
 
 def enrich(cand, http):
-    """Open the film's own page: poster (same site as the film url) + IMDb id."""
+    """Open the film's own info page: poster (same site as that page) + IMDb id."""
     try:
-        status, final, ctype, html = http.get_text(cand["url"])
+        status, final, ctype, html = http.get_text(cand.get("info_url") or cand["url"])
     except Exception:
         return cand
     if status != 200 or not html:

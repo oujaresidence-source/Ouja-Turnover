@@ -22,7 +22,7 @@ def _section(payload, key):
 
 def _photo_card(item, section_key, wide=False):
     art = item.get("art") or {}
-    has_img = art.get("kind") in ("owned", "og", "poster") and art.get("src")
+    has_img = art.get("kind") in ("owned", "og", "poster", "commons") and art.get("src")
     w, h = int(art.get("w") or 0), int(art.get("h") or 0)
     ratio = ' style="aspect-ratio:%d/%d"' % (w, h) if (has_img and w and h) else ' style="aspect-ratio:16/10"'
     img = ('<img src="%s" alt="">' % esc(art["src"])) if has_img else '<div class="ph">%s</div>' % esc((item.get("ttl") or "•")[:1])
@@ -86,6 +86,7 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .rt{display:inline-flex;align-items:center;gap:4px}
 .rt-logo{background:var(--red);color:var(--paper);font-weight:700;font-size:8px;padding:2px 5px;border-radius:3px;direction:ltr}
 .rt-v{font-size:11px}
+.rnew{font-size:9px;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:2px 7px}
 .fx{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--line)}
 .fxt{display:flex;align-items:center;gap:6px;font-family:%(serif)s;font-weight:700;font-size:15px}
 .fxt:last-of-type{justify-content:flex-end}
@@ -99,6 +100,7 @@ body{font-family:%(sans)s;color:var(--ink);direction:rtl;-webkit-print-color-adj
 .say{text-align:center;padding:6px 10px}
 .say .t{font-family:%(serif)s;font-weight:700;font-size:17px;line-height:1.6}
 .say .b{font-size:11px;color:var(--mute);margin-top:4px}
+.credit{font-size:9px;color:var(--mute);text-align:center}
 .ftr{display:flex;justify-content:space-between;font-size:10px;color:var(--mute);border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 """ % st
 
@@ -134,6 +136,12 @@ def build_poster(payload, art_map=None):
     sy = payload.get("saying") or {}
     if sy.get("text"):
         blocks.append('<div class="say"><div class="t">%s</div><div class="b">%s</div></div>' % (esc(sy["text"]), esc(sy.get("by", ""))))
+    credits = []
+    for s in sections:
+        for it in s.get("items") or []:
+            cr = (it.get("art") or {}).get("credit")
+            if cr and cr not in credits:
+                credits.append(cr)
     return (
         '<!doctype html>' + NL + '<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>poster</title>'
         '<style>' + NL + '%s' + NL + '%s' + NL + '%s' + NL + '</style></head><body>'
@@ -143,8 +151,10 @@ def build_poster(payload, art_map=None):
         '<div class="pills">%s</div>'
         '%s'
         '%s'
+        '%s'
         '<div class="ftr"><span>العدد %s · كل رابط تحققنا منه قبل النشر</span><span dir="ltr">oujares.com</span></div>'
         '</div></body></html>'
     ) % (tokens.css_root(), fonts.font_faces(), css(), esc(payload.get("dateLabel", "")), pills,
          ('<div class="occ">%s</div>' % esc(oc["banner_ar"])) if oc.get("banner_ar") else "",
-         "".join(blocks), esc(payload.get("issue", "")))
+         "".join(blocks), ('<div class="credit">%s</div>' % esc(" · ".join(credits))) if credits else "",
+         esc(payload.get("issue", "")))

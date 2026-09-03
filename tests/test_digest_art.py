@@ -37,7 +37,7 @@ class Fallback(unittest.TestCase):
     def test_cinema_uses_the_film_pages_poster_same_site_only(self):
         good = "https://media0106.elcinema.com/uploads/_640x_abc.jpg"
         http = FakeHttp(pages={good: (200, "image/jpeg", _png(640, 960))})
-        it = {"ttl": "Fall 2", "url": "https://elcinema.com/work/2099766/", "art_hint": {"poster": good}}
+        it = {"ttl": "Fall 2", "url": "https://www.muvicinemas.com/ar/movie-finder", "info_url": "https://elcinema.com/work/2099766/", "art_hint": {"poster": good}}
         got = art.resolve(it, "cinema", 12, 0, http)
         self.assertEqual(got["kind"], "poster")
         self.assertEqual((got["w"], got["h"]), (640, 960))
@@ -54,6 +54,32 @@ class Fallback(unittest.TestCase):
         got = art.resolve(self._item(og=ok), "events", 12, 0, http, owned={})
         self.assertEqual((got["kind"], got["w"], got["h"]), ("og", 1200, 630))
 
+    def test_logos_per_side_and_large_fallback(self):
+        """الاتحاد's schedule thumbnail is 50×50 — it must not blank النصر's logo, and the
+        team page's large file replaces it."""
+        h = "https://saff.com.sa/uploadcenter/saffteamsmall1566200867.png"     # tiny
+        big = "https://saff.com.sa/uploadcenter/saffteamlarge1566200867.png"
+        a = "https://saff.com.sa/uploadcenter/saffteamsmallfkCLO1747742996.png"
+        http = FakeHttp(pages={h: (200, "image/png", _png(50, 50)), big: (200, "image/png", _png(400, 400)), a: (200, "image/png", _png(400, 400))})
+        fx = {"url": "https://saff.com.sa/championship.php?id=415", "home_logo": h, "away_logo": a, "home_team_id": "103"}
+        got = art.logos_for(fx, http, large_lookup=lambda tid: big if tid == "103" else "")
+        self.assertTrue(got["home"] and got["away"])
+        self.assertTrue(got["home_big"] and got["away_big"])
+        got2 = art.logos_for(fx, http, large_lookup=lambda tid: "")
+        self.assertTrue(got2["home"] and got2["away"])
+        self.assertFalse(got2["home_big"])
+        one = art.logos_for(dict(fx, home_logo=""), http)
+        self.assertTrue(one and one["away"] and not one["home"])
+
+    def test_commons_photo_carries_its_credit(self):
+        u = "https://upload.wikimedia.org/wikipedia/commons/thumb/x/1200px-x.jpg"
+        http = FakeHttp(pages={u: (200, "image/jpeg", _png(1200, 800))})
+        it = {"ttl": "الطريف", "url": "https://tickets.bujairi.sa/en/d/3552/diriyah-access",
+              "commons": {"url": u, "credit": "الصورة: X · CC BY 2.0 · Wikimedia Commons", "page": "https://commons.wikimedia.org/wiki/File:x.jpg"}}
+        got = art.resolve(it, "worth", 12, 0, http, owned={})
+        self.assertEqual(got["kind"], "commons")
+        self.assertIn("Wikimedia Commons", got["credit"])
+
     def test_club_logos_from_the_fa_site_only(self):
         h = "https://saff.com.sa/uploadcenter/saffteamsmall1.png"
         a = "https://saff.com.sa/uploadcenter/saffteamsmall2.png"
@@ -63,8 +89,9 @@ class Fallback(unittest.TestCase):
         self.assertEqual(got["kind"], "logos")
         self.assertTrue(got["home"].startswith("data:image/png;base64,"))
         self.assertTrue(got["sha256"])
-        self.assertIsNone(art.logos_for(dict(fx, away_logo="https://elsewhere.example/x.png"), http))
-        self.assertIsNone(art.logos_for(dict(fx, away_logo=""), http))
+        cross = art.logos_for(dict(fx, away_logo="https://elsewhere.example/x.png"), http)
+        self.assertTrue(cross["home"] and not cross["away"])          # the foreign side is dropped, not the row
+        self.assertIsNone(art.logos_for(dict(fx, home_logo="", away_logo=""), http))
 
     def test_og_same_site_big_enough_is_used_and_hashed(self):
         raw = _png(900, 600)

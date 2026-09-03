@@ -11,7 +11,7 @@ MAX_TITLE_WORDS = 4
 MAX_SUB_WORDS = 10
 MIN_PRIMARY_CONFIDENCE = 0.75
 DAYS = ("thu", "fri", "sat")
-ART_KINDS = ("owned", "og", "poster", "generated", "none")
+ART_KINDS = ("owned", "og", "poster", "commons", "generated", "none")
 
 SECTIONS = {
     "events":   {"title": "فعاليات ومعارض", "min": 2, "max": 4, "exact": None},

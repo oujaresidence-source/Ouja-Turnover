@@ -59,10 +59,10 @@ def _art(item, section_key, issue, slot, art_map):
     art = item.get("art") or {}
     kind = art.get("kind") or "none"
     override = (art_map or {}).get((section_key, slot))
-    if override and override.get("kind") in ("owned", "og", "poster") and override.get("src"):
+    if override and override.get("kind") in ("owned", "og", "poster", "commons") and override.get("src"):
         art = dict(art, **override)
         kind = override["kind"]
-    if kind in ("owned", "og", "poster") and art.get("src"):
+    if kind in ("owned", "og", "poster", "commons") and art.get("src"):
         cls = "art art-photo" + (" art-poster" if kind == "poster" else "")
         return '<div class="%s"%s><img src="%s" alt=""></div>' % (cls, _ratio_style(art, "2/3" if kind == "poster" else "16/9"), esc(art["src"]))
     if kind == "generated":
@@ -78,6 +78,8 @@ def _ratings(item):
     when the build opened the source page (guard rule 11)."""
     r = item.get("ratings") or {}
     if not r.get("sources"):
+        if item.get("new_this_week") or item.get("release_label", "").startswith(("الخميس", "الجمعة", "السبت")):
+            return '<div class="rate"><span class="rnew">جديد · التقييم ما نزل بعد</span></div>'
         return ""
     bits = []
     if r.get("imdb") is not None:
@@ -169,7 +171,7 @@ def page_events(payload, sec, issue, checked, n, art_map):
 
 def page_cinema(payload, sec, issue, checked, n, art_map):
     items = sec["items"]
-    claim = sec.get("claim") or "ثلاثة أفلام على الشاشة هالأسبوع"
+    claim = sec.get("claim") or "ثلاثة أفلام على الشاشة هالويكند"
     cards = "".join(_card(it, "cinema", issue, i, art_map) for i, it in enumerate(items))
     return (
         '<section class="page cinema"><div class="eyebrow">%s</div>'
@@ -184,7 +186,7 @@ def page_fixtures(payload, sec, issue, checked, n, art_map):
     head = next((it for it in items if it.get("in_riyadh")), items[0])
     claim = sec.get("claim") or "%s: %s و%s" % (head.get("when", ""), head.get("home", ""), head.get("away", ""))
     lg = head.get("logos") or {}
-    if lg.get("home") and lg.get("away"):
+    if lg.get("home") and lg.get("away") and lg.get("home_big", True) and lg.get("away_big", True):
         band = ('<div class="lband"><div class="club"><img src="%s" alt=""><span>%s</span></div>'
                 '<span class="vsbig">×</span><div class="club"><img src="%s" alt=""><span>%s</span></div></div>'
                 % (esc(lg["home"]), esc(head.get("home", "")), esc(lg["away"]), esc(head.get("away", ""))))
@@ -211,12 +213,13 @@ def page_fixtures(payload, sec, issue, checked, n, art_map):
 def page_worth(payload, sec, issue, checked, n, art_map):
     it = sec["items"][0]
     claim = sec.get("claim") or it.get("ttl", "")
+    credit = ((it.get("art") or {}).get("credit") or "")
     return (
         '<section class="page worth"><div class="eyebrow">%s</div>'
         '<h1 class="claim">%s</h1>'
         '<div class="grid g1">%s</div>%s</section>'
     ) % (esc(sec.get("title", "")), bidi(claim),
-         _card(it, "worth", issue, 0, art_map, big=True), _foot(_sources_of(sec), checked, n))
+         _card(it, "worth", issue, 0, art_map, big=True), _foot(_sources_of(sec), checked, n, extra=credit))
 
 
 def page_podcast(payload, sec, issue, checked, n, art_map):
@@ -227,7 +230,7 @@ def page_podcast(payload, sec, issue, checked, n, art_map):
         '<h1 class="claim">%s</h1>'
         '<div class="grid g1">%s</div>%s</section>'
     ) % (esc(sec.get("title", "")), bidi(claim), _card(dict(it, hook=it.get("hook") or ("مع %s" % it.get("artist", "")) if it.get("artist") else it), "podcast", issue, 0, art_map, big=True),
-         _foot(_sources_of(sec), checked, n, extra="الأكثر استماعاً في السعودية هالأسبوع"))
+         _foot(_sources_of(sec), checked, n, extra="الأكثر استماعاً في السعودية هالويكند"))
 
 
 def page_words(payload, checked, n):
@@ -446,7 +449,7 @@ def build_story(payload, art_map=None):
         '<!doctype html>' + NL + '<html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>story</title>'
         '<style>' + NL + '%s' + NL + '%s' + NL + '%s' + NL + '</style></head><body>'
         '<div class="story"><div class="eyebrow">عوجا · وش صاير بالرياض</div>'
-        '<div class="num">%s</div><h1 class="claim">خطة نهاية الأسبوع، جاهزة</h1>%s'
+        '<div class="num">%s</div><h1 class="claim">خطة هالويكند، جاهزة</h1>%s'
         '<div class="foot"><span>العدد %s · النشرة كاملة عند الاستقبال وفي الشقة</span><span dir="ltr">%s</span></div>'
         '</div></body></html>'
     ) % (tokens.css_root(), fonts.font_faces(), css_story(), esc(payload.get("dateLabel", "")), rows,
