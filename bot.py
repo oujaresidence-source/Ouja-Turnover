@@ -21830,6 +21830,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
 
         <div id="ticketsOpsSummary"></div>
         <div class="kpis" id="ticketStats"></div>
+        <div id="rrSummary"></div>
 
         <div class="card">
           <div class="card-head">
@@ -27603,8 +27604,57 @@ async function loadTickets(){
   _populateTicketCatFilter();
   _renderTicketsBody();
   renderTicketsOpsSummary();
+  loadRRSummary();
   // also refresh the sidebar badge
   buildSideNav();
+}
+
+// RR reimbursements: read-only money strip (claimed vs actually recovered). Its own
+// fetch and its own try/catch — the maintenance table must never go blank because the
+// reimbursement summary hiccuped, so a failure here just hides the strip.
+function _rrN(v){ try{ return Math.round(Number(v)||0).toLocaleString('en-US'); }catch(e){ return '0'; } }
+function _rrKpi(ic, cls, val, lbl){
+  return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+cls+'">'+ic+'</div></div>'
+    + '<div class="kpi-val">'+val+'</div><div class="kpi-lbl">'+lbl+'</div></div>';
+}
+async function loadRRSummary(){
+  const el = document.getElementById('rrSummary'); if(!el) return;
+  let d = null;
+  try{ d = await api('/api/tickets/rr-summary'); }catch(_){ el.innerHTML = ''; return; }
+  if(!d || d.error){ el.innerHTML = ''; return; }
+  _renderRRSummary(d);
+}
+function _renderRRSummary(d){
+  const el = document.getElementById('rrSummary'); if(!el) return;
+  if(!d.n && !d.open){ el.innerHTML = ''; return; }
+  const rate = Math.round(Number(d.rate||0));
+  const rcls = rate >= 80 ? 'g' : (rate >= 50 ? 'a' : 'r');
+  let h = '<div class="card"><div class="card-head">'
+    + '<span class="card-title">🧾 طلبات التعويض RR — ' + esc(d.month||'') + '</span>'
+    + '<span class="muted" style="font-size:11.5px">استرداد Airbnb · للاطلاع فقط</span>'
+    + '</div><div class="kpis" style="margin:2px 0 4px">'
+    + _rrKpi('≡', 'b', _rrN(d.claimed) + ' ر.س', 'طالبنا فيه هذا الشهر')
+    + _rrKpi('✓', 'g', _rrN(d.received) + ' ر.س', 'اللي استلمناه فعلاً')
+    + _rrKpi('%', rcls, rate + '%', 'نسبة الاسترداد')
+    + _rrKpi('⏳', (d.awaiting ? 'a' : 'b'), (d.awaiting||0), 'بانتظار إغلاق فيصل')
+    + '</div>';
+  const rows = d.by_unit || [];
+  if(rows.length){
+    h += '<div style="overflow-x:auto"><table class="data"><thead><tr><th>الشقة</th>'
+      + '<th class="num">طالبنا</th><th class="num">استلمنا</th><th class="num">عدد</th>'
+      + '</tr></thead><tbody>';
+    for(const r of rows.slice(0, 12)){
+      h += '<tr><td>' + esc(r.unit||'') + '</td><td class="num">' + _rrN(r.claimed)
+        + '</td><td class="num">' + _rrN(r.received) + '</td><td class="num">'
+        + (r.n||0) + '</td></tr>';
+    }
+    h += '</tbody></table></div>';
+  }
+  const all = d.all || {};
+  h += '<div class="muted" style="font-size:11.5px;margin-top:8px">من البداية: طالبنا '
+    + _rrN(all.claimed) + ' ر.س · استلمنا ' + _rrN(all.received) + ' ر.س عبر '
+    + (all.n||0) + ' مطالبة · الطلبات المفتوحة الآن: ' + (d.open||0) + '.</div></div>';
+  el.innerHTML = h;
 }
 
 function _renderTicketStats(){
@@ -46318,6 +46368,21 @@ def _tickets_context(today):
         print("tickets context error:", e)
     return hot_lids, next_arr
 
+async def _api_rr_summary(request):
+    """GET /api/tickets/rr-summary?month=YYYY-MM — read-only reimbursement money view.
+
+    Reads the Discord ticket store only: no Hostaway, no Claude, nothing to warm. It
+    inherits the «تذاكر» read permission from the /api/tickets/ prefix rule, so a user
+    who cannot see tickets cannot see the recovered money either."""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    month = (request.query.get("month", "") or "").strip()[:7] or None
+    try:
+        return _json(_rr_summary(_dtk.get("tickets") or {}, month=month))
+    except Exception as e:
+        print("rr summary error:", e)
+        return _json({"error": "summary_failed"}, 500)
+
 async def _api_tickets_list(request):
     """GET /api/tickets/list?status=&priority=&category=&q=&lid="""
     if not _dash_auth(request):
@@ -62952,6 +63017,7 @@ async def start_web_server():
         app.router.add_get("/api/cleaning/photos-find", _api_cleaning_photos_find)
         # Maintenance tickets (صيانة)
         app.router.add_get("/api/tickets/list", _api_tickets_list)
+        app.router.add_get("/api/tickets/rr-summary", _api_rr_summary)
         app.router.add_post("/api/tickets/create", _api_tickets_create)
         app.router.add_post("/api/tickets/update", _api_tickets_update)
         app.router.add_post("/api/tickets/delete", _api_tickets_delete)
@@ -65846,6 +65912,7 @@ def _rr_enrich(code):
     lid = res.get("listingMapId")
     today = datetime.now(TZ).date()
     out = {"guest": (res.get("guestName") or "").strip(),
+           "lid": lid,                       # kept: the close-out needs the OWNER behind the unit
            "unit": _tk_unit_name(lid) if lid else "",
            "arrival": a.isoformat() if a else "", "departure": d.isoformat() if d else "",
            "channel": (res.get("channelName") or ""), "status": (res.get("status") or "")}
@@ -66014,6 +66081,7 @@ async def _rr_generate_english(channel, rec):
                                "تأكدوا من الرقم. النسخة الإنجليزية بتطلع بدون بيانات الحجز.")
         text = _rr_render_english(rec, enrich, data)
         rec["english_ok"] = bool(data)
+        _rr_stamp_enrich(rec, enrich)     # unit/guest/dates/lid stay ON the ticket for the close-out
         _dtk_save()
         await _tk_send_block(channel,
                              "🇬🇧 **النسخة الإنجليزية — انسخها كاملة للباك أوفيس:**", text)
@@ -66033,6 +66101,662 @@ async def _rr_generate_english(channel, rec):
         except Exception:
             pass
 
+# ---------------- RR close-out: SAM finishes the claim, Faisal closes the ticket ----------------
+#  When the Airbnb claim is finally settled, whoever chased it presses «✅ خلصت المطالبة»
+#  and answers five short boxes. Everything else — the story, the items, the apartment,
+#  the guest, the amount we asked for — is already on the ticket and is NEVER retyped.
+#
+#  Out of that comes ONE deterministic Arabic WhatsApp message for the apartment owner.
+#  The model contributes a single summarising sentence with no numbers in it; every riyal
+#  in the text is rendered from the stored record, so a hallucination cannot move money.
+#  WhatsApp is not Discord: bold is one star, there are no links, and the whole thing is
+#  capped — and when it must be trimmed, the STORY shrinks, never the money lines.
+#
+#  The ticket then waits. Only Faisal (or a server admin) can close it, and the gate is
+#  re-checked at the moment of the press, not when the button was drawn.
+_RR_PAYERS = [("ouja",  "🏢 عوجا (على حسابنا)",   "Ouja paid"),
+              ("owner", "🧑 المالك (على حسابه)",  "Owner paid"),
+              ("none",  "➖ ما فيه إصلاح مدفوع",  "No paid repair")]
+_RR_PAYER_KEYS = {k for k, _ar, _en in _RR_PAYERS}
+_RR_PAYER_AR = {k: ar for k, ar, _en in _RR_PAYERS}
+_RR_OUTCOME_AR = {"denied": "❌ رفضوا المطالبة", "partial": "⚠️ أقل من المطلوب",
+                  "full": "✅ كامل المبلغ", "over": "✅ أكثر من المطلوب",
+                  "received": "✅ استلمنا", "unknown": "—"}
+RR_WA_CAP              = int(os.environ.get("RR_WA_CAP", "950") or 950)
+RR_NUDGE_HOURS         = float(os.environ.get("RR_NUDGE_HOURS", "24") or 24)
+RR_NUDGE_POLL_MIN      = int(os.environ.get("RR_NUDGE_POLL_MIN", "60") or 60)
+RR_OWNER_RELAY_ROLE_ID = int(os.environ.get("RR_OWNER_RELAY_ROLE_ID", "0") or 0)
+
+_RR_CLOSE_REFUSAL = (
+    "🙏 **إغلاق طلبات التعويض لفيصل فقط.**\n"
+    "كمّل شغلك عادي: حدّث حالة المطالبة، وسجّل النتيجة من زر «✅ خلصت المطالبة» — "
+    "وفيصل يراجع الأرقام ورسالة المالك ويقفل الطلب.")
+
+def _rr_close_ids():
+    """Who may close an RR ticket, besides server admins. A garbled value falls back to
+    'admins only' — never to 'everybody', because a wide-open close is the bug we fixed."""
+    raw = str(os.environ.get("RR_CLOSE_IDS", "") or "")
+    out = [int(p) for p in (x.strip() for x in raw.replace("،", ",").split(",")) if p.isdigit()]
+    for uid in (PROC_OWNER_IDS or []):
+        if uid not in out:
+            out.append(uid)
+    return out
+
+def _rr_can_close(user):
+    """Faisal (by id, or as a server admin). Everyone else keeps every other button."""
+    if _tk_is_admin(user):
+        return True
+    return bool(getattr(user, "id", None) in _rr_close_ids())
+
+def _rr_outcome(claimed, received):
+    """Claimed vs what actually landed. A halala of float drift must never tell an owner
+    we were short-changed, so 'nearly equal' counts as full. Pure."""
+    if received is None:
+        return "unknown"
+    try:
+        received = float(received)
+    except (TypeError, ValueError):
+        return "unknown"
+    if received <= 0.005:
+        return "denied"
+    try:
+        claimed = float(claimed)
+    except (TypeError, ValueError):
+        return "received"
+    if claimed <= 0:
+        return "received"
+    if received > claimed + 0.51:
+        return "over"
+    if received >= claimed - 0.51:
+        return "full"
+    return "partial"
+
+def _rr_parse_when(raw, today):
+    """The date SAM typed → a real date, or None. ISO and dd/mm/yyyy only; anything else
+    («يوم الخميس اللي راح») keeps its words elsewhere and dates the record today. Pure."""
+    s = str(raw or "").strip().translate(_AR_DIGIT_MAP)
+    if not s:
+        return None
+    d = _parse_date(s)
+    if d:
+        return d
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$", s)
+    if m:
+        try:
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            return None
+    return None
+
+def _rr_closeout_parse(rec, payer, received_raw, when_raw, ref_raw, reason_raw,
+                       note_raw, actor="", actor_id=0, today=None):
+    """SAM's five boxes → the stored close-out. Returns (record, error). Pure except for
+    the clock. '0' is a VALID answer (they refused) — only unreadable input is refused."""
+    if payer not in _RR_PAYER_KEYS:
+        return None, "اختر مين دفع الإصلاح قبل لا تكمل."
+    raw_s = str(received_raw or "").strip()
+    if re.search(r"[-−]", raw_s):
+        return None, "المبلغ ما ينفع يكون بالسالب — اكتب الرقم اللي وصلنا، و«0» إذا رفضوا."
+    received = _tk_num(raw_s)
+    if received is None:
+        return None, ("ما فهمت المبلغ «%s» — اكتب رقم فقط، و«0» إذا رفضوا المطالبة."
+                      % raw_s[:40])
+    claimed = _tk_num((rec or {}).get("total_raw"))
+    today = today or datetime.now(TZ).date()
+    d = _rr_parse_when(when_raw, today)
+    prev = (rec or {}).get("closeout")
+    prev = prev if isinstance(prev, dict) else {}
+    co = {"payer": payer,
+          "received": float(received),
+          "received_raw": raw_s[:40],
+          "claimed": (float(claimed) if claimed is not None else None),
+          "date": (d or today).isoformat(),
+          "date_raw": str(when_raw or "").strip()[:60],
+          "ref": str(ref_raw or "").strip()[:60],
+          "less_reason": str(reason_raw or "").strip()[:600],
+          "note": str(note_raw or "").strip()[:400],
+          "by": str(actor or "")[:60],
+          "by_id": int(actor_id or 0),
+          "at": datetime.now(TZ).isoformat(timespec="seconds"),
+          "revision": int(prev.get("revision") or 0) + 1}
+    co["outcome"] = _rr_outcome(co["claimed"], co["received"])
+    return co, None
+
+def _rr_stamp_enrich(rec, enrich):
+    """Keep what the Hostaway lookup found ON the ticket. A later lookup that fails must
+    never erase what we already knew, so a blank never overwrites a value. Pure."""
+    for k in ("guest", "unit", "arrival", "departure", "channel", "lid"):
+        v = (enrich or {}).get(k)
+        if v not in (None, "", 0):
+            rec[k] = v
+    return rec
+
+def _rr_owner_contact(rec):
+    """(owner name, phone) for the apartment behind this claim — registry by listing id
+    first, then by unit name, phone from the finance owner profile. A registry hiccup
+    returns blanks: an owner lookup must never take a settled claim down with it."""
+    try:
+        info = None
+        lid = (rec or {}).get("lid")
+        if lid is not None:
+            info = _owner_info_by_lid(lid)
+        if not info and (rec or {}).get("unit"):
+            info = _owner_info(rec.get("unit"))
+        owner = str((info or {}).get("owner") or "").strip()
+        if not owner:
+            return "", ""
+        store = _load_json("owner_terms.json", {}) or {}
+        prof = (store.get("owners") or {}).get(owner) or {}
+        return owner, str(prof.get("phone") or "").strip()
+    except Exception as e:
+        print("rr owner contact error:", e)
+        return "", ""
+
+def _rr_clip(s, n):
+    """Whitespace-collapsed, cut on a word boundary when there is one. Pure."""
+    s = re.sub(r"\s+", " ", str(s or "")).strip()
+    if n is None or len(s) <= n:
+        return s
+    if n <= 1:
+        return ""
+    cut = s[:n - 1]
+    sp = cut.rfind(" ")
+    if sp > n * 0.6:
+        cut = cut[:sp]
+    return cut.rstrip() + "…"
+
+def _rr_story_fallback(rec):
+    """No model? The team's own Arabic, shortened — never a blank where the story goes."""
+    return _rr_clip((rec or {}).get("narrative"), 220)
+
+def _rr_d_ar(iso):
+    """2026-08-12 → 12/08/2026 (what an owner reads without thinking). Pure."""
+    d = _parse_date(iso)
+    if not d:
+        return str(iso or "").strip()
+    return "%02d/%02d/%04d" % (d.day, d.month, d.year)
+
+def _rr_item_lines(items_raw, limit=6):
+    """The claim as the team typed it, one bullet per line. We RE-FORMAT, never re-parse:
+    the amounts stay exactly the characters the team wrote. Returns (lines, hidden). Pure."""
+    out = []
+    for ln in str(items_raw or "").split("\n"):
+        ln = re.sub(r"\s+", " ", ln).strip(" -•\t")
+        if ln:
+            out.append(ln)
+    extra = max(0, len(out) - int(limit))
+    return out[:int(limit)], extra
+
+# The last line of the owner's message. Keyed by (who paid, was it refused) so that a
+# refused claim can never end on a sentence that sounds like money is coming.
+_RR_WA_PAYER = {
+    ("ouja", False):  "الإصلاح كان على حساب عوجا، والمبلغ المسترد يعوّض اللي صرفناه.",
+    ("ouja", True):   "الإصلاح كان على حساب عوجا وما حصلنا أي تعويض.",
+    ("owner", False): "الإصلاح كان على حسابك، والمبلغ المسترد من نصيبك.",
+    ("owner", True):  "الإصلاح كان على حسابك، وللأسف ما حصلنا تعويض من Airbnb.",
+    ("none", False):  "ما فيه إصلاح مدفوع لهذي الحادثة.",
+    ("none", True):   "ما فيه إصلاح مدفوع، وما حصلنا أي تعويض.",
+}
+
+def _rr_wa_build(rec, co, owner_name, story_line, story_budget, items_limit, keep_note,
+                 reason_ar=None, note_ar=None):
+    """One rendering pass of the owner's message. Blocks are joined by a blank line and
+    empty blocks disappear, so a missing optional part never leaves a hole. Pure."""
+    B = []
+    who = str(owner_name or "").strip()
+    B.append(("السلام عليكم *%s* 👋" % who) if who else "السلام عليكم 👋")
+    unit = str((rec or {}).get("unit") or "").strip()
+    B.append(("تحديث عن حادثة صارت في شقة *%s*." % unit) if unit
+             else "تحديث عن حادثة صارت في إحدى شققك.")
+    stay = []
+    guest = str(rec.get("guest") or "").strip()
+    if guest:
+        stay.append(guest)
+    a, d = _rr_d_ar(rec.get("arrival")), _rr_d_ar(rec.get("departure"))
+    if a and d:
+        stay.append("من %s إلى %s" % (a, d))
+    elif a or d:
+        stay.append(a or d)
+    if stay:
+        B.append("*الحجز:* " + " · ".join(stay))
+    if story_budget is None or story_budget > 0:
+        story = _rr_clip(str(story_line or "").strip() or _rr_story_fallback(rec), story_budget)
+        if story:
+            B.append("*وش صار:* " + story)
+    lines, extra = _rr_item_lines(rec.get("items_raw"), limit=items_limit)
+    if lines:
+        blk = ["*الأضرار:*"] + ["• " + x for x in lines]
+        if extra:
+            blk.append("• + %d بنود ثانية" % extra)
+        B.append("\n".join(blk))
+    claimed, received = co.get("claimed"), co.get("received")
+    outcome = co.get("outcome") or _rr_outcome(claimed, received)
+    money = []
+    if claimed is not None:
+        money.append("*طالبنا Airbnb بـ:* %s ر.س" % _tk_sar(claimed))
+    if outcome == "denied":
+        money.append("*اللي استلمناه:* ما استلمنا شي — Airbnb رفضت المطالبة.")
+    elif outcome == "full":
+        money.append("*اللي استلمناه:* %s ر.س ✅ (كامل المبلغ)" % _tk_sar(received))
+    else:
+        money.append("*اللي استلمناه:* %s ر.س" % _tk_sar(received))
+    if outcome == "partial" and claimed is not None:
+        money.append("*الفرق:* %s ر.س" % _tk_sar(float(claimed) - float(received)))
+    # The agent types these in English; the owner reads the Arabic rendering when we have
+    # one, and the original words when we don't (a failed translation must not blank them).
+    reason = str((reason_ar if reason_ar is not None else co.get("less_reason")) or "").strip()
+    if reason and outcome in ("denied", "partial"):
+        money.append(("*سبب الرفض:* " if outcome == "denied" else "*سبب Airbnb:* ")
+                     + _rr_clip(reason, 220))
+    B.append("\n".join(money))
+    B.append(_RR_WA_PAYER.get((co.get("payer"), outcome == "denied"), ""))
+    if keep_note:
+        B.append(_rr_clip((note_ar if note_ar is not None else co.get("note")), 200))
+    ref = str(co.get("ref") or "").strip()
+    if ref:
+        B.append("*مرجع القضية:* " + ref)
+    if set(rec.get("evidence") or []) & {"photos", "video"}:
+        B.append("الصور والتفاصيل كاملة عندنا — نرسلها لك إذا تحب.")
+    B.append("تحياتنا — فريق عوجا 🏡")
+    return "\n\n".join([b for b in B if str(b).strip()])
+
+def _rr_wa_owner_msg(rec, co, owner_name="", story_line="", cap=None,
+                     reason_ar=None, note_ar=None):
+    """The message the owner actually reads. WhatsApp formatting (ONE star for bold, no
+    links, no code fences) and capped, because a deep link or an old phone truncates a
+    long message silently. When it must shrink, the story goes first and the money lines
+    go last — the numbers are the point of the message. Pure."""
+    cap = int(cap or RR_WA_CAP)
+    rec, co = (rec or {}), (co or {})
+    txt = ""
+    for budget, items_limit, keep_note in ((None, 6, True), (200, 6, True), (140, 3, True),
+                                           (140, 3, False), (0, 2, False)):
+        txt = _rr_wa_build(rec, co, owner_name, story_line, budget, items_limit, keep_note,
+                           reason_ar=reason_ar, note_ar=note_ar)
+        if len(txt) <= cap:
+            return txt
+    return txt[:max(1, cap - 1)].rstrip() + "…"
+
+_RR_STORY_SYSTEM = (
+    "You prepare the Arabic wording of an update sent to a Saudi apartment OWNER about a "
+    "guest-damage claim. You are given an Arabic operations report and two notes the "
+    "claims agent wrote IN ENGLISH while dealing with Airbnb. Produce Saudi Arabic that is "
+    "friendly-professional: no drama, no blame of the owner, no promises. "
+    "NEVER invent facts. Copy every number EXACTLY as it appears, in Western digits, and "
+    "never add a number that is not in the source — all the amounts are added separately "
+    "by the system. NEVER say who paid for the repair or that anything was covered or "
+    "compensated: a separate line states that, and a guess there would contradict it. "
+    "Return ONLY a JSON object with three keys: "
+    "story (ONE short Arabic sentence, two at most, describing what happened to the "
+    "apartment — from the Arabic report), "
+    "reason (the agent's English explanation of why Airbnb paid less or refused, "
+    "translated into Arabic, faithful and complete; empty string if none was given), "
+    "note (the agent's English closing note to the owner, translated into Arabic; "
+    "empty string if none was given)."
+)
+
+def _rr_ar_texts(rec, co):
+    """The Arabic wording for the owner's message: the one-line story, plus the agent's
+    English «why less» and «note» rendered into Arabic.
+
+    She works the claim with Airbnb's recovery team in English, so she types English —
+    the owner reads Arabic. On ANY failure this returns `ok=False` and hands the original
+    text straight back, so the close-out still completes and a human is told to check the
+    wording before sending, rather than the whole thing dying on a translation."""
+    raw_reason = str((co or {}).get("less_reason") or "").strip()
+    raw_note = str((co or {}).get("note") or "").strip()
+    out = {"story": "", "reason": raw_reason, "note": raw_note, "ok": False}
+    try:
+        narrative = str((rec or {}).get("narrative") or "").strip()
+        if not (narrative or raw_reason or raw_note):
+            out["ok"] = True                      # nothing to translate is not a failure
+            return out
+        nl = chr(10)
+        user = ("ARABIC OPERATIONS REPORT (what happened):" + nl + (narrative[:1500] or "—")
+                + nl + nl + "AGENT'S ENGLISH NOTE — why Airbnb paid less or refused:" + nl
+                + (raw_reason[:600] or "—")
+                + nl + nl + "AGENT'S ENGLISH CLOSING NOTE TO THE OWNER:" + nl
+                + (raw_note[:400] or "—")
+                + nl + nl + "Return the JSON object now.")
+        data = claude_json(_RR_STORY_SYSTEM, user, max_tokens=900,
+                           model=RR_MODEL or CLAUDE_MODEL_PREMIUM)
+        if not isinstance(data, dict):
+            return out
+        out["story"] = str(data.get("story") or "").strip()[:400]
+        if raw_reason:
+            out["reason"] = str(data.get("reason") or "").strip()[:600] or raw_reason
+        if raw_note:
+            out["note"] = str(data.get("note") or "").strip()[:400] or raw_note
+        out["ok"] = True
+        return out
+    except Exception as e:
+        print("rr arabic texts error:", e)
+        return out
+
+def _rr_summary(tickets, month=None, today=None):
+    """Read-only money view over the RR tickets: what we claimed vs what actually landed,
+    this month and all time, plus a per-apartment split. Money counts in the month the
+    close-out was recorded. A corrupt record is skipped, never fatal. Pure."""
+    if not month:
+        month = (today or datetime.now(TZ).date()).strftime("%Y-%m")
+    m_claimed = m_received = a_claimed = a_received = 0.0
+    m_n = a_n = open_n = await_n = 0
+    by = {}
+    for rec in (tickets or {}).values():
+        if not isinstance(rec, dict) or rec.get("kind") != "rr":
+            continue
+        if rec.get("status") != "closed":
+            open_n += 1
+            if rec.get("awaiting_close"):
+                await_n += 1
+        co = rec.get("closeout")
+        if not isinstance(co, dict):
+            continue
+        claimed = co.get("claimed")
+        if not isinstance(claimed, (int, float)):
+            claimed = _tk_num(rec.get("total_raw")) or 0.0
+        try:
+            received = float(co.get("received") or 0.0)
+        except (TypeError, ValueError):
+            received = 0.0
+        claimed = float(claimed)
+        a_claimed += claimed
+        a_received += received
+        a_n += 1
+        if str(co.get("at") or "")[:7] != month:
+            continue
+        m_claimed += claimed
+        m_received += received
+        m_n += 1
+        unit = str(rec.get("unit") or "").strip() or "غير محدد"
+        row = by.setdefault(unit, {"unit": unit, "claimed": 0.0, "received": 0.0, "n": 0})
+        row["claimed"] += claimed
+        row["received"] += received
+        row["n"] += 1
+    for row in by.values():
+        row["claimed"] = round(row["claimed"], 2)
+        row["received"] = round(row["received"], 2)
+    return {"month": month,
+            "claimed": round(m_claimed, 2), "received": round(m_received, 2), "n": m_n,
+            "rate": (round(m_received / m_claimed * 100, 2) if m_claimed > 0 else 0.0),
+            "open": open_n, "awaiting": await_n,
+            "by_unit": sorted(by.values(), key=lambda r: (-r["received"], -r["claimed"], r["unit"])),
+            "all": {"claimed": round(a_claimed, 2), "received": round(a_received, 2), "n": a_n}}
+
+# ---- the Discord surface: /rr-close → form → the owner's message → Faisal's gate ----
+#  A SLASH COMMAND, deliberately, not a button. Discord stores a card's buttons on the
+#  message itself, so a new button only ever appears on tickets opened after the deploy —
+#  every claim already in flight would have been left without a door. A slash command is
+#  typed into whatever room she is standing in, so it works in ALL the RR tickets, the old
+#  ones included. It is also the only thing that CAN open a form: a modal must answer an
+#  interaction, and a typed «!ouja …» message is not one.
+#
+#  The form is in ENGLISH because she runs the claim with Airbnb's recovery team in
+#  English; what she writes is translated into Arabic for the owner (see _rr_ar_texts).
+class RRCloseoutModal(discord.ui.Modal, title="Close reimbursement claim"):
+    def __init__(self, payer):
+        super().__init__()
+        self.payer = payer
+        self.received = discord.ui.TextInput(
+            label="Amount actually received (SAR)", max_length=20,
+            placeholder="1000 — type 0 if they refused the claim")
+        self.when = discord.ui.TextInput(
+            label="Date received / decided (optional)", required=False, max_length=40,
+            placeholder="2026-08-20 or 20/08/2026")
+        self.ref = discord.ui.TextInput(
+            label="Airbnb case reference (optional)", required=False, max_length=60,
+            placeholder="Resolution Center case number")
+        self.reason = discord.ui.TextInput(
+            label="If less than we asked, why?", required=False, max_length=600,
+            style=discord.TextStyle.paragraph,
+            placeholder="What Airbnb told you, in your own words. Translated to Arabic for the owner.")
+        self.note = discord.ui.TextInput(
+            label="Note for the owner (optional)", required=False, max_length=400,
+            style=discord.TextStyle.paragraph,
+            placeholder="Anything you want the owner to know. Translated to Arabic.")
+        for item in (self.received, self.when, self.ref, self.reason, self.note):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await _rr_closeout_submit(interaction, self.payer,
+                                      str(self.received.value or ""), str(self.when.value or ""),
+                                      str(self.ref.value or ""), str(self.reason.value or ""),
+                                      str(self.note.value or ""))
+        except Exception as e:
+            print("rr closeout error:", repr(e))
+            try:
+                await interaction.followup.send(
+                    "⚠️ Something went wrong and nothing was saved — try again, or tell Faisal.",
+                    ephemeral=True)
+            except Exception:
+                pass
+
+def _rr_closeout_head(rec, co, owner, phone):
+    """The at-a-glance card Faisal approves from: the money, the owner, and who typed it."""
+    out = co.get("outcome")
+    color = {"denied": 0xE05252, "partial": 0xE0A33E}.get(out, 0x3EA55E)
+    e = discord.Embed(title="✅ ملخص إغلاق RR #%03d" % int(rec.get("seq") or 0), color=color)
+    e.add_field(name="💰 طالبنا",
+                value=(("%s ر.س" % _tk_sar(co.get("claimed"))) if co.get("claimed") is not None
+                       else "— (ما انسجل مبلغ مطلوب)"), inline=True)
+    e.add_field(name="🏦 استلمنا", value="%s ر.س" % _tk_sar(co.get("received")), inline=True)
+    e.add_field(name="📊 النتيجة", value=_RR_OUTCOME_AR.get(out, out or "—"), inline=True)
+    e.add_field(name="🏠 المالك", value=(owner or "⚠️ ما عرفنا المالك"), inline=True)
+    e.add_field(name="📱 جواله", value=(phone or "غير مسجّل"), inline=True)
+    e.add_field(name="💸 مين دفع الإصلاح", value=_RR_PAYER_AR.get(co.get("payer"), "—"), inline=True)
+    if not rec.get("unit"):
+        e.add_field(name="⚠️ انتبهوا",
+                    value="ما قدرنا نربط الطلب بشقة (رقم الحجز غلط؟) — راجعوا المالك قبل الإرسال.",
+                    inline=False)
+    if co.get("less_reason"):
+        e.add_field(name="📝 سبب النقص/الرفض", value=str(co["less_reason"])[:1024], inline=False)
+    if co.get("ref"):
+        e.add_field(name="🔖 مرجع القضية", value=str(co["ref"])[:200], inline=False)
+    e.set_footer(text="سجّلها %s · نسخة %d" % (co.get("by") or "?", int(co.get("revision") or 1)))
+    return e
+
+async def _rr_closeout_submit(interaction, payer, received_raw, when_raw, ref_raw,
+                              reason_raw, note_raw):
+    """Store the settlement, write the owner's message, and hand the ticket to Faisal."""
+    ch = interaction.channel
+    rec = _dtk["tickets"].get(str(getattr(ch, "id", 0)))
+    if not rec or rec.get("kind") != "rr":
+        await interaction.followup.send(
+            "⚠️ This is not an RR reimbursement room — run `/rr-close` inside the claim's "
+            "own ticket room.", ephemeral=True)
+        return
+    co, err = _rr_closeout_parse(rec, payer, received_raw, when_raw, ref_raw, reason_raw,
+                                note_raw, actor=str(interaction.user),
+                                actor_id=getattr(interaction.user, "id", 0))
+    if err:
+        await interaction.followup.send("🙏 " + err, ephemeral=True)
+        return
+    # SAVE WHAT SHE TYPED FIRST. Everything below reaches out — Hostaway, the registry,
+    # Claude — and a jammed thread pool must never cost her the numbers she just entered.
+    rec["closeout"] = co
+    rec["awaiting_close"] = True
+    rec["status"] = "paid" if co["received"] > 0 else "denied"
+    rec.pop("nudged_at", None)
+    _dtk_save()
+    if not rec.get("unit") and rec.get("code"):        # old tickets: look the apartment up once
+        try:
+            _rr_stamp_enrich(rec, await asyncio.to_thread(_rr_enrich, rec.get("code") or "") or {})
+        except Exception as e:
+            print("rr closeout enrich error:", e)
+    owner, phone = await asyncio.to_thread(_rr_owner_contact, rec)
+    try:                                  # a slow model must not hold a settled claim open
+        ar = await asyncio.wait_for(asyncio.to_thread(_rr_ar_texts, rec, co), timeout=90)
+    except Exception as e:
+        print("rr arabic timeout/error:", e)
+        ar = {"story": "", "reason": co.get("less_reason") or "",
+              "note": co.get("note") or "", "ok": False}
+    msg_txt = _rr_wa_owner_msg(rec, co, owner_name=owner, story_line=ar.get("story") or "",
+                               reason_ar=ar.get("reason"), note_ar=ar.get("note"))
+    co["translated"] = bool(ar.get("ok"))
+    rec["owner_name"], rec["owner_phone"] = owner, phone
+    rec["wa_msg"] = msg_txt
+    _dtk_save()
+    mentions = []
+    if rec.get("opener_id"):
+        mentions.append("<@%d>" % int(rec["opener_id"]))
+    if RR_OWNER_RELAY_ROLE_ID:
+        mentions.append("<@&%d>" % RR_OWNER_RELAY_ROLE_ID)
+    head = (" ".join(mentions) + " — ") if mentions else ""
+    await ch.send(content=head + "رسالة المالك جاهزة 👇",
+                  embed=_rr_closeout_head(rec, co, owner, phone),
+                  allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+    await _tk_send_block(ch, "📋 **انسخ هذا النص كامل وأرسله للمالك على واتساب:**", msg_txt)
+    if not co.get("translated") and (co.get("less_reason") or co.get("note")):
+        await ch.send("⚠️ **الترجمة الآلية تعطلت** — كلام سام نازل بالإنجليزي داخل الرسالة. "
+                      "راجعوه واكتبوه بالعربي قبل الإرسال، أو شغّلوا `/rr-close` مرة ثانية.")
+    tail = await ch.send(
+        "👆 النص جاهز للنسخ. بعد ما ترسله للمالك اضغط «📤 أرسلتها للمالك».\n"
+        "🔒 الطلب ما ينقفل إلا من فيصل.",
+        view=RRCloseoutView(), allowed_mentions=discord.AllowedMentions.none())
+    rec["closeout_msg_id"] = tail.id
+    _dtk_save()
+    log_event("ops", "RR #%s: ملخص الإغلاق جاهز · استلمنا %s من %s"
+              % (rec.get("seq", "?"), _tk_sar(co.get("received")),
+                 (_tk_sar(co.get("claimed")) if co.get("claimed") is not None else "؟")))
+    await interaction.followup.send(
+        "✅ Saved. The owner's Arabic message is ready above — copy it and send it on "
+        "WhatsApp, then press «📤 أرسلتها للمالك». Faisal reviews and closes the ticket."
+        + ("" if co.get("translated") else
+           "\n⚠️ Automatic translation failed, so your English text is still English "
+           "inside the message. Check it before sending, or run `/rr-close` again."),
+        ephemeral=True)
+
+class RRCloseoutView(discord.ui.View):
+    """Under the ready message: mark-as-sent (anyone), approve+close and send-back (Faisal
+    only). Persistent — a redeploy must never orphan these buttons."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📤 أرسلتها للمالك", style=discord.ButtonStyle.secondary,
+                       custom_id="rr_sent", row=0)
+    async def sent(self, interaction: discord.Interaction, button: discord.ui.Button):
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        co = (rec or {}).get("closeout")
+        if not isinstance(co, dict):
+            await interaction.response.send_message(
+                "⚠️ ما لقيت ملخص إغلاق بهذي الغرفة.", ephemeral=True)
+            return
+        if co.get("sent_at"):                       # pressing twice must not log it twice
+            await interaction.response.send_message(
+                "📤 مسجّلة أصلاً: أرسلها **%s** بتاريخ %s."
+                % (co.get("sent_by") or "?", str(co["sent_at"])[:16].replace("T", " ")),
+                ephemeral=True)
+            return
+        co["sent_at"] = datetime.now(TZ).isoformat(timespec="seconds")
+        co["sent_by"] = str(interaction.user)
+        _dtk_save()
+        log_event("ops", "RR #%s: أُرسلت رسالة المالك (%s)"
+                  % ((rec or {}).get("seq", "?"), interaction.user))
+        await interaction.response.send_message(
+            "📤 تمام — مسجّل إن %s أرسل الرسالة للمالك." % interaction.user.mention,
+            allowed_mentions=discord.AllowedMentions(users=False))
+
+    @discord.ui.button(label="✅ اعتمد وأقفل", style=discord.ButtonStyle.success,
+                       custom_id="rr_approve_close", row=0)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _rr_can_close(interaction.user):
+            await interaction.response.send_message(_RR_CLOSE_REFUSAL, ephemeral=True)
+            return
+        rec = _dtk["tickets"].get(str(interaction.channel_id)) or {}
+        co = rec.get("closeout") if isinstance(rec.get("closeout"), dict) else {}
+        if not co.get("sent_at"):
+            await interaction.response.send_message(
+                "⚠️ ما أحد سجّل إنه أرسل الرسالة للمالك. تبي تقفل على أي حال؟",
+                view=_TkCloseConfirm(guard=_rr_can_close, refuse_msg=_RR_CLOSE_REFUSAL),
+                ephemeral=True)
+            return
+        await interaction.response.send_message("🔒 جاري الإغلاق…", ephemeral=True)
+        await _tk_close(interaction)
+
+    @discord.ui.button(label="↩️ رجّعها لسام", style=discord.ButtonStyle.secondary,
+                       custom_id="rr_send_back", row=0)
+    async def send_back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _rr_can_close(interaction.user):
+            await interaction.response.send_message(_RR_CLOSE_REFUSAL, ephemeral=True)
+            return
+        rec = _dtk["tickets"].get(str(interaction.channel_id))
+        if not rec:
+            await interaction.response.send_message(
+                "⚠️ ما لقيت بيانات هذا الطلب.", ephemeral=True)
+            return
+        rec["awaiting_close"] = False
+        rec.pop("nudged_at", None)
+        _dtk_save()
+        co = rec.get("closeout") if isinstance(rec.get("closeout"), dict) else {}
+        tag = ("<@%d> " % int(co["by_id"])) if co.get("by_id") else ""
+        await interaction.response.send_message(
+            "↩️ %sفيه ملاحظة على ملخص الإغلاق — عدّلوه واضغطوا «✅ خلصت المطالبة» مرة ثانية." % tag,
+            allowed_mentions=discord.AllowedMentions(users=True))
+
+@bot.tree.command(name="rr-close",
+                  description="سجّل نتيجة مطالبة التعويض واكتب رسالة المالك (داخل غرفة الطلب)")
+@app_commands.describe(payer="Who paid for the repair? This changes what the owner is told.")
+@app_commands.choices(payer=[
+    app_commands.Choice(name="Ouja paid for the repair", value="ouja"),
+    app_commands.Choice(name="The owner paid for the repair", value="owner"),
+    app_commands.Choice(name="No paid repair", value="none"),
+])
+async def slash_rr_close(interaction: discord.Interaction, payer: app_commands.Choice[str]):
+    """Typed inside the claim's own room. ASCII name on purpose — a rejected command name
+    fails the WHOLE tree sync and would take every other slash command down with it.
+
+    'Who paid' is a command option rather than a sixth form box because a Discord modal
+    holds exactly five inputs, and the five we have are all things only she knows."""
+    rec = _dtk["tickets"].get(str(getattr(interaction.channel, "id", 0)))
+    if not rec or rec.get("kind") != "rr":
+        await interaction.response.send_message(
+            "⚠️ Run this inside the reimbursement ticket's own room "
+            "(the `rr-…` channel of the claim you just finished).", ephemeral=True)
+        return
+    # A modal must be the FIRST response to the interaction — never defer before it.
+    await interaction.response.send_modal(RRCloseoutModal(payer.value))
+
+async def _rr_run_nudges():
+    """ONE reminder per waiting close-out, never a stream. The stamp is stored on the
+    ticket, so a redeploy (which restarts every loop from its first tick) can't re-ping."""
+    now = datetime.now(TZ)
+    for cid, rec in list(_dtk["tickets"].items()):
+        if not isinstance(rec, dict) or rec.get("kind") != "rr":
+            continue
+        if not rec.get("awaiting_close") or rec.get("status") == "closed" or rec.get("nudged_at"):
+            continue
+        co = rec.get("closeout") if isinstance(rec.get("closeout"), dict) else {}
+        try:
+            age = (now - datetime.fromisoformat(co.get("at"))).total_seconds() / 3600.0
+        except Exception:
+            continue
+        if age < RR_NUDGE_HOURS:
+            continue
+        ch = bot.get_channel(int(cid)) if str(cid).isdigit() else None
+        if ch is None:
+            continue
+        rec["nudged_at"] = now.isoformat(timespec="seconds")
+        _dtk_save()
+        try:
+            # No configured ids (Faisal closes as a server admin) → no empty mention.
+            who = " ".join("<@%d>" % i for i in _rr_close_ids())
+            await ch.send(
+                ((who + " ") if who else "")
+                + ("⏳ ملخص إغلاق RR #%s صار له **%.0f ساعة** ينتظر الاعتماد — "
+                   "راجعه واضغط «✅ اعتمد وأقفل».") % (rec.get("seq", "?"), age),
+                allowed_mentions=discord.AllowedMentions(users=True))
+        except Exception as e:
+            print("rr nudge send error:", e)
+
+@tasks.loop(minutes=RR_NUDGE_POLL_MIN)
+async def rr_nudge_loop():
+    try:
+        await _rr_run_nudges()
+    except Exception as e:
+        print("rr_nudge_loop error:", e)
+
 class _RRStatusSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(placeholder="📌 حدّث حالة المطالبة…", custom_id="rr_status", row=0,
@@ -66049,9 +66773,20 @@ class _RRStatusSelect(discord.ui.Select):
         await interaction.response.send_message(
             f"📌 حالة المطالبة صارت: **{lbl}** (حدّثها {interaction.user.display_name})",
             allowed_mentions=discord.AllowedMentions(users=False))
+        # The claim just ended — point at the command that records it. A reminder, not a
+        # second door: `/rr-close` is the one way in, and it works in every RR room.
+        if key in ("paid", "denied") and rec and not rec.get("awaiting_close"):
+            try:
+                await interaction.followup.send(
+                    "✍️ Finished with Airbnb? Type `/rr-close` here to record the amount "
+                    "and generate the owner's WhatsApp message.", ephemeral=True)
+            except Exception as e:
+                print("rr closeout prompt error:", e)
 
 class RRTicketView(discord.ui.View):
-    """Lives on every RR card: claim-status tracker + regenerate + close."""
+    """Lives on every RR card: claim-status tracker + regenerate + close. Recording the
+    settlement is NOT here on purpose — it is `/rr-close`, so it reaches the tickets that
+    were already open when the feature shipped (see the close-out section)."""
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(_RRStatusSelect())
@@ -66067,11 +66802,21 @@ class RRTicketView(discord.ui.View):
         await interaction.response.send_message("🔁 أعيد التوليد…")
         await _rr_generate_english(interaction.channel, rec)
 
-    @discord.ui.button(label="✅ إغلاق", style=discord.ButtonStyle.success,
+    @discord.ui.button(label="🔒 إغلاق (فيصل)", style=discord.ButtonStyle.success,
                        custom_id="rr_close", row=1)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("متأكد تبغى تقفل طلب التعويض؟",
-                                                view=_TkCloseConfirm(), ephemeral=True)
+        # The custom_id is unchanged on purpose: cards posted BEFORE this change keep the
+        # old label but route here, so the gate covers every open ticket, not just new ones.
+        if not _rr_can_close(interaction.user):
+            await interaction.response.send_message(_RR_CLOSE_REFUSAL, ephemeral=True)
+            return
+        rec = _dtk["tickets"].get(str(interaction.channel_id)) or {}
+        warn = ("" if isinstance(rec.get("closeout"), dict) else
+                "⚠️ هذا الطلب ما فيه ملخص إغلاق — ما انسجل المبلغ ولا انكتبت رسالة المالك.\n")
+        await interaction.response.send_message(
+            warn + "متأكد تبغى تقفل طلب التعويض؟",
+            view=_TkCloseConfirm(guard=_rr_can_close, refuse_msg=_RR_CLOSE_REFUSAL),
+            ephemeral=True)
 
 class RRPanelView(discord.ui.View):
     def __init__(self):
@@ -70803,6 +71548,7 @@ async def on_ready():
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
     bot.add_view(RRTicketView())
+    bot.add_view(RRCloseoutView())     # «أرسلتها للمالك» / «اعتمد وأقفل» under the owner message
     bot.add_view(ProcPanelView())      # vendor-purchase ticket panel + room buttons
     bot.add_view(ProcTicketView())
     bot.add_view(MusaedEvalView())     # Musaed Quality Scoreboard button (additive)
@@ -70931,6 +71677,8 @@ async def on_ready():
         _pending.append(owner_warm_loop)        # keeps the owners «دورة الشهر» board warm (never cold)
     if not proc_reminder_loop.is_running():
         _pending.append(proc_reminder_loop)     # nudges the holder of each open purchase ticket
+    if not rr_nudge_loop.is_running():
+        _pending.append(rr_nudge_loop)          # ONE reminder per RR close-out waiting on Faisal
     if WATCHMAN_ENABLED and not watchman_loop.is_running():
         _pending.append(watchman_loop)          # «الرقيب»: re-reads finished chats → guide-gap + promise tickets
     if _pk_enabled() and not promise_keeper_loop.is_running():
