@@ -54,7 +54,65 @@ def _listings():
         return {}
 
 
+def _fresh():
+    """{-project_id: project} for ACTIVE onboarding projects that have NO Hostaway listing yet.
+    A fresh apartment is inspected under a NEGATIVE id (minus its project id) until it lands
+    in Hostaway; _reconcile_fresh then moves its rounds to the real listing id."""
+    out = {}
+    try:
+        rows = HOST.onb_fresh_units() if HOST.onb_fresh_units else []
+    except Exception:
+        traceback.print_exc()
+        rows = []
+    for pr in rows or []:
+        try:
+            pid = int(pr.get("project_id") or pr.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if pr.get("listing_id") in (None, ""):
+            out[-pid] = pr
+    return out
+
+
+def _reconcile_fresh():
+    """Pre-launch rounds follow the apartment into Hostaway: for every onboarding project that
+    now carries a listing_id, rows inspected under -project_id move to that listing_id. One
+    project, one listing, so the mapping cannot cross apartments."""
+    try:
+        rows = HOST.onb_fresh_units() if HOST.onb_fresh_units else []
+    except Exception:
+        return
+    for pr in rows or []:
+        try:
+            pid = int(pr.get("project_id") or pr.get("id"))
+            lid = int(pr.get("listing_id"))
+        except (TypeError, ValueError):
+            continue
+        if lid <= 0:
+            continue
+        if db.q1("SELECT 1 AS x FROM mot_inspection WHERE listing_id=? LIMIT 1", (-pid,)):
+            db.execute("UPDATE mot_inspection SET listing_id=? WHERE listing_id=?", (lid, -pid))
+
+
+def _all_units():
+    """{unit_id: name} — Hostaway units from the listings master store PLUS fresh onboarding
+    units under negative ids. Nothing is ever typed by hand into mot."""
+    names = _listings()
+    for uid, pr in _fresh().items():
+        names[uid] = pr.get("unit_name") or ("مشروع #%d" % -uid)
+    return names
+
+
 def _meta(lid):
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return {}
+    if lid < 0:
+        pr = _fresh().get(lid) or {}
+        return {"bedrooms": pr.get("bedrooms"), "bathrooms": None, "beds": None,
+                "owner": pr.get("client_name") or "", "owner_phone": pr.get("client_whatsapp") or "",
+                "fresh": True, "project_id": -lid, "district": pr.get("district") or ""}
     try:
         return dict(HOST.unit_meta(lid) or {}) if HOST.unit_meta else {}
     except Exception:
@@ -63,7 +121,16 @@ def _meta(lid):
 
 
 def _features(lid):
-    """None = unknown to the decor sheet; [] = known to have nothing. Never collapsed."""
+    """None = unknown to the decor sheet; [] = known to have nothing. Never collapsed.
+    A fresh unit answers from its onboarding amenities only when they mention a pool;
+    otherwise it is unknown and the inspector is asked."""
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return None
+    if lid < 0:
+        am = str((_fresh().get(lid) or {}).get("amenities") or "").lower()
+        return ["pool"] if ("pool" in am or "مسبح" in am) else None
     try:
         return HOST.unit_features(lid) if HOST.unit_features else None
     except Exception:
@@ -73,6 +140,8 @@ def _features(lid):
 
 def _wifi(lid):
     try:
+        if int(lid) < 0:
+            return None
         return HOST.wifi_status(lid) if HOST.wifi_status else None
     except Exception:
         return None
@@ -111,7 +180,8 @@ def _round_view(rnd, results=None):
 
 def core_portfolio(today=None):
     today = today or _today()
-    names = _listings()
+    _reconcile_fresh()
+    names = _all_units()
     latest = db.latest_closed_by_listing()
     opens = db.open_by_listing()
     prices = _price_map()
@@ -123,7 +193,8 @@ def core_portfolio(today=None):
         lr = latest.get(lid)
         op = opens.get(lid)
         row = {"listing_id": lid, "name": name, "latest": None, "open": None,
-               "outstanding_sar": 0.0, "blockers": 0, "overdue": False}
+               "outstanding_sar": 0.0, "blockers": 0, "overdue": False,
+               "fresh": lid < 0, "project_id": (-lid if lid < 0 else None)}
         if lr:
             rr = res.get(lr["id"], {})
             has_pool = bool(lr["has_pool"])
@@ -165,7 +236,8 @@ def core_unit(listing_id):
         lid = int(listing_id)
     except (TypeError, ValueError):
         return 400, {"ok": False, "error": "bad listing_id"}
-    names = _listings()
+    _reconcile_fresh()
+    names = _all_units()
     rounds = db.rounds_for(lid)
     res = db.results_many([r["id"] for r in rounds])
     feats = _features(lid)
@@ -192,9 +264,9 @@ def core_open(payload, actor="", today=None):
         lid = int(p.get("listing_id"))
     except (TypeError, ValueError):
         return 400, {"ok": False, "error": "bad listing_id"}
-    names = _listings()
+    names = _all_units()
     if lid not in names:
-        return 404, {"ok": False, "error": "الشقة مو في ماستر الشقق"}
+        return 404, {"ok": False, "error": "الشقة مو في ماستر الشقق ولا في «ضم الوحدات»"}
     feats = _features(lid)
     answer = p.get("has_pool")
     reason = (p.get("pool_reason") or "").strip()
@@ -205,7 +277,7 @@ def core_open(payload, actor="", today=None):
         has_pool = bool(answer)
         source = "inspector"
         try:
-            if HOST.set_unit_features:
+            if HOST.set_unit_features and lid > 0:
                 HOST.set_unit_features(lid, ["pool"] if has_pool else [], actor)
         except Exception:
             traceback.print_exc()
@@ -312,7 +384,8 @@ def _fanout(rnd, results, q, meta, today, actor):
         try:
             if HOST.ticket_create:
                 t = HOST.ticket_create("مشتريات مطابقة السياحة — %s" % name,
-                                       description="\n".join(lines), lid=rnd["listing_id"],
+                                       description="\n".join(lines),
+                                       lid=(rnd["listing_id"] if rnd["listing_id"] > 0 else None),
                                        priority="med", category="مشتريات", source="manual",
                                        source_ref="mot:%d" % rnd["id"], created_by=actor or "mot",
                                        cost=q["ouja_products_total"])
@@ -330,7 +403,8 @@ def _fanout(rnd, results, q, meta, today, actor):
                                        description="معيار %d (%s) غير متوفر في جولة المطابقة #%d%s" % (
                                            l["criterion_no"], l["criterion_ar"], rnd["id"],
                                            (" · " + l["note"]) if l.get("note") else ""),
-                                       lid=rnd["listing_id"], priority="med", category="صيانة",
+                                       lid=(rnd["listing_id"] if rnd["listing_id"] > 0 else None),
+                                       priority="med", category="صيانة",
                                        source="manual", source_ref="mot:%d" % rnd["id"],
                                        created_by=actor or "mot")
                 out["maint_tickets"].append((t or {}).get("id"))
@@ -401,6 +475,53 @@ def core_abandon(payload, actor=""):
         return 409, {"ok": False, "error": CLOSED}
     _log("مطابقة السياحة · ترك جولة #%d على %s" % (rnd["id"], rnd["apartment_name"]))
     return 200, {"ok": True, "round": _round_view(r)}
+
+
+UNIT_PREFIX = "Ouja |"
+UNIT_NAME_MAX = 50
+CLIENT_TYPES = ("owner", "tenant", "prospect")
+UNIT_KINDS = ("tower", "compound", "standalone")
+FURNISH_STATES = ("furnished", "partial", "unfurnished")
+
+
+def core_new_unit(payload, actor=""):
+    """A FRESH apartment (not in Hostaway yet) = an onboarding project. This opens one through
+    the same db function «ضم الوحدات» uses (pure DB, no notification), so the unit shows in
+    both tabs with no second registry. Returns the negative mot unit id."""
+    p = payload or {}
+    name = " ".join(str(p.get("unit_name") or "").split())
+    if not name:
+        return 400, {"ok": False, "error": "اسم الشقة مطلوب"}
+    if not name.startswith(UNIT_PREFIX):
+        name = "%s %s" % (UNIT_PREFIX, name.lstrip("| ").strip())
+    if len(name) > UNIT_NAME_MAX:
+        return 400, {"ok": False, "error": "اسم الشقة طويل — الحد %d حرف" % UNIT_NAME_MAX}
+    owner = str(p.get("client_name") or "").strip()
+    phone = "".join(ch for ch in str(p.get("client_whatsapp") or "") if ch.isdigit() or ch == "+")[:18]
+    district = str(p.get("district") or "").strip()
+    if not owner or not phone or not district:
+        return 400, {"ok": False, "error": "المالك وجواله والحي مطلوبة — «ضم الوحدات» ما يفتح مشروعًا ناقصًا"}
+    try:
+        bedrooms = int(p.get("bedrooms"))
+        if bedrooms < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return 400, {"ok": False, "error": "عدد غرف النوم رقم"}
+    ctype = p.get("client_type") if p.get("client_type") in CLIENT_TYPES else "owner"
+    kind = p.get("unit_kind") if p.get("unit_kind") in UNIT_KINDS else "compound"
+    fstate = p.get("furnish_state") if p.get("furnish_state") in FURNISH_STATES else "furnished"
+    fields = {"unit_name": name, "client_name": owner, "client_whatsapp": phone, "district": district,
+              "bedrooms": bedrooms, "client_type": ctype, "unit_kind": kind, "furnish_state": fstate}
+    if p.get("has_pool") is True:
+        fields["amenities"] = "pool"
+    if not HOST.onb_create_unit:
+        return 503, {"ok": False, "error": "«ضم الوحدات» غير متاح — ما نقدر نسجّل شقة جديدة"}
+    pr = HOST.onb_create_unit(fields, actor) or {}
+    pid = pr.get("id")
+    if not pid:
+        return 500, {"ok": False, "error": "ما انفتح المشروع"}
+    _log("مطابقة السياحة · شقة جديدة قيد الضم: %s (مشروع #%s)" % (name, pid))
+    return 200, {"ok": True, "listing_id": -int(pid), "project_id": int(pid), "name": name}
 
 
 def core_prices(today=None):
@@ -610,6 +731,10 @@ async def api_close(request):
     return _reply(pair)
 
 
+async def api_new_unit(request):
+    return _reply(core_new_unit(await _body(request), actor=_actor(request)))
+
+
 async def api_abandon(request):
     return _reply(core_abandon(await _body(request), actor=_actor(request)))
 
@@ -728,6 +853,7 @@ def register(app):
     p("/api/mot/result", _safe(api_result))
     p("/api/mot/close", _safe(api_close))
     p("/api/mot/abandon", _safe(api_abandon))
+    p("/api/mot/new-unit", _safe(api_new_unit))
     p("/api/mot/price", _safe(api_price))
     p("/api/mot/token", _safe(api_token))
     p("/api/mot/photo", _safe(api_photo))

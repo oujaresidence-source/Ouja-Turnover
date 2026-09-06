@@ -62629,15 +62629,41 @@ async def start_web_server():
 
                 def _mot_onb_license_tasks(lid, keys):
                     """Re-seed the unit's ACTIVE onboarding project so the s5.8–s5.10 document
-                    tasks exist on it (seed_tasks is INSERT OR IGNORE — additive, idempotent)."""
+                    tasks exist on it (seed_tasks is INSERT OR IGNORE — additive, idempotent).
+                    A negative lid IS the project id (a fresh apartment not in Hostaway yet)."""
                     if not (_HAS_ONB and ONB_ENABLED):
                         return {"project_id": None}
-                    rows = _onb.db.q("SELECT id FROM onb_projects WHERE listing_id=? AND status='active' "
-                                     "ORDER BY id DESC LIMIT 1", (int(lid),))
+                    lid = int(lid)
+                    if lid < 0:
+                        rows = _onb.db.q("SELECT id FROM onb_projects WHERE id=?", (-lid,))
+                    else:
+                        rows = _onb.db.q("SELECT id FROM onb_projects WHERE listing_id=? AND status='active' "
+                                         "ORDER BY id DESC LIMIT 1", (lid,))
                     if not rows:
                         return {"project_id": None}
                     _onb.db.seed_tasks(rows[0]["id"])
                     return {"project_id": rows[0]["id"], "keys": list(keys or [])}
+
+                def _mot_onb_fresh_units():
+                    """Active onboarding projects — the fresh apartments (listing_id NULL until
+                    they land in Hostaway; once set, mot moves their rounds to that id)."""
+                    if not (_HAS_ONB and ONB_ENABLED):
+                        return []
+                    return _onb.db.q("SELECT id AS project_id, unit_name, bedrooms, client_name, "
+                                     "client_whatsapp, district, amenities, listing_id FROM onb_projects "
+                                     "WHERE status='active' ORDER BY id DESC")
+
+                def _mot_onb_create_unit(fields, by=""):
+                    """The same DB function «ضم الوحدات» uses: writes the project + seeds its
+                    tasks, notifies nobody."""
+                    if not (_HAS_ONB and ONB_ENABLED):
+                        return None
+                    pr = _onb.db.create_project(fields, created_by=by or "mot")
+                    try:
+                        _onb.db.log(pr["id"], by or "mot", "فُتح المشروع من «مطابقة وزارة السياحة»")
+                    except Exception:
+                        pass
+                    return pr
 
                 _mot.wire({
                     "dash_auth": _dash_auth, "actor": _req_actor, "json_response": _json,
@@ -62649,6 +62675,8 @@ async def start_web_server():
                     "save_quote": _mot_save_quote, "persist": persist_state,
                     "ticket_create": _ticket_create,
                     "onb_license_tasks": _mot_onb_license_tasks,
+                    "onb_fresh_units": _mot_onb_fresh_units,
+                    "onb_create_unit": _mot_onb_create_unit,
                     "log_event": log_event, "public_base": _dispatch_base_url,
                 })
                 _mot.register_routes(app)

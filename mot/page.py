@@ -185,11 +185,11 @@ async function renderPortfolio(){
     + '<div class="kpi"><b>' + s.never + '</b><span>ما انفحصت أبدًا</span></div>'
     + '<div class="kpi"><b>' + fmt(s.outstanding_sar) + '</b><span>ر.س نواقص للوصول للمطابقة</span></div>'
     + '</div>';
-  h += '<div class="card"><div class="hdr"><h2>الشقق</h2><span class="meta">نسخة المعايير ' + esc(p.catalogue_version) + ' · النسبتان منفصلتان عمدًا: المطابقة = متوفر ÷ ما فُحص، الفحص = ما فُحص ÷ الكل</span></div>';
+  h += '<div class="card"><div class="hdr"><h2>الشقق</h2><span class="meta">نسخة المعايير ' + esc(p.catalogue_version) + ' · النسبتان منفصلتان عمدًا: المطابقة = متوفر ÷ ما فُحص، الفحص = ما فُحص ÷ الكل</span><div class="sp"></div><button class="btn gold sm" id="newunit">+ شقة جديدة (قيد الضم)</button></div>';
   h += '<div style="overflow:auto"><table><thead><tr><th>الشقة</th><th>آخر جولة</th><th>المطابقة</th><th>الفحص</th><th>إنشائي</th><th>نواقص (ر.س)</th><th>إعادة الفحص</th><th></th></tr></thead><tbody>';
   p.rows.forEach(function(r){
     var L = r.latest;
-    h += '<tr class="row" data-lid="' + r.listing_id + '"><td><b>' + esc(r.name) + '</b>' + (r.open ? ' <span class="pill gold">جولة مفتوحة · ' + pct(r.open.live.inspected_pct) + ' فُحص</span>' : '') + '</td>';
+    h += '<tr class="row" data-lid="' + r.listing_id + '"><td><b>' + esc(r.name) + '</b>' + (r.fresh ? ' <span class="pill mute">قيد الضم</span>' : '') + (r.open ? ' <span class="pill gold">جولة مفتوحة · ' + pct(r.open.live.inspected_pct) + ' فُحص</span>' : '') + '</td>';
     if(!L){ h += '<td colspan="6" class="meta">ما انفحصت بعد</td>'; }
     else {
       var cls = r.blockers ? 'bad' : ((L.compliance_pct||0) >= 100 ? 'ok' : 'warn');
@@ -205,6 +205,31 @@ async function renderPortfolio(){
   h += '</tbody></table></div></div>';
   app.innerHTML = h;
   app.querySelector('tbody').addEventListener('click', function(e){ var tr = e.target.closest('tr[data-lid]'); if(tr) nav('unit', tr.getAttribute('data-lid')); });
+  qs('newunit').onclick = newUnitForm;
+}
+
+function newUnitForm(){
+  modal('<h3>شقة جديدة قيد الضم</h3><p class="meta">تنفتح كمشروع في «ضم الوحدات» وتظهر هنا فورًا. لما تدخل Hostaway، جولاتها تنتقل معها.</p>'
+    + '<input id="nu_name" placeholder="اسم الشقة (يبدأ بـ Ouja | تلقائيًا)">'
+    + '<input id="nu_district" placeholder="الحي">'
+    + '<input id="nu_owner" placeholder="اسم المالك">'
+    + '<input id="nu_phone" placeholder="جوال المالك" inputmode="tel">'
+    + '<input id="nu_beds" type="number" min="0" placeholder="عدد غرف النوم (٠ = استوديو)">'
+    + '<select id="nu_kind"><option value="compound">مجمع</option><option value="tower">برج</option><option value="standalone">مستقلة</option></select>'
+    + '<select id="nu_furn"><option value="furnished">مؤثثة</option><option value="partial">مؤثثة جزئيًا</option><option value="unfurnished">غير مؤثثة</option></select>'
+    + '<select id="nu_ctype"><option value="owner">العميل مالك</option><option value="tenant">العميل مستأجر</option><option value="prospect">عميل محتمل</option></select>'
+    + '<select id="nu_pool"><option value="">المسبح: نسأل عند الفحص</option><option value="1">فيها مسبح</option></select>'
+    + '<div class="acts"><button class="btn primary" id="nu_go">إضافة وفتح</button><button class="btn" id="nu_cancel">إلغاء</button></div>');
+  qs('nu_cancel').onclick = closeModal;
+  qs('nu_go').onclick = async function(){
+    var body = {unit_name: qs('nu_name').value, district: qs('nu_district').value, client_name: qs('nu_owner').value,
+                client_whatsapp: qs('nu_phone').value, bedrooms: qs('nu_beds').value, unit_kind: qs('nu_kind').value,
+                furnish_state: qs('nu_furn').value, client_type: qs('nu_ctype').value};
+    if(qs('nu_pool').value === '1') body.has_pool = true;
+    var j = await api('/api/mot/new-unit', body);
+    if(!j.ok){ toast(j.error||'خطأ'); return; }
+    closeModal(); S.portfolio = null; toast('انضافت — افتح جولة الفحص'); nav('unit', j.listing_id);
+  };
 }
 
 async function loadUnit(){ var j = await api('/api/mot/unit?listing_id=' + encodeURIComponent(S.lid)); if(!j.ok){ toast(j.error||'خطأ'); return null; } S.unit = j; return j; }
@@ -214,7 +239,7 @@ async function renderUnit(){
   app.innerHTML = '<div class="empty">جارٍ التحميل…</div>';
   var u = await loadUnit(); if(!u) return;
   var m = u.meta || {};
-  var h = '<div class="card"><div class="hdr"><button class="btn sm" id="bk">→ الشقق</button><h2>' + esc(u.name) + '</h2>'
+  var h = '<div class="card"><div class="hdr"><button class="btn sm" id="bk">→ الشقق</button><h2>' + esc(u.name) + '</h2>' + (m.fresh ? '<span class="pill mute">قيد الضم · مشروع #' + m.project_id + '</span>' : '')
     + '<span class="meta">' + (m.bedrooms!=null ? m.bedrooms + ' غرف · ' : '') + (m.bathrooms!=null ? m.bathrooms + ' حمام · ' : '') + 'المالك: ' + esc(m.owner||'—')
     + ' · المسبح: ' + (u.pool_known ? (u.has_pool ? 'نعم' : 'لا') + ' (جدول المرافق)' : '<span class="stale">غير معروف</span>')
     + ' · الإنترنت: ' + (u.wifi===true ? '<span class="pill ok">اشتراك فعّال</span>' : (u.wifi===false ? '<span class="pill bad">بدون اشتراك</span>' : '—')) + '</span>'

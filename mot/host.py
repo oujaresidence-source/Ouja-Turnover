@@ -16,7 +16,9 @@ Caps (all set by bot.py):
     save_quote(payload) -> quote dict     the existing quotes store (sync; caller persists)
     persist()                             persist_state
     ticket_create(title, **kw) -> ticket  the dashboard ticket tracker (_ticket_create)
-    onb_license_tasks(lid, keys) -> dict  re-seed the unit's onboarding project
+    onb_license_tasks(lid, keys) -> dict  re-seed the unit's onboarding project (lid<0 = project)
+    onb_fresh_units() -> [project]        active onboarding projects (fresh apartments)
+    onb_create_unit(fields, by) -> project   open an onboarding project = a fresh apartment
     log_event(cat, text)                  public_base() -> str
 """
 
@@ -39,6 +41,8 @@ class _Host:
     persist = None
     ticket_create = None
     onb_license_tasks = None
+    onb_fresh_units = None
+    onb_create_unit = None
     log_event = None
     public_base = None
 
