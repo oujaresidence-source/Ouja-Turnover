@@ -840,6 +840,14 @@ async def handle_check_page(request):
     return HOST.web.Response(text=check_page.HTML, content_type="text/html")
 
 
+async def handle_center_page(request):
+    """PUBLIC «مركز الالتزام» — a static walkthrough on a demo apartment. Reads nothing from
+    the DB and exposes nothing of ours (see mot/center_page.py + tests/test_mot_center.py)."""
+    from . import center_page
+    return HOST.web.Response(text=center_page.HTML, content_type="text/html",
+                             headers={"Cache-Control": "public, max-age=300"})
+
+
 def register(app):
     g = app.router.add_get
     p = app.router.add_post
@@ -865,3 +873,5 @@ def register(app):
     p("/api/mot/check-result", _safe_public(api_check_result))
     p("/api/mot/check-photo", _safe_public(api_check_photo))
     g("/mot-check/{token}", handle_check_page)
+    # public showcase for the ministry: demo data only, no token, no login, nothing of ours
+    g("/compliance-center", handle_center_page)
