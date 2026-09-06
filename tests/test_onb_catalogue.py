@@ -54,7 +54,9 @@ class TestCatalogueShape(unittest.TestCase):
             self.assertEqual(r[5], 0, "ongoing task %s is marked as a gate" % r[0])
 
     def test_10e_the_counts_the_owner_signed_off(self):
-        self.assertEqual(len(catalogue.rows_for_seed()), 63)
+        # 63 signed off 2026-08 + 3 document tasks (s5.8–s5.10) added with the ministry
+        # compliance module (mot/), owner-approved 2026-09-06.
+        self.assertEqual(len(catalogue.rows_for_seed()), 66)
         self.assertEqual(len(catalogue.ongoing_rows()), 5)
 
 

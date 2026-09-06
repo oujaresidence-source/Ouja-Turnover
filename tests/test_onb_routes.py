@@ -57,10 +57,10 @@ class TestCreate(RoutesCase):
         self.assertFalse(r["ok"])
         self.assertIn("unit_name", r.get("fields") or {})
 
-    def test_17_creating_seeds_63_unit_tasks_and_zero_company_tasks(self):
+    def test_17_creating_seeds_66_unit_tasks_and_zero_company_tasks(self):
         p = self.mk()
         ts = db.tasks(p["id"])
-        self.assertEqual(len(ts), 63)
+        self.assertEqual(len(ts), 66)   # 63 + the three mot/ document tasks s5.8–s5.10
         self.assertEqual([t for t in ts if t["stage"] == "ongoing"], [])
 
 

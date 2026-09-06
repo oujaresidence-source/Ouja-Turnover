@@ -93,6 +93,11 @@ CATALOGUE = [
     ("s5.5", "license", 5, "تقديم طلب رخصة وزارة السياحة", "coordinator", 1),
     ("s5.6", "license", 6, "متابعة الطلب وإغلاق أي نواقص", "coordinator", 1),
     ("s5.7", "license", 7, "تسجيل رقم الرخصة وتاريخ الانتهاء مع تذكير التجديد", "coordinator", 1),
+    # s5.8–s5.10: the three DOCUMENT components of the ministry standards checklist (mot/).
+    # A failed «مستند» in a compliance round lands here, on the unit's project, by re-seeding.
+    ("s5.8", "license", 8, "لصق ملصق QR «روح السعودية» في الوحدة (معيار ١١)", "coordinator", 0),
+    ("s5.9", "license", 9, "تركيب لوحة خطة الإخلاء (معيار ٣٩)", "coordinator", 0),
+    ("s5.10", "license", 10, "لصق ملصقات ترشيد استهلاك الماء والكهرباء (معيار ٤٠)", "coordinator", 0),
     ("s6.1", "photoshoot", 1, "تشغيل قائمة الجاهزية قبل الحجز", "coordinator", 1),
     ("s6.2", "photoshoot", 2, "طلب تنظيف عميق", "coordinator", 1),
     ("s6.3", "photoshoot", 3, "حجز المصور وتنسيق الدخول", "coordinator", 1),

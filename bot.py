@@ -150,6 +150,16 @@ except Exception as _wifi_err:          # pragma: no cover
     _wifi = None
     _HAS_WIFI = False
 
+# Ministry of Tourism compliance «مطابقة وزارة السياحة» — dated inspection rounds per unit
+# against the 47 standards; gaps become an owner quote + tickets + a re-check date.
+try:
+    import mot as _mot
+    _HAS_MOT = os.environ.get("MOT_ENABLED", "1") == "1"
+except Exception as _mot_err:            # pragma: no cover
+    print("[mot] import failed (compliance tab disabled, bot unaffected):", _mot_err)
+    _mot = None
+    _HAS_MOT = False
+
 # Knowledge base «قاعدة المعرفة» — who owns which unit, who pays the cleaning subscription
 # and how much, when the owner is paid. Those facts lived in one accountant's memory; this
 # moves them somewhere the whole team can search, edit, and see the gaps in.
@@ -14881,7 +14891,7 @@ _tickets = []  # newest-first
 _ticket_seq = 0
 
 _TICKET_CATS = ["صيانة", "كهرباء", "سباكة", "تنظيف", "تكييف", "أثاث",
-                "أجهزة", "إنترنت", "أقفال", "أخرى"]
+                "أجهزة", "إنترنت", "أقفال", "مشتريات", "أخرى"]
 _TICKET_STATUSES  = ["open", "in_progress", "fixed", "cancelled"]
 _TICKET_PRIORITY  = ["low", "med", "high", "urgent"]
 
@@ -24467,6 +24477,7 @@ function go(id){
   if(id==='ownrep'){ window.location.href='/owner-report?token='+encodeURIComponent(tok()); return; }   // Owner Report wizard is its own page
   if(id==='monthlylab'){ window.location.href='/monthly-lab?token='+encodeURIComponent(tok()); return; }   // «التسعير الشهري» is its own page — a bad token there can never touch DASHBOARD_HTML
   if(id==='onb'){ window.location.href='/onboarding?token='+encodeURIComponent(tok()); return; }   // «ضم الوحدات» is its own page — a form this size does not belong in DASHBOARD_HTML
+  if(id==='mot'){ window.location.href='/mot?token='+encodeURIComponent(tok()); return; }   // «مطابقة وزارة السياحة» is its own page — same ruling as onb
   if(!document.getElementById('view_'+id)) id='home';   // guard deep-links to unknown hashes
   view = id;
   document.querySelectorAll('.view').forEach(function(v){ v.classList.toggle('on', v.id === 'view_'+id) });
@@ -43172,7 +43183,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
@@ -43211,6 +43222,7 @@ NAV_DEF = {
         {"id": "ownrep", "ic": "finance", "tk": "ownrep"},
         {"id": "design", "ic": "design", "tk": "design"},
         {"id": "onb", "ic": "cleanteams", "tk": "onb"},
+        {"id": "mot", "ic": "tickets", "tk": "mot"},
         {"id": "pmo", "ic": "pmo", "tk": "pmo"},
         {"id": "expenses", "ic": "expenses", "tk": "expenses", "badge": "expenses"},
         {"id": "finance", "ic": "finance", "tk": "finance"},
@@ -43241,7 +43253,7 @@ NAV_DEF = {
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
-            "onb": "ضم الوحدات",
+            "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
             "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
@@ -43264,7 +43276,7 @@ NAV_DEF = {
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
-            "onb": "Unit onboarding",
+            "onb": "Unit onboarding", "mot": "Tourism compliance",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
             "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
@@ -47220,12 +47232,10 @@ async def _api_quotes_get(request):
         return _json({"error": "not found"}, 404)
     return _json({"quote": q})
 
-async def _api_quotes_save(request):
-    """POST {id?, number?, date?, client_*, items, service_rate, vat_rate,
-       vat_on, notes, signature_name}"""
-    if not _dash_auth(request):
-        return _json({"error": "unauthorized"}, 401)
-    b = await _read_body(request)
+def _quote_save_dict(b, by=None):
+    """Create or update ONE quote from a plain dict (the exact body /api/quotes/save accepts).
+    SYNC and does NOT persist — every caller persists itself (the web handler below on the
+    web pool, the compliance module through its host cap). Returns (quote, is_new)."""
     qid = (b.get("id") or "").strip()
     is_new = not qid or qid not in _quotes
     if is_new:
@@ -47234,7 +47244,7 @@ async def _api_quotes_save(request):
             "id": qid,
             "number": b.get("number") or _new_quote_number(),
             "created_at": datetime.now(TZ).isoformat(timespec="seconds"),
-            "created_by": (b.get("by") or "owner"),
+            "created_by": (b.get("by") or by or "owner"),
         }
         _quotes[qid] = q
     else:
@@ -47270,10 +47280,19 @@ async def _api_quotes_save(request):
                                  q.get("vat_rate", 15), q.get("vat_on", True),
                                  q.get("vat_on_service", True))
     q["updated_at"] = datetime.now(TZ).isoformat(timespec="seconds")
-    await asyncio.to_thread(persist_state)
     if is_new:
         log_event("ops", f"عرض سعر جديد · {q['number']} · {q.get('client_name','—')}"
                          + f" · {q['totals']['grand_total']} ر.س")
+    return q, is_new
+
+async def _api_quotes_save(request):
+    """POST {id?, number?, date?, client_*, items, service_rate, vat_rate,
+       vat_on, notes, signature_name}"""
+    if not _dash_auth(request):
+        return _json({"error": "unauthorized"}, 401)
+    b = await _read_body(request)
+    q, is_new = _quote_save_dict(b)
+    await asyncio.to_thread(persist_state)
     return _json({"ok": True, "quote": q, "is_new": is_new})
 
 async def _api_quotes_delete(request):
@@ -61480,6 +61499,8 @@ _ROLE_EXEMPT_WRITES = {
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
     "/api/onb/t/submit",                     # assigned employee updates a task — link token in body
     "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
+    "/api/mot/check-result",                 # inspector phone link — writes ONE result into its open round
+    "/api/mot/check-photo",                  # inspector phone link — attaches a photo to that round
     # The «قاعدة المعرفة» share link. Owner's explicit decision (2026-08-03): whoever
     # holds the link reads AND edits, with no name asked. The token is checked inside
     # kb/routes._pub on every one of these; nothing else stands in front of them. Note
@@ -61542,6 +61563,7 @@ _ROLE_WRITE_RULES = [
     ("/api/coverage/", "coverage"),
     ("/api/recovery/", "rec"),
     ("/api/wifi/", "wifi"),                  # /api/wifi/fill-save is exempt above (public team page)
+    ("/api/mot/", "mot"),                    # /api/mot/check-* are exempt above (inspector link)
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
@@ -61553,6 +61575,7 @@ _ROLE_READ_RULES = [
     # NOTE: the assigned employee's phone link reads /api/onb-t/{token} — deliberately OUTSIDE
     # this prefix, because it is anonymous and this rule would 403 it. Its token is its auth.
     ("/api/onb/", "onb"),
+    ("/api/mot/", "mot"),                    # the inspector link reads /api/mot-t/{token}, outside this prefix
     ("/api/revenue", "rev"),
     ("/api/pricing2", "pricing"),
     ("/api/pricing", "pricing"),
@@ -62520,6 +62543,128 @@ async def start_web_server():
                       % (_wifi.engine.MIN_OBSERVATIONS, _wifi.engine.LOCK_GRACE_DAYS))
             except Exception as _we:
                 print("[wifi] wiring failed (internet tab disabled, bot unaffected):", _we)
+
+        if _HAS_MOT:
+            try:
+                def _mot_listings():
+                    """{listing_id: name} from the listings MASTER STORE (local JSON), active only —
+                    the same source and the same reason as _wifi_listings."""
+                    try:
+                        return {int(k): (v.get("internal_name") or ("#" + str(k)))
+                                for k, v in _ls_get()["listings"].items()
+                                if v.get("active", True)}
+                    except Exception as _mle:
+                        print("[mot] listings unavailable:", _mle)
+                        return {}
+
+                def _mot_unit_meta(lid):
+                    """bedrooms from the listings store, bathrooms from the Hostaway catalog
+                    (bathroomsNumber), owner from the finance registry by listing id, phone from
+                    the owner's finance profile. Every source is best-effort; a miss is None/''."""
+                    lid = int(lid)
+                    out = {"bedrooms": None, "bathrooms": None, "beds": None, "owner": "", "owner_phone": ""}
+                    try:
+                        rec = _ls_get()["listings"].get(str(lid)) or {}
+                        out["bedrooms"] = rec.get("bedrooms")
+                    except Exception:
+                        pass
+                    try:
+                        for _u in (_catalog_units or []):
+                            if int(_u.get("id") or 0) == lid:
+                                out["bathrooms"] = _u.get("baths")
+                                out["bedrooms"] = out["bedrooms"] or _u.get("beds")
+                                break
+                    except Exception:
+                        pass
+                    try:
+                        _orec = _owner_info_by_lid(lid, listings=_mot_listings())
+                        if _orec:
+                            out["owner"] = (_orec.get("owner") or "").strip()
+                    except Exception:
+                        pass
+                    if out["owner"]:
+                        try:
+                            from finance import owners as _fin_owners
+                            _prof = (_fin_owners._terms_store().get("owners") or {}).get(out["owner"]) or {}
+                            out["owner_phone"] = _prof.get("phone") or ""
+                        except Exception:
+                            pass
+                    return out
+
+                def _mot_slug(lid):
+                    try:
+                        _gu = _guide.db.unit_by_listing(lid) if _HAS_GUIDE else None
+                        return (_gu or {}).get("slug") or None
+                    except Exception:
+                        return None
+
+                def _mot_unit_features(lid):
+                    """None = the decor sheet has no record (unknown ≠ no pool). Read through the
+                    guide slug because decor is keyed by slug."""
+                    _slug = _mot_slug(lid)
+                    if not _slug or not _HAS_DECOR:
+                        return None
+                    try:
+                        return _decor.db.unit_features(_slug)
+                    except Exception:
+                        return None
+
+                def _mot_set_unit_features(lid, feats, by=""):
+                    _slug = _mot_slug(lid)
+                    if not _slug or not _HAS_DECOR:
+                        return None
+                    return _decor.db.set_unit_features(_slug, feats, apartment=_mot_listings().get(int(lid)), by=by)
+
+                def _mot_wifi_status(lid):
+                    if not _HAS_WIFI:
+                        return None
+                    try:
+                        return _wifi.db.active_sub(lid) is not None
+                    except Exception:
+                        return None
+
+                def _mot_save_quote(payload):
+                    q, _ = _quote_save_dict(payload, by="mot")
+                    return q
+
+                def _mot_onb_license_tasks(lid, keys):
+                    """Re-seed the unit's ACTIVE onboarding project so the s5.8–s5.10 document
+                    tasks exist on it (seed_tasks is INSERT OR IGNORE — additive, idempotent)."""
+                    if not (_HAS_ONB and ONB_ENABLED):
+                        return {"project_id": None}
+                    rows = _onb.db.q("SELECT id FROM onb_projects WHERE listing_id=? AND status='active' "
+                                     "ORDER BY id DESC LIMIT 1", (int(lid),))
+                    if not rows:
+                        return {"project_id": None}
+                    _onb.db.seed_tasks(rows[0]["id"])
+                    return {"project_id": rows[0]["id"], "keys": list(keys or [])}
+
+                _mot.wire({
+                    "dash_auth": _dash_auth, "actor": _req_actor, "json_response": _json,
+                    "web": web, "tz": TZ, "now": now_riyadh, "state_dir": STATE_DIR,
+                    "web_thread": web_thread,
+                    "listings": _mot_listings, "unit_meta": _mot_unit_meta,
+                    "unit_features": _mot_unit_features, "set_unit_features": _mot_set_unit_features,
+                    "wifi_status": _mot_wifi_status,
+                    "save_quote": _mot_save_quote, "persist": persist_state,
+                    "ticket_create": _ticket_create,
+                    "onb_license_tasks": _mot_onb_license_tasks,
+                    "log_event": log_event, "public_base": _dispatch_base_url,
+                })
+                _mot.register_routes(app)
+                # The three new license-stage document tasks (s5.8–s5.10) only reach EXISTING
+                # projects when seed_tasks runs again; INSERT OR IGNORE makes this a no-op after
+                # the first boot.
+                if _HAS_ONB and ONB_ENABLED:
+                    try:
+                        for _pr in _onb.db.projects(status="active"):
+                            _onb.db.seed_tasks(_pr["id"])
+                    except Exception as _mse:
+                        print("[mot] onboarding re-seed skipped:", _mse)
+                print("[mot] wired + routes registered (/mot, /api/mot/*, /mot-check/{token}) — "
+                      "catalogue %s" % _mot.catalogue.CATALOGUE_VERSION)
+            except Exception as _me:
+                print("[mot] wiring failed (compliance tab disabled, bot unaffected):", _me)
 
         # ---- «قاعدة المعرفة» — the searchable master data for units and owners. Seeds
         # itself once from kb/seed_kb.json; after that the database is the truth and the
