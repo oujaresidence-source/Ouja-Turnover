@@ -255,6 +255,9 @@
       om_open_ended: 'مفتوح', om_mgmt: 'نسبة الإدارة %', om_cleaning: 'النظافة',
       om_cl_ours: 'على عوجا', om_cl_owner: 'يدفعها المالك (شهري)', om_cl_mixed: 'حسب كل شقة', om_cl_amount: 'مبلغ النظافة/شهر',
       om_add_do: 'إضافة الشقة', om_added: 'انضافت ✓',
+      nu_title: 'وحدات جديدة في هوست أوي بدون مالك', nu_hint: 'أي شقة تنضاف في هوست أوي تطلع هنا لين تربطها بمالك — بعدها تظهر في الكشوف والتقارير. (القائمة تتحدث يوميًا)',
+      nu_assign: 'ربط بمالك', nu_owner: 'المالك (اختر موجود أو اكتب اسم مالك جديد)', nu_owner_ph: 'اسم المالك…',
+      nu_new_owner: 'مالك جديد — راح ينضاف للقائمة', nu_none: 'كل شقق هوست أوي مربوطة بمالك ✓', nu_hostaway_id: 'رقم هوست أوي',
       om_terms_btn: 'تعديل الشروط', om_terms_title: 'تغيير بتاريخ سريان',
       om_terms_from: 'يسري من تاريخ', om_terms_hint: 'التغيير ما يلمس الشهور الماضية — كل شهر يقرأ الشروط اللي كانت سارية فيه',
       om_terms_save: 'حفظ التغيير', om_terms_saved: 'انحفظ — يسري من {d}',
@@ -626,6 +629,9 @@
       om_open_ended: 'open', om_mgmt: 'Management %', om_cleaning: 'Cleaning',
       om_cl_ours: 'On Ouja', om_cl_owner: 'Owner pays (monthly)', om_cl_mixed: 'Per apartment', om_cl_amount: 'Cleaning amount/month',
       om_add_do: 'Add apartment', om_added: 'Added ✓',
+      nu_title: 'New Hostaway units with no owner', nu_hint: 'Every listing added in Hostaway shows here until you attach it to an owner — then it appears in statements and reports. (List refreshes daily)',
+      nu_assign: 'Attach to owner', nu_owner: 'Owner (pick an existing one or type a new name)', nu_owner_ph: 'Owner name…',
+      nu_new_owner: 'New owner — will be added to the list', nu_none: 'Every Hostaway listing has an owner ✓', nu_hostaway_id: 'Hostaway id',
       om_terms_btn: 'Change terms', om_terms_title: 'Effective-dated change',
       om_terms_from: 'Effective from', om_terms_hint: 'Past months are untouched — each month reads the terms that were active then',
       om_terms_save: 'Save change', om_terms_saved: 'Saved — effective {d}',
@@ -2537,6 +2543,27 @@
       $('#omLResults').innerHTML = '<div class="wq-sub">✓ ' + esc(nm) + ' <code>#' + esc(el.getAttribute('data-lid')) + '</code></div>';
       $('#omAddApt').focus();
     }
+    else if (act === 'nu-open') {
+      var lidO = el.getAttribute('data-lid');
+      nuUI.open = (nuUI.open === lidO) ? null : lidO;
+      renderOwners(null);
+    }
+    else if (act === 'nu-add') {
+      var ownerN = ($('#nuOwner').value || '').trim();
+      var aptN = ($('#nuApt').value || '').trim();
+      if (!ownerN) { $('#nuOwner').classList.add('need'); $('#nuOwner').focus(); return; }
+      if (!aptN) { $('#nuApt').classList.add('need'); $('#nuApt').focus(); return; }
+      el.disabled = true;
+      api('/erp/api/owners/unit-add', { method: 'POST', body: {
+        owner: ownerN, apartment: aptN, lid: el.getAttribute('data-lid'),
+        from: $('#nuFrom').value || '', mgmt_pct: $('#nuMgmt').value,
+        cleaning: { type: $('#nuClType').value, amount: Number($('#nuClAmt').value || 0) }
+      } }).then(function () {
+        nuUI.open = null;
+        toast(t('om_added'));
+        loadOwners();              // the unit leaves this list and the owner (new or old) shows below
+      }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || t('act_failed'), 'err'); });
+    }
     else if (act === 'om-unit-add') {
       var aptA = $('#omAddApt').value.trim();
       if (!aptA) { $('#omAddApt').classList.add('need'); $('#omAddApt').focus(); return; }
@@ -4297,6 +4324,43 @@
     '</div>';
   }
 
+  /* 2026-09-06: units that exist in Hostaway but belong to no owner yet. Before this,
+     a new listing was invisible in الملاك (the accountant could not pull a report on
+     V6 / 101 النرجس) and a unit whose owner was NEW had no way in at all — the only
+     add path lived inside an existing owner's profile. */
+  var nuUI = { open: null };
+  function newUnitsCardHtml(d) {
+    var list = d.unassigned || [];
+    if (!list.length) return '';
+    var owners = (d.rows || []).map(function (r) { return r.owner; });
+    var dl = '<datalist id="nuOwners">' + owners.map(function (o) {
+      return '<option value="' + esc(o) + '"></option>'; }).join('') + '</datalist>';
+    var rows = list.map(function (u) {
+      var code = String(u.name || '').split('|').pop().trim();
+      var open = nuUI.open === String(u.lid);
+      var form = !open ? '' :
+        '<div class="om-grid" style="margin-top:8px">' +
+        '<label style="grid-column:1/-1">' + esc(t('nu_owner')) +
+          '<input class="in" id="nuOwner" list="nuOwners" placeholder="' + esc(t('nu_owner_ph')) + '"></label>' +
+        '<label>' + esc(t('om_code')) + '<input class="in" id="nuApt" value="' + esc(code) + '"></label>' +
+        '<label>' + esc(t('om_from')) + '<input type="date" class="in" id="nuFrom"></label>' +
+        '<label>' + esc(t('om_mgmt')) + '<input type="number" step="0.5" min="0" max="60" class="in" id="nuMgmt" value="20"></label>' +
+        '<label>' + esc(t('om_cleaning')) + '<select class="in" id="nuClType"><option value="ours">' + esc(t('om_cl_ours')) + '</option><option value="owner">' + esc(t('om_cl_owner')) + '</option></select></label>' +
+        '<label>' + esc(t('om_cl_amount')) + '<input type="number" step="1" min="0" class="in" id="nuClAmt" value="0"></label>' +
+        '</div><div id="nuNewOwner" class="wq-sub" hidden>' + esc(t('nu_new_owner')) + '</div>' +
+        '<button class="btn primary sm" data-act="nu-add" data-lid="' + esc(String(u.lid)) + '" style="margin-top:8px">' + esc(t('om_add_do')) + '</button>';
+      return '<div class="wq-row"><div class="wq-main"><div class="wq-top"><b>' + esc(u.name) + '</b>' +
+        '<span class="tag warnt">' + esc(t('nu_hostaway_id')) + ' ' + esc(String(u.lid)) + '</span></div>' + form + '</div>' +
+        '<div class="wq-actions"><button class="btn ' + (open ? 'ghost' : 'primary') + ' xs" data-act="nu-open" data-lid="' + esc(String(u.lid)) + '">' +
+        esc(open ? t('cancel') : t('nu_assign')) + '</button></div></div>';
+    }).join('');
+    return '<section class="card grp">' +
+      '<header class="grp-h"><span class="grp-ico">🆕</span><h2>' + esc(t('nu_title')) + '</h2>' +
+      '<span class="cnt">' + list.length + '</span></header>' +
+      '<div class="grp-hint">' + esc(t('nu_hint')) + '</div>' + dl +
+      '<div class="grp-list">' + rows + '</div></section>';
+  }
+
   function renderOwners(d) {
     if (d) store.D.owners = d;
     d = store.D.owners || {};
@@ -4305,6 +4369,7 @@
     $('#view').innerHTML =
       (cy ? cycleBoardHtml(cy) : (cyUI.loading ? cycleLoadingHtml() : '')) +
       rangeReportCardHtml(d) +
+      newUnitsCardHtml(d) +
       '<section class="card grp">' +
         '<header class="grp-h"><span class="grp-ico">🏠</span><h2>' + esc(t('o_title')) + '</h2>' +
         '<span class="cnt">' + (d.total || 0) + '</span></header>' +
@@ -4319,6 +4384,14 @@
       cyUI.sel = {};
       loadCycle();
     });
+    var nuo = $('#nuOwner');
+    if (nuo) {
+      nuo.addEventListener('input', function () {
+        var known = ((store.D.owners || {}).rows || []).some(function (r) { return r.owner === nuo.value.trim(); });
+        $('#nuNewOwner').hidden = !nuo.value.trim() || known;
+      });
+      nuo.focus();
+    }
     var ro = $('#rrOwner');
     if (ro) ro.addEventListener('change', function () {
       var u = $('#rrUnit'); if (!u) return;

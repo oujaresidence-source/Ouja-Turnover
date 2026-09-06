@@ -1610,7 +1610,59 @@ def owners_payload():
                               "created_at": lk.get("created_at") or "",
                               "opened_at": lk.get("opened_at") or "",
                               "opens": int(lk.get("opens") or 0)}})
-    return {"ok": True, "rows": rows, "total": len(rows)}
+    unassigned = unassigned_listings()
+    return {"ok": True, "rows": rows, "total": len(rows),
+            "unassigned": unassigned, "unassigned_count": len(unassigned)}
+
+
+def _active_listing_names():
+    """{lid: internal name} for every ACTIVE Hostaway listing, WITHOUT a Hostaway call:
+    the listings master store (synced daily, on disk) first; if it's empty, the warm
+    1-hour listings map. This runs inside the owners-list handler on the event loop,
+    so a cold paginate here would freeze every page."""
+    out = {}
+    try:
+        store = B._ls_get() if hasattr(B, "_ls_get") else None
+        for rec in ((store or {}).get("listings") or {}).values():
+            if not isinstance(rec, dict) or not rec.get("active", True):
+                continue
+            try:
+                lid = int(rec.get("id"))
+            except (TypeError, ValueError):
+                continue
+            out[lid] = (rec.get("internal_name") or rec.get("public_name") or str(lid)).strip()
+    except Exception:
+        out = {}
+    if not out:
+        try:
+            cached = getattr(B, "_listings", None) or {}
+            if cached.get("map"):
+                out = {int(k): str(v or k) for k, v in cached["map"].items()}
+        except Exception:
+            out = {}
+    return out
+
+
+def unassigned_listings():
+    """Active Hostaway listings that NO registry row resolves to (explicit lid or the
+    same name auto-match statements use). 2026-09-06: «V6 و 101 النرجس غير موجودة في
+    الملاك» — a new listing was invisible in the owners section until someone knew to
+    open an existing owner's profile and search for it; a unit whose owner was new
+    could not be registered at all. These now sit at the top of الملاك until assigned."""
+    names = _active_listing_names()
+    if not names:
+        return []
+    taken = set()
+    for rec in _registry_rows():
+        try:
+            lid = B._owner_resolve_lid(rec, names)
+        except Exception:
+            lid = None
+        if lid is not None:
+            taken.add(int(lid))
+    rows = [{"lid": lid, "name": nm} for lid, nm in names.items() if lid not in taken]
+    rows.sort(key=lambda r: -r["lid"])            # newest Hostaway ids first
+    return rows
 
 
 # ====================== Contracts linking (Setup) ======================
