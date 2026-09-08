@@ -12,7 +12,7 @@ Failures:
     c39.evac_plan document                                 -> onboarding s5.9
     c03.elevator  structural                               -> blocker, never a line
     c13.wifi      answered by the wifi bridge = missing     -> 1 x 250 owner line
-Score: 61 components, 7 missing -> 54 available, compliance 88.5, inspected 100.
+Score: 60 components, 7 missing -> 53 available, compliance 88.3, inspected 100.
 
 Run: python3 -m unittest tests.test_mot_flow
 """
@@ -100,17 +100,17 @@ class TestOpen(FlowCase):
         st, body = self.open(has_pool=True)
         self.assertEqual(st, 200)
         self.assertEqual(self.fh.features, ["pool"])
-        self.assertEqual(body["round"]["denominator"], 67)
+        self.assertEqual(body["round"]["denominator"], 66)
         self.assertEqual(body["round"]["pool_source"], "inspector")
 
     def test_known_no_pool_is_61_from_decor(self):
         st, body = self.open()
-        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 61, "decor"))
+        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 60, "decor"))
 
     def test_override_needs_a_reason(self):
         self.assertEqual(self.open(has_pool=True)[0], 400)
         st, body = self.open(has_pool=True, pool_reason="المسبح مشترك بالمجمع")
-        self.assertEqual((st, body["round"]["pool_source"], body["round"]["denominator"]), (200, "override", 67))
+        self.assertEqual((st, body["round"]["pool_source"], body["round"]["denominator"]), (200, "override", 66))
 
     def test_wifi_is_prefilled_from_the_bridge(self):
         st, body = self.open()
@@ -160,7 +160,7 @@ class TestClose(FlowCase):
         rid = self.open()[1]["id"]
         st, body = routes.core_close({"id": rid}, actor="فيصل")
         self.assertEqual(st, 409)
-        self.assertEqual(body["not_inspected"], 60)
+        self.assertEqual(body["not_inspected"], 59)
 
     def test_the_whole_fanout_by_hand(self):
         rid = self.open()[1]["id"]
@@ -168,8 +168,9 @@ class TestClose(FlowCase):
         st, body = routes.core_close({"id": rid}, actor="فيصل")
         self.assertEqual(st, 200, body)
         sc = body["score"]
-        self.assertEqual((sc["available"], sc["missing"], sc["not_inspected"]), (54, 7, 0))
-        self.assertEqual((sc["compliance_pct"], sc["inspected_pct"]), (88.5, 100.0))
+        self.assertEqual((sc["available"], sc["missing"], sc["not_inspected"]), (53, 7, 0))
+        self.assertEqual((sc["compliance_pct"], sc["inspected_pct"]), (88.3, 100.0))
+        self.assertEqual(qp_date := self.fh.quotes[0].get("date"), r_date := db.round_(rid)["closed_at"][:10], (qp_date, r_date))
         # owner quote: mattress 3x900 + wifi 250 + toilet 350 (works, separated)
         self.assertEqual(len(self.fh.quotes), 1)
         qp = self.fh.quotes[0]
@@ -194,9 +195,9 @@ class TestClose(FlowCase):
         self.assertEqual(body["fanout"]["blocked"], ["c03.elevator"])
         # frozen on the round
         r = db.round_(rid)
-        self.assertEqual((r["compliance_pct"], r["quote_id"]), (88.5, "q_1"))
+        self.assertEqual((r["compliance_pct"], r["quote_id"]), (88.3, "q_1"))
         self.assertTrue(r["recheck_due"] > r["closed_at"][:10])
-        self.assertTrue(any("88.5" in l for l in self.fh.logs))
+        self.assertTrue(any("88.3" in l for l in self.fh.logs))
 
     def test_unpriced_line_blocks_close_until_confirmed(self):
         rid = self.open()[1]["id"]
@@ -221,7 +222,7 @@ class TestClose(FlowCase):
         routes.core_close({"id": rid}, actor="x")
         st, body = routes.core_portfolio()
         row = next(r for r in body["rows"] if r["listing_id"] == LID)
-        self.assertEqual(row["latest"]["compliance_pct"], 88.5)
+        self.assertEqual(row["latest"]["compliance_pct"], 88.3)
         self.assertEqual(row["blockers"], 1)
         self.assertEqual(row["outstanding_sar"], 2700 + 250 + 350 + 60)
         self.assertEqual(body["summary"]["blocked"], 1)

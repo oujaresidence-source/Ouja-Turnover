@@ -28,8 +28,8 @@ RECHECK_DAYS = 14
 WORKS_SEPARATOR = "— أعمال وتركيبات (تحتاج فنّي) —"
 
 
-def components_for(has_pool):
-    return C.components(bool(has_pool))
+def components_for(has_pool, version=None):
+    return C.components(bool(has_pool), version)
 
 
 def _state(results, key):
@@ -38,8 +38,8 @@ def _state(results, key):
     return s if s in STATES else "unchecked"
 
 
-def score(results, has_pool):
-    comps = components_for(has_pool)
+def score(results, has_pool, version=None):
+    comps = components_for(has_pool, version)
     avail = missing = unchecked = 0
     for c in comps:
         s = _state(results, c["key"])
@@ -59,19 +59,19 @@ def score(results, has_pool):
     }
 
 
-def blockers(results, has_pool):
-    return [c for c in components_for(has_pool)
+def blockers(results, has_pool, version=None):
+    return [c for c in components_for(has_pool, version)
             if c["kind"] == "structural" and _state(results, c["key"]) == "missing"]
 
 
-def can_export_evidence(rnd, results, has_pool):
+def can_export_evidence(rnd, results, has_pool, version=None):
     """A round is evidence only when it is closed, not abandoned, and fully inspected.
     Enforced HERE, not in UI copy."""
     if not rnd or not rnd.get("closed_at"):
         return False, "الجولة ما زالت مفتوحة — أغلقها أولًا"
     if (rnd.get("note") or "") == "abandoned":
         return False, "جولة متروكة — ما تصلح دليلًا"
-    s = score(results, has_pool)
+    s = score(results, has_pool, version or (rnd or {}).get("catalogue_version"))
     if s["not_inspected"]:
         return False, "فيه %d مكوّن ما انفحص — نسبة الفحص لازم تكون ١٠٠٪" % s["not_inspected"]
     return True, ""
@@ -123,13 +123,13 @@ def _is_stale(set_at, today):
     return (t - d).days > STALE_DAYS
 
 
-def quote_lines(results, prices, unit_meta, has_pool, today=None):
+def quote_lines(results, prices, unit_meta, has_pool, today=None, version=None):
     """Split every failed component into where it goes. Products before works inside the
     owner list so the quote reads shopping-list first, then a visibly separate works group."""
     owner_p, owner_w = [], []
     ouja_p, ouja_w, docs, blocked = [], [], [], []
     unpriced, stale = [], []
-    for c in components_for(has_pool):
+    for c in components_for(has_pool, version):
         if _state(results, c["key"]) != "missing":
             continue
         r = (results or {}).get(c["key"]) or {}
@@ -187,7 +187,7 @@ def quote_items(owner_lines):
     return items
 
 
-def outstanding_sar(results, prices, unit_meta, has_pool):
+def outstanding_sar(results, prices, unit_meta, has_pool, version=None):
     """What it costs to reach compliance on this round: owner + Ouja product lines."""
-    q = quote_lines(results, prices, unit_meta, has_pool)
+    q = quote_lines(results, prices, unit_meta, has_pool, version=version)
     return round(q["owner_total"] + q["ouja_products_total"], 2)

@@ -72,14 +72,14 @@ class TestPortfolioAndOpen(FreshCase):
         self.assertEqual(st, 409)
         self.assertTrue(body["need_pool_answer"])
         st, body = routes.core_open({"listing_id": -9, "has_pool": False}, actor="x")
-        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 61, "inspector"))
+        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 60, "inspector"))
         # wifi is NOT prefilled for a unit that has no Hostaway id
         self.assertNotIn(C.WIFI_KEY, db.results(body["id"]))
 
     def test_pool_read_from_amenities(self):
         self.projects[0]["amenities"] = '["pool","gym"]'
         st, body = routes.core_open({"listing_id": -9}, actor="x")
-        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 67, "decor"))
+        self.assertEqual((st, body["round"]["denominator"], body["round"]["pool_source"]), (200, 66, "decor"))
 
     def test_unit_meta_comes_from_the_project(self):
         st, body = routes.core_unit(-9)

@@ -28,8 +28,9 @@ def results_for(has_pool, state="available", override=None):
 
 class TestDenominator(unittest.TestCase):
     def test_follows_has_pool(self):
-        self.assertEqual(engine.score({}, False)["denominator"], 61)
-        self.assertEqual(engine.score({}, True)["denominator"], 67)
+        self.assertEqual(engine.score({}, False)["denominator"], 60)
+        self.assertEqual(engine.score({}, True)["denominator"], 66)
+        self.assertEqual(engine.score({}, False, "2026-09")["denominator"], 61)
 
     def test_pool_results_ignored_when_unit_has_no_pool(self):
         r = results_for(False)
@@ -45,7 +46,7 @@ class TestTwoPercentages(unittest.TestCase):
         self.assertEqual((s["compliance_pct"], s["inspected_pct"]), (100.0, 100.0))
 
     def test_partial_inspection_keeps_the_two_apart(self):
-        # 40 available, 10 missing, 11 unchecked (61 total)
+        # 40 available, 10 missing, 10 unchecked (60 total)
         keys = [c["key"] for c in C.components(False)]
         r = {}
         for i, k in enumerate(keys):
@@ -53,9 +54,9 @@ class TestTwoPercentages(unittest.TestCase):
         s = engine.score(r, False)
         self.assertEqual(s["available"], 40)
         self.assertEqual(s["missing"], 10)
-        self.assertEqual(s["not_inspected"], 11)
-        self.assertEqual(s["compliance_pct"], 80.0)           # 40 / 50, NOT 40 / 61
-        self.assertEqual(s["inspected_pct"], round(50 / 61 * 100, 1))
+        self.assertEqual(s["not_inspected"], 10)
+        self.assertEqual(s["compliance_pct"], 80.0)           # 40 / 50, NOT 40 / 60
+        self.assertEqual(s["inspected_pct"], round(50 / 60 * 100, 1))
 
     def test_nothing_seen_is_not_zero_compliance(self):
         s = engine.score({}, False)
@@ -65,7 +66,7 @@ class TestTwoPercentages(unittest.TestCase):
     def test_missing_rows_count_as_unchecked(self):
         r = {"c04.price_board": {"state": "missing"}}
         s = engine.score(r, False)
-        self.assertEqual(s["not_inspected"], 60)
+        self.assertEqual(s["not_inspected"], 59)
 
 
 class TestEvidenceGate(unittest.TestCase):

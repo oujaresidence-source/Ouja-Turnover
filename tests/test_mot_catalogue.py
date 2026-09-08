@@ -2,7 +2,8 @@
 """
 The catalogue, frozen.
 
-61 components / 41 criteria without a pool, 67 / 47 with. Every key unique and STABLE
+60 live components / 41 criteria without a pool, 66 / 47 with (61/67 under the original
+2026-09 version, which retired nothing — a retired key is still counted for old rounds). Every key unique and STABLE
 against the snapshot below — a future edit may add a key, never rename or drop one, because
 closed rounds are stored by key and must still render years later.
 
@@ -38,9 +39,21 @@ FROZEN_KEYS = [
 
 
 class TestCounts(unittest.TestCase):
-    def test_61_without_pool_67_with(self):
-        self.assertEqual(len(C.components(False)), 61)
-        self.assertEqual(len(C.components(True)), 67)
+    def test_60_without_pool_66_with(self):
+        self.assertEqual(len(C.components(False)), 60)
+        self.assertEqual(len(C.components(True)), 66)
+
+    def test_old_rounds_keep_their_61_67(self):
+        self.assertEqual(len(C.components(False, version="2026-09")), 61)
+        self.assertEqual(len(C.components(True, version="2026-09")), 67)
+        self.assertNotIn("c35.dinner_set", [c["key"] for c in C.components(False)])
+        self.assertIn("c35.dinner_set", [c["key"] for c in C.components(False, version="2026-09")])
+
+    def test_retired_keys_stay_in_the_catalogue_list(self):
+        keys = [r[0] for r in C.CATALOGUE]
+        for k in C.RETIRED:
+            self.assertIn(k, keys)
+            self.assertGreater(C.RETIRED[k], "2026-09")
 
     def test_41_criteria_without_pool_47_with(self):
         self.assertEqual(C.criteria_count(False), 41)

@@ -22,7 +22,7 @@ description_ar is deliberately EMPTY until the official ministry wording arrives
 Faisal — a paraphrased standard in a document that goes to the ministry is worse than a blank.
 """
 
-CATALOGUE_VERSION = "2026-09"
+CATALOGUE_VERSION = "2026-09b"
 
 KINDS = ("product", "works", "document", "structural")
 BILLED = ("ouja", "owner")
@@ -65,10 +65,10 @@ CATALOGUE = [
     ("c15.bedroom_seat", "s3", 15, "جلسة غرفة النوم", "كرسي / جلسة غرفة النوم", "product", "owner", "per_bedroom"),
     ("c16.tv", "s3", 16, "التلفزيون", "تلفزيون", "product", "owner", "per_unit"),
     ("c17.kettle", "s3", 17, "القهوة والشاي", "غلاية كهربائية", "product", "owner", "per_unit"),
-    ("c17.cups", "s3", 17, "القهوة والشاي", "أكواب وأدوات تقديم", "product", "owner", "per_unit"),
+    ("c17.cups", "s3", 17, "القهوة والشاي", "أكواب وفناجين", "product", "owner", "per_unit"),
     ("c17.water", "s3", 17, "القهوة والشاي", "مياه شرب معبأة", "product", "ouja", "per_unit"),
-    ("c18.dishes", "s3", 18, "أواني الطعام", "أواني طعام", "product", "owner", "per_unit"),
-    ("c18.cutlery", "s3", 18, "أواني الطعام", "أدوات مائدة", "product", "owner", "per_unit"),
+    ("c18.dishes", "s3", 18, "أواني الطعام", "صحون وأطباق تقديم", "product", "owner", "per_unit"),
+    ("c18.cutlery", "s3", 18, "أواني الطعام", "أدوات مائدة (ملاعق · شوك · سكاكين)", "product", "owner", "per_unit"),
     ("c19.living_vent", "s3", 19, "تهوية غرفة المعيشة", "تهوية غرفة المعيشة", "works", "owner", "per_unit"),
     # --- s4 غرفة النوم والاستديو (20-25)
     ("c20.room_size", "s4", 20, "مساحة الغرفة/الاستديو", "مساحة الغرفة أو الاستديو", "structural", "owner", "per_unit"),
@@ -98,8 +98,8 @@ CATALOGUE = [
     ("c33.bath_vent", "s5", 33, "تهوية الحمام", "تهوية الحمام", "works", "owner", "per_unit"),
     # --- s6 المطبخ (34-36)
     ("c34.microwave", "s6", 34, "الميكروويف", "ميكروويف", "product", "owner", "per_unit"),
-    ("c35.cookware", "s6", 35, "أدوات الطبخ", "أواني الطبخ", "product", "owner", "per_unit"),
-    ("c35.prep_tools", "s6", 35, "أدوات الطبخ", "أدوات التحضير والتقديم", "product", "owner", "per_unit"),
+    ("c35.cookware", "s6", 35, "أدوات الطبخ", "قدور ومقالي", "product", "owner", "per_unit"),
+    ("c35.prep_tools", "s6", 35, "أدوات الطبخ", "أدوات تحضير الطبخ (سكاكين · لوح تقطيع · مصفاة)", "product", "owner", "per_unit"),
     ("c35.dinner_set", "s6", 35, "أدوات الطبخ", "طقم مائدة لشخصين", "product", "owner", "per_unit"),
     ("c36.hood", "s6", 36, "شفاط المطبخ", "شفاط المطبخ", "works", "owner", "per_unit"),
     # --- s7 السلامة والاستدامة (37-41)
@@ -119,6 +119,12 @@ CATALOGUE = [
     ("c46.pool_rescue", "s8", 46, "وسائل الإنقاذ", "طوق نجاة وعصا إنقاذ", "product", "owner", "per_unit"),
     ("c47.pool_electric", "s8", 47, "كهرباء وإنارة المسبح", "كهرباء وإنارة المسبح", "works", "owner", "per_unit"),
 ]
+
+# Components RETIRED from new rounds (key -> the version that retired them). A key is never
+# deleted or reused: a round taken under an older version still renders and scores with it.
+RETIRED = {
+    "c35.dinner_set": "2026-09b",   # duplicate of c18.dishes + c18.cutlery (owner ruling 2026-09-08)
+}
 
 # Official ministry wording per criterion number. EMPTY on purpose until Faisal sends it;
 # the pages render nothing for an empty entry, never a paraphrase.
@@ -146,9 +152,20 @@ def as_dict(row):
     return d
 
 
-def components(has_pool):
-    """The components a round is measured against. Pool section only when has_pool."""
-    return [as_dict(r) for r in CATALOGUE if has_pool or r[1] != POOL_SECTION]
+def _live(key, version):
+    """A retired key stays live for rounds taken under a version older than its retirement."""
+    ret = RETIRED.get(key)
+    if not ret:
+        return True
+    return bool(version) and str(version) < ret
+
+
+def components(has_pool, version=None):
+    """The components a round is measured against. Pool section only when has_pool; a
+    retired component only when `version` (the round's frozen catalogue_version) predates
+    its retirement."""
+    return [as_dict(r) for r in CATALOGUE
+            if (has_pool or r[1] != POOL_SECTION) and _live(r[0], version)]
 
 
 def by_key(key):
@@ -158,5 +175,5 @@ def by_key(key):
     return None
 
 
-def criteria_count(has_pool):
-    return len({r[2] for r in CATALOGUE if has_pool or r[1] != POOL_SECTION})
+def criteria_count(has_pool, version=None):
+    return len({c["criterion_no"] for c in components(has_pool, version)})

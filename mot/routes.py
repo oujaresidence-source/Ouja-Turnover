@@ -163,10 +163,11 @@ def _round_view(rnd, results=None):
     """A round as the pages read it: frozen numbers if closed, live numbers if open."""
     results = results if results is not None else db.results(rnd["id"])
     has_pool = bool(rnd["has_pool"])
-    sc = engine.score(results, has_pool)
+    ver = rnd.get("catalogue_version")
+    sc = engine.score(results, has_pool, ver)
     v = dict(rnd)
     v["live"] = sc
-    v["blockers"] = [b["key"] for b in engine.blockers(results, has_pool)]
+    v["blockers"] = [b["key"] for b in engine.blockers(results, has_pool, ver)]
     v["is_open"] = rnd.get("closed_at") is None
     v["abandoned"] = (rnd.get("note") or "") == "abandoned"
     try:
@@ -199,8 +200,8 @@ def core_portfolio(today=None):
             rr = res.get(lr["id"], {})
             has_pool = bool(lr["has_pool"])
             meta = _meta(lid)
-            out = engine.outstanding_sar(rr, prices, meta, has_pool)
-            bl = engine.blockers(rr, has_pool)
+            out = engine.outstanding_sar(rr, prices, meta, has_pool, lr.get("catalogue_version"))
+            bl = engine.blockers(rr, has_pool, lr.get("catalogue_version"))
             row["latest"] = {"id": lr["id"], "closed_at": lr["closed_at"],
                              "compliance_pct": lr["compliance_pct"], "inspected_pct": lr["inspected_pct"],
                              "denominator": lr["denominator"], "has_pool": has_pool,
@@ -222,7 +223,7 @@ def core_portfolio(today=None):
         if op:
             orr = db.results(op["id"])
             row["open"] = {"id": op["id"], "opened_at": op["opened_at"], "inspector": op["inspector"],
-                           "live": engine.score(orr, bool(op["has_pool"]))}
+                           "live": engine.score(orr, bool(op["has_pool"]), op.get("catalogue_version"))}
         rows.append(row)
     return 200, {"ok": True, "today": today.isoformat(), "rows": rows,
                  "summary": {"units": len(rows), "compliant": n_ok, "blocked": n_blocked,
@@ -247,10 +248,11 @@ def core_unit(listing_id):
     if open_v:
         open_v["results"] = res.get(open_v["id"], {})
         open_v["photos"] = db.photos(open_v["id"])
-        open_v["components"] = engine.components_for(bool(open_v["has_pool"]))
+        open_v["components"] = engine.components_for(bool(open_v["has_pool"]), open_v.get("catalogue_version"))
         open_v["prices"] = _price_map()
         open_v["quote_preview"] = engine.quote_lines(open_v["results"], open_v["prices"], meta,
-                                                     bool(open_v["has_pool"]), today=_today())
+                                                     bool(open_v["has_pool"]), today=_today(),
+                                                     version=open_v.get("catalogue_version"))
     return 200, {"ok": True, "listing_id": lid, "name": names.get(lid) or ("#%d" % lid),
                  "meta": meta, "pool_known": feats is not None,
                  "has_pool": (("pool" in feats) if feats is not None else None),
@@ -309,7 +311,7 @@ def core_open(payload, actor="", today=None):
 def _apply_result(rnd, p, actor, allow_billed):
     key = (p.get("comp_key") or "").strip()
     comp = C.by_key(key)
-    if not comp or (comp["pool_only"] and not rnd["has_pool"]):
+    if not comp or (comp["pool_only"] and not rnd["has_pool"]) or not C._live(key, rnd.get("catalogue_version")):
         return 400, {"ok": False, "error": "مكوّن غير معروف لهذي الجولة"}
     state = (p.get("state") or "").strip()
     if state not in engine.STATES:
@@ -329,7 +331,7 @@ def _apply_result(rnd, p, actor, allow_billed):
     except db.RoundClosed:
         return 409, {"ok": False, "error": CLOSED}
     results = db.results(rnd["id"])
-    return 200, {"ok": True, "result": r, "live": engine.score(results, bool(rnd["has_pool"]))}
+    return 200, {"ok": True, "result": r, "live": engine.score(results, bool(rnd["has_pool"]), rnd.get("catalogue_version"))}
 
 
 def core_result(payload, actor=""):
@@ -355,8 +357,9 @@ def _fanout(rnd, results, q, meta, today, actor):
             "client_name": meta.get("owner") or "",
             "client_phone": meta.get("owner_phone") or "",
             "items": items, "by": actor or "mot",
+            "date": today.isoformat(),
             "notes": "نواقص مطابقة وزارة السياحة — %s — جولة %s (%d/%d مكوّن)" % (
-                name, today.isoformat(), engine.score(results, bool(rnd["has_pool"]))["available"],
+                name, today.isoformat(), engine.score(results, bool(rnd["has_pool"]), rnd.get("catalogue_version"))["available"],
                 rnd["denominator"]),
         }
         try:
@@ -437,14 +440,15 @@ def core_close(payload, actor="", today=None):
     if rnd.get("closed_at"):
         return 409, {"ok": False, "error": CLOSED}
     has_pool = bool(rnd["has_pool"])
+    ver = rnd.get("catalogue_version")
     results = db.results(rnd["id"])
-    sc = engine.score(results, has_pool)
+    sc = engine.score(results, has_pool, ver)
     if sc["not_inspected"]:
         return 409, {"ok": False, "not_inspected": sc["not_inspected"],
                      "error": "باقي %d مكوّن ما انفحص — الجولة ما تنقفل ناقصة (تقدر تتركها بدل الإغلاق)"
                               % sc["not_inspected"]}
     meta = _meta(rnd["listing_id"])
-    q = engine.quote_lines(results, _price_map(), meta, has_pool, today=today)
+    q = engine.quote_lines(results, _price_map(), meta, has_pool, today=today, version=ver)
     if q["unpriced"] and not p.get("allow_unpriced"):
         return 409, {"ok": False, "unpriced": q["unpriced"],
                      "error": "فيه %d بند بدون سعر — سعّره في قائمة الأسعار أو أكّد الإغلاق بدونه"
@@ -588,7 +592,7 @@ def core_report(rid, today=None):
     if not rnd:
         return 404, {"ok": False, "error": NOT_FOUND}
     results = db.results(rnd["id"])
-    ok, why = engine.can_export_evidence(rnd, results, bool(rnd["has_pool"]))
+    ok, why = engine.can_export_evidence(rnd, results, bool(rnd["has_pool"]), rnd.get("catalogue_version"))
     if not ok:
         return 409, {"ok": False, "error": why}
     html = report.html_for(rnd, results, db.photos(rnd["id"]), _meta(rnd["listing_id"]),
@@ -611,11 +615,11 @@ def core_check_get(token):
                                        "listing_id": rnd["listing_id"],
                                        "has_pool": bool(rnd["has_pool"]), "opened_at": rnd["opened_at"],
                                        "denominator": rnd["denominator"]},
-                 "components": engine.components_for(bool(rnd["has_pool"])),
+                 "components": engine.components_for(bool(rnd["has_pool"]), rnd.get("catalogue_version")),
                  "results": {k: {"state": r["state"], "qty": r["qty"], "note": r["note"],
                                  "source": r["source"]} for k, r in results.items()},
                  "photos": ph, "max_photos": photos.MAX_PER_COMPONENT,
-                 "live": engine.score(results, bool(rnd["has_pool"]))}
+                 "live": engine.score(results, bool(rnd["has_pool"]), rnd.get("catalogue_version"))}
 
 
 def core_check_result(payload, actor=""):

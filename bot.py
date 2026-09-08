@@ -28120,10 +28120,16 @@ function printQuote(){
   const vat = vo ? (sub+srv) * vr/100 : 0;
   const grand = sub+srv+vat;
   let rows = '';
+  let _n = 0;
   q.items.forEach(function(it,i){
     if(!(it.description||it.price||it.qty)) return;
+    if(it.description && !parseFloat(it.qty||0) && !parseFloat(it.price||0)){   // a section header (e.g. «أعمال وتركيبات»): no number, no zeros
+      rows += '<tr><td colspan="5" class="desc" style="background:#faf7f0;color:#8c7443;font-weight:700">'+esc(it.description)+'</td></tr>';
+      return;
+    }
+    _n += 1;
     const total = (parseFloat(it.qty||0))*(parseFloat(it.price||0));
-    rows += '<tr><td>'+(i+1)+'</td><td class="desc">'+esc(it.description||'')+'</td><td>'+(it.qty||0)+'</td><td>'+fmt(it.price||0)+'</td><td class="amt">'+fmt(total)+'</td></tr>';
+    rows += '<tr><td>'+_n+'</td><td class="desc">'+esc(it.description||'')+'</td><td>'+(it.qty||0)+'</td><td>'+fmt(it.price||0)+'</td><td class="amt">'+fmt(total)+'</td></tr>';
   });
   const w = window.open('', '_blank');
   w.document.write('<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>'+esc(q.number||'Quote')+'</title>'

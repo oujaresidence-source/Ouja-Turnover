@@ -49,7 +49,7 @@ def _demo_results(has_pool):
 
 def _demo_report_html():
     rnd = {"id": 1, "listing_id": 0, "apartment_name": DEMO_UNIT["name"], "has_pool": 0,
-           "denominator": 61, "catalogue_version": C.CATALOGUE_VERSION,
+           "denominator": len(C.components(False)), "catalogue_version": C.CATALOGUE_VERSION,
            "closed_at": "2026-09-14T11:20:00", "inspector": "مفتش عوجا (نموذج)", "opened_by": ""}
     return report.html_for(rnd, _demo_results(False), [], DEMO_UNIT, DEMO_PRICES, state_dir="/nonexistent")
 

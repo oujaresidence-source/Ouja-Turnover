@@ -75,9 +75,10 @@ tr { page-break-inside:avoid; }
 
 def html_for(rnd, results, photo_rows, meta, prices, state_dir="/data"):
     has_pool = bool(rnd["has_pool"])
-    comps = engine.components_for(has_pool)
-    sc = engine.score(results, has_pool)
-    q = engine.quote_lines(results, prices, meta, has_pool)
+    ver = rnd.get("catalogue_version")
+    comps = engine.components_for(has_pool, ver)
+    sc = engine.score(results, has_pool, ver)
+    q = engine.quote_lines(results, prices, meta, has_pool, version=ver)
     by_key = {}
     for p in photo_rows or []:
         by_key.setdefault(p["comp_key"], []).append(p["url"])
@@ -97,7 +98,7 @@ def html_for(rnd, results, photo_rows, meta, prices, state_dir="/data"):
              "<div class='kpi'><b class='num'>", e(len(q["blocked"])), "</b><span>معايير إنشائية غير مطابقة</span></div>",
              "</div>"]
     parts.append("<div class='sub'>المعايير المحسوبة: %d معيارًا / %d مكوّنًا%s · المالك: %s</div>" % (
-        C.criteria_count(has_pool), sc["denominator"],
+        C.criteria_count(has_pool, ver), sc["denominator"],
         " (شقة بمسبح)" if has_pool else " (بدون مسبح)", e(meta.get("owner") or "—")))
     if q["blocked"]:
         parts.append("<div class='blk'><b>الوحدة غير مطابقة — تحتاج قرار:</b> ")
