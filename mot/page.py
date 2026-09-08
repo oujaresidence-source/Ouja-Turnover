@@ -256,7 +256,7 @@ async function renderUnit(){
       + (r.abandoned ? '<span class="pill mute">متروكة</span>' : '<span class="pill ' + cls + '">مطابقة ' + pct(r.compliance_pct) + '</span><span class="meta">فحص ' + pct(r.inspected_pct) + ' من ' + r.denominator + (r.has_pool?' (مسبح)':'') + '</span>')
       + '<span class="meta">' + esc(r.inspector||'') + '</span>'
       + (r.blockers.length ? '<span class="pill bad">' + r.blockers.length + ' إنشائي</span>' : '')
-      + (r.fanout && r.fanout.quote && r.fanout.quote.number ? '<span class="pill gold">عرض ' + esc(r.fanout.quote.number) + ' · ' + fmt(r.fanout.quote.total) + ' ر.س</span>' : '')
+      + (r.fanout && r.fanout.quote && r.fanout.quote.number ? '<a class="pill gold" style="text-decoration:none" href="/dashboard?token=' + encodeURIComponent(TOKEN) + '#quote">عرض ' + esc(r.fanout.quote.number) + ' · ' + fmt(r.fanout.quote.total) + ' ر.س ↗</a>' : '')
       + (r.fanout && r.fanout.purchase_ticket ? '<span class="pill mute">تذكرة مشتريات</span>' : '')
       + (r.fanout && r.fanout.maint_tickets && r.fanout.maint_tickets.length ? '<span class="pill mute">' + r.fanout.maint_tickets.length + ' صيانة</span>' : '')
       + '<span class="sp"></span>'
@@ -310,9 +310,9 @@ function renderOpenRound(u){
     });
     h += '</div>';
   });
-  h += '<div class="sumbar"><button class="btn primary" id="closer"' + (lv.not_inspected ? ' disabled' : '') + '>إغلاق الجولة' + (lv.not_inspected ? ' (باقي ' + lv.not_inspected + ')' : ' وإصدار العرض والتذاكر') + '</button>'
+  h += '<div class="sumbar" style="flex-direction:column;align-items:stretch;gap:8px"><div class="meta">' + (lv.not_inspected ? 'كمّل الفحص أولًا — الإغلاق هو اللي يطلع عرض السعر والتذاكر' : 'الفحص مكتمل ✓ — اضغط الإغلاق ليصدر عرض السعر للمالك وتذاكر عوجا تلقائيًا') + '</div><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="btn gold" id="closer" style="font-size:15px;padding:10px 18px"' + (lv.not_inspected ? ' disabled' : '') + '>' + (lv.not_inspected ? 'إغلاق الجولة (باقي ' + lv.not_inspected + ')' : '🧾 إغلاق الجولة وإصدار عرض السعر') + '</button>'
     + '<label>إعادة الفحص <input type="date" id="recheck" style="font:inherit;padding:5px 8px;border:1px solid var(--border);border-radius:8px"></label>'
-    + '<span class="sp" style="flex:1"></span><button class="btn danger sm" id="aband">ترك الجولة</button></div>';
+    + '<span class="sp" style="flex:1"></span><button class="btn danger sm" id="aband">ترك الجولة</button></div></div>';
   return h;
 }
 
@@ -375,8 +375,10 @@ async function closeRound(o, extra){
   if(f.blocked && f.blocked.length) lines.push(f.blocked.length + ' معيار إنشائي — الوحدة غير مطابقة وتحتاج قرار');
   if(f.errors && f.errors.length) lines.push('تنبيه: ' + f.errors.join(' · '));
   lines.push('إعادة الفحص: ' + j.recheck_due);
-  modal('<h3>' + esc(msg) + '</h3><p>' + lines.map(esc).join('<br>') + '</p><div class="acts"><button class="btn primary" id="mok">تمام</button>'
-    + (j.score.inspected_pct>=100 ? '<a class="btn" target="_blank" href="' + withTok('/api/mot/report?id=' + o.id) + '">ملف الدليل</a>' : '') + '</div>');
+  modal('<h3>' + esc(msg) + '</h3><p>' + lines.map(esc).join('<br>') + '</p><div class="acts">'
+    + (f.quote ? '<a class="btn gold" href="/dashboard?token=' + encodeURIComponent(TOKEN) + '#quote">افتح عرض السعر ' + esc(f.quote.number) + '</a>' : '')
+    + (j.score.inspected_pct>=100 ? '<a class="btn" target="_blank" href="' + withTok('/api/mot/report?id=' + o.id) + '">ملف الدليل</a>' : '')
+    + '<button class="btn primary" id="mok">تمام</button></div>');
   qs('mok').onclick = function(){ closeModal(); S.portfolio = null; renderUnit(); };
 }
 
