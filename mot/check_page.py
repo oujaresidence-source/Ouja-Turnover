@@ -100,7 +100,8 @@ function render(){
     h += '<h3>' + esc(sec[1]) + '</h3>';
     comps.forEach(function(c){
       var res = D.results[c.key] || {}; var st = res.state || 'unchecked'; var ph = D.photos[c.key] || [];
-      h += '<div class="comp" data-key="' + esc(c.key) + '"><div class="t"><span class="no">' + c.criterion_no + '</span><b>' + esc(c.label_ar) + '</b><small>' + esc(c.criterion_ar) + (res.source==='wifi' ? ' · <span class="tag ok">من اشتراكات النت</span>' : '') + '</small></div>';
+      h += '<div class="comp" data-key="' + esc(c.key) + '"><div class="t"><span class="no">' + c.criterion_no + '</span><b>' + esc(c.label_ar) + '</b><small>' + esc(c.criterion_ar) + (res.source==='wifi' ? ' · <span class="tag ok">من اشتراكات النت</span>' : '') + '</small></div>'
+        + (c.description_ar ? '<div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5">' + esc(c.description_ar) + '</div>' : '');
       h += '<div class="seg"><button class="av' + (st==='available'?' on':'') + '" data-s="available">متوفر</button><button class="mi' + (st==='missing'?' on':'') + '" data-s="missing">غير متوفر</button><button class="un' + (st==='unchecked'?' on':'') + '" data-s="unchecked">لم يُفحص</button></div>';
       if(st==='missing'){
         h += '<div class="extra">';

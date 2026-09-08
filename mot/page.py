@@ -289,7 +289,7 @@ function renderOpenRound(u){
       var r = res[c.key] || {}; var st = r.state || 'unchecked';
       var pr = prices[c.key]; var ph = photos[c.key] || [];
       h += '<div class="comp" data-key="' + esc(c.key) + '"><span class="no">' + c.criterion_no + '</span>'
-        + '<div class="lbl"><b>' + esc(c.label_ar) + '</b><small>' + esc(c.criterion_ar) + ' · ' + KIND[c.kind] + (c.key==='c13.wifi' && r.source==='wifi' ? ' · <span class="pill ok">من اشتراكات النت</span>' : '') + (r.source==='override' ? ' · <span class="pill warn">تجاوز</span>' : '') + '</small></div>'
+        + '<div class="lbl"><b>' + esc(c.label_ar) + '</b><small>' + esc(c.criterion_ar) + ' · ' + KIND[c.kind] + (c.description_ar ? '<br><span style="color:var(--muted)">' + esc(c.description_ar) + '</span>' : '') + (c.key==='c13.wifi' && r.source==='wifi' ? ' · <span class="pill ok">من اشتراكات النت</span>' : '') + (r.source==='override' ? ' · <span class="pill warn">تجاوز</span>' : '') + '</small></div>'
         + '<div class="seg"><button class="av' + (st==='available'?' on':'') + '" data-s="available">متوفر</button><button class="mi' + (st==='missing'?' on':'') + '" data-s="missing">غير متوفر</button><button class="un' + (st==='unchecked'?' on':'') + '" data-s="unchecked">لم يُفحص</button></div>';
       if(st==='missing'){
         h += '<div class="extra">';

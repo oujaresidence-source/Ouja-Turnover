@@ -104,6 +104,12 @@ def html_for(rnd, results, photo_rows, meta, prices, state_dir="/data"):
         parts.append("<div class='blk'><b>الوحدة غير مطابقة — تحتاج قرار:</b> ")
         parts.append("، ".join(e("%d. %s" % (b["criterion_no"], b["label_ar"])) for b in q["blocked"]))
         parts.append("</div>")
+    merged_lines = []
+    for src, dst in C.MERGED_INTO.items():
+        if any(c["criterion_no"] == dst for c in comps) and not any(c["criterion_no"] == src for c in comps):
+            merged_lines.append("<div class='sub'>المعيار %d (%s): مغطّى ضمن المعيار %d.</div>" % (
+                src, e(C.DESCRIPTION_AR.get(src, "")), dst))
+    parts.extend(merged_lines)
     for skey, slabel in C.SECTIONS:
         rows = [c for c in comps if c["section"] == skey]
         if not rows:

@@ -211,7 +211,7 @@ section .lead{margin:0 0 16px;color:var(--muted);font-size:15px}
     <h2>المعايير كما نقرؤها</h2>
     <p class="lead">٤٧ معيارًا في ثمانية أقسام، حوّلناها إلى <b id="ncomp"></b> مكوّنًا قابلًا للفحص على أرض الشقة (<b id="ncomp_pool"></b> مع المسبح). كل مكوّن له مفتاح ثابت لا يتغيّر، ونسخة معايير <span class="chip" id="ver"></span> تُثبَّت على كل جولة.</p>
     <div class="grid2" id="sections"></div>
-    <p class="lead" style="margin-top:12px;font-size:13.5px">نص المعايير الرسمي يُعرض حرفيًا من اللائحة عند اعتماده، ولا نعيد صياغته.</p>
+    <p class="lead" style="margin-top:12px;font-size:13.5px">نص كل معيار يُعرض حرفيًا من قائمة الوزارة على شاشة المفتش وفي ملف الدليل، ولا نعيد صياغته. المعيار ١٨ (أواني الطعام) يُفحص ضمن المعيار ٣٥ ويبقى محسوبًا.</p>
   </section>
 
   <section id="journey">
@@ -355,6 +355,7 @@ function renderPhone(){
     cs.forEach(function(c){
       var r = R[c.key]||{}; var st = r.state||'unchecked';
       h += '<div class="comp" data-key="' + esc(c.key) + '"><div class="t"><span class="no">' + c.criterion_no + '</span><b>' + esc(c.label_ar) + '</b><small>' + esc(c.criterion_ar) + (c.key==='c13.wifi' ? ' · من الاشتراكات' : '') + '</small></div>'
+        + (c.description_ar ? '<div style="font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.5">' + esc(c.description_ar) + '</div>' : '');
         + '<div class="seg"><button class="av' + (st==='available'?' on':'') + '" data-s="available">متوفر</button><button class="mi' + (st==='missing'?' on':'') + '" data-s="missing">غير متوفر</button><button class="un' + (st==='unchecked'?' on':'') + '" data-s="unchecked">لم يُفحص</button></div>';
       if(st==='missing'){
         h += '<div class="extra">';

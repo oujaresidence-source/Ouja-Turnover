@@ -30,7 +30,7 @@ class TestDenominator(unittest.TestCase):
     def test_follows_has_pool(self):
         self.assertEqual(engine.score({}, False)["denominator"], 60)
         self.assertEqual(engine.score({}, True)["denominator"], 66)
-        self.assertEqual(engine.score({}, False, "2026-09")["denominator"], 61)
+        self.assertEqual(engine.score({}, False, "2026-09")["denominator"], 62)   # 61 + the later-added qibla marker
 
     def test_pool_results_ignored_when_unit_has_no_pool(self):
         r = results_for(False)

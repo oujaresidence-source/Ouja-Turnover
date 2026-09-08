@@ -21,7 +21,7 @@ FROZEN_KEYS = [
     "c01.suitability", "c02.lighting", "c03.elevator", "c04.price_board",
     "c05.condition", "c06.rules_board", "c07.smart_lock", "c08.broom", "c08.detergents",
     "c08.gloves", "c09.bin",
-    "c10.iron", "c11.qr_saudi", "c12.prayer_rug", "c13.wifi", "c14.door_cam",
+    "c10.iron", "c11.qr_saudi", "c12.prayer_rug", "c12.qibla", "c13.wifi", "c14.door_cam",
     "c15.bedroom_seat", "c16.tv", "c17.kettle", "c17.cups", "c17.water", "c18.dishes",
     "c18.cutlery", "c19.living_vent",
     "c20.room_size", "c21.mattress", "c21.pillows", "c21.linen", "c21.protector",
@@ -44,10 +44,13 @@ class TestCounts(unittest.TestCase):
         self.assertEqual(len(C.components(True)), 66)
 
     def test_old_rounds_keep_their_61_67(self):
-        self.assertEqual(len(C.components(False, version="2026-09")), 61)
-        self.assertEqual(len(C.components(True, version="2026-09")), 67)
-        self.assertNotIn("c35.dinner_set", [c["key"] for c in C.components(False)])
-        self.assertIn("c35.dinner_set", [c["key"] for c in C.components(False, version="2026-09")])
+        # 2026-09 rounds: the 61 they had + c12.qibla (added later, never retired) = 62.
+        # Additions reach old rounds as «unchecked»; retirements never take rows away from them.
+        self.assertEqual(len(C.components(False, version="2026-09")), 62)
+        self.assertEqual(len(C.components(True, version="2026-09")), 68)
+        self.assertNotIn("c18.dishes", [c["key"] for c in C.components(False)])
+        self.assertIn("c18.dishes", [c["key"] for c in C.components(False, version="2026-09")])
+        self.assertIn("c35.dinner_set", [c["key"] for c in C.components(False)])
 
     def test_retired_keys_stay_in_the_catalogue_list(self):
         keys = [r[0] for r in C.CATALOGUE]
@@ -98,10 +101,15 @@ class TestStability(unittest.TestCase):
     def test_wifi_key_is_a_product(self):
         self.assertEqual(C.by_key(C.WIFI_KEY)["kind"], "product")
 
-    def test_official_wording_is_blank_until_it_arrives(self):
-        # a paraphrase of a regulator's text must never ship silently
+    def test_official_wording_present_for_all_47(self):
+        self.assertEqual(sorted(C.DESCRIPTION_AR), list(range(1, 48)))
         for c in C.components(True):
-            self.assertEqual(c["description_ar"], "")
+            self.assertTrue(c["description_ar"])
+
+    def test_merged_criterion_still_counted(self):
+        self.assertEqual(C.criteria_count(False), 41)
+        self.assertEqual(C.criteria_count(True), 47)
+        self.assertNotIn(18, {c["criterion_no"] for c in C.components(False)})
 
 
 if __name__ == "__main__":
