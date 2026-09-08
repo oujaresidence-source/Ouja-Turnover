@@ -58,6 +58,7 @@ h3{margin:18px 16px 6px;font-size:14px;color:var(--muted);font-weight:700}
 .empty{padding:40px 20px;text-align:center;color:var(--muted)}
 .foot{position:fixed;bottom:0;left:0;right:0;background:rgba(250,247,241,.96);border-top:1px solid var(--border);padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px;max-width:560px;margin:0 auto}
 .foot b{font-family:var(--num);color:var(--ink)}
+.foot a.go{margin-inline-start:auto;background:var(--gold);color:#fff;text-decoration:none;font-weight:800;padding:9px 12px;border-radius:12px;font-size:13px;white-space:nowrap}
 .toast{position:fixed;bottom:70px;left:50%;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;opacity:0;transition:all .22s var(--ease);pointer-events:none;z-index:20;max-width:90vw;font-size:14px}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -115,7 +116,9 @@ function render(){
     });
   });
   qs('list').innerHTML = h;
-  qs('foot').innerHTML = '<span>باقي <b>' + lv.not_inspected + '</b></span><span>متوفر <b>' + lv.available + '</b></span><span>غير متوفر <b>' + lv.missing + '</b></span><span style="margin-inline-start:auto;color:var(--muted);font-size:12px">' + (lv.not_inspected ? 'كمّل الكل عشان المدير يقدر يقفل الجولة' : 'اكتمل الفحص ✓') + '</span>';
+  qs('foot').innerHTML = '<span>باقي <b>' + lv.not_inspected + '</b></span><span>متوفر <b>' + lv.available + '</b></span><span>غير متوفر <b>' + lv.missing + '</b></span>'
+    + (lv.not_inspected ? '<span style="margin-inline-start:auto;color:var(--muted);font-size:12px">كمّل الكل عشان تقدر تقفل الجولة</span>'
+                        : '<a class="go" href="/mot#unit=' + encodeURIComponent(r.listing_id) + '">🧾 إغلاق وإصدار العرض (اللوحة)</a>');
 }
 
 async function save(key, patch){

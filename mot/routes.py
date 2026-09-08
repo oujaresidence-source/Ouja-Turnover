@@ -608,6 +608,7 @@ def core_check_get(token):
     for p in db.photos(rnd["id"]):
         ph.setdefault(p["comp_key"], []).append(p["id"])
     return 200, {"ok": True, "round": {"id": rnd["id"], "apartment_name": rnd["apartment_name"],
+                                       "listing_id": rnd["listing_id"],
                                        "has_pool": bool(rnd["has_pool"]), "opened_at": rnd["opened_at"],
                                        "denominator": rnd["denominator"]},
                  "components": engine.components_for(bool(rnd["has_pool"])),
