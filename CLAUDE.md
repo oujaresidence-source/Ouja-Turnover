@@ -220,6 +220,54 @@ POSTs to `/api/decor/inquire` **and** opens WhatsApp exactly as before.
   is double-gated: login + `decor` permission. **Existing non-admin users see the tab only
   after the owner ticks it in الصلاحيات** — the whitelist model denies unknown tabs.
 
+## Direct-booking collection «التحصيل» — the `directpay/` package
+A debt ledger with a human attestation gate, NOT an integration. Direct (non-Airbnb) bookings
+are paid through **StayHub**, which is not connected to this bot and never will be — this code
+never calls StayHub, has no credentials and no URL for it; `stayhub_ref` is free text for a
+future reconciliation. Every confirmed direct reservation (classified by the ONE classifier
+`_finance_channel` — never copy it; `DIRECTPAY_EXTRA_CHANNELS` adds substrings on top) opens
+its own Discord room under «تحصيل الحجوزات المباشرة» (topic `ouja-dp:<res_id> seq:<n> lid:<id>`).
+- **THE OWNER RULE (2026-09-10), absolute:** a room closes ONLY when an **administrator** (him
+  and Aseel — Discord `administrator`, NOT `manage_guild`; `_dp_can_close` is written fresh, do
+  not swap in `_tk_is_admin`) uploads an image/PDF proving the money is in StayHub AND types the
+  amount + the StayHub reference. `DIRECTPAY_CLOSE_IDS` adds ids; a garbled value ⇒ admins only,
+  never everybody. Every refused press is a `directpay_events` row naming who tried.
+- **State machine** (`engine.transition`, the ONLY place; buttons + routes both call it):
+  `open → verified` (proof + amount + ref, variance inside `max(1 SAR, 1%)` or a 10–400-char
+  reason) · `open → written_off` («إغلاق بدون إثبات», 20–400-char reason, **permanent red**,
+  counted forever, in the daily summary all month) · `open → void` («ليست حجز مباشر» / cancelled,
+  reason required, records the raw channel so the owner can tune EXTRA_CHANNELS) ·
+  `verified → open` ONLY on a price increase after close. No `closed` state, no "close anyway".
+- **Traps closed structurally — do not simplify:** (1) `DIRECTPAY_START_DATE` = first-boot date,
+  persisted in `directpay_settings`, never recomputed — without it the first tick opens a room
+  for every historical booking; (2) `DIRECTPAY_DRYRUN=1` by default — ledger fills, log prints
+  «would open», nothing posts; rooms backfill 5/tick when flipped to 0; (3) three anti-duplicate
+  layers: `UNIQUE(reservation_id)` + `_once_claim("directpay:open:<id>")` (released on failure)
+  + rebuild from channel topics across `_category_family` every tick; (4) rooms via
+  `_make_channel_spill` only (50-per-category cap is a certainty here); (5) the proof scan
+  **fails CLOSED** (`proof.find_proof` → «ما قدرت أقرأ الملفات») — the opposite of
+  `_maint_has_proof`, on purpose; (6) proof BYTES re-hosted under `$STATE_DIR/directpay/<id>/`
+  (a Discord attachment URL is signed and expires); (7) a Hostaway cancellation posts a note +
+  «إلغاء الغرفة» button — the bot never auto-voids (paid-then-cancelled = refund decision);
+  (8) no web close endpoint — `/api/directpay/*` is board/ticket/note only; (9) hourly loop +
+  persisted `summary_date` latch, never `@tasks.loop(time=…)`.
+- **Detection:** `directpay_poll_loop` (10 min, guarded + staggered) pulls a targeted arrival
+  window today−3 → today+400 in 120-day slices via `_ha_reservations_window` — NEVER
+  `get_reservations_cached()` — and filters `reservationDate` in Python; the webhook adds
+  `_bg_task(_directpay_on_hook(rid))` as a latency shortcut only (`WEBHOOK_SECRET` may be
+  random-per-boot). `service.process_reservations` is the single path for both.
+- Dashboard tab `dpay` («التحصيل», cat_ops) is a `_ROLE_READ_RULES`/`_ROLE_WRITE_RULES`
+  permission tab — existing non-admin users see it only after the owner ticks it in الصلاحيات.
+- Tests: `tests/test_directpay_{engine,db,gate,proof,startdate,structure}.py` (the structure
+  test greps the rules above; zero backslashes in `directpay/*.py`).
+- Env: `DIRECTPAY_ENABLED`(1), `DIRECTPAY_DRYRUN`(**1**), `DIRECTPAY_START_DATE`(first boot),
+  `DIRECTPAY_CATEGORY`(تحصيل الحجوزات المباشرة), `DIRECTPAY_SUMMARY_CHANNEL`(تحصيل-الملخص),
+  `DIRECTPAY_CLOSE_IDS`(empty), `DIRECTPAY_PING_ROLE_ID`(empty), `DIRECTPAY_POLL_MIN`(10),
+  `DIRECTPAY_LOOKBACK_DAYS`(3), `DIRECTPAY_MAX_OPEN_PER_TICK`(5), `DIRECTPAY_NUDGE_AFTER_DAYS`(2),
+  `DIRECTPAY_NUDGE_EVERY_DAYS`(2), `DIRECTPAY_SUMMARY_HOUR`(13), `DIRECTPAY_VARIANCE_SAR`(1.0),
+  `DIRECTPAY_VARIANCE_PCT`(0.01), `DIRECTPAY_PROOF_MAX_MB`(12), `DIRECTPAY_WATCH_DAYS`(30),
+  `DIRECTPAY_EXTRA_CHANNELS`(empty).
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log

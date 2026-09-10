@@ -116,6 +116,16 @@ except Exception as _decor_err:         # pragma: no cover
     _decor = None
     _HAS_DECOR = False
 
+# Direct-booking collection «التحصيل» — one Discord room per direct reservation, closed only by
+# an administrator with StayHub proof. DRY-RUN by default. Additive; the bot runs without it.
+try:
+    import directpay as _directpay
+    _HAS_DIRECTPAY = True
+except Exception as _dp_err:            # pragma: no cover
+    print("[directpay] import failed (collection tickets disabled, bot unaffected):", _dp_err)
+    _directpay = None
+    _HAS_DIRECTPAY = False
+
 # Cleaning coverage «تغطية التنظيف» — where every apartment is, who cleans it, how
 # OujaCT actually performs, and the head count to bring cleaning fully in-house.
 # READ-ONLY: it computes from the existing stores and writes nothing but its geo cache.
@@ -6656,6 +6666,19 @@ DECOR_OPS_CHANNEL  = os.environ.get("DECOR_OPS_CHANNEL", "تنسيق-الحفل�
 # overflow protection the صيانة tickets already have.
 DECOR_CATEGORY     = os.environ.get("DECOR_CATEGORY", "تنسيق الحفلات")
 
+# ============= «التحصيل» direct-booking collection tickets =============
+# Every direct reservation (Hostaway, not Airbnb) opens its own room the moment it appears
+# and stays open until an ADMINISTRATOR uploads StayHub proof + types amount and reference.
+# POSTURE ON FIRST DEPLOY: DIRECTPAY_DRYRUN=1 (read live inside directpay.config) — the ledger
+# fills and the log shows what WOULD open, no channel is created, nothing is posted. The owner
+# flips it to 0 in Railway. Only reservations BOOKED on/after the first-boot date (persisted
+# in brain.db) ever open a room, and at most DIRECTPAY_MAX_OPEN_PER_TICK (5) per tick.
+DIRECTPAY_ENABLED         = os.environ.get("DIRECTPAY_ENABLED", "1") in ("1", "true", "True", "yes")
+DIRECTPAY_CATEGORY        = os.environ.get("DIRECTPAY_CATEGORY", "تحصيل الحجوزات المباشرة")
+DIRECTPAY_SUMMARY_CHANNEL = os.environ.get("DIRECTPAY_SUMMARY_CHANNEL", "تحصيل-الملخص")
+DIRECTPAY_POLL_MIN        = max(2, int(os.environ.get("DIRECTPAY_POLL_MIN", "10") or 10))
+DIRECTPAY_PING_ROLE_ID    = int(os.environ.get("DIRECTPAY_PING_ROLE_ID", "0") or 0)
+
 # ============= Ops Watchdog «الرقيب التشغيلي» — 30-min ops health cycle =============
 # Read-only monitor: posts a phone-first summary to WATCHDOG_CHANNEL every cycle and pings
 # instantly (once per flag) on criticals. LIVE by default (owner go-live 2026-07-05) — set
@@ -8022,6 +8045,579 @@ async def decor_warn_loop():
 @decor_warn_loop.before_loop
 async def _decor_warn_ready():
     await bot.wait_until_ready()
+
+# ===================== «التحصيل» — direct-booking collection tickets =====================
+# One Discord ROOM per direct reservation, opened the moment it appears, closed ONLY by an
+# administrator who uploads proof that the money is in StayHub and types the amount + the
+# StayHub reference. The rules live in directpay/ (engine.transition is the single state
+# machine); this block is the Discord skin: rooms, the pinned card, the buttons, the modals.
+# StayHub is never called. DIRECTPAY_DRYRUN=1 (the default) posts nothing.
+
+def _dp_close_ids():
+    return _directpay.config.close_ids() if _HAS_DIRECTPAY else []
+
+# Written fresh — NOT _tk_is_admin, which also accepts the looser server-management
+# permission. The owner's rule: only people with **administrator** on (him and Aseel), plus
+# DIRECTPAY_CLOSE_IDS. A garbled env value yields [] → administrators only, never everybody.
+def _dp_can_close(user):
+    p = getattr(user, "guild_permissions", None)
+    if p is not None and bool(getattr(p, "administrator", False)):
+        return True
+    try:
+        uid = getattr(user, "id", None)
+        return uid is not None and int(uid) in set(_dp_close_ids())
+    except Exception:
+        return False
+
+_DP_CLOSE_REFUSAL = ("🙏 **إغلاق غرف التحصيل للإدارة فقط** (فيصل وأسيل). "
+                     "ارفع إثبات StayHub هنا وهم يقفلونها بعد ما يشوفونه.")
+
+def _directpay_fetch_reservation(rid):
+    """ONE targeted GET — the webhook path and the per-ticket refresh. Never the cache."""
+    try:
+        data = api_get(f"/reservations/{rid}")
+        res = (data or {}).get("result") or {}
+        return res if isinstance(res, dict) and res.get("id") is not None else None
+    except Exception as e:
+        print("[directpay] reservation fetch failed:", e)
+        return None
+
+def _directpay_room_link(channel_id):
+    if not GUILD_ID or not channel_id:
+        return ""
+    return f"https://discord.com/channels/{GUILD_ID}/{channel_id}"
+
+def _directpay_caps():
+    """The exact capability dict wired into the package (tests execute it too). Mutable bot
+    globals go in as zero-arg lambdas so the package never holds a stale object."""
+    return {
+        "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor, "req_actor": _req_actor,
+        "json_response": _json, "web": web, "state_dir": STATE_DIR, "state_path": _state_path,
+        "tz": TZ, "now": now_riyadh, "listings": get_listings_map,
+        "notify": _directpay_notify, "log_event": log_event,
+        "finance_channel": _finance_channel,          # the ONE channel classifier — never copied
+        "payment_signal": _payment_signal,            # pure harvesting; printed with its field names
+        "ha_reservations_window": _ha_reservations_window,   # targeted window — never get_reservations_cached
+        "ha_reservation": _directpay_fetch_reservation,
+        "confirmed_statuses": lambda: CONFIRMED_STATUSES,
+        "guild_id": GUILD_ID,
+    }
+
+def _directpay_notify(payload):
+    """HOST.notify hook. Called from the event loop (buttons) OR from a worker thread (the
+    poller runs service.tick under to_thread) — both are handled; neither can raise."""
+    if not (DIRECTPAY_ENABLED and _HAS_DIRECTPAY):
+        return
+    try:
+        coro = _directpay_deliver(payload)
+        try:
+            asyncio.get_running_loop()
+            _bg_task(coro, "directpay:notify")
+        except RuntimeError:
+            main = getattr(bot, "loop", None)
+            if main is not None and main.is_running():
+                asyncio.run_coroutine_threadsafe(coro, main)
+            else:
+                coro.close()
+    except Exception as e:
+        print("[directpay] notify schedule failed (non-fatal):", e)
+
+def _directpay_find_category(guild):
+    want = _tk_cat_norm(DIRECTPAY_CATEGORY)
+    for cat in guild.categories:
+        if _tk_cat_norm(cat.name) == want:
+            return cat
+    return None
+
+async def _directpay_category(guild):
+    """«تحصيل الحجوزات المباشرة» — spelling-tolerant match (ة/ه) so a variant never makes a
+    twin category; created on first use, seated under the decoration category."""
+    cat = _directpay_find_category(guild)
+    if cat is not None:
+        return cat
+    cat = await guild.create_category(DIRECTPAY_CATEGORY)
+    try:
+        below = next((c for c in guild.categories
+                      if _tk_cat_norm(c.name) == _tk_cat_norm(DECOR_CATEGORY)), None)
+        if below is not None:
+            await cat.edit(position=below.position + 1)
+    except Exception as e:
+        print("[directpay] category position skipped (non-fatal):", e)
+    return cat
+
+def _directpay_mentions(guild):
+    """Who gets pinged: every non-managed role with administrator on, the optional
+    DIRECTPAY_PING_ROLE_ID, and any DIRECTPAY_CLOSE_IDS user. Never @everyone."""
+    bits = []
+    try:
+        for role in getattr(guild, "roles", None) or []:
+            perms = getattr(role, "permissions", None)
+            if perms is not None and getattr(perms, "administrator", False) and not getattr(role, "managed", False):
+                if getattr(role, "is_default", lambda: False)():
+                    continue
+                bits.append(role.mention)
+    except Exception:
+        pass
+    if DIRECTPAY_PING_ROLE_ID:
+        bits.append(f"<@&{DIRECTPAY_PING_ROLE_ID}>")
+    for uid in _dp_close_ids():
+        bits.append(f"<@{uid}>")
+    return " ".join(dict.fromkeys(bits))
+
+_DP_ALLOWED = discord.AllowedMentions(roles=True, users=True, everyone=False)
+
+def _directpay_res_url(ticket):
+    rid = str(ticket.get("reservation_id") or "")
+    if rid and "{id}" in HOSTAWAY_RES_URL_TEMPLATE:
+        return HOSTAWAY_RES_URL_TEMPLATE.format(id=rid)
+    return ""
+
+def _directpay_card_embed(ticket):
+    st = ticket.get("status") or "open"
+    color = {"open": 0xB88935, "verified": 0x2E7D4F, "written_off": 0xB3261E, "void": 0x8A8A8A}.get(st, 0xB88935)
+    emb = discord.Embed(title="💰 تحصيل حجز مباشر — %s" % (ticket.get("unit_name") or "—"), color=color,
+                        description=_directpay.notify.card_status_line(ticket) + "\n\n" + _directpay.notify.RULE_LINE)
+    for name, val in _directpay.notify.card_fields(ticket, _directpay_res_url(ticket)):
+        emb.add_field(name=name, value=str(val)[:1000] or "—", inline=False)
+    emb.set_footer(text="غرفة تحصيل #%s · %s" % (ticket.get("seq") or "—", ticket.get("id")))
+    return emb
+
+async def _directpay_ticket_for(channel):
+    """The ticket for a room: the DB row, else the topic tag (a lost volume must not kill the
+    buttons — mirrors _tk_rec_for)."""
+    t = await asyncio.to_thread(_directpay.db.by_channel, channel.id)
+    if t:
+        return t
+    m = re.search(r"ouja-dp:(\d+)", getattr(channel, "topic", "") or "")
+    if m:
+        t = await asyncio.to_thread(_directpay.db.by_reservation, m.group(1))
+        if t and not t.get("channel_id"):
+            t = await asyncio.to_thread(_directpay.service.set_room, t["id"], channel.id)
+        return t
+    return None
+
+async def _directpay_make_room(guild, ticket):
+    """ONE ROOM PER RESERVATION. _once_claim makes the creation atomic even across two bot
+    copies; on failure the claim is released so the next tick retries instead of the key
+    poisoning for 6h. _make_channel_spill rolls into «... ٢» when the category hits Discord's
+    50-channel cap — this ledger WILL hit it."""
+    key = "directpay:open:%s" % ticket.get("reservation_id")
+    if not _once_claim(key):
+        print("[directpay] room already being opened for", ticket.get("reservation_id"))
+        return None
+    try:
+        seq = ticket.get("seq") or await asyncio.to_thread(_next_counter, "directpay_ticket")
+        slug = re.sub(r"^ouja-", "", channel_name(ticket.get("unit_name") or "unit"))[:40]
+        cat = await _directpay_category(guild)
+        name = _directpay.notify.channel_name(seq, slug)
+        topic = "ouja-dp:%s seq:%s lid:%s" % (ticket.get("reservation_id"), seq, ticket.get("listing_id") or 0)
+        ch = await _make_channel_spill(guild, cat, name, topic)
+        t = await asyncio.to_thread(_directpay.service.set_room, ticket["id"], ch.id, None, seq)
+        mentions = _directpay_mentions(guild)
+        msg = await ch.send(content=(mentions + " " if mentions else "") + _directpay.notify.open_text(t),
+                            embed=_directpay_card_embed(t), view=DirectpayTicketView(),
+                            allowed_mentions=_DP_ALLOWED)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        await asyncio.to_thread(_directpay.service.set_room, ticket["id"], ch.id, msg.id, seq)
+        await asyncio.to_thread(_directpay.db.add_event, ticket["id"], "room_opened", "bot", "",
+                                "channel=%s name=%s" % (ch.id, name))
+        log_event("finance", "فُتحت غرفة تحصيل · %s · %s · %s · #%s"
+                  % (t.get("unit_name") or "—", t.get("guest_name") or "—",
+                     _directpay.notify.fmt_sar(t.get("total_sar")), name))
+        return ch
+    except Exception as e:
+        _once_release(key)
+        print("[directpay] room create failed (will retry next tick):", e)
+        return None
+
+async def _directpay_refresh_card(channel, ticket_id, view=None):
+    try:
+        t = await asyncio.to_thread(_directpay.db.ticket, ticket_id)
+        if not t or not t.get("card_msg_id"):
+            return
+        m = await channel.fetch_message(int(t["card_msg_id"]))
+        if view is None:
+            view = DirectpayTicketView() if t.get("status") == "open" else None
+        await m.edit(embed=_directpay_card_embed(t), view=view)
+    except Exception as e:
+        print("[directpay] card refresh skipped (non-fatal):", e)
+
+async def _directpay_unlock_channel(ch):
+    """Undo _tk_lock_channel on a verified room whose price rose: every send_messages deny
+    the lock wrote is lifted (set back to neutral), nothing else is touched."""
+    try:
+        for target, ov in list(ch.overwrites.items()):
+            if getattr(ov, "send_messages", None) is False:
+                ov.send_messages = None
+                await ch.set_permissions(target, overwrite=ov)
+                if _TK_LOCK_PAUSE:
+                    await asyncio.sleep(_TK_LOCK_PAUSE)
+        if ch.name.startswith("مغلقة-"):
+            await ch.edit(name=ch.name[len("مغلقة-"):][:100])
+    except Exception as e:
+        print("[directpay] unlock error (non-fatal):", e)
+
+async def _directpay_finalize_close(channel, ticket, text):
+    """Close note, pinned; lock (merged overwrites — the lesson at _tk_lock_channel); rename
+    «مغلقة-»; buttons off. The channel is KEPT — audit trail, never deleted."""
+    try:
+        msg = await channel.send(text, allowed_mentions=_DP_ALLOWED)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+    except Exception as e:
+        print("[directpay] close note failed:", e)
+    await _directpay_refresh_card(channel, ticket["id"], view=None)
+    try:
+        await _tk_lock_channel(channel)
+    except Exception as e:
+        print("[directpay] lock error:", e)
+    try:
+        if not channel.name.startswith("مغلقة-"):
+            await channel.edit(name=("مغلقة-" + channel.name)[:100])
+    except Exception as e:
+        print("[directpay] rename error:", e)
+
+def _dp_actor(interaction):
+    u = interaction.user
+    return getattr(u, "display_name", None) or getattr(u, "name", "") or "—"
+
+async def _directpay_deliver(payload):
+    """kind='open'          → create the room (or refresh the card if it exists)
+       kind='nudge'         → aging ping inside the room
+       kind='price_up'      → verified room reopened: unlock, note, ping
+       kind='price_changed' → note in the room, no state change
+       kind='cancelled'     → note + «إلغاء الغرفة» button; the bot never auto-voids
+       kind='summary'       → the daily message, edited in place if today's already exists"""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    kind = payload.get("kind")
+    text = payload.get("text") or ""
+    try:
+        if kind == "summary":
+            cat = await _directpay_category(guild)
+            ch = await ensure_channel(guild, DIRECTPAY_SUMMARY_CHANNEL, cat)
+            if ch is None:
+                return
+            today = payload.get("date") or ""
+            prev_date = await asyncio.to_thread(_directpay.db.setting_get, "summary_msg_date")
+            prev_id = await asyncio.to_thread(_directpay.db.setting_get, "summary_msg_id")
+            if prev_date == today and prev_id:
+                try:
+                    m = await ch.fetch_message(int(prev_id))
+                    await m.edit(content=text)
+                    return
+                except Exception:
+                    pass
+            m = await ch.send(text, allowed_mentions=_DP_ALLOWED)
+            await asyncio.to_thread(_directpay.db.setting_set, "summary_msg_date", today)
+            await asyncio.to_thread(_directpay.db.setting_set, "summary_msg_id", str(m.id))
+            return
+        ticket_id = payload.get("ticket_id")
+        t = await asyncio.to_thread(_directpay.db.ticket, ticket_id) if ticket_id else None
+        if not t:
+            return
+        if kind == "open":
+            if t.get("channel_id"):
+                ch = guild.get_channel(int(t["channel_id"]))
+                if ch is not None:
+                    await _directpay_refresh_card(ch, t["id"])
+                    return
+            await _directpay_make_room(guild, t)
+            return
+        ch = guild.get_channel(int(t["channel_id"])) if str(t.get("channel_id") or "").isdigit() else None
+        if ch is None:
+            return
+        mentions = _directpay_mentions(guild)
+        if kind == "nudge":
+            await ch.send((mentions + " " if mentions else "") + text, allowed_mentions=_DP_ALLOWED)
+        elif kind == "price_up":
+            await _directpay_unlock_channel(ch)
+            m = await ch.send((mentions + " " if mentions else "") + text, allowed_mentions=_DP_ALLOWED)
+            try:
+                await m.pin()
+            except Exception:
+                pass
+            await _directpay_refresh_card(ch, t["id"], view=DirectpayTicketView())
+        elif kind == "price_changed":
+            await ch.send(text)
+            await _directpay_refresh_card(ch, t["id"])
+        elif kind == "cancelled":
+            await ch.send((mentions + " " if mentions else "") + text, view=DirectpayCancelledView(),
+                          allowed_mentions=_DP_ALLOWED)
+            await _directpay_refresh_card(ch, t["id"])
+    except Exception as e:
+        print("[directpay] post failed (non-fatal):", e)
+
+class DirectpayCloseModal(discord.ui.Modal, title="تم التحصيل في StayHub"):
+    """The attestation. Amount + StayHub reference are required; the proof file must already
+    be in the room. Everything is re-checked at submit time, not when the button was drawn."""
+    def __init__(self, ticket):
+        super().__init__(timeout=600)
+        self.ticket = ticket
+        self.add_item(discord.ui.TextInput(label="المبلغ المستلم في StayHub (ر.س)", custom_id="amount",
+                                           required=True, max_length=16, placeholder="مثال: 1200"))
+        self.add_item(discord.ui.TextInput(label="رقم العملية / المرجع في StayHub", custom_id="ref",
+                                           required=True, min_length=3, max_length=64))
+        self.add_item(discord.ui.TextInput(label="ملاحظة (اختياري)", custom_id="note", required=False,
+                                           style=discord.TextStyle.paragraph, max_length=400))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _dp_can_close(interaction.user):
+            await asyncio.to_thread(_directpay.service.refuse, self.ticket["id"], _dp_actor(interaction),
+                                    str(interaction.user.id), "close_submit")
+            await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        amount = _directpay.engine.parse_amount(self.children[0].value)
+        ref = self.children[1].value.strip()
+        note = (self.children[2].value or "").strip()
+        if amount is None:
+            await interaction.followup.send("المبلغ لازم يكون رقم أكبر من صفر.", ephemeral=True)
+            return
+        att, why = await _directpay.proof.find_proof(interaction.channel)
+        if att is None:
+            await interaction.followup.send(_directpay.proof.reason_ar(why), ephemeral=True)
+            return
+        ok, msg = _directpay.proof.check(att, _directpay.config.proof_max_mb())
+        if not ok:
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+        try:
+            rel, meta = await _directpay.proof.store(STATE_DIR, self.ticket["id"], att,
+                                                    _dp_actor(interaction), interaction.user.id)
+        except Exception as e:
+            print("[directpay] proof download failed:", e)
+            await interaction.followup.send("ما قدرت أحمّل ملف الإثبات الحين، جرّب بعد شوي.", ephemeral=True)
+            return
+        ok, why, info = await asyncio.to_thread(
+            _directpay.service.attest_verified, self.ticket["id"], amount, ref, rel, meta,
+            _dp_actor(interaction), str(interaction.user.id), note, "")
+        if ok:
+            await _directpay_finalize_close(interaction.channel, info, _directpay.notify.close_text(info))
+            await interaction.followup.send("تم ✓ — الغرفة انقفلت والإثبات محفوظ.", ephemeral=True)
+            return
+        if isinstance(info, dict) and info.get("code") == "variance":
+            ctx = {"ticket_id": self.ticket["id"], "amount": amount, "ref": ref, "note": note,
+                   "proof_rel": rel, "proof_meta": meta}
+            await interaction.followup.send(why, view=DirectpayVarianceView(ctx), ephemeral=True)
+            return
+        await interaction.followup.send(why, ephemeral=True)
+
+class DirectpayVarianceView(discord.ui.View):
+    """Ephemeral, per-close — no persistent custom_id on purpose (it dies with the message)."""
+    def __init__(self, ctx):
+        super().__init__(timeout=300)
+        self.ctx = ctx
+
+    @discord.ui.button(label="إغلاق مع فرق — اكتب السبب", style=discord.ButtonStyle.danger)
+    async def with_variance(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _dp_can_close(interaction.user):
+            await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+            return
+        await interaction.response.send_modal(DirectpayVarianceModal(self.ctx))
+
+class DirectpayVarianceModal(discord.ui.Modal, title="إغلاق مع فرق في المبلغ"):
+    def __init__(self, ctx):
+        super().__init__(timeout=600)
+        self.ctx = ctx
+        self.add_item(discord.ui.TextInput(label="ليش المبلغ مختلف؟ (إلزامي)", custom_id="vreason",
+                                           required=True, min_length=10, max_length=400,
+                                           style=discord.TextStyle.paragraph))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _dp_can_close(interaction.user):
+            await asyncio.to_thread(_directpay.service.refuse, self.ctx["ticket_id"], _dp_actor(interaction),
+                                    str(interaction.user.id), "close_variance")
+            await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        c = self.ctx
+        ok, why, info = await asyncio.to_thread(
+            _directpay.service.attest_verified, c["ticket_id"], c["amount"], c["ref"], c["proof_rel"],
+            c["proof_meta"], _dp_actor(interaction), str(interaction.user.id), c.get("note") or "",
+            self.children[0].value.strip())
+        if ok:
+            await _directpay_finalize_close(interaction.channel, info, _directpay.notify.close_text(info))
+            await interaction.followup.send("تم ✓ — انقفلت مع تسجيل الفرق وسببه.", ephemeral=True)
+        else:
+            await interaction.followup.send(why, ephemeral=True)
+
+class DirectpayReasonModal(discord.ui.Modal, title="سبب الإغلاق"):
+    """kind='void' («ليست حجز مباشر» / cancelled) or kind='writeoff' («إغلاق بدون إثبات»,
+    20–400 chars, permanent red)."""
+    def __init__(self, ticket, kind):
+        super().__init__(timeout=600)
+        self.ticket, self.kind = ticket, kind
+        if kind == "writeoff":
+            label, mn = "ليش تقفلها بدون إثبات؟ (٢٠ حرف على الأقل)", 20
+        else:
+            label, mn = "ليش هذي مو حجز مباشر / ليش تنلغى؟", 3
+        self.add_item(discord.ui.TextInput(label=label, custom_id="reason", required=True,
+                                           min_length=mn, max_length=400, style=discord.TextStyle.paragraph))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _dp_can_close(interaction.user):
+            await asyncio.to_thread(_directpay.service.refuse, self.ticket["id"], _dp_actor(interaction),
+                                    str(interaction.user.id), self.kind)
+            await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        reason = self.children[0].value.strip()
+        fn = _directpay.service.write_off if self.kind == "writeoff" else _directpay.service.void_ticket
+        ok, why, info = await asyncio.to_thread(fn, self.ticket["id"], reason, _dp_actor(interaction),
+                                                str(interaction.user.id))
+        if not ok:
+            await interaction.followup.send(why, ephemeral=True)
+            return
+        text = (_directpay.notify.writeoff_text(info) if self.kind == "writeoff"
+                else _directpay.notify.void_text(info))
+        await _directpay_finalize_close(interaction.channel, info, text)
+        await interaction.followup.send("تم.", ephemeral=True)
+
+class DirectpayTicketView(discord.ui.View):
+    """The pinned card's buttons. No ids on the buttons — the ROOM is the id. Discord cannot
+    hide a button per viewer, so every gated button refuses politely and LOGS who tried."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _ticket(self, interaction):
+        t = await _directpay_ticket_for(interaction.channel)
+        if not t:
+            await interaction.response.send_message("ما لقيت تذكرة التحصيل لهذي الغرفة.", ephemeral=True)
+        return t
+
+    async def _gate(self, interaction, t, action):
+        if _dp_can_close(interaction.user):
+            return True
+        await asyncio.to_thread(_directpay.service.refuse, t["id"], _dp_actor(interaction),
+                                str(interaction.user.id), action)
+        await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+        return False
+
+    @discord.ui.button(label="✅ تم التحصيل", style=discord.ButtonStyle.success, custom_id="dp_close", row=0)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._ticket(interaction)
+        if not t:
+            return
+        if t.get("status") != "open":
+            return await interaction.response.send_message(
+                "هذي التذكرة مو مفتوحة (%s)." % _directpay.engine.status_ar(t.get("status")), ephemeral=True)
+        if not await self._gate(interaction, t, "close"):
+            return
+        await interaction.response.send_modal(DirectpayCloseModal(t))
+
+    @discord.ui.button(label="🔄 تحديث من Hostaway", style=discord.ButtonStyle.secondary, custom_id="dp_refresh", row=0)
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._ticket(interaction)
+        if not t:
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await asyncio.to_thread(_directpay.service.refresh_ticket, t["id"])
+        await _directpay_refresh_card(interaction.channel, t["id"])
+        await interaction.followup.send("تحدّثت ✓", ephemeral=True)
+
+    @discord.ui.button(label="🚫 ليست حجز مباشر", style=discord.ButtonStyle.secondary, custom_id="dp_notdirect", row=1)
+    async def notdirect(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._ticket(interaction)
+        if not t:
+            return
+        if not await self._gate(interaction, t, "notdirect"):
+            return
+        await interaction.response.send_modal(DirectpayReasonModal(t, "void"))
+
+    @discord.ui.button(label="🔴 إغلاق بدون إثبات", style=discord.ButtonStyle.danger, custom_id="dp_writeoff", row=1)
+    async def writeoff(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._ticket(interaction)
+        if not t:
+            return
+        if not await self._gate(interaction, t, "writeoff"):
+            return
+        await interaction.response.send_modal(DirectpayReasonModal(t, "writeoff"))
+
+class DirectpayCancelledView(discord.ui.View):
+    """Posted when Hostaway says the reservation was cancelled. The bot never voids by itself —
+    a paid-then-cancelled booking is a refund decision, not a cleanup."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="إلغاء الغرفة", style=discord.ButtonStyle.danger, custom_id="dp_void_cancel")
+    async def void_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await _directpay_ticket_for(interaction.channel)
+        if not t:
+            return await interaction.response.send_message("ما لقيت تذكرة التحصيل لهذي الغرفة.", ephemeral=True)
+        if not _dp_can_close(interaction.user):
+            await asyncio.to_thread(_directpay.service.refuse, t["id"], _dp_actor(interaction),
+                                    str(interaction.user.id), "void_cancel")
+            return await interaction.response.send_message(_DP_CLOSE_REFUSAL, ephemeral=True)
+        await interaction.response.send_modal(DirectpayReasonModal(t, "void"))
+
+async def _directpay_on_hook(rid):
+    """The webhook path: one targeted GET, then the same path as the poller. Never raises —
+    the hook acks 200 regardless."""
+    if not (DIRECTPAY_ENABLED and _HAS_DIRECTPAY) or not rid:
+        return
+    try:
+        await asyncio.to_thread(_directpay.service.on_hook_reservation, rid, now_riyadh())
+    except Exception as e:
+        print("[directpay] hook path error (non-fatal):", e)
+
+def _directpay_known_rooms(guild):
+    """Reconcile from Discord reality every tick (sync_checkouts pattern): every room topic
+    ouja-dp:<res_id> across the category family counts as already handled, so a wiped volume
+    self-heals instead of re-opening the same rooms."""
+    out = {}
+    try:
+        cat = _directpay_find_category(guild)
+        if cat is None:
+            return out
+        for c in _category_family(guild, cat):
+            for ch in c.text_channels:
+                m = re.search(r"ouja-dp:(\d+)(?:\s+seq:(\d+))?", ch.topic or "")
+                if m:
+                    out[m.group(1)] = {"channel_id": ch.id, "seq": int(m.group(2)) if m.group(2) else None}
+    except Exception as e:
+        print("[directpay] room scan error (non-fatal):", e)
+    return out
+
+@tasks.loop(minutes=DIRECTPAY_POLL_MIN)
+async def directpay_poll_loop():
+    """The guarantee. The webhook is only a latency optimisation (WEBHOOK_SECRET may be
+    random-per-boot, so it may never fire)."""
+    if not (DIRECTPAY_ENABLED and _HAS_DIRECTPAY):
+        return
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        rooms = _directpay_known_rooms(guild) if guild is not None else {}
+        await asyncio.to_thread(_directpay.service.tick, now_riyadh(), set(rooms), rooms)
+    except Exception as e:
+        print("[directpay] poll error (non-fatal):", e)
+
+@directpay_poll_loop.before_loop
+async def _directpay_poll_ready():
+    await bot.wait_until_ready()
+
+@tasks.loop(hours=1)
+async def directpay_nudge_loop():
+    """Hourly tick; the daily summary latches on a PERSISTED date in directpay_settings — a
+    time-based loop re-runs its first iteration on every Railway redeploy."""
+    if not (DIRECTPAY_ENABLED and _HAS_DIRECTPAY):
+        return
+    try:
+        await asyncio.to_thread(_directpay.service.nudges, now_riyadh())
+        await asyncio.to_thread(_directpay.service.daily_summary, now_riyadh(), _directpay_room_link)
+    except Exception as e:
+        print("[directpay] nudge/summary error (non-fatal):", e)
+
+@directpay_nudge_loop.before_loop
+async def _directpay_nudge_ready():
+    await bot.wait_until_ready()
+
 
 def _finchat_notify(payload):
     """finchat escalation ping — schedules the async Discord post. Never raises into a handler."""
@@ -14327,6 +14923,8 @@ async def _handle_hook(request):
         evt = str(payload.get("event") or payload.get("type") or payload.get("object") or "").lower()
         if "reservation" in evt and (rid or lid):
             _invalidate_reservation_caches(listing_id=lid, reservation_id=rid)
+            if rid and DIRECTPAY_ENABLED and _HAS_DIRECTPAY:
+                _bg_task(_directpay_on_hook(rid), "hook:directpay")   # latency only; the poller is the guarantee
     except Exception as e:
         print("hook invalidation error:", e)
     cid = _extract_conversation_id(payload)
@@ -21287,6 +21885,40 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
       </section>
 
+      <!-- ============ DPAY («التحصيل» — direct-booking collection ledger) ============ -->
+      <section class="view" id="view_dpay">
+        <div class="page-head">
+          <div>
+            <div class="page-title" id="t_dpay">التحصيل</div>
+            <div class="page-sub" id="t_dpay_sub"></div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadDpay()">↻</button>
+          </div>
+        </div>
+        <div class="kpis" id="dpayStats"></div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_dpay_open">الغرف المفتوحة</span>
+            <span class="muted" id="t_dpay_open_hint" style="font-size:12px"></span>
+          </div>
+          <div id="dpayOpen"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card" id="dpayWoCard" style="border-color:var(--red)">
+          <div class="card-head">
+            <span class="card-title" id="t_dpay_wo" style="color:var(--red)">إغلاق بدون إثبات</span>
+            <span class="muted" id="t_dpay_wo_hint" style="font-size:12px"></span>
+          </div>
+          <div id="dpayWo"><div class="empty sk">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title" id="t_dpay_ver">تم تحصيلها (آخر ٣٠ يوم)</span>
+          </div>
+          <div id="dpayVer"><div class="empty sk">—</div></div>
+        </div>
+      </section>
+
       <!-- ============ PROMISES (متتبع الوعود — accountability ledger) ============ -->
       <section class="view" id="view_promises">
         <div class="page-head">
@@ -22132,6 +22764,7 @@ function _cascadeConfirmHTML(unitName, targetIso, moves){
 const TK='ouja_token', TH='ouja_theme';
 const T = {
   ar:{dir:'rtl',
+    dpay:'التحصيل',
     home:'الرئيسية', inbox:'صندوق الوارد', today:'اليوم', pricing:'التسعير الديناميكي', strat:'الاستراتيجيات', rev:'الإيرادات', learn:'ما تعلّمه', log:'النشاط', more:'المزيد', clean:'التنظيف العميق', tickets:'الصيانة', reviews:'المراجعات', users:'المستخدمون', quote:'عروض الأسعار', weekly:'التقرير الأسبوعي', design:'طلبات التصميم', pmo:'تجهيز الشقق', expenses:'المصاريف', finance:'المالية',
     cat_overview:'نظرة عامة', cat_ops:'العمليات', cat_pricing:'التسعير والإيرادات', cat_owner_sales:'عروض الملاك / المبيعات', cat_finance:'المالية والمحاسبة', cat_guests:'الضيوف', cat_system:'النظام',
     cleanteams:'فرق التنظيف',
@@ -22460,6 +23093,7 @@ const T = {
     }
   },
   en:{dir:'ltr',
+    dpay:'Collection',
     home:'Home', inbox:'Inbox', today:'Today', pricing:'Dynamic Pricing', strat:'Strategies', rev:'Revenue', learn:'Learnings', log:'Activity', more:'More', clean:'Deep clean', tickets:'Maintenance', reviews:'Reviews', users:'Users', quote:'Quotations', weekly:'Weekly report', design:'Design requests', pmo:'Fit-out projects', expenses:'Expenses', finance:'Finance',
     cat_overview:'Overview', cat_ops:'Operations', cat_pricing:'Pricing & Revenue', cat_owner_sales:'Owner / Sales', cat_finance:'Finance & Accounting', cat_guests:'Guests', cat_system:'System',
     cleanteams:'Cleaning Teams',
@@ -24444,6 +25078,7 @@ function refreshView(id){
     case 'cphotos':  return loadCleaningPhotos();
     case 'promises': return loadPromises();
     case 'decor':    return loadDecor();
+    case 'dpay':     return loadDpay();
     case 'guide':    return loadGuide();
     case 'quality':  return loadQuality();
     case 'guests':   return loadGuests();
@@ -24505,6 +25140,7 @@ function go(id){
   if(id==='cphotos') loadCleaningPhotos();
   if(id==='promises') loadPromises();
   if(id==='decor') loadDecor();
+  if(id==='dpay') loadDpay();
   if(id==='guide') loadGuide();
   if(id==='cleanteams') loadCleanTeams();
   if(id==='coverage') loadCoverage();
@@ -26654,6 +27290,102 @@ async function loadDecor(){
   }
   DEC.board = d;
   decRender();
+}
+
+var DPAY = {board:null, sort:'age', dir:-1};
+
+function dpaySar(v){
+  var n = Number(v||0);
+  var s = (Math.round(n*100)/100).toLocaleString(L==='ar'?'ar-SA':'en-US', {maximumFractionDigits:2});
+  return s + ' ' + labelText('ر.س','SAR');
+}
+
+async function loadDpay(){
+  var st=function(id,txt){ var el=document.getElementById(id); if(el) el.textContent=txt; };
+  st('t_dpay', labelText('التحصيل','Collection'));
+  st('t_dpay_sub', labelText('كل حجز مباشر = دين مفتوح لين تثبت الإدارة وصول المبلغ في StayHub. الإغلاق في ديسكورد فقط.','Every direct booking is an open debt until an administrator proves the money landed in StayHub. Closing happens in Discord only.'));
+  st('t_dpay_open', labelText('الغرف المفتوحة','Open rooms'));
+  st('t_dpay_wo', labelText('إغلاق بدون إثبات','Closed without proof'));
+  st('t_dpay_wo_hint', labelText('ما تختفي أبد — تبقى هنا بالأحمر','Never disappears — stays here in red'));
+  st('t_dpay_ver', labelText('تم تحصيلها (آخر ٣٠ يوم)','Collected (last 30 days)'));
+  var d; try{ d = await api('/api/directpay/board'); }catch(e){ d = null; }
+  if(!d || !d.ok){
+    var box=document.getElementById('dpayOpen');
+    if(box) box.innerHTML = emptyState(labelText('تعذّر التحميل','Could not load'),'','⚠️');
+    return;
+  }
+  DPAY.board = d;
+  dpayRender();
+}
+
+function dpayRender(){
+  var d=DPAY.board||{}; var t=d.totals||{}; var a=d.aging||{};
+  var stats=document.getElementById('dpayStats');
+  function bk(k){ var x=a[k]||{}; return (x.count||0); }
+  if(stats) stats.innerHTML=[
+    {v:dpaySar(t.outstanding_sar), l:labelText('إجمالي غير محصّل','Total outstanding'), cls:'r', vc:((t.open_count||0)>0?'red':'')},
+    {v:(t.open_count||0), l:labelText('غرف مفتوحة','Open rooms'), cls:'b'},
+    {v:dpaySar(t.written_off_sar), l:labelText('مقفول بدون إثبات (كل الوقت)','Written off (all time)'), cls:'r', vc:((t.written_off_count||0)>0?'red':'')},
+    {v:dpaySar(t.verified_recent_sar), l:labelText('محصّل آخر ٣٠ يوم','Collected, last 30 days'), cls:'g'}
+  ].map(function(k){
+    return '<div class="kpi"><div class="kpi-head"><div class="kpi-ic '+k.cls+'">💰</div></div>'
+      +'<div class="kpi-val '+(k.vc||'')+'">'+esc(String(k.v))+'</div><div class="kpi-lbl">'+esc(k.l)+'</div></div>';
+  }).join('');
+  var chips = [['b0_2',labelText('٠–٢ يوم','0–2 d'),''],['b3_7',labelText('٣–٧ أيام','3–7 d'),''],['b8_14',labelText('٨–١٤ يوم','8–14 d'),'warn'],['b15p',labelText('١٥+ يوم','15+ d'),'bad']];
+  var hint=document.getElementById('t_dpay_open_hint');
+  if(hint){
+    hint.innerHTML = chips.map(function(c){ var x=a[c[0]]||{}; return '<span class="pill '+c[2]+'" style="margin-inline-start:4px">'+esc(c[1])+': '+esc(String(x.count||0))+' · '+esc(dpaySar(x.sar))+'</span>'; }).join('')
+      + (d.dryrun ? ' <span class="pill warn">'+esc(labelText('وضع التجربة: ما ينفتح غرف','Dry run: no rooms open'))+'</span>' : '')
+      + (d.start_date ? ' <span class="muted">'+esc(labelText('من ','since ')+d.start_date)+'</span>' : '');
+  }
+  dpayRenderOpen();
+  dpayRenderWo();
+  dpayRenderVer();
+}
+
+function dpaySorted(rows){
+  var k=DPAY.sort, dir=DPAY.dir;
+  var key={unit:function(r){return (r.unit_name||'').toLowerCase()}, guest:function(r){return (r.guest_name||'').toLowerCase()},
+           date:function(r){return r.arrival||''}, amount:function(r){return Number(r.amount||0)}, age:function(r){return Number(r.age_days||0)}}[k] || function(r){return Number(r.age_days||0)};
+  return rows.slice().sort(function(x,y){ var a=key(x), b=key(y); return (a<b?-1:(a>b?1:0))*dir; });
+}
+
+function dpayRoomLink(r){
+  if(!r.room_url) return '<span class="muted">'+esc(labelText('بدون غرفة','no room'))+'</span>';
+  return '<a href="'+esc(r.room_url)+'" target="_blank" rel="noopener" class="btn ghost sm">'+esc(labelText('افتح الغرفة','Open room'))+'</a>';
+}
+
+function dpayRenderOpen(){
+  var d=DPAY.board||{}; var rows=d.open||[];
+  var box=document.getElementById('dpayOpen'); if(!box) return;
+  if(!rows.length){ box.innerHTML='<div class="empty">'+esc(labelText('ما فيه شي غير محصّل 🤍','Nothing outstanding 🤍'))+'</div>'; return; }
+  var cols=[['unit',labelText('الوحدة','Unit')],['guest',labelText('الضيف','Guest')],['date',labelText('التاريخ','Dates')],['amount',labelText('المبلغ','Amount')],['age',labelText('العمر بالأيام','Age (days)')]];
+  var head='<thead><tr>'+cols.map(function(c){ var on=(DPAY.sort===c[0]); return '<th data-dpsort="'+c[0]+'" style="cursor:pointer">'+esc(c[1])+(on?(DPAY.dir>0?' ▲':' ▼'):'')+'</th>'; }).join('')+'<th>'+esc(labelText('الغرفة','Room'))+'</th></tr></thead>';
+  var body='<tbody>'+dpaySorted(rows).map(function(r){
+    var age=Number(r.age_days||0); var cls= age>=15?'bad':(age>=8?'warn':'');
+    return '<tr><td>'+esc(r.unit_name||'—')+'</td><td>'+esc(r.guest_name||'—')+'</td><td>'+esc((r.arrival||'—')+' ← '+(r.departure||'—'))+'</td>'
+      +'<td class="num">'+esc(dpaySar(r.amount))+'</td><td class="num"><span class="pill '+cls+'">'+age+'</span></td><td>'+dpayRoomLink(r)+'</td></tr>';
+  }).join('')+'</tbody>';
+  box.innerHTML='<div style="overflow-x:auto"><table class="data">'+head+body+'</table></div>';
+  box.querySelectorAll('th[data-dpsort]').forEach(function(th){ th.addEventListener('click', function(){ var k=th.getAttribute('data-dpsort'); if(DPAY.sort===k) DPAY.dir=-DPAY.dir; else { DPAY.sort=k; DPAY.dir=(k==='amount'||k==='age')?-1:1; } dpayRenderOpen(); }); });
+}
+
+function dpayRenderWo(){
+  var d=DPAY.board||{}; var rows=d.written_off||[];
+  var box=document.getElementById('dpayWo'); if(!box) return;
+  if(!rows.length){ box.innerHTML='<div class="empty">'+esc(labelText('ولا وحدة — وهذا المطلوب','None — as it should be'))+'</div>'; return; }
+  box.innerHTML='<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+esc(labelText('الوحدة','Unit'))+'</th><th>'+esc(labelText('الضيف','Guest'))+'</th><th>'+esc(labelText('المبلغ','Amount'))+'</th><th>'+esc(labelText('من','By'))+'</th><th>'+esc(labelText('التاريخ','Date'))+'</th><th>'+esc(labelText('السبب','Reason'))+'</th><th></th></tr></thead><tbody>'
+    + rows.map(function(r){ return '<tr style="color:var(--red)"><td>'+esc(r.unit_name||'—')+'</td><td>'+esc(r.guest_name||'—')+'</td><td class="num">'+esc(dpaySar(r.amount))+'</td><td>'+esc(r.closed_by||'—')+'</td><td>'+esc(String(r.closed_at||'').slice(0,10))+'</td><td style="white-space:pre-wrap">'+esc(r.close_note||'')+'</td><td>'+dpayRoomLink(r)+'</td></tr>'; }).join('')
+    + '</tbody></table></div>';
+}
+
+function dpayRenderVer(){
+  var d=DPAY.board||{}; var rows=d.verified_recent||[];
+  var box=document.getElementById('dpayVer'); if(!box) return;
+  if(!rows.length){ box.innerHTML='<div class="empty">'+esc(labelText('ما فيه تحصيلات مقفولة بآخر ٣٠ يوم','No collections closed in the last 30 days'))+'</div>'; return; }
+  box.innerHTML='<div style="overflow-x:auto"><table class="data"><thead><tr><th>'+esc(labelText('الوحدة','Unit'))+'</th><th>'+esc(labelText('الضيف','Guest'))+'</th><th>'+esc(labelText('المستلم','Received'))+'</th><th>'+esc(labelText('مرجع StayHub','StayHub ref'))+'</th><th>'+esc(labelText('الفرق','Variance'))+'</th><th>'+esc(labelText('اعتمدها','By'))+'</th><th>'+esc(labelText('التاريخ','Date'))+'</th></tr></thead><tbody>'
+    + rows.map(function(r){ var v=Number(r.variance_sar||0); return '<tr><td>'+esc(r.unit_name||'—')+'</td><td>'+esc(r.guest_name||'—')+'</td><td class="num">'+esc(dpaySar(r.received_sar))+'</td><td>'+esc(r.stayhub_ref||'—')+'</td><td class="num">'+(Math.abs(v)>0.005?'<span class="pill warn">'+esc(dpaySar(v))+'</span>':'—')+'</td><td>'+esc(r.closed_by||'—')+'</td><td>'+esc(String(r.closed_at||'').slice(0,10))+'</td></tr>'; }).join('')
+    + '</tbody></table></div>';
 }
 
 function decStateChip(s){
@@ -43238,7 +43970,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
@@ -43257,6 +43989,7 @@ NAV_DEF = {
         {"id": "cphotos", "ic": "clean_center", "tk": "cphotos"},
         {"id": "promises", "ic": "tickets", "tk": "promises", "badge": "promises"},
         {"id": "decor", "ic": "design", "tk": "decor", "badge": "decor"},
+        {"id": "dpay", "ic": "finance", "tk": "dpay"},
         {"id": "pricing", "ic": "pricing", "tk": "pricing", "badge": "pricing"},
         {"id": "plab", "ic": "plab", "tk": "plab"},
         {"id": "monthlylab", "ic": "pricing", "tk": "monthlylab"},
@@ -43302,6 +44035,7 @@ NAV_DEF = {
             "home": "الرئيسية", "brain": "أوجا برين", "gaps": "فجوات منتصف الأسبوع", "inbox": "صندوق الوارد", "calendar": "التقويم",
             "clean_center": "مركز التنظيف", "cphotos": "صور التنظيف", "promises": "الوعود",
             "decor": "تنسيق الحفلات",
+            "dpay": "التحصيل",
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
@@ -43325,6 +44059,7 @@ NAV_DEF = {
             "home": "Home", "brain": "Ouja Brain", "gaps": "Weekday Gaps", "inbox": "Inbox", "calendar": "Calendar",
             "clean_center": "Cleaning Center", "cphotos": "Cleaning Photos", "promises": "Promises",
             "decor": "Decoration Orders",
+            "dpay": "Collection",
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
@@ -61593,6 +62328,7 @@ _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
     ("/api/onb/", "onb"),                    # /api/onb/t/submit is exempt above (employee link)
     ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
+    ("/api/directpay/", "dpay"),             # «التحصيل» notes — login + «dpay» tab (the close is Discord-only)
     ("/api/digest/", "digest"),              # weekend digest actions — login + «digest» tab
     ("/api/pricing/strategy-toggle", "strat"),
     ("/api/strategy/", "strat"),
@@ -61647,6 +62383,7 @@ _ROLE_READ_RULES = [
     # this prefix, because it is anonymous and this rule would 403 it. Its token is its auth.
     ("/api/onb/", "onb"),
     ("/api/mot/", "mot"),                    # the inspector link reads /api/mot-t/{token}, outside this prefix
+    ("/api/directpay/", "dpay"),             # «التحصيل» board — the outstanding SAR total is sensitive
     ("/api/revenue", "rev"),
     ("/api/pricing2", "pricing"),
     ("/api/pricing", "pricing"),
@@ -62438,6 +63175,17 @@ async def start_web_server():
                       % _decor.notify.dryrun())
             except Exception as _de:
                 print("[decor] wiring failed (decoration orders disabled, bot unaffected):", _de)
+
+        # ---- «التحصيل» direct-booking collection tickets — ledger + read-only API; the close lives in Discord ----
+        if _HAS_DIRECTPAY and DIRECTPAY_ENABLED:
+            try:
+                _directpay.wire(_directpay_caps())
+                _directpay.register_routes(app)
+                _dp_start = _directpay.bootstrap()
+                print("[directpay] wired + routes registered (/api/directpay/*) — dryrun=%s start_date=%s"
+                      % (_directpay.notify.dryrun(), _dp_start))
+            except Exception as _dpe:
+                print("[directpay] wiring failed (collection tickets disabled, bot unaffected):", _dpe)
 
         # ---- «تغطية التنظيف» — the coverage study. READ-ONLY: every capability below is
         # a getter. It reads the same stores the cleaning ops already use and computes
@@ -71569,6 +72317,9 @@ async def on_ready():
         bot.add_view(DecorPanelView())   # «افتح طلب تنسيق» panel button
     if _HAS_DIGEST:
         bot.add_view(DigestView())       # «وش صاير بالرياض» approve / alternates / drop buttons
+    if _HAS_DIRECTPAY:
+        bot.add_view(DirectpayTicketView())     # «التحصيل» room buttons (the room id IS the ticket id)
+        bot.add_view(DirectpayCancelledView())  # «إلغاء الغرفة» under a Hostaway-cancellation note
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)
@@ -71635,7 +72386,9 @@ async def on_ready():
                      (price_opp_loop, "price_opp_loop"),
                      (weekly_review_loop, "weekly_review_loop"),
                      (watchman_loop, "watchman_loop"),
-                     (watchdog_loop, "watchdog_loop")):
+                     (watchdog_loop, "watchdog_loop"),
+                     (directpay_poll_loop, "directpay_poll_loop"),
+                     (directpay_nudge_loop, "directpay_nudge_loop")):
         if getattr(_lp, "_error_guarded", False):
             continue                    # on_ready can re-fire on re-identify
         _loop_guard(_lp, _nm)
@@ -71791,6 +72544,10 @@ async def on_ready():
         _pending.append(monthly_engine_loop)      # precomputes the lab price the site publishes
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
         _pending.append(decor_warn_loop)          # late decoration / late cake — separate warnings
+    if DIRECTPAY_ENABLED and _HAS_DIRECTPAY and not directpay_poll_loop.is_running():
+        _pending.append(directpay_poll_loop)      # «التحصيل»: direct bookings → collection rooms (dry-run by default)
+    if DIRECTPAY_ENABLED and _HAS_DIRECTPAY and not directpay_nudge_loop.is_running():
+        _pending.append(directpay_nudge_loop)     # «التحصيل»: aging nudges + the 13:00 daily summary
     # Fire them off spread over time, in the background: on_ready must keep going
     # (the web server starts a few lines above this) while the loops trickle up.
     _pending = ([persist_loop] if persist_loop in _pending else []) + \
