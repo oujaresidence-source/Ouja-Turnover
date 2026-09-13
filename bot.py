@@ -6669,10 +6669,10 @@ DECOR_CATEGORY     = os.environ.get("DECOR_CATEGORY", "تنسيق الحفلات
 # ============= «التحصيل» direct-booking collection tickets =============
 # Every direct reservation (Hostaway, not Airbnb) opens its own room the moment it appears
 # and stays open until an ADMINISTRATOR uploads StayHub proof + types amount and reference.
-# POSTURE ON FIRST DEPLOY: DIRECTPAY_DRYRUN=1 (read live inside directpay.config) — the ledger
-# fills and the log shows what WOULD open, no channel is created, nothing is posted. The owner
-# flips it to 0 in Railway. Only reservations BOOKED on/after the first-boot date (persisted
-# in brain.db) ever open a room, and at most DIRECTPAY_MAX_OPEN_PER_TICK (5) per tick.
+# POSTURE: LIVE since 2026-09-13 (owner ruling after one dry-run day; he does not edit Railway
+# vars, so the default lives in directpay.config). DIRECTPAY_DRYRUN=1 silences it again. Only
+# reservations BOOKED on/after the first-boot date (persisted in brain.db) ever open a room,
+# and at most DIRECTPAY_MAX_OPEN_PER_TICK (5) per tick.
 DIRECTPAY_ENABLED         = os.environ.get("DIRECTPAY_ENABLED", "1") in ("1", "true", "True", "yes")
 DIRECTPAY_CATEGORY        = os.environ.get("DIRECTPAY_CATEGORY", "تحصيل الحجوزات المباشرة")
 DIRECTPAY_SUMMARY_CHANNEL = os.environ.get("DIRECTPAY_SUMMARY_CHANNEL", "تحصيل-الملخص")
@@ -8051,7 +8051,7 @@ async def _decor_warn_ready():
 # administrator who uploads proof that the money is in StayHub and types the amount + the
 # StayHub reference. The rules live in directpay/ (engine.transition is the single state
 # machine); this block is the Discord skin: rooms, the pinned card, the buttons, the modals.
-# StayHub is never called. DIRECTPAY_DRYRUN=1 (the default) posts nothing.
+# StayHub is never called. DIRECTPAY_DRYRUN=1 posts nothing (live by default since 2026-09-13).
 
 def _dp_close_ids():
     return _directpay.config.close_ids() if _HAS_DIRECTPAY else []

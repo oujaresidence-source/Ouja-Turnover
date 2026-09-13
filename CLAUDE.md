@@ -240,8 +240,9 @@ its own Discord room under «تحصيل الحجوزات المباشرة» (top
   `verified → open` ONLY on a price increase after close. No `closed` state, no "close anyway".
 - **Traps closed structurally — do not simplify:** (1) `DIRECTPAY_START_DATE` = first-boot date,
   persisted in `directpay_settings`, never recomputed — without it the first tick opens a room
-  for every historical booking; (2) `DIRECTPAY_DRYRUN=1` by default — ledger fills, log prints
-  «would open», nothing posts; rooms backfill 5/tick when flipped to 0; (3) three anti-duplicate
+  for every historical booking; (2) `DIRECTPAY_DRYRUN` — was 1 for the first deploy, **0 (live) since 2026-09-13 by owner
+  ruling, changed in code because he never edits Railway vars**; set 1 to silence; rooms
+  backfill 5/tick for rows recorded during dry-run; (3) three anti-duplicate
   layers: `UNIQUE(reservation_id)` + `_once_claim("directpay:open:<id>")` (released on failure)
   + rebuild from channel topics across `_category_family` every tick; (4) rooms via
   `_make_channel_spill` only (50-per-category cap is a certainty here); (5) the proof scan
@@ -260,7 +261,7 @@ its own Discord room under «تحصيل الحجوزات المباشرة» (top
   permission tab — existing non-admin users see it only after the owner ticks it in الصلاحيات.
 - Tests: `tests/test_directpay_{engine,db,gate,proof,startdate,structure}.py` (the structure
   test greps the rules above; zero backslashes in `directpay/*.py`).
-- Env: `DIRECTPAY_ENABLED`(1), `DIRECTPAY_DRYRUN`(**1**), `DIRECTPAY_START_DATE`(first boot),
+- Env: `DIRECTPAY_ENABLED`(1), `DIRECTPAY_DRYRUN`(**0** since 2026-09-13), `DIRECTPAY_START_DATE`(first boot),
   `DIRECTPAY_CATEGORY`(تحصيل الحجوزات المباشرة), `DIRECTPAY_SUMMARY_CHANNEL`(تحصيل-الملخص),
   `DIRECTPAY_CLOSE_IDS`(empty), `DIRECTPAY_PING_ROLE_ID`(empty), `DIRECTPAY_POLL_MIN`(10),
   `DIRECTPAY_LOOKBACK_DAYS`(3), `DIRECTPAY_MAX_OPEN_PER_TICK`(5), `DIRECTPAY_NUDGE_AFTER_DAYS`(2),

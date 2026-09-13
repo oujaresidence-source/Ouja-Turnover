@@ -2,8 +2,8 @@
 """
 directpay.config — every DIRECTPAY_* environment variable, read at call time (never cached)
 so a Railway change or a test's os.environ edit is seen immediately. Every default is safe
-to deploy as-is: the feature is ON but DRY-RUN, and nothing is posted until the owner flips
-DIRECTPAY_DRYRUN to 0.
+to deploy as-is. Dry-run was the default for the first deploy (2026-09-10); the owner ruled it
+LIVE on 2026-09-13 (he never edits Railway vars — posture changes are made in code).
 """
 import os
 
@@ -38,8 +38,9 @@ def enabled():
 
 
 def dryrun():
-    """ON by default. The first deploy is observable and silent; the owner flips it."""
-    return _flag("DIRECTPAY_DRYRUN", "1")
+    """LIVE by default since 2026-09-13 — the owner watched the dry-run day and asked for the rooms
+    to open without touching Railway. Set DIRECTPAY_DRYRUN=1 to silence it again without a deploy."""
+    return _flag("DIRECTPAY_DRYRUN", "0")
 
 
 def start_date_env():

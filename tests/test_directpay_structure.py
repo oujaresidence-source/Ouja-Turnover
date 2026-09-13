@@ -8,7 +8,7 @@ package never imported → AttributeError → caught → every route silently go
   * directpay/*.py contain ZERO backslashes (the DASHBOARD_HTML/page.py trap, kept out by rule)
   * every `_directpay.<name>` bot.py references resolves on the package
   * every dp_* custom_id lives in a View that bot.add_view registers
-  * env defaults: ENABLED on, DRYRUN ON, loops exist and are not running
+  * env defaults: ENABLED on, DRYRUN OFF (owner ruling 2026-09-13), loops exist and are not running
   * role rules + nav + both T.ar / T.en carry the `dpay` tab
   * the webhook line, the loop guard, the staggered start
   * no web close endpoint exists
@@ -88,7 +88,7 @@ class BotBoundary(unittest.TestCase):
     def test_import_guard_and_flags(self):
         self.assertTrue(self.bot._HAS_DIRECTPAY)
         self.assertTrue(self.bot.DIRECTPAY_ENABLED)
-        self.assertTrue(self.bot._directpay.notify.dryrun())      # DRYRUN ON by default
+        self.assertFalse(self.bot._directpay.notify.dryrun())     # LIVE by default (owner ruling 2026-09-13)
         self.assertEqual(self.bot.DIRECTPAY_CATEGORY, "تحصيل الحجوزات المباشرة")
         self.assertEqual(self.bot.DIRECTPAY_SUMMARY_CHANNEL, "تحصيل-الملخص")
         self.assertEqual(self.bot.DIRECTPAY_POLL_MIN, 10)

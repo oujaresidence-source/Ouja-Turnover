@@ -14,7 +14,7 @@ RULE_LINE = "هذي غرفة تحصيل. ما تنقفل إلا بعد ما يو
 
 
 def dryrun():
-    """ON by default — read live from the environment so a Railway flip needs no deploy."""
+    """OFF by default since 2026-09-13 (owner ruling) — DIRECTPAY_DRYRUN=1 in Railway silences it again."""
     return config.dryrun()
 
 
