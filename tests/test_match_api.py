@@ -124,13 +124,13 @@ class TestMatchAnswers(unittest.TestCase):
 
 class TestMatchRouteOrder(unittest.TestCase):
     def test_match_route_is_registered_before_the_slug_catchall(self):
-        """/stay/{slug} is a catch-all. Registered after it, /stay/match 404s."""
+        """/apartments/{slug} is a catch-all. Registered after it, /apartments/match 404s."""
         with open("bot.py", encoding="utf-8") as f:
             src = f.read()
-        i_match = src.index('add_get("/stay/match"')
-        i_slug = src.index('add_get("/stay/{slug}"')
+        i_match = src.index('add_get("/apartments/match"')
+        i_slug = src.index('add_get("/apartments/{slug}"')
         self.assertLess(i_match, i_slug,
-                        "/stay/match must be registered before /stay/{slug}")
+                        "/apartments/match must be registered before /apartments/{slug}")
 
 
 class TestMatchRunParallelAvailability(unittest.TestCase):

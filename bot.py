@@ -21399,7 +21399,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
             <div class="page-sub" id="t_gw_sub"></div>
           </div>
           <div class="page-tools">
-            <a class="btn ghost sm" id="gwOpen" href="/stay" target="_blank">↗</a>
+            <a class="btn ghost sm" id="gwOpen" href="/apartments" target="_blank">↗</a>
             <button class="btn ghost sm" onclick="gwSync()" id="gwSyncBtn">⟳</button>
           </div>
         </div>
@@ -33319,12 +33319,12 @@ function gwListRow(x){ var ar=(L==='ar'); var thumb=x.hero?('<img src="'+esc(x.h
     +'<td style="padding:8px 5px"><select onchange="gwSetNbhd('+x.id+',this.value)" style="font-size:11px;padding:4px 6px;border-radius:7px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);max-width:150px">'+gwNbOptions(x.neighborhood||'')+'</select></td>'
     +'<td style="padding:8px 5px">'+(x.has_airbnb?fbChip('✓','ok'):fbChip(ar?'مفقود':'missing','warn'))+'</td>'
     +'<td style="padding:8px 5px">'+x.images+'</td><td style="padding:8px 5px">'+(x.tags||[]).length+'</td>'
-    +'<td style="padding:8px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
+    +'<td style="padding:8px 5px;white-space:nowrap"><button class="btn ghost xs" onclick="gwEdit('+x.id+')">'+(ar?'تعديل':'Edit')+'</button> <a class="btn ghost xs" href="/apartments/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'View')+'</a> <button class="btn ghost xs" onclick="gwCopy(&#39;'+esc(x.slug)+'&#39;)">📋</button></td></tr>'; }
 async function gwToggleVis(id,on){ try{ await post('/api/gw/listing',{id:String(id),visible:!!on}); toast('✓'); }catch(_){ toast('⚠'); } }
 function gwNbOptions(sel){ var ar=(L==='ar'); return '<option value="">'+(ar?'— الحي —':'— area —')+'</option>'+(_gw.nbhds||[]).map(function(o){ return '<option value="'+esc(o.key)+'"'+(o.key===sel?' selected':'')+'>'+esc(ar?o.ar:o.en)+'</option>'; }).join(''); }
 async function gwSetNbhd(id,val){ try{ await post('/api/gw/listing',{id:String(id),neighborhood:val}); if((_gw.byId||{})[id])_gw.byId[id].neighborhood=val; toast('✓'); }catch(_){ toast('⚠'); } }
-function gwCopy(slug){ var u=location.origin+'/stay/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
-function gwCopyStay(){ var u=location.origin+'/stay'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /stay':'/stay link copied'); }catch(e){ prompt('',u); } }
+function gwCopy(slug){ var u=location.origin+'/apartments/'+slug; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ الرابط':'Link copied'); }catch(e){ prompt('',u); } }
+function gwCopyStay(){ var u=location.origin+'/apartments'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /apartments':'/apartments link copied'); }catch(e){ prompt('',u); } }
 function gwCopyElite(){ var u=location.origin+'/elite'; try{ navigator.clipboard.writeText(u); toast(L==='ar'?'تم نسخ رابط /elite':'/elite link copied'); }catch(e){ prompt('',u); } }
 function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast('⚠'); return; }
   openDrawer((ar?'تعديل: ':'Edit: ')+(x.name||''), '#'+id);
@@ -33432,7 +33432,7 @@ async function gwAirbnb(){ var ar=(L==='ar'), b=document.getElementById('gwBody'
   if(miss.length){ h+='<div style="background:rgba(180,84,63,.08);border:1px solid var(--down,#b4543f);border-radius:12px;padding:13px 15px;margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="font-size:22px;font-weight:800;color:var(--down,#b4543f)">'+miss.length+'</span><b style="font-size:13.5px">'+(ar?'وحدة بدون رابط Airbnb':'listings missing an Airbnb URL')+'</b></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?'صفحاتها تعرض زر حجز معطّل. عدّل الرابط من Hostaway ‹ Listing ‹ Airbnb/channel link ثم «تحديث من Hostaway» — أو حط رابط احتياطي محلي من تبويب «الوحدات».':'Their booking button is disabled. Set the link in Hostaway > Listing > Airbnb/channel link then Sync — or add a local fallback in Listings.')+'</div></div>'; }
   else { h+='<div style="'+fbCard()+';border:1px solid var(--green,#3e7d5a)"><b>🔗 '+esc(t().gw_airbnb)+'</b> · '+fbChip((ar?'كل الوحدات مربوطة':'all linked')+' ('+found+')','ok')+'</div>'; }
   h+='<div style="display:flex;gap:8px;margin:0 2px 8px">'+fbChip((ar?'موجود ':'found ')+found,'ok')+fbChip((ar?'مفقود ':'missing ')+miss.length,(miss.length?'bad':'ok'))+'</div>';
-  h+='<div style="display:flex;flex-direction:column;gap:5px">'+ls.map(function(x){ var src=(x.source==='hostaway'?(ar?'Hostaway':'Hostaway'):(x.source==='override'?(ar?'احتياطي محلي':'local fallback'):'')); return '<div style="padding:9px 10px;background:var(--surface);border:1px solid '+(x.has_airbnb?'var(--border)':'var(--down,#b4543f)')+';border-radius:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12px">'+esc(x.name)+'</b>'+(x.has_airbnb?(fbChip('✓ '+esc(src),'ok')+'<a class="btn ghost xs" href="'+esc(x.url)+'" target="_blank">Airbnb ↗</a>'):fbChip(ar?'مفقود':'missing','bad'))+'<a class="btn ghost xs" href="/stay/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'view')+'</a></div>'; }).join('')+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:5px">'+ls.map(function(x){ var src=(x.source==='hostaway'?(ar?'Hostaway':'Hostaway'):(x.source==='override'?(ar?'احتياطي محلي':'local fallback'):'')); return '<div style="padding:9px 10px;background:var(--surface);border:1px solid '+(x.has_airbnb?'var(--border)':'var(--down,#b4543f)')+';border-radius:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12px">'+esc(x.name)+'</b>'+(x.has_airbnb?(fbChip('✓ '+esc(src),'ok')+'<a class="btn ghost xs" href="'+esc(x.url)+'" target="_blank">Airbnb ↗</a>'):fbChip(ar?'مفقود':'missing','bad'))+'<a class="btn ghost xs" href="/apartments/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'view')+'</a></div>'; }).join('')+'</div>';
   b.innerHTML=h; }
 async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/analytics?days=7'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
   var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">'
@@ -56998,6 +56998,17 @@ a{color:inherit;text-decoration:none}
 .price{font-weight:700;font-size:15px;color:var(--ink)}
 .price.soft{color:var(--mut);font-weight:600;font-size:13.5px}
 .disc{font-size:11.5px;color:#6e5d4b;line-height:1.55}
+.note{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--bg);border:1px dashed var(--line);font-size:11.5px;color:#6e5d4b;line-height:1.65;text-align:center}
+.note a,.foot a{color:var(--gold2);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.about{padding:6px 0 34px}
+.about h1{font-size:24px;color:var(--ink);margin:16px 0 6px;letter-spacing:-.01em}
+.about h2{font-size:15.5px;color:var(--ink);margin:0 0 8px;font-weight:700}
+.about p,.about li{font-size:14.5px;line-height:1.8;color:#4d3f31;margin:0 0 8px}
+.about ul{padding-inline-start:20px;margin:0}
+.about .box{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:12px 0}
+.about .box.key{border-color:var(--gold);background:var(--amber)}
+.about .ensec{direction:ltr;text-align:left;border-top:1px solid var(--line);margin-top:28px;padding-top:20px}
+.about .ensec ul{padding-inline-start:20px}
 .sk{background:linear-gradient(90deg,#ece2cd 25%,#f3ecdd 50%,#ece2cd 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:10px}
 @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .summary{position:sticky;top:58px;z-index:30;background:rgba(255,253,248,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:9px 0;margin-bottom:8px}
@@ -57126,9 +57137,9 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
-<header class="head"><div class="wrap"><a class="brand" href="/stay"><span class="dot"></span>عوجا <span class="en">OUJA</span></a><span class="muted" style="font-size:12.5px">إقامات الرياض</span></div></header>
+<header class="head"><div class="wrap"><a class="brand" href="/apartments"><span class="dot"></span>عوجا <span class="en">OUJA</span></a><span class="muted" style="font-size:12.5px">إقامات الرياض</span></div></header>
 <main id="view" class="wrap"></main>
-<div class="foot">عوجا · إقامات مختارة في الرياض · الحجز والتأكيد داخل Airbnb</div>
+<div class="foot">عوجا · إقامات مختارة في الرياض · موقع تصفح فقط · الحجز والدفع داخل Airbnb · <a href="/apartments/about">عن هذا الموقع</a></div>
 <script>
 var STAY=/*__STAY_DATA__*/null;
 var V=document.getElementById('view');
@@ -57170,8 +57181,9 @@ function viewLanding(){
     +'<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div><div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div></div>'
     +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
     +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
-    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button></div>'
-    /* Stay Match entry PAUSED (owner request 2026-07-23): the /stay/match route and
+    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button>'
+    +'<div class="note">هذا الموقع للتصفح والبحث فقط · الحجز والدفع يتمّان داخل Airbnb · لا يتم أي حجز أو دفع هنا. <a href="/apartments/about">عن هذا الموقع</a></div></div>'
+    /* Stay Match entry PAUSED (owner request 2026-07-23): the /apartments/match route and
        all its code stay intact, but no guest-facing link points to it. Re-enable by
        restoring this card + the search zero-results button below it. */
     +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
@@ -57193,7 +57205,7 @@ function viewLanding(){
     if(tg.length)q+='&tags='+encodeURIComponent(tg.join(','));
     if(nb)q+='&neighborhood='+encodeURIComponent(nb);
     if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
-    location.href='/stay/search'+q;
+    location.href='/apartments/search'+q;
   };
   // Featured available units — show real inventory on the landing so a visitor sees
   // product immediately instead of an empty search form (browse mode, no dates).
@@ -57204,7 +57216,7 @@ function viewLanding(){
     fetch('/api/stay/featured').then(function(r){return r.json();}).then(function(d){
       var res=((d&&d.results)||[]).slice(0,6);
       if(!res.length){fe.innerHTML='';return;}
-      fe.innerHTML='<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 10px"><h2 style="font-size:18px;color:var(--ink);margin:0;font-weight:700">إقامات مختارة</h2><a class="more" href="/stay/search'+location.search+'">عرض الكل</a></div><div class="grid">'+res.map(card).join('')+'</div>';
+      fe.innerHTML='<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 10px"><h2 style="font-size:18px;color:var(--ink);margin:0;font-weight:700">إقامات مختارة</h2><a class="more" href="/apartments/search'+location.search+'">عرض الكل</a></div><div class="grid">'+res.map(card).join('')+'</div>';
       track('stay_featured_view',{count:res.length});
     }).catch(function(){fe.innerHTML='';});
   })();
@@ -57220,7 +57232,7 @@ function card(l){
     price='<div class="price">'+perNight+'الإجمالي التقريبي: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div>';
   }
   else{price='<div class="price soft">السعر يظهر داخل Airbnb</div>';}
-  return '<a class="card lc" href="/stay/'+he(l.slug)+location.search+'">'
+  return '<a class="card lc" href="/apartments/'+he(l.slug)+location.search+'">'
     +'<div class="ph">'+img+(ov.length?('<div class="ov-row">'+ov.join('')+'</div>'):'')+'</div>'
     +'<div class="bd"><h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
     +ratingHtml(l)
@@ -57236,7 +57248,7 @@ function searchSummary(ci,co,g,ty){
   var nb=pp.get('neighborhood')||'';var nbl=((STAY&&STAY.config&&STAY.config.neighborhoods)||[]).filter(function(o){return o.key===nb;})[0];if(nb&&nbl)bits.push('📍 '+he(nbl.ar||nbl.en));
   (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
   var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
-  return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/stay'+location.search+'">تعديل البحث</a></div></div>';
+  return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/apartments'+location.search+'">تعديل البحث</a></div></div>';
 }
 
 var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0,facts:[]};
@@ -57387,7 +57399,7 @@ function mqCard(l){
   var price=(l.est_total!=null&&l.nights>0)
     ?('<div class="price"><b>من '+money(l.est_avg)+' / الليلة</b> · الإجمالي التقريبي '+money(l.est_total)+'</div>')
     :'<div class="price soft">السعر يظهر داخل Airbnb</div>';
-  return '<a class="card lc" href="/stay/'+he(l.slug)+mqLinkQS()+'">'
+  return '<a class="card lc" href="/apartments/'+he(l.slug)+mqLinkQS()+'">'
     +'<div class="ph">'+img+'</div><div class="bd">'
     +'<h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
     +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
@@ -57427,7 +57439,7 @@ function mqCompareTable(top,factsDef){
   });
   var head='<tr><th class="mq-cmp-attr"></th>'+cols.map(function(l){
     var img=l.cover?('<img loading="lazy" width="200" height="150" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg" style="height:70px">—</div>';
-    return '<th><a class="mq-cmp-unit" href="/stay/'+he(l.slug)+mqLinkQS()+'">'+img+'<span>'+he(l.name_ar||l.name_en)+'</span></a></th>';
+    return '<th><a class="mq-cmp-unit" href="/apartments/'+he(l.slug)+mqLinkQS()+'">'+img+'<span>'+he(l.name_ar||l.name_en)+'</span></a></th>';
   }).join('')+'</tr>';
   var rows='<tr><th class="mq-cmp-attr">غرف · أسرّة</th>'+cols.map(function(l){return '<td>'+he(mqRoomsBeds(l))+'</td>';}).join('')+'</tr>'
     +'<tr><th class="mq-cmp-attr">السعر / الليلة</th>'+cols.map(function(l){return '<td>'+mqPriceCell(l)+'</td>';}).join('')+'</tr>';
@@ -57465,7 +57477,7 @@ function mqBindChipClicks(){
 
 function mqResults(){
   var q=mqQuery();
-  history.replaceState(null,'','/stay/match'+q);
+  history.replaceState(null,'','/apartments/match'+q);
   // A plain skeleton with no text reads as frozen once the guest has waited a
   // couple of seconds on a cold cache. One static line is honest (we don't know
   // how long it'll take, so no fake percentage/progress) but tells them it's alive.
@@ -57482,7 +57494,7 @@ function mqResults(){
     if(d&&d.impossible){
       V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما عندنا وحدة تكفي هالعدد</h2>'
         +'<p class="mq-sub">أكبر وحدة عندنا تستوعب '+he(String(d.max_capacity||0))+' ضيوف. لو تبون تقسمون على وحدتين نقدر نساعدكم.</p>'
-        +'<a class="btn block" href="/stay">تصفح كل الوحدات</a></div>';
+        +'<a class="btn block" href="/apartments">تصفح كل الوحدات</a></div>';
       track('match_results',{count:0});return;
     }
     if(!top.length){
@@ -57505,7 +57517,7 @@ function mqResults(){
       }
       V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">ما لقينا وحدات متاحة بهذي التواريخ</h2>'
         +'<p class="mq-sub">جرّب تواريخ ثانية، أو تصفح الوحدات بدون تحديد تاريخ.</p>'
-        +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+        +'<a class="btn block" href="/apartments">تصفح الوحدات</a></div>';
       track('match_results',{count:0});return;
     }
 
@@ -57536,14 +57548,14 @@ function mqResults(){
     V.innerHTML=html;
     mqBindChipClicks();
     var again=document.getElementById('mqAgain');
-    if(again)again.onclick=function(){location.href='/stay/match';};
+    if(again)again.onclick=function(){location.href='/apartments/match';};
     // guests + type feed the dashboard unmet-demand table; weak marks a low-confidence result
     track('match_results',{count:top.length,guests:MQ.party,
                            type:(MQ.purpose||'rest'),weak:(d.confident?0:1),facts:MQ.facts.length});
   }).catch(function(){
     V.innerHTML='<div class="mq-wrap"><h2 class="mq-head">صار خلل بسيط</h2>'
       +'<p class="mq-sub">جرّب مرة ثانية، أو تصفح الوحدات مباشرة.</p>'
-      +'<a class="btn block" href="/stay">تصفح الوحدات</a></div>';
+      +'<a class="btn block" href="/apartments">تصفح الوحدات</a></div>';
   });
 }
 
@@ -57566,7 +57578,7 @@ function viewMatch(){
 function viewSearch(){
   var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
   var verr=validateDates(ci,co);
-  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0 4px;color:var(--ink)">'+he(verr)+'</h2><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل التواريخ</a></div></div>';return;}
+  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0 4px;color:var(--ink)">'+he(verr)+'</h2><div style="margin-top:14px"><a class="btn" href="/apartments'+location.search+'">عدّل التواريخ</a></div></div>';return;}
   V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="grid" style="margin:6px 0 18px">'+'<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:18px;width:62%"></div><div class="sk" style="height:13px;width:42%"></div><div class="sk" style="height:40px;width:100%;margin-top:6px"></div></div></div>'.repeat(4)+'</div>';
   var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+((p.get('tags'))?('&tags='+encodeURIComponent(p.get('tags'))):'')+((p.get('neighborhood'))?('&neighborhood='+encodeURIComponent(p.get('neighborhood'))):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
   track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
@@ -57583,7 +57595,7 @@ function viewSearch(){
       V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
     } else {
       track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/stay'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
+      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/apartments'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
       if(ci&&co){loadSimilar(ty);}
     }
   }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
@@ -57598,7 +57610,7 @@ function loadSimilar(ty){
 function viewListing(){
   var l=(STAY&&STAY.listing)||null;
   function render(l){
-    if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/stay">ارجع للبحث</a></p></div>';return;}
+    if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/apartments">ارجع للبحث</a></p></div>';return;}
     track('stay_listing_view',{listing_id:l.id});
     var imgs=(l.images||[]);
     var gallery;
@@ -57650,11 +57662,11 @@ function viewListing(){
     var waNum=((STAY&&STAY.config&&STAY.config.whatsapp)||'');
     var waCta='';
     if(waNum){
-      var waMsg='مرحبا، أبغى أحجز مباشرة: '+(l.name_ar||l.name_en||'')+(dci&&dco?(' · '+dci+' إلى '+dco):'')+(pq.get('guests')?(' · '+pq.get('guests')+' ضيوف'):'');
-      waCta='<a class="btn block ghost" id="wabtn" target="_blank" rel="noopener" style="margin-top:7px;background:transparent;border:1.5px solid var(--green);color:var(--green)" href="https://wa.me/'+he(waNum)+'?text='+encodeURIComponent(waMsg)+'">احجز مباشرة عبر واتساب 💬</a>';
+      var waMsg='مرحبا، عندي استفسار عن: '+(l.name_ar||l.name_en||'')+(dci&&dco?(' · '+dci+' إلى '+dco):'')+(pq.get('guests')?(' · '+pq.get('guests')+' ضيوف'):'');
+      waCta='<a class="btn block ghost" id="wabtn" target="_blank" rel="noopener" style="margin-top:7px;background:transparent;border:1.5px solid var(--green);color:var(--green)" href="https://wa.me/'+he(waNum)+'?text='+encodeURIComponent(waMsg)+'">تواصل معنا عبر واتساب 💬</a>';
     }
     var note=l.has_airbnb?'<div class="disc" style="text-align:center;margin-bottom:3px">بننقلك إلى Airbnb بنفس التواريخ وعدد الضيوف.</div>':'';
-    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+waCta+note+'<div class="disc" style="text-align:center">السعر النهائي والتوفر النهائي داخل Airbnb.</div></div>';
+    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+waCta+note+'<div class="disc" style="text-align:center">السعر والتوفر والدفع كلها داخل Airbnb · لا يتم أي حجز أو دفع في هذا الموقع.</div></div>';
     document.body.appendChild(bar);
     var ab=document.getElementById('abtn');
     if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
@@ -57676,7 +57688,7 @@ function viewListing(){
     document.addEventListener('keydown',esc);document.body.style.overflow='hidden';document.body.appendChild(ov);
   }
   var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
-  var token=(l&&l.slug)||location.pathname.replace(/^\/stay\/(id\/)?/,'').split('?')[0];
+  var token=(l&&l.slug)||location.pathname.replace(/^\/apartments\/(id\/)?/,'').split('?')[0];
   var dated=(ci&&co&&co>ci);
   if(l && !dated){ render(l); }
   else{
@@ -57684,11 +57696,50 @@ function viewListing(){
   }
 }
 
+function viewAbout(){
+  document.title='عن هذا الموقع · عوجا';
+  V.innerHTML='<div class="about">'
+    +'<h1>عن هذا الموقع</h1>'
+    +'<p>موقع «عوجا» هذا هو محرك بحث وتصفح لوحدات عوجا السكنية في الرياض. يعرض الوحدات وصورها ومواصفاتها فقط، ولا يقدّم أي خدمة حجز أو دفع.</p>'
+    +'<div class="box key"><h2>ما الذي لا يتم في هذا الموقع نهائيًا</h2><ul>'
+    +'<li>لا يتم أي حجز أو تأكيد حجز هنا.</li>'
+    +'<li>لا يتم أي دفع أو تحصيل مالي، ولا تُطلب أي بيانات بطاقة أو حساب بنكي.</li>'
+    +'<li>لا يتم توقيع أي عقد إقامة ولا جمع بيانات هوية.</li>'
+    +'</ul></div>'
+    +'<div class="box"><h2>ما الذي يقدّمه الموقع</h2><ul>'
+    +'<li>عرض الوحدات وصورها ومواصفاتها وأحيائها.</li>'
+    +'<li>البحث حسب التاريخ وعدد الضيوف والحي ونوع الإقامة.</li>'
+    +'<li>إظهار السعر التقريبي والتوفر كما هو معروض على منصة الحجز.</li>'
+    +'</ul></div>'
+    +'<div class="box"><h2>أين يتم الحجز والدفع؟</h2>'
+    +'<p>عند اختيار وحدة يتم تحويل الزائر إلى صفحة الوحدة نفسها داخل منصة Airbnb. الحجز والدفع والتأكيد تتم حصريًا داخل منصات الحجز المرخّصة ووفق شروطها وأنظمتها.</p></div>'
+    +'<div class="box"><h2>الترخيص</h2>'
+    +'<p>وحدات عوجا السكنية مرخّصة من وزارة السياحة، وتُدار بواسطة Ouja Residence (عوجا) في الرياض.</p></div>'
+    +'<p class="muted" style="font-size:13px">للاستفسارات: <a href="mailto:oujaresidence@gmail.com" style="color:var(--gold2)">oujaresidence@gmail.com</a></p>'
+    +'<div class="ensec">'
+    +'<h1>About this website</h1>'
+    +'<p>This Ouja website is a search and browsing engine for Ouja residential units in Riyadh. It shows the units, their photos and details only. It offers no booking or payment service.</p>'
+    +'<div class="box key"><h2>What never happens on this website</h2><ul>'
+    +'<li>No booking or booking confirmation is made here.</li>'
+    +'<li>No payment or collection of money, and no card or bank details are ever requested.</li>'
+    +'<li>No stay contract is signed and no identity data is collected.</li>'
+    +'</ul></div>'
+    +'<div class="box"><h2>Where booking and payment happen</h2>'
+    +'<p>When a visitor picks a unit, they are taken to that unit&#39;s own page on Airbnb. Booking, payment and confirmation happen exclusively inside licensed booking platforms, under their terms and rules.</p></div>'
+    +'<div class="box"><h2>Licensing</h2>'
+    +'<p>Ouja residential units are licensed by the Ministry of Tourism and managed by Ouja Residence in Riyadh.</p></div>'
+    +'<p class="muted" style="font-size:13px">Enquiries: <a href="mailto:oujaresidence@gmail.com" style="color:var(--gold2)">oujaresidence@gmail.com</a></p>'
+    +'<p style="margin-top:18px"><a class="btn ghost sm" href="/apartments">Browse the units · تصفح الوحدات</a></p>'
+    +'</div></div>';
+  track('stay_about_view',{});
+}
+
 (function(){
   var path=location.pathname;
-  if(path==='/stay'||path==='/stay/'){viewLanding();}
-  else if(path==='/stay/search'){viewSearch();}
-  else if(path==='/stay/match'){viewMatch();}
+  if(path==='/apartments'||path==='/apartments/'){viewLanding();}
+  else if(path==='/apartments/search'){viewSearch();}
+  else if(path==='/apartments/match'){viewMatch();}
+  else if(path==='/apartments/about'){viewAbout();}
   else{viewListing();}
 })();
 </script>
@@ -57698,21 +57749,24 @@ function viewListing(){
 # 9665XXXXXXXX). Unset = the button simply doesn't render — we never fake a contact.
 STAY_WHATSAPP = re.sub(r"\D", "", os.environ.get("STAY_WHATSAPP", "") or "")
 
-# ---- «إيقاف موقع الضيوف» — the /stay pause switch (owner request 2026-08-24) ----
-# STAY_PAUSED=1 makes every visitor-facing /stay page answer a real HTTP 404, stops
-# robots.txt advertising the site and empties the sitemap. Nothing is deleted, no
-# data is touched, no Hostaway call changes: flip it back to 0 in Railway and the
-# whole site returns on the next boot.
+# ---- «إيقاف موقع الضيوف» — the guest-site pause switch ----
+# The site was paused at /stay on 2026-08-24 (STAY_PAUSED=1 on Railway) and RELAUNCHED
+# at /apartments on 2026-09-15. The relaunch is live by default and reads its OWN switch,
+# APARTMENTS_PAUSED, so the old STAY_PAUSED=1 still set on Railway cannot keep the new
+# address dark (the owner does not edit Railway vars — the flip happens in code).
+# APARTMENTS_PAUSED=1 makes every visitor-facing /apartments page answer a real HTTP
+# 404, stops robots.txt advertising the site and empties the sitemap. Nothing is
+# deleted, no data is touched, no Hostaway call changes.
 #
 # DELIBERATELY NARROW. /elite and /monthly BORROW the /api/stay/* endpoints
 # (search, listing, event) — gating anything named "stay" would take two other live
-# sites down with it. Only the six HTML pages below are gated; the shared data
-# endpoints and /stay/hero-image (the dashboard previews it) stay up on purpose.
+# sites down with it. Only the HTML pages are gated; the shared data endpoints and
+# /stay/hero-image (the dashboard previews it) stay up on purpose.
 # tests/test_stay_pause.py locks both halves.
 def _stay_paused():
     """Read at request time, not import time — so a test (and any future in-app
     toggle) can flip it without a restart."""
-    return os.environ.get("STAY_PAUSED", "0") in ("1", "true", "True", "yes")
+    return os.environ.get("APARTMENTS_PAUSED", "0") in ("1", "true", "True", "yes")
 
 
 def _stay_gate():
@@ -57733,7 +57787,7 @@ def _biz_links(base, wa):
     if _stay_paused():
         return {"book": wa_url or mail, "wa": wa_url or mail,
                 "email": OUJA_CONTACT_EMAIL}
-    stay = (base + "/stay") if base else "/stay"
+    stay = (base + "/apartments") if base else "/apartments"
     return {"book": stay, "wa": wa_url or stay, "email": OUJA_CONTACT_EMAIL}
 
 
@@ -57742,7 +57796,7 @@ async def _handle_robots(request):
     base = str(request.url.origin())
     # Paused (STAY_PAUSED=1): the pages answer 404, so stop inviting the crawler in.
     txt = ("User-agent: *\n"
-           + ("Disallow: /stay\n" if _stay_paused() else "Allow: /stay\n") +
+           + ("Disallow: /apartments\n" if _stay_paused() else "Allow: /apartments\n") +
            # Ouja Elite is a discreet members site — keep it out of search by default.
            # Flip this to "Allow: /elite\n" (and add it to the sitemap) to make it public.
            "Disallow: /elite\n"
@@ -57764,13 +57818,13 @@ async def _handle_sitemap(request):
     if _stay_paused():
         urls = []                     # paused: a valid but empty sitemap, no dead links
     else:
-        urls = [f"{base}/stay", f"{base}/stay/search"]
+        urls = [f"{base}/apartments", f"{base}/apartments/search", f"{base}/apartments/about"]
     try:
         for snap in ([] if _stay_paused() else _gw_visible_snaps()):
             ov = _gw_overrides.get(str(snap.get("id"))) if isinstance(_gw_overrides, dict) else None
             slug = _gw_slug(snap, ov or {})
             if slug:
-                urls.append(f"{base}/stay/{slug}")
+                urls.append(f"{base}/apartments/{slug}")
     except Exception as e:
         print("sitemap error:", e)
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -57783,13 +57837,16 @@ def _stay_render(route="landing", listing=None, base=""):
     title = "اختر إقامتك مع عوجا"
     desc = "وحدات عوجا المتاحة في الرياض · دخول ذاتي · الحجز عبر Airbnb"
     og = ""
-    path = {"landing": "/stay", "search": "/stay/search", "listing": "/stay",
-            "match": "/stay/match"}.get(route, "/stay")
+    if route == "about":
+        title = "عن هذا الموقع · عوجا"
+        desc = "موقع تصفح فقط لوحدات عوجا في الرياض — الحجز والدفع يتمّان داخل Airbnb، ولا يتم أي حجز أو دفع هنا."
+    path = {"landing": "/apartments", "search": "/apartments/search", "listing": "/apartments",
+            "match": "/apartments/match", "about": "/apartments/about"}.get(route, "/apartments")
     if listing:
         title = (listing.get("name_ar") or title) + " · عوجا"
         desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
         og = listing.get("cover") or ""
-        path = "/stay/" + (listing.get("slug") or str(listing.get("id")))
+        path = "/apartments/" + (listing.get("slug") or str(listing.get("id")))
     vis = _gw_visible_snaps()
     hcfg = _gw_hero_resolve()
     if not listing and hcfg.get("url"):
@@ -57825,7 +57882,7 @@ def _stay_render(route="landing", listing=None, base=""):
         ld = {"@context": "https://schema.org", "@type": "LodgingBusiness",
               "name": "Ouja Residence · عوجا",
               "description": desc,
-              "url": (base or "") + "/stay",
+              "url": (base or "") + "/apartments",
               "address": {"@type": "PostalAddress", "addressLocality": "Riyadh", "addressCountry": "SA"}}
         if hcfg.get("url"):
             ld["image"] = hcfg["url"]
@@ -57854,7 +57911,7 @@ async def _handle_stay_id(request):
     if snap:
         slug = _gw_slug(snap, ov)
         q = ("?" + request.query_string) if request.query_string else ""
-        raise web.HTTPFound("/stay/" + slug + q)
+        raise web.HTTPFound("/apartments/" + slug + q)
     return web.Response(text=_stay_render("listing", base=str(request.url.origin())), content_type="text/html")
 
 async def _handle_stay_detail(request):
@@ -58041,6 +58098,20 @@ async def _handle_stay_match(request):
     _stay_gate()
     return web.Response(text=_stay_render("match", base=str(request.url.origin())),
                         content_type="text/html")
+
+async def _handle_stay_about(request):
+    """«عن هذا الموقع» — browsing-only / no payment here / licensed units. Written for
+    a Ministry of Tourism inspector as much as for a guest (owner request 2026-09-15)."""
+    _stay_gate()
+    return web.Response(text=_stay_render("about", base=str(request.url.origin())),
+                        content_type="text/html")
+
+async def _handle_stay_legacy(request):
+    """The old address. /stay… → /apartments… (301, query string kept) so links shared
+    before the relaunch — TikTok bios, old messages, Google — still land somewhere."""
+    rest = request.match_info.get("rest", "")
+    q = ("?" + request.query_string) if request.query_string else ""
+    raise web.HTTPMovedPermanently("/apartments" + (("/" + rest) if rest else "") + q)
 
 async def _api_stay_config(request):
     return _json({"ok": True, "noo": _gw_noo_options(),
@@ -62719,12 +62790,13 @@ async def start_web_server():
         app.router.add_get("/fin/o/{token}", _handle_owner_portal)
         app.router.add_get("/fin/o/{token}/pdf", _handle_owner_portal_pdf)
         # ---- public guest website (no token) — order: static before dynamic slug ----
-        app.router.add_get("/stay", _handle_stay)
-        app.router.add_get("/stay/", _handle_stay)
-        app.router.add_get("/stay/search", _handle_stay_search)
-        app.router.add_get("/stay/match", _handle_stay_match)
+        app.router.add_get("/apartments", _handle_stay)
+        app.router.add_get("/apartments/", _handle_stay)
+        app.router.add_get("/apartments/search", _handle_stay_search)
+        app.router.add_get("/apartments/match", _handle_stay_match)
+        app.router.add_get("/apartments/about", _handle_stay_about)
         app.router.add_get("/api/stay/match", _api_stay_match)
-        app.router.add_get("/stay/id/{lid}", _handle_stay_id)
+        app.router.add_get("/apartments/id/{lid}", _handle_stay_id)
         app.router.add_get("/api/stay/config", _api_stay_config)
         app.router.add_get("/api/stay/search", _api_stay_search)
         app.router.add_get("/api/stay/featured", _api_stay_featured)
@@ -62748,7 +62820,10 @@ async def start_web_server():
         app.router.add_get("/api/gw/hero", _api_gw_hero)
         app.router.add_post("/api/gw/hero", _api_gw_hero)
         app.router.add_post("/api/gw/hero/upload", _api_gw_hero_upload)
-        app.router.add_get("/stay/{slug}", _handle_stay_detail)
+        # Old address → new one. Registered AFTER /stay/hero-image (the dashboard reads it).
+        app.router.add_get("/stay", _handle_stay_legacy)
+        app.router.add_get("/stay/{rest:.*}", _handle_stay_legacy)
+        app.router.add_get("/apartments/{slug}", _handle_stay_detail)
         # ---- Ouja Elite members site (no token); reuses /api/stay/*; {slug} catch-all LAST ----
         app.router.add_get("/elite", _handle_elite)
         app.router.add_get("/elite/", _handle_elite)

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""«إيقاف موقع الضيوف» — the /stay pause switch, and the blast radius it must not have.
+"""«إيقاف موقع الضيوف» — the /apartments pause switch, and the blast radius it must not have.
 
-The owner asked (2026-08-24) for oujares.com/stay to go quiet: a real "page not
+The owner asked (2026-08-24) for the guest site to go quiet (relaunched at
+/apartments on 2026-09-15 behind its own APARTMENTS_PAUSED switch): a real "page not
 found", every page, switched from Railway with no code change.
 
 The danger is not the pause — it is the over-reach. /elite and /monthly BORROW the
@@ -55,39 +56,40 @@ class _Paused:
         self.prev = None
 
     def __enter__(self):
-        self.prev = os.environ.get("STAY_PAUSED")
-        os.environ["STAY_PAUSED"] = "1" if self.on else "0"
+        self.prev = os.environ.get("APARTMENTS_PAUSED")
+        os.environ["APARTMENTS_PAUSED"] = "1" if self.on else "0"
         return self
 
     def __exit__(self, *a):
         if self.prev is None:
-            os.environ.pop("STAY_PAUSED", None)
+            os.environ.pop("APARTMENTS_PAUSED", None)
         else:
-            os.environ["STAY_PAUSED"] = self.prev
+            os.environ["APARTMENTS_PAUSED"] = self.prev
         return False
 
 
-# The six visitor-facing pages, as (name, handler, request) — /stay, /stay/,
-# /stay/search, /stay/match, /stay/id/{lid}, /stay/{slug}.
+# The six visitor-facing pages, as (name, handler, request) — /apartments, /apartments/,
+# /apartments/search, /apartments/match, /apartments/id/{lid}, /apartments/{slug}.
 def _pages():
     return [
-        ("/stay",         bot._handle_stay,        _Req()),
-        ("/stay/search",  bot._handle_stay_search, _Req()),
-        ("/stay/match",   bot._handle_stay_match,  _Req()),
-        ("/stay/id/{lid}", bot._handle_stay_id,    _Req(match={"lid": "999999"})),
-        ("/stay/{slug}",  bot._handle_stay_detail, _Req(match={"slug": "no-such-unit"})),
+        ("/apartments",         bot._handle_stay,        _Req()),
+        ("/apartments/search",  bot._handle_stay_search, _Req()),
+        ("/apartments/match",   bot._handle_stay_match,  _Req()),
+        ("/apartments/about",  bot._handle_stay_about,  _Req()),
+        ("/apartments/id/{lid}", bot._handle_stay_id,    _Req(match={"lid": "999999"})),
+        ("/apartments/{slug}",  bot._handle_stay_detail, _Req(match={"slug": "no-such-unit"})),
     ]
 
 
 class TestSwitchDefaultsOff(unittest.TestCase):
     def test_default_is_live(self):
         """No env var set = the site is up. A pause must never be the default."""
-        prev = os.environ.pop("STAY_PAUSED", None)
+        prev = os.environ.pop("APARTMENTS_PAUSED", None)
         try:
             self.assertFalse(bot._stay_paused())
         finally:
             if prev is not None:
-                os.environ["STAY_PAUSED"] = prev
+                os.environ["APARTMENTS_PAUSED"] = prev
 
     def test_zero_is_live(self):
         with _Paused(False):
@@ -113,12 +115,12 @@ class TestPagesGoDark(unittest.TestCase):
                     try:
                         resp = _run(handler(req))
                     except web.HTTPFound:
-                        continue          # /stay/id redirects to the slug — still alive
+                        continue          # /apartments/id redirects to the slug — still alive
                     self.assertEqual(resp.status, 200)
 
 
 class TestBlastRadius(unittest.TestCase):
-    """The pause must stop at /stay's own pages. Elite and Monthly share the pipes."""
+    """The pause must stop at /apartments's own pages. Elite and Monthly share the pipes."""
 
     def test_shared_apis_stay_up(self):
         with _Paused(True):
@@ -157,34 +159,34 @@ class TestSearchEngineSignals(unittest.TestCase):
     def test_robots_stops_advertising_a_dead_site(self):
         with _Paused(True):
             txt = _run(bot._handle_robots(_Req())).text
-            self.assertIn("Disallow: /stay", txt)
-            self.assertNotIn("Allow: /stay", txt)
+            self.assertIn("Disallow: /apartments", txt)
+            self.assertNotIn("Allow: /apartments", txt)
 
     def test_robots_allows_when_live(self):
         with _Paused(False):
             txt = _run(bot._handle_robots(_Req())).text
-            self.assertIn("Allow: /stay", txt)
+            self.assertIn("Allow: /apartments", txt)
 
     def test_sitemap_lists_nothing_when_paused(self):
         with _Paused(True):
             body = _run(bot._handle_sitemap(_Req())).text
-            self.assertNotIn("/stay", body)
+            self.assertNotIn("/apartments", body)
             self.assertIn("<urlset", body)      # still valid XML, just empty
 
     def test_sitemap_lists_stay_when_live(self):
         with _Paused(False):
             body = _run(bot._handle_sitemap(_Req())).text
-            self.assertIn("/stay", body)
+            self.assertIn("/apartments", body)
 
 
 class TestBusinessPageHasNoDeadButtons(unittest.TestCase):
-    """/business is public and stays up while /stay is paused. None of its three
+    """/business is public and stays up while /apartments is paused. None of its three
     buttons may point at a page that answers 404."""
 
     def test_live_book_goes_to_stay(self):
         with _Paused(False):
             l = bot._biz_links("https://oujares.com", "966500000000")
-            self.assertEqual(l["book"], "https://oujares.com/stay")
+            self.assertEqual(l["book"], "https://oujares.com/apartments")
             self.assertEqual(l["wa"], "https://wa.me/966500000000")
 
     def test_paused_book_goes_to_whatsapp(self):
@@ -194,13 +196,13 @@ class TestBusinessPageHasNoDeadButtons(unittest.TestCase):
             self.assertEqual(l["wa"], "https://wa.me/966500000000")
 
     def test_paused_without_a_number_falls_back_to_email_not_stay(self):
-        """The pre-existing WhatsApp fallback was /stay. While paused that is a
+        """The pre-existing WhatsApp fallback was /apartments. While paused that is a
         dead link, so both buttons must land on email instead."""
         with _Paused(True):
             l = bot._biz_links("https://oujares.com", "")
             for key in ("book", "wa"):
                 with self.subTest(button=key):
-                    self.assertNotIn("/stay", l[key])
+                    self.assertNotIn("/apartments", l[key])
                     self.assertTrue(l[key].startswith("mailto:"), l[key])
 
     def test_no_link_is_ever_empty(self):
