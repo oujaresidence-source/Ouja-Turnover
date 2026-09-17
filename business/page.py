@@ -153,6 +153,7 @@ COPY = {
         "contact_cr": "Commercial Registration", "contact_addr": "Riyadh, Saudi Arabia",
         "wa": "WhatsApp", "email_l": "Email", "book": "Book a stay",
         "footer_sync": "Figures refresh nightly from our property management system. Last sync: {sync}.",
+        "footer_legal": "Ahmed Musaed bin Nassar Company · Commercial Registration No. 7050158810",
         "skip": "Skip to content",
     },
     "ar": {
@@ -287,6 +288,7 @@ COPY = {
         "contact_cr": "السجل التجاري", "contact_addr": "الرياض، السعودية",
         "wa": "واتساب", "email_l": "البريد", "book": "احجز إقامة",
         "footer_sync": "تتحدّث الأرقام ليليًا من نظام إدارة الأملاك. آخر مزامنة: {sync}.",
+        "footer_legal": "شركة أحمد مساعد بن نصار · رقم السجل التجاري: 7050158810",
         "skip": "تخطّ إلى المحتوى",
     },
 }
@@ -1001,6 +1003,7 @@ html[dir=rtl] .track-h{font-family:"IBM Plex Sans Arabic",serif;font-weight:600}
 .contact-meta{font-family:"IBM Plex Mono",monospace;color:var(--muted);font-size:13px;letter-spacing:.02em}
 .foot{border-top:1px solid var(--line);padding:34px 0 70px;color:var(--faint);font-size:12.5px;
   font-family:"IBM Plex Mono",monospace;letter-spacing:.02em}
+.foot .legal{margin:10px 0 0;opacity:.85}
 .foot .dot-live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);
   margin-inline-end:8px;box-shadow:0 0 8px var(--ok);animation:pulse 2.4s var(--e1) infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -1059,7 +1062,7 @@ html[dir=rtl] .lst-title{font-family:"IBM Plex Sans Arabic",serif;font-weight:60
 <main class="wrap">
 __BODY__
 </main>
-<footer class="foot"><div class="wrap"><p><span class="dot-live" aria-hidden="true"></span>__FOOTER__</p></div></footer>
+<footer class="foot"><div class="wrap"><p><span class="dot-live" aria-hidden="true"></span>__FOOTER__</p><p class="legal">__FOOTER_LEGAL__</p></div></footer>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <linearGradient id="goldbar" x1="0" y1="1" x2="0" y2="0">
     <stop offset="0" stop-color="#8A6218"></stop><stop offset="1" stop-color="#C79A4E"></stop>
@@ -1234,4 +1237,5 @@ def render_page(lang, base="", links=None):
             .replace("__ALT_LANG__", "ar" if lang == "en" else "en")
             .replace("__ALT_LABEL__", _e(t["alt_label"]))
             .replace("__FOOTER__", _e(footer))
+            .replace("__FOOTER_LEGAL__", _e(t["footer_legal"]))
             .replace("__BODY__", body))

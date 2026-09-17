@@ -83,13 +83,20 @@ class Renders(unittest.TestCase):
             self.assertNotIn('data-kind="proposal"', self.html[lang])
             self.assertNotIn('class="lead-form"', self.html[lang])
 
-    def test_no_exact_listing_count_and_no_cr_or_hostaway(self):
+    def test_no_exact_listing_count_and_no_hostaway(self):
         for lang in ("en", "ar"):
             h = self.html[lang]
             self.assertNotIn("67 listings", h)
             self.assertNotIn("Hostaway", h)          # "trusted PMS" instead
-            self.assertNotIn("7050158810", h)         # CR number removed
-            self.assertNotIn("Commercial Registration", h)
+
+    def test_footer_carries_legal_name_and_cr(self):
+        # owner ruling 2026-09-17: the legal entity + CR number sit in the footer only
+        for lang in ("en", "ar"):
+            h = self.html[lang]
+            self.assertEqual(h.count("7050158810"), 1)
+            self.assertIn('class="legal"', h)
+        self.assertIn("Ahmed Musaed bin Nassar Company", self.html["en"])
+        self.assertIn("شركة أحمد مساعد بن نصار", self.html["ar"])
 
     def test_review_wall_scales_with_featured_default_and_show_all(self):
         for lang in ("en", "ar"):
