@@ -16,6 +16,7 @@ WHAT THE SCHEMA ENFORCES
 import datetime
 import json
 import os
+import secrets
 import threading
 import time
 from contextlib import closing
@@ -80,6 +81,16 @@ CREATE TABLE IF NOT EXISTS cw_messages (
     at          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cw_msgs_key ON cw_messages(work_key, active);
+-- The one-tap contact button. Discord caps a link button's URL at 512 characters and the
+-- ready-made WhatsApp message alone is ~730 once encoded, so the button points at a SHORT
+-- link on our own server (/cw/<token>) that rebuilds the message and redirects. airbnb_url
+-- is the fallback button when the guest has no phone, looked up once when the card is made.
+CREATE TABLE IF NOT EXISTS cw_links (
+    token       TEXT PRIMARY KEY,
+    work_key    TEXT NOT NULL UNIQUE,
+    airbnb_url  TEXT,
+    created_at  TEXT
+);
 CREATE TABLE IF NOT EXISTS cw_settings (
     key    TEXT PRIMARY KEY,
     value  TEXT,
@@ -224,12 +235,17 @@ def demo_items():
     return q("SELECT * FROM cw_items WHERE demo=1 ORDER BY work_key")
 
 
+def demo_item_by_channel(channel_id):
+    return q1("SELECT * FROM cw_items WHERE demo=1 AND channel_id=?", (str(channel_id or ""),))
+
+
 def delete_demo():
-    """Removes demo rows and ONLY demo rows (and their events/messages)."""
+    """Removes demo rows and ONLY demo rows (and their events/messages/links)."""
     keys = [r["work_key"] for r in demo_items()]
     for k in keys:
         execute("DELETE FROM cw_events WHERE work_key=?", (k,))
         execute("DELETE FROM cw_messages WHERE work_key=?", (k,))
+        execute("DELETE FROM cw_links WHERE work_key=?", (k,))
     execute("DELETE FROM cw_items WHERE demo=1")
     return len(keys)
 
@@ -290,6 +306,24 @@ def active_messages(work_key, kinds=None):
 
 def deactivate_message(message_id):
     execute("UPDATE cw_messages SET active=0 WHERE message_id=?", (str(message_id),))
+
+
+# ------------------------------------------------------------------ one-tap contact links
+
+def link_for(work_key):
+    return q1("SELECT * FROM cw_links WHERE work_key=?", (work_key,))
+
+
+def ensure_link(work_key, airbnb_url=""):
+    """The row's short-link token, created once (INSERT OR IGNORE keeps the first)."""
+    execute("INSERT OR IGNORE INTO cw_links (token, work_key, airbnb_url, created_at) "
+            "VALUES (?,?,?,?)", (secrets.token_urlsafe(12), work_key, airbnb_url or "", now_iso()))
+    return link_for(work_key)
+
+
+def item_by_token(token):
+    row = q1("SELECT work_key FROM cw_links WHERE token=?", (str(token or ""),))
+    return item(row["work_key"]) if row else None
 
 
 # ------------------------------------------------------------------ settings + the switch
@@ -364,4 +398,5 @@ def daily_claimed(day):
 
 def counts():
     return {t: q1("SELECT COUNT(*) AS n FROM %s" % t)["n"]
-            for t in ("cw_items", "cw_events", "cw_messages", "cw_settings", "cw_daily")}
+            for t in ("cw_items", "cw_events", "cw_messages", "cw_links", "cw_settings",
+                      "cw_daily")}

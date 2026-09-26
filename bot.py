@@ -5287,6 +5287,19 @@ async def _handle_d_redirect(request):
     text = _dispatch_wa_text(team.get("name", ""), date_iso, items)
     raise web.HTTPFound(_wa_send_url(team.get("phone", ""), text))
 
+async def _handle_cw_wa(request):
+    """«متابعة الخروج» one-tap WhatsApp: the card's link button points here (Discord caps a
+    button URL at 512 chars; the ready message alone is ~730 encoded). Rebuilds the guest
+    message signed with the responsible person's name and 302s to wa.me. Unknown token or no
+    phone → 404. Runs on the checkout pool, never the shared default one."""
+    if not _HAS_CHECKOUT:
+        raise web.HTTPNotFound()
+    token = request.match_info.get("token", "")
+    url = await _checkout.flow.run_blocking(_checkout.flow.wa_redirect, token)
+    if not url:
+        raise web.HTTPNotFound()
+    raise web.HTTPFound(url)
+
 _public_base_seen = None   # auto-captured from a real web request (so no PUBLIC_BASE_URL needed)
 
 def _remember_public_base(request):
@@ -8728,7 +8741,7 @@ _cw_cover_cache = {"day": None, "at": 0.0, "map": {}}
 
 def _cw_today_turnovers():
     """Every CONFIRMED departure today, from a targeted departure-window query (never
-    get_reservations_cached — it truncates). BLOCKING: the package calls it via to_thread.
+    get_reservations_cached — it truncates). BLOCKING: the package runs it on its own pool.
     The same query _recovery_todays_checkouts() makes, kept raw because that helper drops the
     checkout time, the phone and the conversation id this feature needs."""
     today = datetime.now(TZ).date()
@@ -8864,8 +8877,14 @@ def _cw_early_checkin(lid, day):
 
 
 def _cw_view(buttons, disabled=False):
+    """Answer buttons (static custom_ids) plus, as a ('link', label, url) tuple, the one-tap
+    contact button — a Discord link button opens the URL directly, no bot round-trip."""
     v = discord.ui.View(timeout=None)
     for b in buttons or []:
+        if isinstance(b, (tuple, list)) and b and b[0] == "link":
+            v.add_item(discord.ui.Button(label=b[1][:80], url=b[2], disabled=disabled,
+                                         style=discord.ButtonStyle.link))
+            continue
         v.add_item(discord.ui.Button(label=_checkout.texts.BUTTON_LABELS[b],
                                      style=_CW_STYLE.get(b, discord.ButtonStyle.secondary),
                                      custom_id="cw_" + b, disabled=disabled))
@@ -8953,6 +8972,7 @@ def _cw_wire():
         "post": _cw_post,
         "edit": _cw_edit,
         "board_channel": _cw_board_channel,
+        "link_base": _dispatch_base_url,        # the one-tap WhatsApp short link /cw/<token>
     })
     return True
 
@@ -8971,23 +8991,20 @@ def _cw_presser_name(user):
 
 
 async def _cw_reply(interaction, message, view=None):
-    try:
-        kw = {"ephemeral": True}
-        if view is not None:
-            kw["view"] = view
-        if interaction.response.is_done():
-            await interaction.followup.send(message or "تم", **kw)
-        else:
-            await interaction.response.send_message(message or "تم", **kw)
-    except Exception as e:
-        print("[checkout] reply failed:", e)
-
-
-def _cw_link_view(links):
-    v = discord.ui.View(timeout=600)
-    for url, label in links[:4]:
-        v.add_item(discord.ui.Button(label=label[:80], url=url, style=discord.ButtonStyle.link))
-    return v
+    """Always answers. If Discord refuses the reply (e.g. a bad button), it retries as plain
+    text — a swallowed error here is exactly what left «thinking…» on screen forever."""
+    for attempt_view in ((view, None) if view is not None else (None,)):
+        try:
+            kw = {"ephemeral": True}
+            if attempt_view is not None:
+                kw["view"] = attempt_view
+            if interaction.response.is_done():
+                await interaction.followup.send(message or "تم", **kw)
+            else:
+                await interaction.response.send_message(message or "تم", **kw)
+            return
+        except Exception as e:
+            print("[checkout] reply failed:", e)
 
 
 class CwNoModal(discord.ui.Modal, title="⛔ ما طلع"):
@@ -9028,7 +9045,7 @@ class CwRetryView(discord.ui.View):
 
 
 async def _cw_save_no(interaction, work_key, reason, reason_text, choice, typed=None):
-    name = await asyncio.to_thread(_cw_presser_name, interaction.user)
+    name = await _checkout.flow.run_blocking(_cw_presser_name, interaction.user)
     res = await _checkout.flow.answer_no(work_key, name, str(interaction.user.id), reason,
                                          reason_text, choice, typed)
     if not res.get("ok") and res.get("error") in ("format", "past", "tomorrow"):
@@ -9088,13 +9105,13 @@ async def _cw_interaction(interaction):
         if cid not in _CW_IDS:
             return
         mid = str(getattr(interaction.message, "id", "") or "")
-        row = await asyncio.to_thread(_checkout.db.item_by_message, mid)
+        row = await _checkout.flow.run_blocking(_checkout.db.item_by_message, mid)
         if not row:
             await _cw_reply(interaction, _checkout.texts.REPLY_NOT_FOUND)
             return
         wk = row["work_key"]
         if cid == "cw_no":
-            ok, why = await asyncio.to_thread(_checkout.flow.can_answer, wk, "no")
+            ok, why = await _checkout.flow.run_blocking(_checkout.flow.can_answer, wk, "no")
             if not ok:
                 await _cw_reply(interaction, why)
                 return
@@ -9102,7 +9119,7 @@ async def _cw_interaction(interaction):
                                                     view=CwNoView(wk), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        name = await asyncio.to_thread(_cw_presser_name, interaction.user)
+        name = await _checkout.flow.run_blocking(_cw_presser_name, interaction.user)
         did = str(interaction.user.id)
         fl = _checkout.flow
         if cid == "cw_yes":
@@ -9114,11 +9131,15 @@ async def _cw_interaction(interaction):
         elif cid == "cw_demo_ff":
             res = await fl.demo_ff(wk)
         else:
+            # Cards posted before the one-tap button existed still carry cw_wa. The link goes
+            # in the TEXT (masked link): a link button's URL is capped at 512 characters.
             res = await fl.whatsapp(wk, name, did)
             links = ([(res["url"], _checkout.texts.BUTTON_LABELS["wa"])] if res.get("url")
                      else list(res.get("links") or []))
-            await _cw_reply(interaction, res.get("message"),
-                            _cw_link_view(links) if links else None)
+            msg = res.get("message") or ""
+            for url, label in links[:3]:
+                msg += "\n[%s](%s)" % (label, url)
+            await _cw_reply(interaction, msg[:1990])
             return
         await _cw_reply(interaction, res.get("message"))
     except Exception as e:
@@ -9135,7 +9156,7 @@ async def _cw_after_submit(ch, key, user):
     if not (_HAS_CHECKOUT and key):
         return
     try:
-        if await asyncio.to_thread(_checkout.flow.submitted_before_out, key, str(user)):
+        if await _checkout.flow.run_blocking(_checkout.flow.submitted_before_out, key, str(user)):
             await ch.send(_checkout.texts.BEFORE_OUT)
     except Exception as e:
         print("[checkout] before-out warning failed:", e)
@@ -9151,7 +9172,7 @@ async def checkout_watch_loop():
     try:
         if _checkout.HOST.today_turnovers is None:
             _cw_wire()
-        if not await asyncio.to_thread(_checkout.flow.live):
+        if not await _checkout.flow.run_blocking(_checkout.flow.live):
             return
         rep = await _checkout.flow.tick()
         if rep.get("posted") or rep.get("actions"):
@@ -9179,7 +9200,7 @@ async def _cw_run_start(user):
 async def _cw_run_risk(channel_id):
     if _checkout.HOST.today_turnovers is None:
         _cw_wire()
-    demo_ch = await asyncio.to_thread(_checkout.db.setting, "demo_risk_channel", "")
+    demo_ch = await _checkout.flow.run_blocking(_checkout.db.setting, "demo_risk_channel", "")
     demo = bool(demo_ch) and str(channel_id) == str(demo_ch)
     now_ = now_riyadh()
     rows = await _checkout.flow.risk_rows(now_, demo_only=demo)
@@ -9205,7 +9226,7 @@ async def _cw_demo_clear(guild):
                 n += 1
             except Exception as e:
                 print("[checkout] demo channel delete failed:", e)
-    rows = await asyncio.to_thread(_checkout.flow.demo_end)
+    rows = await _checkout.flow.run_blocking(_checkout.flow.demo_end)
     return n, rows, cat
 
 
@@ -9216,10 +9237,10 @@ async def _cw_run_demo(guild, user):
     if cat is None:
         cat = await _cw_demo_category(guild, True)
     chans = {}
-    for name, scen in _checkout.texts.DEMO_CHANNELS:
+    for name, scen, _unit in _checkout.texts.DEMO_CHANNELS:
         ch = await guild.create_text_channel(name, category=cat, topic="checkout-demo:1")
         chans[scen] = str(ch.id)
-    name = await asyncio.to_thread(_cw_presser_name, user)
+    name = await _checkout.flow.run_blocking(_cw_presser_name, user)
     await _checkout.flow.demo_setup(chans, name, str(user.id))
     return _checkout.texts.DEMO_READY % " ".join("<#%s>" % c for c in chans.values())
 
@@ -9245,47 +9266,73 @@ async def _cw_slash_guard(interaction):
     return True
 
 
+async def _cw_answer(interaction, work, ephemeral=True):
+    """Defer, run `work()` (→ str or [str]), answer. ANY failure still answers with the
+    reason, so a command can never leave «thinking…» on screen."""
+    await interaction.response.defer(ephemeral=ephemeral, thinking=True)
+    try:
+        out = await work()
+    except Exception as e:
+        print("[checkout] command failed:", e)
+        out = "⚠️ صار خطأ: %s" % str(e)[:300]
+    for c in (out if isinstance(out, list) else [out]) or ["تم"]:
+        try:
+            await interaction.followup.send(str(c)[:1990], ephemeral=ephemeral,
+                                            allowed_mentions=discord.AllowedMentions.none())
+        except Exception as e:
+            print("[checkout] followup failed:", e)
+
+
 @bot.tree.command(name="checkout-start", description="تشغيل متابعة الخروج — يحول قنوات اليوم ويبدأ يسأل")
 async def slash_checkout_start(interaction: discord.Interaction):
-    if not await _cw_slash_guard(interaction):
-        return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    await interaction.followup.send((await _cw_run_start(interaction.user))[:1990], ephemeral=True)
+    if await _cw_slash_guard(interaction):
+        await _cw_answer(interaction, lambda: _cw_run_start(interaction.user))
 
 
 @bot.tree.command(name="checkout-stop", description="إيقاف متابعة الخروج (الأزرار تظل تسجل)")
 async def slash_checkout_stop(interaction: discord.Interaction):
     if not await _cw_slash_guard(interaction):
         return
-    await asyncio.to_thread(_checkout.flow.stop, str(interaction.user.display_name))
-    await interaction.response.send_message(_checkout.texts.STOP_REPLY, ephemeral=True)
+
+    async def work():
+        await _checkout.flow.run_blocking(_checkout.flow.stop,
+                                          str(interaction.user.display_name))
+        return _checkout.texts.STOP_REPLY
+    await _cw_answer(interaction, work)
 
 
 @bot.tree.command(name="checkout-risk", description="تحليل خطر اليوم — كل خروج اليوم مع السبب والخطوة")
 async def slash_checkout_risk(interaction: discord.Interaction):
     if not await _cw_slash_guard(interaction):
         return
-    await interaction.response.defer(thinking=True)
-    chunks = await _cw_run_risk(getattr(interaction.channel, "id", ""))
-    for c in chunks or ["ما فيه خروج اليوم."]:
-        await interaction.followup.send(c, allowed_mentions=discord.AllowedMentions.none())
+
+    async def work():
+        return (await _cw_run_risk(getattr(interaction.channel, "id", ""))
+                or ["ما فيه خروج اليوم."])
+    await _cw_answer(interaction, work, ephemeral=False)
 
 
-@bot.tree.command(name="checkout-demo", description="تجربة متابعة الخروج — ٥ قنوات لتصوير الفيديو")
+@bot.tree.command(name="checkout-demo", description="تجربة متابعة الخروج — غرف شقق تجريبية لتصوير الفيديو")
 async def slash_checkout_demo(interaction: discord.Interaction):
+    if await _cw_slash_guard(interaction):
+        await _cw_answer(interaction, lambda: _cw_run_demo(interaction.guild, interaction.user))
+
+
+@bot.tree.command(name="checkout-demo-next", description="التجربة: خلّ الخطوة الجاية تصير الحين (داخل غرفة الشقة، يظهر لك بس)")
+async def slash_checkout_demo_next(interaction: discord.Interaction):
     if not await _cw_slash_guard(interaction):
         return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    await interaction.followup.send(await _cw_run_demo(interaction.guild, interaction.user),
-                                    ephemeral=True)
+
+    async def work():
+        res = await _checkout.flow.demo_next(getattr(interaction.channel, "id", ""))
+        return res.get("message") or "تم"
+    await _cw_answer(interaction, work)
 
 
 @bot.tree.command(name="checkout-demo-end", description="إنهاء التجربة — يمسح قنوات التجربة وبياناتها بس")
 async def slash_checkout_demo_end(interaction: discord.Interaction):
-    if not await _cw_slash_guard(interaction):
-        return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    await interaction.followup.send(await _cw_run_demo_end(interaction.guild), ephemeral=True)
+    if await _cw_slash_guard(interaction):
+        await _cw_answer(interaction, lambda: _cw_run_demo_end(interaction.guild))
 
 
 @bot.tree.command(name="checkout-report", description="تقرير الخروج لكل مسؤول — يظهر لك بس")
@@ -9296,10 +9343,9 @@ async def slash_checkout_report(interaction: discord.Interaction,
                                 period: app_commands.Choice[int] = None):
     if not await _cw_slash_guard(interaction):
         return
-    await interaction.response.defer(ephemeral=True, thinking=True)
     days = period.value if period else 1
-    for c in await asyncio.to_thread(_checkout.flow.report_text, now_riyadh(), days):
-        await interaction.followup.send(c, ephemeral=True)
+    await _cw_answer(interaction, lambda: _checkout.flow.run_blocking(
+        _checkout.flow.report_text, now_riyadh(), days))
 
 
 async def _cw_prefix_guard(ctx):
@@ -9321,7 +9367,7 @@ async def cmd_checkout_start(ctx):
 @bot.command(name="ايقاف-الخروج", aliases=["checkout-stop", "إيقاف-الخروج"])
 async def cmd_checkout_stop(ctx):
     if await _cw_prefix_guard(ctx):
-        await asyncio.to_thread(_checkout.flow.stop, str(ctx.author.display_name))
+        await _checkout.flow.run_blocking(_checkout.flow.stop, str(ctx.author.display_name))
         await ctx.reply(_checkout.texts.STOP_REPLY)
 
 
@@ -9338,6 +9384,21 @@ async def cmd_checkout_demo(ctx):
         await ctx.reply(await _cw_run_demo(ctx.guild, ctx.author))
 
 
+@bot.command(name="قدم-التجربة", aliases=["checkout-demo-next", "قدّم-التجربة"])
+async def cmd_checkout_demo_next(ctx):
+    """Prefix fallback for /checkout-demo-next. The typed command is deleted and the answer
+    vanishes after a few seconds, so the recording shows only the real bot message."""
+    if not await _cw_prefix_guard(ctx):
+        return
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+    res = await _checkout.flow.demo_next(ctx.channel.id)
+    if not res.get("ok"):
+        await ctx.send(res.get("message") or "—", delete_after=6)
+
+
 @bot.command(name="انهاء-التجربة", aliases=["checkout-demo-end", "إنهاء-التجربة"])
 async def cmd_checkout_demo_end(ctx):
     if await _cw_prefix_guard(ctx):
@@ -9352,7 +9413,7 @@ async def cmd_checkout_report(ctx, days: str = "1"):
         return
     n = 7 if str(days).strip() in ("7", "٧") else 1
     try:
-        for c in await asyncio.to_thread(_checkout.flow.report_text, now_riyadh(), n):
+        for c in await _checkout.flow.run_blocking(_checkout.flow.report_text, now_riyadh(), n):
             await ctx.author.send(c)
         await ctx.reply("📈 أرسلت لك التقرير خاص.")
     except Exception as e:
@@ -64468,6 +64529,8 @@ async def start_web_server():
         app.router.add_get("/api/cleaning/teams", _api_cleaning_teams)
         app.router.add_post("/api/cleaning/teams", _api_cleaning_teams)
         app.router.add_get("/d/{token}", _handle_d_redirect)   # WhatsApp cleaning-dispatch redirect
+        if _HAS_CHECKOUT:
+            app.router.add_get("/cw/{token}", _handle_cw_wa)   # «متابعة الخروج» one-tap WhatsApp
         app.router.add_post("/api/cleaning/assign", _api_cleaning_assign)
         app.router.add_post("/api/cleaning/clear-early", _api_cleaning_clear_early)
         app.router.add_get("/api/cleaning/teams-analytics", _api_cleaning_teams_analytics)

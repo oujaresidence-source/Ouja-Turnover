@@ -281,7 +281,10 @@ checkout in her head. **Ships OFF** — nothing posts until an admin runs `/chec
   (3) **the presser is accountable** — every answer stores who pressed it (`state_by`, `cw_events`),
   and a 🚨 surprise is logged against whoever pressed ✅; (4) **the demo is isolated** — `demo=1`
   rows never call Hostaway, never write `oujact_checkout.json`, never reach the board / 17:00
-  summary / report / risk (all readers filter `demo=0`); the demo lives in its own category.
+  summary / report / risk (all readers filter `demo=0`); the demo lives in its own category;
+  (5) **the demo is a clean stage the owner narrates himself** (owner ruling 2026-09-26): each
+  room holds ONLY the real card — no pinned script, no sample card, no 🎬 badge, no ⏩ button.
+  Time moves with `/checkout-demo-next` typed in the room (reply private to him).
 - **State machine** (`engine.py`, PURE): `waiting → asking → out | no_answer | inside →
   cleaned_pending → approved`. Ping once at the reservation's checkOutTime; a reminder every
   `CHECKOUT_REMIND_MIN` after «ما رد» (and after an unanswered ping) until ✅/⛔; re-ask at the
@@ -301,12 +304,23 @@ checkout in her head. **Ships OFF** — nothing posts until an admin runs `/chec
   (`تشغيل-الخروج`: switch on, `sync_oujact_turnovers('today')`, sweep every room of today in the
   Turnovers family incl. overflow, list departures with no room), `/checkout-stop`
   (`ايقاف-الخروج`), `/checkout-risk` (`خطر-اليوم`, in-channel; inside the demo risk room it reads
-  demo rows only), `/checkout-demo` (`تجربة-الخروج`), `/checkout-demo-end` (`انهاء-التجربة`),
+  demo rows only), `/checkout-demo` (`تجربة-الخروج`), `/checkout-demo-next` (`قدم-التجربة`, the
+  typed prefix command is deleted), `/checkout-demo-end` (`انهاء-التجربة`),
   `/checkout-report` (`تقرير-الخروج`, ephemeral; prefix version DMs the invoker — per-person
   numbers stay OUT of every shared room).
-- **Mechanics:** one listener `_cw_interaction` for static ids `cw_yes/cw_noanswer/cw_no/cw_wa/
-  cw_surprise/cw_demo_ff`, row found by message id (`cw_items.card_message_id` or `cw_messages`),
-  so buttons survive redeploys. `checkout_watch_loop` every 2 min; Hostaway read once per 5 min
+- **📱 WhatsApp = ONE tap** (owner ruling 2026-09-26): a Discord LINK button → our short link
+  `/cw/<token>` (`cw_links`) → 302 to wa.me with the message typed, signed with the RESPONSIBLE
+  person's name (a link button can't know who pressed). Why the redirect: Discord caps a button
+  URL at **512 chars** and the bilingual message is ~730 encoded — the first version put it in a
+  button, Discord refused the reply, and the error was swallowed → «thinking…» forever. No phone
+  → the card links the Airbnb chat instead. `_cw_reply` now retries as plain text on any refusal.
+- **Own thread pool (`flow.run_blocking`), never `asyncio.to_thread`:** the shared default pool
+  jams for minutes after a deploy (Hostaway work), and every button press queued behind it —
+  the first live `/checkout-demo` sat on «thinking…» for minutes. Slash commands go through
+  `_cw_answer`, which always answers, error or not.
+- **Mechanics:** one listener `_cw_interaction` for static ids `cw_yes/cw_noanswer/cw_no/
+  cw_surprise` (+ legacy `cw_wa/cw_demo_ff` on cards posted before 2026-09-26), row found by
+  message id (`cw_items.card_message_id` or `cw_messages`), so buttons survive redeploys. `checkout_watch_loop` every 2 min; Hostaway read once per 5 min
   (`_cw_today_turnovers` = targeted departure + arrival windows, never the truncated cache).
   `work_key` PRIMARY KEY = one card per apartment+day; `cw_daily` = the 17:00 summary latch.
 - Env (all defaults correct — the owner never opens Railway): `CHECKOUT_WATCH_LIVE`(0),

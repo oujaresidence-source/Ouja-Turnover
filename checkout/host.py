@@ -4,7 +4,7 @@ checkout.host — the ONE bridge between this package and bot.py (ops/host.py pa
 bot.py calls checkout.wire({...}) once from start_web_server. This package NEVER does
 `import bot`: bot.py runs as __main__, so importing it by name would boot a second bot.
 
-Blocking hooks (Hostaway) are called by the package through asyncio.to_thread; Discord hooks
+Blocking hooks (Hostaway) run on the package's own pool (flow.run_blocking); Discord hooks
 are coroutines and run on the bot's loop.
 """
 
@@ -38,6 +38,7 @@ class _Host:
     edit = None              # async (channel_id, message_id, text=None, embed=None,
                              #        buttons=None, demo=False) -> bool
     board_channel = None     # async () -> channel id of «متابعة-الخروج» (created if missing)
+    link_base = None         # () -> "https://…" public base for the one-tap /cw/<token> link
 
     is_live = None           # optional override () -> bool; None = the stored switch
 

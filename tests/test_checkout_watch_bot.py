@@ -218,18 +218,70 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(bot._wa_from_phone(""), "")
 
     def test_button_ids_match_the_listener(self):
-        v = bot._cw_view(list(flow.CARD_BUTTONS) + ["demo_ff"])
+        keys = ["yes", "noanswer", "no", "wa", "surprise", "demo_ff"]   # incl. legacy ids
+        v = bot._cw_view(keys)
         ids = sorted(i.custom_id for i in v.children)
         self.assertEqual(ids, sorted(bot._CW_IDS))
+
+    def test_link_button_is_a_real_discord_link(self):
+        v = bot._cw_view(["yes", ("link", "📱 واتساب الضيف", "https://oujares.com/cw/abc")])
+        link = v.children[1]
+        self.assertEqual(link.style, bot.discord.ButtonStyle.link)
+        self.assertEqual(link.url, "https://oujares.com/cw/abc")
+        self.assertIsNone(link.custom_id)
+
+    def test_short_link_is_wired(self):
+        keys = ("now", "today_turnovers", "send_guest", "guest_links", "channels", "cover",
+                "cleaning_status", "early_hint", "early_checkin", "set_oujact_state",
+                "log_oujact", "wa_number", "clean_minutes_default", "post", "edit",
+                "board_channel", "link_base")
+        saved = {k: getattr(HOST, k) for k in keys}
+        try:
+            self.assertTrue(bot._cw_wire())
+            self.assertIs(HOST.link_base, bot._dispatch_base_url)
+        finally:
+            for k, v in saved.items():
+                setattr(HOST, k, v)
+
+    def test_short_link_redirects_for_real(self):
+        """The aiohttp handler itself: a known token → 302 to wa.me; unknown → 404."""
+        import asyncio
+        import tempfile
+        from aiohttp import web
+        from aiohttp.test_utils import make_mocked_request
+        from brain import db as bdb
+        from checkout import db as cdb
+        bdb.set_db_path_for_tests(os.path.join(tempfile.mkdtemp(prefix="cwbot_"), "brain.db"))
+        cdb.reset_init_cache()
+        saved = HOST.wa_number
+        HOST.wa_number = bot._wa_from_phone
+        try:
+            cdb.insert_item("7:2026-09-26", {"lid": 7, "day": "2026-09-26", "guest": "Sara",
+                                             "phone": "0501234567", "responsible": "ناصر",
+                                             "state": "asking"})
+            tok = cdb.ensure_link("7:2026-09-26")["token"]
+
+            async def call(t):
+                req = make_mocked_request("GET", "/cw/" + t, match_info={"token": t})
+                try:
+                    await bot._handle_cw_wa(req)
+                except web.HTTPException as e:
+                    return e
+            ok = asyncio.run(call(tok))
+            self.assertIsInstance(ok, web.HTTPFound)
+            self.assertTrue(ok.location.startswith("https://wa.me/966501234567?text="))
+            self.assertIsInstance(asyncio.run(call("nope")), web.HTTPNotFound)
+        finally:
+            HOST.wa_number = saved
 
     def test_commands_registered(self):
         names = {c.name for c in bot.bot.tree.get_commands()}
         for n in ("checkout-start", "checkout-stop", "checkout-risk", "checkout-demo",
-                  "checkout-demo-end", "checkout-report"):
+                  "checkout-demo-next", "checkout-demo-end", "checkout-report"):
             self.assertIn(n, names)
         prefix = {c.name for c in bot.bot.commands}
-        for n in ("تشغيل-الخروج", "ايقاف-الخروج", "خطر-اليوم", "تجربة-الخروج", "انهاء-التجربة",
-                  "تقرير-الخروج"):
+        for n in ("تشغيل-الخروج", "ايقاف-الخروج", "خطر-اليوم", "تجربة-الخروج", "قدم-التجربة",
+                  "انهاء-التجربة", "تقرير-الخروج"):
             self.assertIn(n, prefix)
 
 

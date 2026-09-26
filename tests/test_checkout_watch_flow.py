@@ -143,6 +143,7 @@ class FlowCase(unittest.TestCase):
         HOST.clean_minutes_default = 40
         HOST.post, HOST.edit, HOST.board_channel = self.d.post, self.d.edit, self.d.board_channel
         HOST.is_live = None
+        HOST.link_base = lambda: "https://oujares.test"
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -336,7 +337,10 @@ class TestAnswers(FlowCase):
         ping_id = db.events(WK, ["ping"])[0]["detail"]
         self.assertTrue(any(e["id"] == ping_id and e["disabled"] for e in self.d.edits))
         remind_posts = [p for p in self.d.posts if (p["text"] or "").startswith("⏰")]
-        self.assertEqual(remind_posts[-1]["buttons"], ["yes", "noanswer", "no", "wa"])
+        b = remind_posts[-1]["buttons"]
+        self.assertEqual(b[:3], ["yes", "noanswer", "no"])
+        self.assertEqual(b[3][0], "link")
+        self.assertEqual(len(b), 4)
         self.assertIn("الضيف ما رد من 30 دقيقة", remind_posts[-1]["text"])
 
     def test_before_out_warning_when_submitted_unconfirmed(self):
@@ -457,26 +461,56 @@ class TestOujactWiring(FlowCase):
 # ============================================================== WhatsApp (§5.5)
 
 class TestWhatsApp(FlowCase):
+    """One tap: the card carries a LINK button to our short /cw/<token> link, which rebuilds
+    the message and redirects to wa.me. Discord caps a button URL at 512 characters."""
 
     def setUp(self):
         super().setUp()
         self.start(at(9))
 
-    def test_link_carries_the_presser_name_and_normalised_phone(self):
+    def card_post(self, ch):
+        return self.cards(ch)[0]
+
+    def test_card_has_a_short_one_tap_link(self):
+        link = [b for b in self.card_post("501")["buttons"] if isinstance(b, tuple)]
+        self.assertEqual(len(link), 1)
+        kind, label, url = link[0]
+        self.assertEqual((kind, label), ("link", "📱 واتساب الضيف"))
+        tok = db.link_for(WK)["token"]
+        self.assertEqual(url, "https://oujares.test/cw/" + tok)
+        self.assertLessEqual(len(url), 512)
+        self.assertEqual(self.card_post("501")["buttons"][:3], ["yes", "noanswer", "no"])
+        self.assertEqual(self.card_post("501")["buttons"][-1], "surprise")
+
+    def test_redirect_opens_the_guest_chat_signed_by_the_responsible(self):
+        target = flow.wa_redirect(db.link_for(WK)["token"])
+        self.assertTrue(target.startswith("https://wa.me/966501234567?text="))
+        body = urllib.parse.unquote(target.split("text=", 1)[1])
+        self.assertIn("معك ناصر من عوجا", body)
+        self.assertIn("مرحبا Sara", body)
+        self.assertGreater(len(target), 512)              # why the short link exists
+        self.assertEqual(db.events(WK, ["wa_link"])[0]["detail"], "opened")
+
+    def test_unknown_token_is_refused(self):
+        self.assertIsNone(flow.wa_redirect("nope"))
+
+    def test_no_phone_card_links_the_airbnb_chat_instead(self):
+        link = [b for b in self.card_post("502")["buttons"] if isinstance(b, tuple)]
+        self.assertEqual(link, [("link", "💬 محادثة الضيف في Airbnb",
+                                 "https://www.airbnb.com/hosting/stay/ABC123")])
+        self.assertIsNone(flow.wa_redirect(db.link_for(WK2)["token"]))
+
+    def test_the_link_survives_every_card_edit(self):
+        self.tick(at(12, 0))
+        run(flow.answer_yes(WK, "نورة", "222", at(12, 5)))
+        card_id = db.item(WK)["card_message_id"]
+        for e in [e for e in self.d.edits if e["id"] == card_id]:
+            self.assertTrue(any(isinstance(b, tuple) for b in e["buttons"]))
+
+    def test_legacy_button_still_answers_with_the_presser_name(self):
         res = run(flow.whatsapp(WK, "نورة", "222", at(12)))
-        self.assertTrue(res["url"].startswith("https://wa.me/966501234567?text="))
         body = urllib.parse.unquote(res["url"].split("text=", 1)[1])
         self.assertIn("معك نورة من عوجا", body)
-        self.assertIn("this is نورة from Ouja", body)
-        self.assertIn("مرحبا Sara", body)
-        self.assertEqual(db.events(WK, ["wa_link"])[0]["actor"], "نورة")
-
-    def test_no_phone_falls_back_to_the_airbnb_link(self):
-        res = run(flow.whatsapp(WK2, "نورة", "222", at(12)))
-        self.assertEqual(res["url"], "")
-        self.assertEqual(res["message"], texts.WA_NO_PHONE)
-        self.assertEqual(res["links"], [("https://www.airbnb.com/hosting/stay/ABC123",
-                                         "💬 حجز الضيف في Airbnb")])
 
 
 # ============================================================== board + 17:00 (§10)
@@ -566,6 +600,8 @@ class TestRiskAndReport(FlowCase):
 # ============================================================== demo (§9)
 
 class TestDemo(FlowCase):
+    """The demo is a clean stage the owner narrates himself: each apartment room holds ONLY
+    the real card. No script, no sample card, no badge, no extra button."""
 
     CH = {"yes": "701", "noanswer": "702", "no": "703", "surprise": "704", "risk": "705"}
 
@@ -576,32 +612,39 @@ class TestDemo(FlowCase):
     def demo_row(self, n):
         return db.item("demo:%d" % n)
 
-    def test_setup_posts_steps_sample_and_real_card(self):
+    def test_each_room_holds_only_the_real_card(self):
         self.assertEqual(len(db.demo_items()), 4)
         for scen, ch in self.CH.items():
             posts = [p for p in self.d.posts if p["channel"] == ch]
-            self.assertEqual(posts[0]["embed"]["title"], "📖 خطوات الفيديو")
-            self.assertIn(posts[0]["id"], self.d.pins)
-            if scen != "risk":
-                self.assertIn("🎬 تجربة", posts[1]["embed"]["title"])
-                self.assertIn("🎬 تجربة", posts[2]["embed"]["title"])
-                self.assertIn("demo_ff", posts[2]["buttons"])
-        self.assertIn("خطر اليوم", self.d.texts_in("705")[-1])
+            if scen == "risk":
+                self.assertEqual(posts, [])                 # starts empty; /checkout-risk there
+                continue
+            self.assertEqual(len(posts), 1)
+            self.assertTrue(posts[0]["embed"]["title"].startswith("🚪 متابعة الخروج — Ouja | شقة"))
+            self.assertNotIn("demo_ff", posts[0]["buttons"])
+        self.assertEqual(self.d.pins, [])
         self.assertEqual(db.setting("demo_risk_channel"), "705")
 
+    def test_demo_next_is_typed_in_the_room(self):
+        r = run(flow.demo_next("701", at(12, 1)))
+        self.assertEqual(r["action"], "ping")
+        self.assertTrue(self.d.texts_in("701")[-1].startswith("<@999> 🚪 وقت خروج"))
+        self.assertFalse(run(flow.demo_next("501", at(12, 1)))["ok"])   # a real room: refused
+        self.assertFalse(run(flow.demo_next("705", at(12, 1)))["ok"])   # the risk room
+
     def test_ff_advances_and_nothing_real_is_touched(self):
-        r = run(flow.demo_ff("demo:2", at(12, 1)))
+        r = run(flow.demo_next("702", at(12, 1)))
         self.assertEqual(r["action"], "ping")
         run(flow.answer_noanswer("demo:2", "فيصل", "999", at(12, 2)))
         for _ in range(3):
-            run(flow.demo_ff("demo:2", at(12, 3)))
+            run(flow.demo_next("702", at(12, 3)))
         self.assertEqual(self.demo_row(2)["remind_count"], 3)
-        previews = [t for t in self.d.texts_in("702") if t.startswith("🎬 تجربة — كان بينرسل")]
+        previews = [t for t in self.d.texts_in("702") if "ما انرسلت" in t]
         self.assertEqual(len(previews), 2)
-        run(flow.demo_ff("demo:4", at(12, 1)))
+        run(flow.demo_next("704", at(12, 1)))
         run(flow.answer_yes("demo:4", "فيصل", "999", at(12, 2)))
         run(flow.surprise("demo:4", "فيصل", "999", at(12, 3)))
-        run(flow.demo_ff("demo:1", at(12, 1)))
+        run(flow.demo_next("701", at(12, 1)))
         run(flow.answer_yes("demo:1", "فيصل", "999", at(12, 2)))
         self.assertEqual(self.sent, [])                          # no guest message
         self.assertEqual(self.oujact, [])                        # no oujact_checkout.json write
@@ -612,22 +655,24 @@ class TestDemo(FlowCase):
                                                       + texts.NL + "ما فيه بيانات للفترة." + texts.NL])
 
     def test_demo_whatsapp_opens_the_contact_picker(self):
-        res = run(flow.whatsapp("demo:1", "فيصل", "999", at(12)))
-        self.assertTrue(res["url"].startswith("https://wa.me/?text="))
+        card = [p for p in self.d.posts if p["channel"] == "701"][0]
+        url = [b for b in card["buttons"] if isinstance(b, tuple)][0][2]
+        target = flow.wa_redirect(url.rsplit("/", 1)[1])
+        self.assertTrue(target.startswith("https://wa.me/?text="))
 
     def test_demo_no_scenario_shows_the_red_cap(self):
-        run(flow.demo_ff("demo:3", at(12, 1)))
+        run(flow.demo_next("703", at(12, 1)))
         res = run(flow.answer_no("demo:3", "فيصل", "999", "late_ask", "", "3h", None, at(12, 2)))
         self.assertTrue(res["ok"])
         desc = [e for e in self.d.edits if e["channel"] == "703" and e["embed"]][-1]["embed"]["description"]
         self.assertIn("🔴 لو طلع", desc)
-        self.assertEqual(run(flow.demo_ff("demo:3", at(12, 3)))["action"], "reask")
+        self.assertEqual(run(flow.demo_next("703", at(12, 3)))["action"], "reask")
 
     def test_demo_rows_survive_real_ticks_untouched(self):
         self.start(at(12, 5))
         self.assertEqual(self.demo_row(1)["state"], engine.WAITING)
-        self.assertNotIn("demo", "".join(p["text"] or "" for p in self.d.posts
-                                         if p["channel"] == "900"))
+        self.assertNotIn("شقة 101", "".join(p["text"] or "" for p in self.d.posts
+                                            if p["channel"] == "900"))
 
     def test_demo_end_deletes_only_demo_rows(self):
         self.start(at(9))
@@ -638,13 +683,13 @@ class TestDemo(FlowCase):
         self.assertEqual(len(db.items_for_day(DAY)), real_before)
         self.assertEqual(real_before, 2)
         self.assertTrue(all(not e["work_key"].startswith("demo:") for e in db.events()))
+        self.assertIsNotNone(db.link_for(WK))                    # real links untouched
 
     def test_running_demo_again_resets(self):
-        run(flow.demo_ff("demo:1", at(12, 1)))
+        run(flow.demo_next("701", at(12, 1)))
         run(flow.demo_setup(self.CH, "فيصل", "999", at(12, 5)))
         self.assertEqual(self.demo_row(1)["state"], engine.WAITING)
         self.assertEqual(len(db.demo_items()), 4)
-
 
 def tearDownModule():
     # bot.py prints at import; flush before unittest writes its summary so the LAST line of

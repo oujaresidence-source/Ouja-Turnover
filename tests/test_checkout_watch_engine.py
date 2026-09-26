@@ -249,14 +249,24 @@ class TestTexts(unittest.TestCase):
                 texts.demo_airbnb_preview(texts.airbnb_body("x"))]
         out += list(texts.REASONS_AR.values()) + list(texts.EXPECT_AR.values())
         out += list(texts.EXPECT_ERRORS.values()) + list(texts.BUTTON_LABELS.values())
-        for scen in texts.DEMO_STEPS:
-            out.append(texts.demo_steps(scen)["description"])
+        out.append(texts.DEMO_READY)
         return out
 
     def test_team_strings_carry_no_money(self):
         for s in self._all_team_strings():
             for w in ("ريال", "ر.س", "SAR"):
                 self.assertNotIn(w, s, s)
+
+    def test_demo_card_looks_exactly_like_a_real_card(self):
+        real = texts.card(row(), DL)
+        demo = texts.card(row(demo=1), DL)
+        self.assertEqual(real, demo)
+        self.assertNotIn("تجربة", demo["title"])
+
+    def test_demo_rooms_do_not_give_away_the_scenario(self):
+        for name, _scen, _unit in texts.DEMO_CHANNELS:
+            for w in ("طلع", "رد", "مفاجأة"):
+                self.assertNotIn(w, name)
 
     def test_state_line_names_who_and_when(self):
         r = row(state=engine.OUT, state_by="ناصر", state_at=engine.iso(at(12, 40)))

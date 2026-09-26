@@ -4,7 +4,7 @@ checkout.flow — the orchestration of «متابعة الخروج»: the tick, 
 the Airbnb message, the board, the 17:00 summary, the risk analysis, the report and the demo.
 
 It talks to the outside world ONLY through HOST (checkout.host). Hostaway hooks are blocking
-and are called with asyncio.to_thread; Discord hooks are coroutines. Everything here is
+and run on this package's OWN small thread pool (run_blocking); Discord hooks are coroutines. Everything here is
 therefore testable with a fake HOST, a temp brain.db and an injected `now`.
 
 THE OWNER'S RULES, and where each one is enforced
@@ -19,14 +19,22 @@ THE OWNER'S RULES, and where each one is enforced
 
 import asyncio
 import datetime
+import functools
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from . import db, engine, texts
 from .host import HOST
 
-CARD_BUTTONS = ("yes", "noanswer", "no", "wa", "surprise")
-PROMPT_BUTTONS = ("yes", "noanswer", "no", "wa")
+CARD_BUTTONS = ("yes", "noanswer", "no", "contact", "surprise")
+PROMPT_BUTTONS = ("yes", "noanswer", "no", "contact")
+
+# Blocking work runs on its OWN pool. asyncio.to_thread shares one default pool with every
+# background job in bot.py, and right after a deploy Hostaway work can hold all of it for
+# minutes — a button press queued behind that shows «thinking…» forever (seen live on the
+# first /checkout-demo, 2026-09-26). Six workers: one tick read + a few humans at once.
+_pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="checkout")
 
 _locks = {}                      # (name, loop) -> asyncio.Lock, created on the running loop
 _tcache = {"at": None, "day": None, "rows": {}}
@@ -124,7 +132,7 @@ async def turnovers(now_, fresh=False):
             and (now_ - at).total_seconds() < _TURNOVER_TTL):
         return _tcache["rows"]
     try:
-        rows = await asyncio.to_thread(HOST.require("today_turnovers")) or []
+        rows = await run_blocking(HOST.require("today_turnovers")) or []
     except Exception as e:
         print("[checkout] turnovers unavailable:", e)
         return _tcache["rows"] if _tcache["day"] == day else {}
@@ -143,10 +151,16 @@ async def turnovers(now_, fresh=False):
     return out
 
 
+async def run_blocking(fn, *args, **kwargs):
+    """Like asyncio.to_thread, but on this package's own pool (see _pool)."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_pool, functools.partial(fn, *args, **kwargs))
+
+
 async def _thread(fn, *args):
     if fn is None:
         return None
-    return await asyncio.to_thread(fn, *args)
+    return await run_blocking(fn, *args)
 
 
 # ------------------------------------------------------------------ Discord helpers
@@ -160,10 +174,75 @@ def _hint(row):
         return False
 
 
+def contact_button(row):
+    """('link', label, url) — ONE tap opens the guest's WhatsApp chat with the message typed.
+    Discord fixes a link button's URL when the message is posted and caps it at 512 chars,
+    so it points at our short /cw/<token> link, which rebuilds the message and redirects.
+    No phone → the Airbnb conversation instead; neither → no button."""
+    lk = db.link_for(row["work_key"])
+    base = ""
+    if HOST.link_base:
+        try:
+            base = (HOST.link_base() or "").rstrip("/")
+        except Exception:
+            base = ""
+    if lk and base and (row.get("phone") or row.get("demo")):
+        return ("link", texts.BUTTON_LABELS["contact"], "%s/cw/%s" % (base, lk["token"]))
+    if lk and lk.get("airbnb_url"):
+        return ("link", texts.BUTTON_LABELS["airbnb"], lk["airbnb_url"])
+    return None
+
+
+def _with_contact(row, keys):
+    out = []
+    for k in keys:
+        if k == "contact":
+            b = contact_button(row)
+            if b:
+                out.append(b)
+        else:
+            out.append(k)
+    return out
+
+
 def card_buttons(row):
     if row.get("state") == engine.APPROVED:
         return []
-    return list(CARD_BUTTONS) + (["demo_ff"] if row.get("demo") else [])
+    return _with_contact(row, CARD_BUTTONS)
+
+
+def prompt_buttons(row):
+    return _with_contact(row, PROMPT_BUTTONS)
+
+
+async def ensure_contact(row):
+    """Create the short link once per turnover; look the Airbnb link up only when there is
+    no phone (it is a Hostaway call)."""
+    if db.link_for(row["work_key"]):
+        return
+    airbnb = ""
+    if not row.get("phone") and not row.get("demo") and HOST.guest_links and row.get("res_id"):
+        try:
+            links = await _thread(HOST.guest_links, row["res_id"]) or []
+            airbnb = next((u for u, _l in links if "wa.me" not in u and len(u) <= 512), "")
+        except Exception as e:
+            print("[checkout] guest links failed:", e)
+    db.ensure_link(row["work_key"], airbnb)
+
+
+def wa_redirect(token):
+    """The target of /cw/<token>: the full wa.me link, rebuilt fresh. BLOCKING-safe (sqlite)."""
+    row = db.item_by_token(token)
+    if not row:
+        return None
+    text = texts.wa_text(row.get("guest"), row.get("responsible") or "")
+    number = ""
+    if not row.get("demo") and row.get("phone") and HOST.wa_number:
+        number = HOST.wa_number(row["phone"]) or ""
+    if not number and not row.get("demo"):
+        return None
+    db.log_event(row["work_key"], "wa_link", "رابط", "", detail="opened")
+    return texts.wa_link(number, text)
 
 
 async def refresh_card(row):
@@ -184,7 +263,7 @@ async def _disable_prompts(row):
     for m in db.active_messages(row["work_key"]):
         try:
             await HOST.edit(m.get("channel_id") or row.get("channel_id"), m["message_id"],
-                            buttons=list(PROMPT_BUTTONS), disabled=True,
+                            buttons=prompt_buttons(row), disabled=True,
                             demo=bool(row.get("demo")))
         except Exception as e:
             print("[checkout] could not disable a prompt:", e)
@@ -202,7 +281,7 @@ async def _post(row, text, buttons=None):
 
 async def _prompt(row, kind, text):
     await _disable_prompts(row)
-    mid = await _post(row, text, list(PROMPT_BUTTONS))
+    mid = await _post(row, text, prompt_buttons(row))
     if mid:
         db.add_message(mid, row["work_key"], row.get("channel_id"), kind)
     return mid
@@ -305,6 +384,7 @@ async def attach(ch, t, now_, kind="card_posted", present=None):
     row = db.item(wk)
     if row.get("card_message_id"):
         return "exists"
+    await ensure_contact(row)
     mid = await HOST.post(chan, embed=texts.card(row, deadline(day), _hint(row)),
                           buttons=card_buttons(row), demo=False)
     if not mid:
@@ -834,24 +914,25 @@ def _demo_times(now_, scenario):
 
 
 async def demo_setup(channels, by, by_did, now_=None):
-    """channels = {scenario: channel_id} (the five demo rooms). Resets every demo row, then
-    posts in each room: the pinned steps, a sample turnover card, and the REAL Checkout Card
-    built by the same builder with demo=1."""
+    """channels = {scenario: channel_id}. Resets every demo row and posts ONE thing per
+    apartment room: the real Checkout Card, built by the same builder with demo=1, so the
+    video shows exactly what the team will see. No script, no sample cards, no badges — the
+    owner narrates it himself. The risk room starts empty; /checkout-risk typed there reads
+    the demo apartments."""
     now_ = now_ or now()
     db.delete_demo()
     day = now_.date().isoformat()
-    for i, (_name, scen) in enumerate(texts.DEMO_CHANNELS, 1):
+    n = 0
+    for _name, scen, unit in texts.DEMO_CHANNELS:
         ch = channels.get(scen)
         if not ch:
             continue
-        await HOST.post(ch, embed=texts.demo_steps(scen), pin=True, mentions=False)
         if scen == "risk":
             db.set_setting("demo_risk_channel", str(ch))
             continue
-        unit = "Ouja | تجربة %d" % i
+        n += 1
         co, ci = _demo_times(now_, scen)
-        await HOST.post(ch, embed=texts.demo_sample_turnover(unit), mentions=False)
-        wk = "demo:%d" % i
+        wk = "demo:%d" % n
         db.insert_item(wk, {"lid": 0, "day": day, "unit": unit, "guest": texts.DEMO_GUEST,
                             "phone": "", "conversation_id": "", "channel_name": "Airbnb",
                             "checkout_at": _iso(co), "checkin_at": _iso(ci),
@@ -860,16 +941,22 @@ async def demo_setup(channels, by, by_did, now_=None):
                             "channel_id": str(ch), "state": engine.WAITING, "demo": 1},
                        at=_iso(now_))
         row = db.item(wk)
+        await ensure_contact(row)
         mid = await HOST.post(ch, embed=texts.card(row, deadline(day)),
                               buttons=card_buttons(row), demo=True, mentions=False)
         if mid:
             db.update_item(wk, {"card_message_id": str(mid)})
             db.log_event(wk, "card_posted")
-    risk_ch = channels.get("risk")
-    if risk_ch:
-        for chunk in risk_chunks(db.demo_items(), now_):
-            await HOST.post(risk_ch, text=chunk, mentions=False)
     return len(db.demo_items())
+
+
+async def demo_next(channel_id, now_=None):
+    """/checkout-demo-next typed inside a demo apartment room: the next timed step happens
+    now. The reply is private to whoever typed it; the team only sees the real message."""
+    row = db.demo_item_by_channel(channel_id)
+    if not row:
+        return {"ok": False, "message": "اكتب الأمر داخل غرفة شقة من شقق التجربة."}
+    return await demo_ff(row["work_key"], now_)
 
 
 async def demo_ff(wk, now_=None):
