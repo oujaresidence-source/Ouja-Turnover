@@ -5294,6 +5294,7 @@ async def _handle_cw_wa(request):
     phone → 404. Runs on the checkout pool, never the shared default one."""
     if not _HAS_CHECKOUT:
         raise web.HTTPNotFound()
+    _cw_ready()
     token = request.match_info.get("token", "")
     url = await _checkout.flow.run_blocking(_checkout.flow.wa_redirect, token)
     if not url:
@@ -9022,6 +9023,28 @@ def _cw_wire():
     return True
 
 
+def _cw_ready():
+    """Make the watch usable the moment Discord is — which is BEFORE start_web_server runs.
+
+    brain.db learns its folder from brain.wire(), called inside start_web_server; a command
+    or button that lands in the first minutes after a deploy hit «Ouja Brain used capability
+    'state_path' before brain.wire() ran» (seen live on /checkout-demo, 2026-09-26). The
+    database needs only the folder, so it is handed over here — the same _state_path the
+    full wire() sets later, never brain.wire() itself (that also seeds data)."""
+    if not _HAS_CHECKOUT:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[checkout] brain path hand-over failed:", e)
+    if _checkout.HOST.today_turnovers is None:
+        _cw_wire()
+    return True
+
+
 def _cw_presser_name(user):
     """The Arabic employee name for a Discord user (Employee Calendar ids), else display name."""
     did = str(getattr(user, "id", "") or "")
@@ -9149,6 +9172,7 @@ async def _cw_interaction(interaction):
         cid = (interaction.data or {}).get("custom_id") or ""
         if cid not in _CW_IDS:
             return
+        _cw_ready()
         if cid == "cw_demo_submit":
             await interaction.response.defer(ephemeral=True, thinking=True)
             name = await _checkout.flow.run_blocking(_cw_presser_name, interaction.user)
@@ -9208,6 +9232,7 @@ async def _cw_after_submit(ch, key, user):
     if not (_HAS_CHECKOUT and key):
         return
     try:
+        _cw_ready()
         if await _checkout.flow.run_blocking(_checkout.flow.submitted_before_out, key, str(user)):
             await ch.send(_checkout.texts.BEFORE_OUT)
     except Exception as e:
@@ -9222,8 +9247,7 @@ async def checkout_watch_loop():
         return
     await bot.wait_until_ready()
     try:
-        if _checkout.HOST.today_turnovers is None:
-            _cw_wire()
+        _cw_ready()
         if not await _checkout.flow.run_blocking(_checkout.flow.live):
             return
         rep = await _checkout.flow.tick()
@@ -9236,8 +9260,7 @@ async def checkout_watch_loop():
 # ---------------- «متابعة الخروج» commands (slash + !ouja fallback, admin only) ----------------
 
 async def _cw_run_start(user):
-    if _checkout.HOST.today_turnovers is None:
-        _cw_wire()
+    _cw_ready()
     try:
         await sync_oujact_turnovers(day="today")     # the existing guarded path opens missing rooms
     except Exception as e:
@@ -9250,8 +9273,7 @@ async def _cw_run_start(user):
 
 
 async def _cw_run_risk(channel_id):
-    if _checkout.HOST.today_turnovers is None:
-        _cw_wire()
+    _cw_ready()
     demo_ch = await _checkout.flow.run_blocking(_checkout.db.setting, "demo_risk_channel", "")
     demo = bool(demo_ch) and str(channel_id) == str(demo_ch)
     now_ = now_riyadh()
@@ -9283,8 +9305,7 @@ async def _cw_demo_clear(guild):
 
 
 async def _cw_run_demo(guild, user):
-    if _checkout.HOST.today_turnovers is None:
-        _cw_wire()
+    _cw_ready()
     _n, _rows, cat = await _cw_demo_clear(guild)
     if cat is None:
         cat = await _cw_demo_category(guild, True)
@@ -9320,6 +9341,7 @@ async def _cw_slash_guard(interaction):
     if not _can_delete_channels(interaction.user):
         await interaction.response.send_message(_checkout.texts.ADMIN_ONLY, ephemeral=True)
         return False
+    _cw_ready()
     return True
 
 
@@ -9412,6 +9434,7 @@ async def _cw_prefix_guard(ctx):
     if not _can_delete_channels(ctx.author):
         await ctx.reply(_checkout.texts.ADMIN_ONLY)
         return False
+    _cw_ready()
     return True
 
 

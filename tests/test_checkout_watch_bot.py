@@ -194,6 +194,48 @@ class TestCleaningStatus(unittest.TestCase):
         self.assertEqual(bot._cw_cleaning_status(7, "2026-09-26"), "submitted")
 
 
+class TestBootWindow(unittest.TestCase):
+    """The first minutes after a deploy: Discord is live, start_web_server (and brain.wire)
+    has not run. /checkout-demo failed there with «before brain.wire() ran»."""
+
+    def test_the_watch_works_before_the_web_server_starts(self):
+        import tempfile
+        from brain import db as bdb
+        from brain.host import HOST as BH
+        from checkout import db as cdb
+        saved = (BH.state_path, bdb._DB_PATH_OVERRIDE, bdb._resolved_path)
+        tmp = tempfile.mkdtemp(prefix="cwboot_")
+        saved_dir = bot.STATE_DIR
+        try:
+            BH.state_path = None                      # exactly the boot state
+            bdb._DB_PATH_OVERRIDE = None
+            bdb._resolved_path = None
+            bot.STATE_DIR = tmp
+            cdb.reset_init_cache()
+            with self.assertRaises(RuntimeError) as ctx:  # the live error, reproduced
+                cdb.item("demo:1")
+            self.assertIn("before brain.wire() ran", str(ctx.exception))
+            self.assertTrue(bot._cw_ready())
+            self.assertIs(BH.state_path, bot._state_path)
+            self.assertIsNone(cdb.item("demo:1"))         # the database answers now
+            self.assertTrue(bdb.db_path().startswith(tmp))
+        finally:
+            BH.state_path, bdb._DB_PATH_OVERRIDE, bdb._resolved_path = saved
+            bot.STATE_DIR = saved_dir
+            cdb.reset_init_cache()
+
+    def test_ready_never_replaces_a_real_wiring(self):
+        from brain.host import HOST as BH
+        saved = BH.state_path
+        marker = lambda name: "/elsewhere/" + name     # noqa: E731
+        try:
+            BH.state_path = marker
+            bot._cw_ready()
+            self.assertIs(BH.state_path, marker)
+        finally:
+            BH.state_path = saved
+
+
 class TestWiring(unittest.TestCase):
 
     def test_wire_hands_over_the_real_helpers(self):
