@@ -365,6 +365,60 @@ def summary(n, on_time, late_units):
     return s
 
 
+# ------------------------------------------------------------------ 30-min report (غرفة-المراقبة)
+# Owner request 2026-09-26: «كل نص ساعة يعلمني وش صار ومين لسا ما كلم». It goes to the
+# monitoring room, NOT the team board, so it may name the responsible person.
+
+EVENT_AR = {
+    "yes": "أكد ✅ طلع",
+    "noanswer": "سجل 📵 ما رد",
+    "no": "سجل ⛔ ما طلع",
+    "surprise": "🚨 الفريق لقى الضيف داخل",
+    "submitted": "رفع تقرير التنظيف 🧹",
+    "approved": "انعتمد التنظيف ✔️",
+    "airbnb_failed": "⚠️ ما انرسلت رسالة Airbnb",
+}
+
+
+def report_header(now, counts):
+    return ("📋 **تقرير الخروج — %s**" % hm(now) + NL +
+            "اليوم %d خروج · ✅ طلع %d · ⛔ داخل %d · 📵 ما رد %d · ⏳ ننتظر %d · "
+            "🧹 بانتظار الاعتماد %d · ✔️ معتمدة %d"
+            % (counts.get("total", 0), counts.get("out", 0), counts.get("inside", 0),
+               counts.get("no_answer", 0), counts.get("waiting", 0), counts.get("cleaned", 0),
+               counts.get("approved", 0)))
+
+
+def report_unanswered(row, minutes):
+    return "• %s — %s — عدى وقت الخروج بـ %d دقيقة%s" % (
+        row.get("unit") or "", row.get("responsible") or "بدون مسؤول", minutes,
+        (" · <#%s>" % row["channel_id"]) if row.get("channel_id") else "")
+
+
+def report_act(row, reason):
+    s = "• %s — %s — %s" % (row.get("unit") or "", reason, row.get("responsible") or "بدون مسؤول")
+    if row.get("checkin_at"):
+        s += " · 🔴 دخول %s" % hm(row.get("checkin_at"))
+    if row.get("channel_id"):
+        s += " · <#%s>" % row["channel_id"]
+    return s
+
+
+def report_event(ev, unit):
+    detail = ""
+    if ev.get("kind") == "no" and "|" in (ev.get("detail") or ""):
+        code, t = ev["detail"].split("|", 1)
+        detail = " (%s · متوقع %s)" % (REASONS_AR.get(code, code), t)
+    who_ = (ev.get("actor") or "").strip()
+    return "• %s %s%s %s%s" % (hm(ev.get("at")), (who_ + " ") if who_ else "",
+                               EVENT_AR.get(ev.get("kind"), ev.get("kind")), "— " + (unit or ""),
+                               detail)
+
+
+REPORT_NONE_WAITING = "ولا أحد — كل اللي عدى وقت خروجهم انسجل لهم جواب 👌"
+REPORT_NOTHING_NEW = "ما صار شي جديد."
+
+
 # ------------------------------------------------------------------ risk (§8.3)
 
 RISK_ICON = {"red": "🔴", "orange": "🟠", "green": "🟢", "done": "✅"}

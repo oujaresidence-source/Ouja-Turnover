@@ -8987,6 +8987,17 @@ async def _cw_edit(channel_id, message_id, text=None, embed=None, buttons=None, 
         return False
 
 
+async def _cw_monitor_channel():
+    """«غرفة-المراقبة» — the watchdog's room (WATCHDOG_CHANNEL), wherever it lives."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return None
+    ch = discord.utils.get(guild.text_channels, name=WATCHDOG_CHANNEL)
+    if ch is None:
+        ch = await ensure_channel(guild, WATCHDOG_CHANNEL, None)
+    return str(ch.id) if ch is not None else None
+
+
 async def _cw_board_channel():
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
@@ -9019,6 +9030,7 @@ def _cw_wire():
         "board_channel": _cw_board_channel,
         "link_base": _dispatch_base_url,        # the one-tap WhatsApp short link /cw/<token>
         "turnover_card": _cw_turnover_card,     # demo: the REAL Turnover card builder
+        "monitor_channel": _cw_monitor_channel, # the 30-min report → «غرفة-المراقبة»
     })
     return True
 

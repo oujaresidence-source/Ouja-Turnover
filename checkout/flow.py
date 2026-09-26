@@ -89,6 +89,14 @@ def board_channel_name():
     return _env("CHECKOUT_BOARD_CHANNEL", "متابعة-الخروج")
 
 
+def report_every():
+    """Minutes between monitoring-room reports (owner: every half hour)."""
+    try:
+        return max(10, int(_env("CHECKOUT_REPORT_MIN", "30")))
+    except ValueError:
+        return 30
+
+
 def demo_category_name():
     return _env("CHECKOUT_DEMO_CATEGORY", "🎬 تجربة الخروج")
 
@@ -522,6 +530,10 @@ async def tick(now_=None, force=False, kind="card_posted"):
                 await maybe_summary(now_)
             except Exception as e:
                 print("[checkout] summary failed:", e)
+            try:
+                await maybe_watch_report(now_)
+            except Exception as e:
+                print("[checkout] monitoring report failed:", e)
         return rep
 
 
@@ -814,6 +826,87 @@ async def maybe_summary(now_):
     ch = await HOST.require("board_channel")()
     if ch:
         await HOST.post(ch, text=texts.summary(len(rows), on_time, late), mentions=False)
+    return True
+
+
+# ------------------------------------------------------------------ 30-min report (غرفة-المراقبة)
+
+def _slot(now_, every):
+    mins = (now_.hour * 60 + now_.minute) // every * every
+    return now_.replace(hour=mins // 60, minute=mins % 60, second=0, microsecond=0)
+
+
+def watch_report_chunks(rows, now_, since):
+    """«وش صار ومين لسا ما كلم»: counts, who has not answered after checkout (with the
+    responsible person's NAME — this goes to the monitoring room, not the team board), what
+    needs action, and every answer since the last report."""
+    risk = _risk_ctx(rows, now_)
+    counts = {"total": len(rows)}
+    for r in rows:
+        k = {engine.WAITING: "waiting", engine.ASKING: "waiting", engine.OUT: "out",
+             engine.INSIDE: "inside", engine.NO_ANSWER: "no_answer",
+             engine.CLEANED: "cleaned", engine.APPROVED: "approved"}.get(r.get("state"))
+        if k:
+            counts[k] = counts.get(k, 0) + 1
+    unanswered, act = [], []
+    for r in sorted(rows, key=lambda x: str(x.get("checkout_at") or "")):
+        st, co = r.get("state"), engine.parse_dt(r.get("checkout_at"))
+        if st in (engine.WAITING, engine.ASKING) and co and now_ >= co:
+            unanswered.append(texts.report_unanswered(r, int((now_ - co).total_seconds() // 60)))
+        elif st == engine.INSIDE:
+            why = texts.REASONS_AR.get(r.get("reason_code") or "", "الضيف داخل")
+            if r.get("expected_out_at"):
+                why += " · متوقع يطلع %s" % texts.hm(r["expected_out_at"])
+            act.append(texts.report_act(r, "⛔ " + why))
+        elif st == engine.NO_ANSWER:
+            since_na = engine.parse_dt(r.get("state_at")) or now_
+            act.append(texts.report_act(r, "📵 الضيف ما رد من %d دقيقة"
+                                        % int((now_ - since_na).total_seconds() // 60)))
+        elif st in engine.OPEN and risk[r["work_key"]][0] == engine.RED:
+            act.append(texts.report_act(r, texts.RISK_REASON[risk[r["work_key"]][1]][0]))
+    units = {r["work_key"]: r.get("unit") for r in rows}
+    evs = [e for e in db.events_for_keys(list(units))
+           if e["kind"] in texts.EVENT_AR and engine.parse_dt(e["at"]) > since]
+    lines = [texts.report_header(now_, counts), "", "**⏰ لسا ما جاوبوا:**"]
+    lines += unanswered or [texts.REPORT_NONE_WAITING]
+    if act:
+        lines += ["", "**🔴 تحتاج تصرف:**"] + act
+    lines += ["", "**🕒 من %s:**" % texts.hm(since)]
+    lines += [texts.report_event(e, units.get(e["work_key"])) for e in evs] \
+        or [texts.REPORT_NOTHING_NEW]
+    return _split(lines)
+
+
+async def maybe_watch_report(now_):
+    """One NEW message per half-hour slot in the monitoring room. The slot is claimed in the
+    database before posting, so two ticks or a redeploy never post it twice. Silent in quiet
+    hours, on a day with no checkouts, and once everything is approved and nothing moved."""
+    if engine.in_quiet(now_, quiet_from(), quiet_to()) or not HOST.monitor_channel:
+        return False
+    every = report_every()
+    slot = _slot(now_, every)
+    last = engine.parse_dt(db.setting("watch_report_slot"))
+    if last and last >= slot:
+        return False
+    rows = db.items_for_day(now_.date().isoformat())
+    if not rows:
+        return False
+    # «what happened» = strictly after the previous report was BUILT (not its slot), so an
+    # answer that landed in the same minute as that report is never reported twice
+    prev = engine.parse_dt(db.setting("watch_report_at"))
+    since = prev if (prev and prev.date() == now_.date()) \
+        else slot - datetime.timedelta(minutes=every)
+    db.set_setting("watch_report_slot", _iso(slot))
+    db.set_setting("watch_report_at", _iso(now_))
+    moved = any(engine.parse_dt(e["at"]) > since
+                for e in db.events_for_keys([r["work_key"] for r in rows]))
+    if all(r.get("state") == engine.APPROVED for r in rows) and not moved:
+        return False                                  # the day is done and quiet
+    ch = await HOST.monitor_channel()
+    if not ch:
+        return False
+    for chunk in watch_report_chunks(rows, now_, since):
+        await HOST.post(ch, text=chunk, mentions=False)
     return True
 
 

@@ -307,6 +307,13 @@ checkout in her head. **Ships OFF** — nothing posts until an admin runs `/chec
 - **Oujact wiring (the cleaners' warning):** ✅ → `guest_confirmed` (+ status `guest_out`),
   ⛔ late_ok/late_ask → `late_checkout`, other ⛔ → `inside`, ما رد → **`no_answer`** (new state in
   `OUJACT_CHECKOUT_STATES`, `_OUJACT_REASON`, tier 90 in `_oujact_priority`), 🚨 → `inside`.
+- **30-min report → «غرفة-المراقبة»** (owner request 2026-09-26, `flow.maybe_watch_report`): a NEW
+  message every `CHECKOUT_REPORT_MIN` (30) while live — counts, «⏰ لسا ما جاوبوا» (unit + the
+  RESPONSIBLE person's name + minutes since checkout), «🔴 تحتاج تصرف», and every answer since the
+  previous report. It names people ON PURPOSE: it goes to the watchdog's room (WATCHDOG_CHANNEL),
+  never the team board. Slot claimed in `cw_settings.watch_report_slot` before posting (no double
+  post on redeploy); «since» = `watch_report_at`, strictly after. Silent 23:00–08:00, on empty
+  days, and once all approved and nothing moved. Separate from the watchdog's own summary.
 - **Switch precedence:** stored `cw_settings.live` > env `CHECKOUT_WATCH_LIVE` > `0`, read through a
   3-second cache, so `/checkout-stop` lands within seconds and survives redeploys. Stopped = the
   tick returns at once; buttons STILL record answers.

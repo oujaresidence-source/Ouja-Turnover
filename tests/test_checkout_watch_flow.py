@@ -604,6 +604,95 @@ class TestBoard(FlowCase):
         self.assertFalse(db.daily_claimed(DAY))
 
 
+# ============================================================== 30-min report (غرفة-المراقبة)
+
+class TestWatchReport(FlowCase):
+    """Owner request: «كل نص ساعة يعلمني وش صار ومين لسا ما كلم» in the monitoring room."""
+
+    def setUp(self):
+        super().setUp()
+
+        async def monitor():
+            return "950"
+        HOST.monitor_channel = monitor
+
+    def tearDown(self):
+        HOST.monitor_channel = None
+        super().tearDown()
+
+    def reports(self):
+        return [p["text"] for p in self.d.posts if p["channel"] == "950"]
+
+    def test_one_new_message_per_half_hour_even_across_a_restart(self):
+        self.start(at(9, 0))
+        self.tick(at(9, 2))
+        self.assertEqual(len(self.reports()), 1)
+        self.tick(at(9, 28))
+        self.assertEqual(len(self.reports()), 1)
+        self.tick(at(9, 30))
+        self.assertEqual(len(self.reports()), 2)
+        db.reset_init_cache()               # redeploy
+        flow.reset_cache()
+        self.tick(at(9, 32))
+        self.assertEqual(len(self.reports()), 2)
+
+    def test_it_names_who_has_not_answered_and_what_happened(self):
+        self.start(at(9, 0))
+        self.tick(at(12, 0))                                  # both past checkout
+        run(flow.answer_yes(WK2, "نورة", "222", at(12, 10)))
+        self.tick(at(12, 30))
+        txt = self.reports()[-1]
+        self.assertIn("📋 **تقرير الخروج — 12:30**", txt)
+        self.assertIn("اليوم 2 خروج · ✅ طلع 1", txt)
+        self.assertIn("• Ouja | الملقا 1 — ناصر — عدى وقت الخروج بـ 30 دقيقة · <#501>", txt)
+        self.assertIn("• 12:10 نورة أكد ✅ طلع — Ouja | النرجس 2", txt)
+        self.assertNotIn("<@", txt)                          # names, never pings
+        self.tick(at(13, 0))
+        nxt = self.reports()[-1]
+        self.assertNotIn("12:10 نورة", nxt)                  # never reported twice
+        self.assertIn(texts.REPORT_NOTHING_NEW, nxt)
+        self.assertIn("عدى وقت الخروج بـ 60 دقيقة", nxt)     # still unanswered, still named
+
+    def test_action_section_for_inside_and_no_answer(self):
+        self.start(at(9, 0))
+        self.tick(at(12, 0))
+        run(flow.answer_noanswer(WK, "ناصر", "111", at(12, 5)))
+        run(flow.answer_no(WK2, "نورة", "222", "packing", "", "1h", None, at(12, 6)))
+        self.tick(at(12, 30))
+        txt = self.reports()[-1]
+        self.assertIn("**🔴 تحتاج تصرف:**", txt)
+        self.assertIn("📵 الضيف ما رد من 25 دقيقة — ناصر · 🔴 دخول 16:00", txt)
+        self.assertIn("⛔ يجهز أغراضه — شوي ويطلع · متوقع يطلع 13:06 — ناصر", txt)  # responsible
+        self.assertIn("سجل ⛔ ما طلع — Ouja | النرجس 2 (يجهز أغراضه — شوي ويطلع · متوقع 13:06)", txt)
+
+    def test_quiet_hours_stopped_and_empty_days_stay_silent(self):
+        self.start(at(9, 0))
+        n = len(self.reports())
+        self.tick(at(23, 10))
+        self.assertEqual(len(self.reports()), n)             # 23:00–08:00
+        flow.stop("admin")
+        self.tick(at(10, 0))
+        self.assertEqual(len(self.reports()), n)             # stopped
+        self.assertFalse(run(flow.maybe_watch_report(at(10, 30).replace(day=27))))  # no rows
+
+    def test_a_finished_quiet_day_stops_reporting(self):
+        self.start(at(9, 0))
+        for lid in (LID, LID2):
+            self.status[lid] = "approved"
+        self.tick(at(15, 0))                                 # approvals land → one report
+        n = len(self.reports())
+        self.tick(at(15, 30))
+        self.tick(at(16, 0))
+        self.assertEqual(len(self.reports()), n)
+
+    def test_demo_rows_never_appear(self):
+        run(flow.demo_setup({"yes": "701", "noanswer": "702", "no": "703", "surprise": "704",
+                             "risk": "705"}, "فيصل", "999", at(9)))
+        self.start(at(9, 0))
+        self.assertNotIn("شقة 101", "".join(self.reports()))
+        self.assertIn("اليوم 2 خروج", self.reports()[-1])
+
+
 # ============================================================== risk + report
 
 class TestRiskAndReport(FlowCase):

@@ -39,6 +39,7 @@ class _Host:
                              #        buttons=None, demo=False) -> bool
     board_channel = None     # async () -> channel id of «متابعة-الخروج» (created if missing)
     link_base = None         # () -> "https://…" public base for the one-tap /cw/<token> link
+    monitor_channel = None   # async () -> channel id of «غرفة-المراقبة» (the 30-min report)
     # (unit, checkout_at, checkin_at, responsible, emoji) -> embed dict, built by bot.py's OWN
     # _oujact_card_embed so the demo's first card is the real Turnover card, not a look-alike
     turnover_card = None
