@@ -712,7 +712,7 @@ class TestDemo(FlowCase):
         card = [p for p in self.d.posts if p["channel"] == "701"][1]
         url = [b for b in card["buttons"] if isinstance(b, tuple)][0][2]
         target = flow.wa_redirect(url.rsplit("/", 1)[1])
-        self.assertTrue(target.startswith("https://wa.me/966501234567?text="))
+        self.assertTrue(target.startswith("https://wa.me/966501130431?text="))
         body = urllib.parse.unquote(target.split("text=", 1)[1])
         self.assertIn("معك فيصل من عوجا", body)
         self.assertEqual(self.sent, [])                     # opening a chat sends nothing

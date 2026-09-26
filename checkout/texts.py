@@ -438,9 +438,10 @@ DEMO_READY = "جهزت التجربة: %s — اكتب /checkout-demo-next دا�
 
 DEMO_GUEST = "ضيف تجريبي"
 # The demo guest's phone, so 📱 opens a chat DIRECTLY exactly like a real guest (owner ruling
-# 2026-09-26: "a random Saudi number"). The message is only typed, never sent — WhatsApp
-# waits for the presser's own send button. No Hostaway/Airbnb message ever goes to it.
-DEMO_PHONE = "0501234567"
+# 2026-09-26: the number the owner chose for the video). The message is only typed, never
+# sent — WhatsApp waits for the presser's own send button. No Hostaway/Airbnb message ever
+# goes to it.
+DEMO_PHONE = "+966 50 113 0431"
 
 # (room name, scenario, apartment). Apartment rooms get their name from bot.py's own
 # _oujact_channel (None here), so they read exactly like real turnover rooms; only the risk
