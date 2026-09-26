@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS cw_items (
     clean_minutes     INTEGER,
     responsible       TEXT,
     responsible_did   TEXT,                  -- '<id>' | 'role:<id>' | ''
+    responsible_emoji TEXT,                  -- the person's calendar colour (🟡) for the card
     channel_id        TEXT,
     card_message_id   TEXT,
     state             TEXT NOT NULL DEFAULT 'waiting',
@@ -107,6 +108,8 @@ EVENT_KINDS = ("card_posted", "ping", "yes", "no", "noanswer", "remind", "reask"
                "airbnb_sent", "airbnb_failed", "surprise", "submitted", "approved",
                "deadline_miss", "converted")
 
+_LATE_COLUMNS = (("responsible_emoji", "TEXT"),)
+
 _inited = set()
 _init_lock = threading.Lock()
 _answer_lock = threading.Lock()        # first-final-wins, like _decide_early_checkin
@@ -121,6 +124,12 @@ def _ensure():
             return
         with closing(_bdb.connect()) as cx:
             cx.executescript(SCHEMA)
+            # Columns added after the first live deploy: CREATE TABLE IF NOT EXISTS does not
+            # touch an existing table, so each one is added here once, additively.
+            have = {r[1] for r in cx.execute("PRAGMA table_info(cw_items)").fetchall()}
+            for col, decl in _LATE_COLUMNS:
+                if col not in have:
+                    cx.execute("ALTER TABLE cw_items ADD COLUMN %s %s" % (col, decl))
             cx.commit()
         _inited.add(path)
 
@@ -159,8 +168,8 @@ def execute(sql, args=()):
 
 ITEM_FIELDS = ("lid", "day", "res_id", "unit", "guest", "phone", "conversation_id",
                "channel_name", "checkout_at", "checkin_at", "clean_minutes", "responsible",
-               "responsible_did", "channel_id", "card_message_id", "state", "state_by",
-               "state_by_did", "state_at", "reason_code", "reason_text", "expected_out_at",
+               "responsible_did", "responsible_emoji", "channel_id", "card_message_id", "state",
+               "state_by", "state_by_did", "state_at", "reason_code", "reason_text", "expected_out_at",
                "remind_count", "next_action_at", "airbnb_sent", "airbnb_note", "pinged_at",
                "demo")
 

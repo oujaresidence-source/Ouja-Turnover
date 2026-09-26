@@ -233,7 +233,7 @@ class TestTexts(unittest.TestCase):
         out = []
         for r in rows:
             c = texts.card(r, DL, hint=True)
-            out += [c["title"], c["description"], texts.ping(r), texts.remind(r, 2, 60),
+            out += [texts.embed_text(c), texts.ping(r), texts.remind(r, 2, 60),
                     texts.reask(r), texts.reask_now(r), texts.surprise_post(r),
                     texts.board_line(r), texts.state_line(r), texts.reply_taken(r)]
             for k in ("yes", "noanswer", "no", "surprise"):
@@ -266,12 +266,46 @@ class TestTexts(unittest.TestCase):
     def test_demo_rooms_do_not_give_away_the_scenario(self):
         for name, _scen, _unit in texts.DEMO_CHANNELS:
             for w in ("طلع", "رد", "مفاجأة"):
-                self.assertNotIn(w, name)
+                self.assertNotIn(w, name or "")
+
+    def test_card_uses_the_turnover_card_layout(self):
+        r = row(checkin_at=engine.iso(at(16)), responsible_emoji="🟡", responsible="عهود")
+        c = texts.card(r, DL)
+        self.assertEqual(c["title"], "🚪 متابعة الخروج")
+        names = [f["name"] for f in c["fields"]]
+        self.assertEqual(names, ["الضيف", "الخروج", "الدخول", "المسؤول", "الحالة"])
+        self.assertEqual([f["inline"] for f in c["fields"]], [True, True, True, False, False])
+        vals = {f["name"]: f["value"] for f in c["fields"]}
+        self.assertEqual(vals["الخروج"], "12:00 PM")
+        self.assertEqual(vals["الدخول"], "🔴 04:00 PM")
+        self.assertEqual(vals["المسؤول"], "🟡 عهود")
+        self.assertEqual(c["footer"]["text"], texts.CARD_FOOTER)
+        self.assertEqual(texts.card(row(), DL)["fields"][2]["value"], "ما فيه دخول اليوم")
+
+    def test_plan_and_alert_boxes_only_when_needed(self):
+        inside = row(state=engine.INSIDE, checkin_at=engine.iso(at(16)), reason_code="late_ask",
+                     expected_out_at=engine.iso(at(15, 30)), state_by="ناصر")
+        f = {x["name"]: x["value"] for x in texts.card(inside, DL)["fields"]}
+        self.assertIn("أقصى تأخير نقدر نعطيه 15:20", f["الخطة"])
+        self.assertIn("🔴 لو طلع 15:30", f["الخطة"])
+        self.assertNotIn("تنبيه", f)
+        alerted = texts.card(row(airbnb_note="⚠️ x"), DL, hint=True)
+        f = {x["name"]: x["value"] for x in alerted["fields"]}
+        self.assertIn("💡", f["تنبيه"])
+        self.assertIn("⚠️ x", f["تنبيه"])
+        self.assertNotIn("footer", texts.card(row(state=engine.APPROVED), DL))
+
+    def test_field_values_are_never_empty_or_too_long(self):
+        for st in engine.STATES:
+            for fld in texts.card(row(state=st, guest="", responsible="", reason_code="other",
+                                      reason_text="x" * 2000), DL)["fields"]:
+                self.assertTrue(fld["value"].strip())
+                self.assertLessEqual(len(fld["value"]), 1024)
 
     def test_state_line_names_who_and_when(self):
         r = row(state=engine.OUT, state_by="ناصر", state_at=engine.iso(at(12, 40)))
         self.assertIn("أكده ناصر 12:40", texts.state_line(r))
-        self.assertIn("الشقة جاهزة للتنظيف", texts.card(r, DL)["description"])
+        self.assertIn("الشقة جاهزة للتنظيف", texts.embed_text(texts.card(r, DL)))
 
     def test_mentions(self):
         self.assertEqual(texts.who(row(responsible_did="111")), "<@111>")

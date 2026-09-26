@@ -283,8 +283,18 @@ checkout in her head. **Ships OFF** — nothing posts until an admin runs `/chec
   rows never call Hostaway, never write `oujact_checkout.json`, never reach the board / 17:00
   summary / report / risk (all readers filter `demo=0`); the demo lives in its own category;
   (5) **the demo is a clean stage the owner narrates himself** (owner ruling 2026-09-26): each
-  room holds ONLY the real card — no pinned script, no sample card, no 🎬 badge, no ⏩ button.
-  Time moves with `/checkout-demo-next` typed in the room (reply private to him).
+  demo room is a REAL turnover room plus the add-on — card 1 = the Turnover card built by
+  bot.py's own `_oujact_card_embed` (via `HOST.turnover_card`), card 2 = the Checkout Watch card;
+  rooms named by `_oujact_channel`. No pinned script, no 🎬 badge, no ⏩ button. Time moves with
+  `/checkout-demo-next` typed in the room (reply private to him). The demo's «📷 Submit for
+  Review» is `cw_demo_submit`, NOT `ouja_cleaning_done`: it acts the outcome out and never
+  touches the cleaning-report store.
+- **One family of cards:** the Checkout Watch card uses the Turnover card's boxed-fields layout
+  in Arabic (الضيف · الخروج · الدخول / المسؤول with the calendar emoji / الحالة, + الخطة and
+  تنبيه only when needed, times as "12:00 PM"). Cards are plain dicts in Discord's shape
+  (`fields`, `footer`); bot.py draws them with `discord.Embed.from_dict`.
+  `cw_items.responsible_emoji` was added after the first live deploy — `db._LATE_COLUMNS`
+  adds it to the existing table at boot (CREATE TABLE IF NOT EXISTS never alters one).
 - **State machine** (`engine.py`, PURE): `waiting → asking → out | no_answer | inside →
   cleaned_pending → approved`. Ping once at the reservation's checkOutTime; a reminder every
   `CHECKOUT_REMIND_MIN` after «ما رد» (and after an unanswered ping) until ✅/⛔; re-ask at the

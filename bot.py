@@ -8732,10 +8732,12 @@ async def ops_turnover_loop():
 # handled by ONE listener (_cw_interaction) that finds the turnover by message id, so a press
 # works on a message posted before the last redeploy (the «القفل» pattern).
 
-_CW_IDS = ("cw_yes", "cw_noanswer", "cw_no", "cw_wa", "cw_surprise", "cw_demo_ff")
+_CW_IDS = ("cw_yes", "cw_noanswer", "cw_no", "cw_wa", "cw_surprise", "cw_demo_ff",
+           "cw_demo_submit")
 _CW_STYLE = {"yes": discord.ButtonStyle.success, "noanswer": discord.ButtonStyle.secondary,
              "no": discord.ButtonStyle.danger, "wa": discord.ButtonStyle.primary,
-             "surprise": discord.ButtonStyle.danger, "demo_ff": discord.ButtonStyle.secondary}
+             "surprise": discord.ButtonStyle.danger, "demo_ff": discord.ButtonStyle.secondary,
+             "demo_submit": discord.ButtonStyle.success}
 _cw_cover_cache = {"day": None, "at": 0.0, "map": {}}
 
 
@@ -8837,7 +8839,15 @@ def _cw_cover(lid, day, channel_id=None):
         guild = bot.get_guild(GUILD_ID)
         role = find_operation_role(guild) if guild is not None else None
         role_id = str(role.id) if role is not None else ""
-    return {"name": name, "did": str(did or ""), "role_id": role_id}
+    emoji = ""
+    try:
+        unit = (get_listings_map() or {}).get(int(lid)) or ""
+        emoji = ((_oujact_cover_info(unit, day, int(lid)) or {}).get("emoji") or "").strip()
+    except Exception:
+        emoji = ""
+    if not emoji and name:
+        emoji = _cw_emoji_for(name)
+    return {"name": name, "did": str(did or ""), "role_id": role_id, "emoji": emoji}
 
 
 def _cw_cleaning_status(lid, day, channel_id=None):
@@ -8892,8 +8902,42 @@ def _cw_view(buttons, disabled=False):
 
 
 def _cw_embed(e):
-    return discord.Embed(title=e.get("title") or "", description=e.get("description") or "",
-                         color=e.get("color") or GOLD)
+    """Embed from a plain dict in Discord's own shape (title, description, color, fields,
+    footer) — the package builds cards as data, never as discord objects."""
+    d = {"title": e.get("title") or "", "color": e.get("color") or GOLD, "type": "rich"}
+    if e.get("description"):
+        d["description"] = e["description"]
+    if e.get("fields"):
+        d["fields"] = [{"name": f.get("name") or "—", "value": f.get("value") or "—",
+                        "inline": bool(f.get("inline"))} for f in e["fields"]][:25]
+    if (e.get("footer") or {}).get("text"):
+        d["footer"] = {"text": e["footer"]["text"]}
+    return discord.Embed.from_dict(d)
+
+
+def _cw_turnover_card(unit, checkout_at, checkin_at, responsible, emoji):
+    """The demo's FIRST card: bot.py's real _oujact_card_embed, fed demo values, so the demo
+    room is a real turnover room plus the add-on — not a look-alike that can drift."""
+    co = checkout_at if isinstance(checkout_at, datetime) else datetime.fromisoformat(str(checkout_at))
+    ci = None
+    if checkin_at:
+        ci = checkin_at if isinstance(checkin_at, datetime) else datetime.fromisoformat(str(checkin_at))
+    it = {"listing": unit, "checkout": co, "checkin_today": ci is not None, "checkin_dt": ci,
+          "directions_url": None}
+    return _oujact_card_embed(it, _checkout.texts.DEMO_TEAM,
+                              {"name": responsible, "emoji": emoji}).to_dict()
+
+
+def _cw_emoji_for(name):
+    """The person's colour emoji from the Employee Calendar; ⚪ like a real room without one."""
+    if _HAS_SCHEDULE and name:
+        try:
+            for e in (_schedule.owners.permanent_map() or {}).get("employees", []):
+                if e.get("name") == name and (e.get("emoji") or "").strip():
+                    return e["emoji"].strip()
+        except Exception as ex:
+            print("[checkout] emoji lookup failed:", ex)
+    return "⚪"
 
 
 async def _cw_channel(channel_id):
@@ -8973,6 +9017,7 @@ def _cw_wire():
         "edit": _cw_edit,
         "board_channel": _cw_board_channel,
         "link_base": _dispatch_base_url,        # the one-tap WhatsApp short link /cw/<token>
+        "turnover_card": _cw_turnover_card,     # demo: the REAL Turnover card builder
     })
     return True
 
@@ -9103,6 +9148,13 @@ async def _cw_interaction(interaction):
             return
         cid = (interaction.data or {}).get("custom_id") or ""
         if cid not in _CW_IDS:
+            return
+        if cid == "cw_demo_submit":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            name = await _checkout.flow.run_blocking(_cw_presser_name, interaction.user)
+            res = await _checkout.flow.demo_submit(getattr(interaction.channel, "id", ""), name,
+                                                   str(interaction.user.id))
+            await _cw_reply(interaction, res.get("message"))
             return
         mid = str(getattr(interaction.message, "id", "") or "")
         row = await _checkout.flow.run_blocking(_checkout.db.item_by_message, mid)
@@ -9236,12 +9288,17 @@ async def _cw_run_demo(guild, user):
     _n, _rows, cat = await _cw_demo_clear(guild)
     if cat is None:
         cat = await _cw_demo_category(guild, True)
-    chans = {}
-    for name, scen, _unit in _checkout.texts.DEMO_CHANNELS:
-        ch = await guild.create_text_channel(name, category=cat, topic="checkout-demo:1")
-        chans[scen] = str(ch.id)
     name = await _checkout.flow.run_blocking(_cw_presser_name, user)
-    await _checkout.flow.demo_setup(chans, name, str(user.id))
+    emoji = await _checkout.flow.run_blocking(_cw_emoji_for, name)
+    now_ = now_riyadh()
+    chans = {}
+    for room, scen, unit in _checkout.texts.DEMO_CHANNELS:
+        if room is None:        # named exactly like a real turnover room
+            has_ci = _checkout.flow._demo_times(now_, scen)[1] is not None
+            room = _oujact_channel(unit, has_ci, _checkout.texts.DEMO_TEAM, emoji)
+        ch = await guild.create_text_channel(room, category=cat, topic="checkout-demo:1")
+        chans[scen] = str(ch.id)
+    await _checkout.flow.demo_setup(chans, name, str(user.id), now_, emoji)
     return _checkout.texts.DEMO_READY % " ".join("<#%s>" % c for c in chans.values())
 
 

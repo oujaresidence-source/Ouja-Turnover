@@ -218,10 +218,52 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(bot._wa_from_phone(""), "")
 
     def test_button_ids_match_the_listener(self):
-        keys = ["yes", "noanswer", "no", "wa", "surprise", "demo_ff"]   # incl. legacy ids
+        keys = ["yes", "noanswer", "no", "wa", "surprise", "demo_ff", "demo_submit"]
         v = bot._cw_view(keys)
         ids = sorted(i.custom_id for i in v.children)
         self.assertEqual(ids, sorted(bot._CW_IDS))
+
+    def test_demo_submit_never_reaches_the_real_submit_handler(self):
+        v = bot._cw_view(["demo_submit"])
+        b = v.children[0]
+        self.assertEqual(b.label, "📷 Submit for Review")      # looks like the real one
+        self.assertEqual(b.custom_id, "cw_demo_submit")        # but is NOT ouja_cleaning_done
+        real = bot.CleaningDoneView().children[0]
+        self.assertEqual(real.custom_id, "ouja_cleaning_done")
+        self.assertEqual(real.label, b.label)
+
+    def test_demo_first_card_is_the_real_turnover_card(self):
+        import datetime as _dt
+        co = _dt.datetime(2026, 9, 26, 12, 0, tzinfo=bot.TZ)
+        ci = _dt.datetime(2026, 9, 26, 16, 0, tzinfo=bot.TZ)
+        got = bot._cw_turnover_card("Ouja | شقة 103", co, ci, "فيصل", "🟡")
+        it = {"listing": "Ouja | شقة 103", "checkout": co, "checkin_today": True,
+              "checkin_dt": ci, "directions_url": None}
+        want = bot._oujact_card_embed(it, "OUJACT", {"name": "فيصل", "emoji": "🟡"}).to_dict()
+        self.assertEqual(got, want)
+        self.assertEqual([f["name"] for f in got["fields"]],
+                         ["Unit", "Responsible", "Cleaning Team", "Checkout", "Status",
+                          "Directions"])
+        self.assertEqual(bot._cw_turnover_card("u", co.isoformat(), None, "x", "⚪")["title"],
+                         got["title"])
+
+    def test_checkout_card_draws_as_a_fields_embed(self):
+        from checkout import engine as ce
+        row = {"work_key": "1:2026-09-26", "day": "2026-09-26", "guest": "Sara",
+               "checkout_at": "2026-09-26T12:00:00+03:00",
+               "checkin_at": "2026-09-26T16:00:00+03:00", "responsible": "عهود",
+               "responsible_emoji": "🟡", "state": ce.ASKING, "clean_minutes": 40}
+        e = bot._cw_embed(texts.card(row, ce.deadline_at("2026-09-26")))
+        self.assertEqual(e.title, "🚪 متابعة الخروج")
+        self.assertEqual([f.name for f in e.fields][:5],
+                         ["الضيف", "الخروج", "الدخول", "المسؤول", "الحالة"])
+        self.assertTrue(e.fields[0].inline)
+        self.assertEqual(e.footer.text, texts.CARD_FOOTER)
+        self.assertEqual(bot._cw_embed({"title": "t", "description": "d"}).description, "d")
+
+    def test_demo_rooms_are_named_like_real_rooms(self):
+        name = bot._oujact_channel("Ouja | شقة 103", True, texts.DEMO_TEAM, "⚪")
+        self.assertEqual(name, "ouja-103-oujact-checkin⚪")
 
     def test_link_button_is_a_real_discord_link(self):
         v = bot._cw_view(["yes", ("link", "📱 واتساب الضيف", "https://oujares.com/cw/abc")])

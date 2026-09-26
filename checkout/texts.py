@@ -78,6 +78,7 @@ BUTTON_LABELS = {
     "airbnb": "💬 محادثة الضيف في Airbnb",
     "surprise": "🚨 وصلنا والضيف داخل",
     "demo_ff": "⏩ قدّم الوقت 30 دقيقة",
+    "demo_submit": "📷 Submit for Review",          # the real button's exact label
 }
 
 
@@ -160,31 +161,57 @@ def _color(row):
 # ------------------------------------------------------------------ the Checkout Card
 
 
+def hm12(d):
+    """'12:00 PM' — the Turnover card's clock format, so the two cards read as one family."""
+    d = engine.parse_dt(d)
+    return d.strftime("%I:%M %p") if d else "—"
+
+
+def _field(name, value, inline=False):
+    return {"name": name, "value": (str(value).strip() or "—")[:1024], "inline": inline}
+
+
+CARD_FOOTER = "اضغط الزر المناسب — اسمك ينحفظ مع الجواب."
+
+
 def card(row, deadline, hint=False):
-    """{title, description, color} — the ONE card, edited in place on every change."""
-    title = "🚪 متابعة الخروج — %s" % (row.get("unit") or "")
-    lines = ["**الضيف:** %s" % (row.get("guest") or "ضيف")]
-    ln = "**الخروج:** %s" % hm(row.get("checkout_at"))
-    if row.get("checkin_at"):
-        ln += " · 🔴 دخول اليوم %s" % hm(row.get("checkin_at"))
-    lines.append(ln)
-    lines.append("**المسؤول:** %s" % (row.get("responsible") or "—"))
-    lines.append("**الحالة:** %s" % state_line(row, card=True))
+    """The Checkout Watch card — the SAME boxed-fields layout as the Turnover card above it,
+    in Arabic (owner ruling 2026-09-26). Edited in place on every change. The demo card is
+    byte-for-byte the real card."""
+    who_ = ((row.get("responsible_emoji") or "") + " " + (row.get("responsible") or "")).strip()
+    fields = [
+        _field("الضيف", row.get("guest") or "ضيف", True),
+        _field("الخروج", hm12(row.get("checkout_at")), True),
+        _field("الدخول", ("🔴 " + hm12(row.get("checkin_at"))) if row.get("checkin_at")
+               else "ما فيه دخول اليوم", True),
+        _field("المسؤول", who_ or "—"),
+        _field("الحالة", state_line(row, card=True)),
+    ]
     if row.get("state") == engine.INSIDE:
-        pb = playbook(row, deadline)
-        if pb:
-            lines.append("📋 " + pb)
-        cap = cap_line(row, deadline)
-        if cap:
-            lines.append(cap)
+        plan = [x for x in (playbook(row, deadline), cap_line(row, deadline)) if x]
+        if plan:
+            fields.append(_field("الخطة", NL.join(plan)))
+    notes = []
     if hint and row.get("state") in engine.OPEN:
-        lines.append("💡 الضيف كتب في الشات إنه طلع — تأكد واضغط ✅")
+        notes.append("💡 الضيف كتب في الشات إنه طلع — تأكد واضغط ✅")
     if row.get("airbnb_note"):
-        lines.append(row["airbnb_note"])
+        notes.append(row["airbnb_note"])
+    if notes:
+        fields.append(_field("تنبيه", NL.join(notes)))
+    out = {"title": "🚪 متابعة الخروج", "color": _color(row), "fields": fields}
     if row.get("state") in engine.OPEN or row.get("state") == engine.OUT:
-        lines.append("")
-        lines.append("_اضغط الزر المناسب — اسمك ينحفظ مع الجواب._")
-    return {"title": title[:250], "description": NL.join(lines)[:3900], "color": _color(row)}
+        out["footer"] = {"text": CARD_FOOTER}
+    return out
+
+
+def embed_text(e):
+    """Everything an embed dict shows, as one string (tests and logs read cards this way)."""
+    e = e or {}
+    parts = [e.get("title") or "", e.get("description") or ""]
+    for f in e.get("fields") or []:
+        parts += [f.get("name") or "", f.get("value") or ""]
+    parts.append((e.get("footer") or {}).get("text") or "")
+    return NL.join(p for p in parts if p)
 
 
 # ------------------------------------------------------------------ channel messages
@@ -411,12 +438,23 @@ DEMO_READY = "جهزت التجربة: %s — اكتب /checkout-demo-next دا�
 
 DEMO_GUEST = "ضيف تجريبي"
 
-# (room name, scenario, apartment). Plain room names: the owner narrates the video himself,
-# so nothing in the room gives away a scenario or reads like a script.
+# (room name, scenario, apartment). Apartment rooms get their name from bot.py's own
+# _oujact_channel (None here), so they read exactly like real turnover rooms; only the risk
+# room is named. The owner narrates the video himself — nothing here reads like a script.
 DEMO_CHANNELS = (
-    ("شقة-101", "yes", "Ouja | شقة 101"),
-    ("شقة-102", "noanswer", "Ouja | شقة 102"),
-    ("شقة-103", "no", "Ouja | شقة 103"),
-    ("شقة-104", "surprise", "Ouja | شقة 104"),
+    (None, "yes", "Ouja | شقة 101"),
+    (None, "noanswer", "Ouja | شقة 102"),
+    (None, "no", "Ouja | شقة 103"),
+    (None, "surprise", "Ouja | شقة 104"),
     ("خطر-اليوم", "risk", ""),
 )
+DEMO_TEAM = "OUJACT"
+
+
+def demo_submitted(who_mention):
+    """What the real 📷 Submit for Review says, acted out — and honest that nothing was saved."""
+    return ("📷 تم إرسال تقرير الصور للمراجعة بواسطة %s. (تجربة — ما انحفظ تقرير)"
+            % (who_mention or "الفريق"))
+
+
+DEMO_ALREADY_SUBMITTED = "انرسل للمراجعة من قبل."

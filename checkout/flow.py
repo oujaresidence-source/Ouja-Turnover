@@ -376,6 +376,7 @@ async def attach(ch, t, now_, kind="card_posted", present=None):
             "checkin_at": _iso(engine.parse_dt(t.get("checkin_at"))),
             "clean_minutes": int(t.get("clean_minutes") or HOST.clean_minutes_default or 40),
             "responsible": cov.get("name") or "", "responsible_did": did,
+            "responsible_emoji": cov.get("emoji") or "",
             "channel_id": chan,
             "state": engine.initial_state(t.get("checkout_at"), now_),
         }, at=_iso(now_))
@@ -845,6 +846,7 @@ async def risk_rows(now_, demo_only=False):
             st = engine.CLEANED
         rows.append({"work_key": wk, "lid": lid, "day": day, "unit": t.get("unit"),
                      "guest": t.get("guest"), "responsible": cov.get("name") or "",
+                     "responsible_emoji": cov.get("emoji") or "",
                      "checkout_at": _iso(engine.parse_dt(t.get("checkout_at"))),
                      "checkin_at": _iso(engine.parse_dt(t.get("checkin_at"))),
                      "clean_minutes": int(t.get("clean_minutes") or HOST.clean_minutes_default or 40),
@@ -913,12 +915,12 @@ def _demo_times(now_, scenario):
     return base, checkin
 
 
-async def demo_setup(channels, by, by_did, now_=None):
-    """channels = {scenario: channel_id}. Resets every demo row and posts ONE thing per
-    apartment room: the real Checkout Card, built by the same builder with demo=1, so the
-    video shows exactly what the team will see. No script, no sample cards, no badges — the
-    owner narrates it himself. The risk room starts empty; /checkout-risk typed there reads
-    the demo apartments."""
+async def demo_setup(channels, by, by_did, now_=None, emoji=""):
+    """channels = {scenario: channel_id}. Resets every demo row, then each apartment room gets
+    what a REAL turnover room shows: the Turnover card first (built by bot.py's own
+    _oujact_card_embed through HOST.turnover_card, so it is not a look-alike), then the
+    Checkout Watch card under it — the add-on, same layout. No script, no badge; the owner
+    narrates. The risk room starts empty; /checkout-risk typed there reads the demo rows."""
     now_ = now_ or now()
     db.delete_demo()
     day = now_.date().isoformat()
@@ -932,12 +934,20 @@ async def demo_setup(channels, by, by_did, now_=None):
             continue
         n += 1
         co, ci = _demo_times(now_, scen)
+        if HOST.turnover_card:
+            try:
+                tcard = HOST.turnover_card(unit, co, ci, by, emoji)
+                await HOST.post(ch, embed=tcard, buttons=["demo_submit"], demo=True,
+                                mentions=False)
+            except Exception as e:
+                print("[checkout] demo turnover card failed:", e)
         wk = "demo:%d" % n
         db.insert_item(wk, {"lid": 0, "day": day, "unit": unit, "guest": texts.DEMO_GUEST,
                             "phone": "", "conversation_id": "", "channel_name": "Airbnb",
                             "checkout_at": _iso(co), "checkin_at": _iso(ci),
                             "clean_minutes": int(HOST.clean_minutes_default or 40),
                             "responsible": by, "responsible_did": str(by_did or ""),
+                            "responsible_emoji": emoji or "",
                             "channel_id": str(ch), "state": engine.WAITING, "demo": 1},
                        at=_iso(now_))
         row = db.item(wk)
@@ -948,6 +958,31 @@ async def demo_setup(channels, by, by_did, now_=None):
             db.update_item(wk, {"card_message_id": str(mid)})
             db.log_event(wk, "card_posted")
     return len(db.demo_items())
+
+
+async def demo_submit(channel_id, by, by_did="", now_=None):
+    """📷 Submit for Review pressed in a DEMO room: act out what the real button does to the
+    watch — the confirmation line, the card moves to «بانتظار الاعتماد», and the before-out
+    warning when nobody pressed ✅ first. It never touches the cleaning-report store."""
+    now_ = now_ or now()
+    row = db.demo_item_by_channel(channel_id)
+    if not row:
+        return {"ok": False, "message": texts.REPLY_NOT_FOUND}
+    if row.get("state") in (engine.CLEANED, engine.APPROVED):
+        return {"ok": False, "message": texts.DEMO_ALREADY_SUBMITTED}
+    wk = row["work_key"]
+    before_out = row.get("state") != engine.OUT
+    await _post(row, texts.demo_submitted(texts.mention(by_did) or by))
+    if before_out:
+        await _post(row, texts.BEFORE_OUT)
+    db.update_item(wk, {"state": engine.CLEANED, "state_at": _iso(now_), "next_action_at": None},
+                   at=_iso(now_))
+    db.log_event(wk, "submitted", by, by_did, detail="before_out" if before_out else "",
+                 at=_iso(now_))
+    row = db.item(wk)
+    await _disable_prompts(row)
+    await refresh_card(row)
+    return {"ok": True, "message": "✅ (تجربة) انرسل للمراجعة."}
 
 
 async def demo_next(channel_id, now_=None):

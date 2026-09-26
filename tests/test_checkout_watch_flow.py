@@ -144,6 +144,13 @@ class FlowCase(unittest.TestCase):
         HOST.post, HOST.edit, HOST.board_channel = self.d.post, self.d.edit, self.d.board_channel
         HOST.is_live = None
         HOST.link_base = lambda: "https://oujares.test"
+        self.turnover_cards = []
+
+        def turnover_card(unit, co, ci, who, emoji):
+            self.turnover_cards.append((unit, co, ci, who, emoji))
+            return {"title": "🧹 Turnover — Ready to Clean",
+                    "fields": [{"name": "Unit", "value": unit, "inline": False}]}
+        HOST.turnover_card = turnover_card
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -171,6 +178,24 @@ class FlowCase(unittest.TestCase):
 # ============================================================== idempotency
 
 class TestIdempotency(FlowCase):
+
+    def test_emoji_column_is_added_to_a_table_made_by_the_first_deploy(self):
+        import sqlite3
+        path = os.path.join(tempfile.mkdtemp(prefix="cwmig_"), "brain.db")
+        first_deploy = "\n".join(l for l in db.SCHEMA.split("\n")
+                                  if "responsible_emoji" not in l)      # 6e32e5a's schema
+        cx = sqlite3.connect(path)
+        cx.executescript(first_deploy)
+        cx.execute("INSERT INTO cw_items (work_key, state, demo) VALUES ('k', 'asking', 0)")
+        cx.commit()
+        cx.close()
+        bdb.set_db_path_for_tests(path)
+        db.reset_init_cache()
+        db.update_item("k", {"responsible_emoji": "🟡"})
+        self.assertEqual(db.item("k")["responsible_emoji"], "🟡")
+        self.assertEqual(db.item("k")["state"], "asking")          # old data kept
+        db.reset_init_cache()
+        db.item("k")                                                # second boot: no error
 
     def test_off_by_default_posts_nothing(self):
         rep = self.tick(at(12, 30))
@@ -290,7 +315,7 @@ class TestAnswers(FlowCase):
                          (engine.OUT, "نورة", "222"))
         self.assertIn(texts.YES_POST, self.d.texts_in("501"))
         card_edit = [e for e in self.d.edits if e["id"] == row["card_message_id"]][-1]
-        self.assertIn("أكده نورة 12:40", card_edit["embed"]["description"])
+        self.assertIn("أكده نورة 12:40", texts.embed_text(card_edit["embed"]))
 
     def test_second_press_is_told_who_answered_first(self):
         run(flow.answer_yes(WK, "نورة", "222", at(12, 40)))
@@ -311,7 +336,7 @@ class TestAnswers(FlowCase):
         run(flow.answer_no(WK, "ناصر", "111", "late_ask", "", "custom", "15:30", at(12, 5)))
         row = db.item(WK)
         self.assertEqual(row["state"], engine.INSIDE)
-        desc = [e for e in self.d.edits if e["id"] == row["card_message_id"]][-1]["embed"]["description"]
+        desc = texts.embed_text([e for e in self.d.edits if e["id"] == row["card_message_id"]][-1]["embed"])
         self.assertIn("🔴 لو طلع 15:30 ما نلحق ننظف قبل 16:00 — أقصى وقت نقدر نعطيه 15:20", desc)
         self.assertIn("أقصى تأخير نقدر نعطيه 15:20", desc)
         self.tick(at(15, 28))
@@ -402,7 +427,7 @@ class TestAirbnb(FlowCase):
         self.assertEqual(len(self.sent), 1)
         fails = db.events(WK, ["airbnb_failed"])
         self.assertEqual([e["detail"] for e in fails], ["firewall_blocked"])
-        desc = [e for e in self.d.edits if e["embed"]][-1]["embed"]["description"]
+        desc = texts.embed_text([e for e in self.d.edits if e["embed"]][-1]["embed"])
         self.assertIn("ما انرسلت رسالة Airbnb (firewall_blocked)", desc)
 
     def test_an_exception_is_logged_not_raised(self):
@@ -612,18 +637,47 @@ class TestDemo(FlowCase):
     def demo_row(self, n):
         return db.item("demo:%d" % n)
 
-    def test_each_room_holds_only_the_real_card(self):
+    def test_each_room_is_a_real_room_plus_the_add_on(self):
+        """Card 1 = the real Turnover card (bot.py's builder, via HOST.turnover_card) with the
+        Submit button; card 2 = the Checkout Watch card. Nothing else, nothing pinned."""
         self.assertEqual(len(db.demo_items()), 4)
         for scen, ch in self.CH.items():
             posts = [p for p in self.d.posts if p["channel"] == ch]
             if scen == "risk":
                 self.assertEqual(posts, [])                 # starts empty; /checkout-risk there
                 continue
-            self.assertEqual(len(posts), 1)
-            self.assertTrue(posts[0]["embed"]["title"].startswith("🚪 متابعة الخروج — Ouja | شقة"))
-            self.assertNotIn("demo_ff", posts[0]["buttons"])
+            self.assertEqual(len(posts), 2)
+            self.assertEqual(posts[0]["embed"]["title"], "🧹 Turnover — Ready to Clean")
+            self.assertEqual(posts[0]["buttons"], ["demo_submit"])
+            self.assertEqual(posts[1]["embed"]["title"], "🚪 متابعة الخروج")
+            self.assertNotIn("demo_ff", posts[1]["buttons"])
         self.assertEqual(self.d.pins, [])
         self.assertEqual(db.setting("demo_risk_channel"), "705")
+        self.assertEqual(self.turnover_cards[0][0], "Ouja | شقة 101")
+        self.assertEqual(self.turnover_cards[0][3], "فيصل")
+        self.assertIsNotNone(self.turnover_cards[2][2])        # 103 has a check-in today
+
+    def test_demo_submit_acts_it_out_and_saves_nothing(self):
+        calls = []
+        HOST.cleaning_status = lambda *a: calls.append(a) or "none"
+        res = run(flow.demo_submit("701", "فيصل", "999", at(12, 5)))
+        self.assertTrue(res["ok"])
+        txt = self.d.texts_in("701")
+        self.assertIn(texts.demo_submitted("<@999>"), txt)
+        self.assertIn(texts.BEFORE_OUT, txt)                  # nobody pressed ✅ first
+        self.assertEqual(self.demo_row(1)["state"], engine.CLEANED)
+        self.assertEqual(db.events("demo:1", ["submitted"])[0]["detail"], "before_out")
+        self.assertEqual(calls, [])                           # the report store is never read
+        self.assertEqual(self.oujact, [])
+        again = run(flow.demo_submit("701", "فيصل", "999", at(12, 6)))
+        self.assertFalse(again["ok"])
+        self.assertFalse(run(flow.demo_submit("501", "فيصل", "999", at(12, 6)))["ok"])  # real room
+
+    def test_demo_submit_after_yes_has_no_warning(self):
+        run(flow.demo_next("704", at(12, 1)))
+        run(flow.answer_yes("demo:4", "فيصل", "999", at(12, 2)))
+        run(flow.demo_submit("704", "فيصل", "999", at(12, 5)))
+        self.assertNotIn(texts.BEFORE_OUT, self.d.texts_in("704"))
 
     def test_demo_next_is_typed_in_the_room(self):
         r = run(flow.demo_next("701", at(12, 1)))
@@ -655,7 +709,7 @@ class TestDemo(FlowCase):
                                                       + texts.NL + "ما فيه بيانات للفترة." + texts.NL])
 
     def test_demo_whatsapp_opens_the_contact_picker(self):
-        card = [p for p in self.d.posts if p["channel"] == "701"][0]
+        card = [p for p in self.d.posts if p["channel"] == "701"][1]
         url = [b for b in card["buttons"] if isinstance(b, tuple)][0][2]
         target = flow.wa_redirect(url.rsplit("/", 1)[1])
         self.assertTrue(target.startswith("https://wa.me/?text="))
@@ -664,7 +718,7 @@ class TestDemo(FlowCase):
         run(flow.demo_next("703", at(12, 1)))
         res = run(flow.answer_no("demo:3", "فيصل", "999", "late_ask", "", "3h", None, at(12, 2)))
         self.assertTrue(res["ok"])
-        desc = [e for e in self.d.edits if e["channel"] == "703" and e["embed"]][-1]["embed"]["description"]
+        desc = texts.embed_text([e for e in self.d.edits if e["channel"] == "703" and e["embed"]][-1]["embed"])
         self.assertIn("🔴 لو طلع", desc)
         self.assertEqual(run(flow.demo_next("703", at(12, 3)))["action"], "reask")
 
