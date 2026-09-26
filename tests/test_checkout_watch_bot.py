@@ -65,11 +65,12 @@ class TestFirewall(unittest.TestCase):
 
     def test_both_bodies_pass_for_many_guest_names(self):
         for g in ("Sara Ahmed", "محمد 2231", "Guest 4455", "", "عبدالله بن فهد", "Lee"):
-            for second in (False, True):
-                body = texts.airbnb_body(g, second=second)
-                ok, reason, _clean = bot.outbound_firewall(body)
-                self.assertTrue(ok, (g, second, reason))
-                self.assertFalse(any(c.isdigit() for c in body))
+            for manager in ("ناصر", "عهود", "", "Agent 007"):
+                for second in (False, True):
+                    body = texts.airbnb_body(g, manager, second=second)
+                    ok, reason, _clean = bot.outbound_firewall(body)
+                    self.assertTrue(ok, (g, manager, second, reason))
+                    self.assertFalse(any(c.isdigit() for c in body))
 
     def test_firewall_is_live_in_this_test(self):
         ok, reason, _ = bot.outbound_firewall("كود الباب 4471")      # positive control

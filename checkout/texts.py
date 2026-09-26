@@ -273,33 +273,36 @@ REPLY_NOANSWER_AGAIN = "مسجل من قبل إن الضيف ما يرد — ك�
 # ------------------------------------------------------------------ guest messages (NO DIGITS)
 
 
-def airbnb_body(guest, second=False):
-    """The second message must differ from the first: send_guest_message de-duplicates on the
-    raw body, so an identical follow-up would be silently suppressed."""
-    g = guest_first(guest)
-    if second:
-        ar = ("مرحبا %s 👋 " % g if g else "مرحبا 👋 ") + \
-            "نعيد نسأل: طلعت من الشقة؟ فريق التنظيف ينتظر ردك 🙏"
-        en = ("Hi %s, " % g if g else "Hi, ") + \
-            "following up — have you checked out? Our cleaning team is waiting on your reply 🙏"
-        return _strip_digits(ar + NL + en)
-    ar = ("مرحبا %s 👋 " % g if g else "مرحبا 👋 ") + \
-        "نبي نتأكد إذا طلعت من الشقة، لأن فريق التنظيف في الطريق. طمنّا بكلمة 🙏"
-    en = ("Hi %s, " % g if g else "Hi, ") + \
-        "just checking whether you've checked out — our cleaning team is on the way. " \
-        "A quick reply helps 🙏"
-    return _strip_digits(ar + NL + en)
+# THE OWNER'S OWN WORDING (2026-09-26) — one message for the 📱 WhatsApp button AND the
+# automatic Airbnb message. Only the two names change: the guest's first name and the
+# property manager = the person responsible for the apartment today. Kept word for word.
 
 
-def wa_text(guest, presser_name):
+def _checkout_ask(guest, manager, again=False):
     g = guest_first(guest)
-    p = _strip_digits(presser_name).strip() or "فريق عوجا"
-    ar = ("مرحبا %s 👋 " % g if g else "مرحبا 👋 ") + \
-        "معك %s من عوجا. حبيت أتأكد: هل طلعت من الشقة؟ لأن فريق التنظيف متجه لك الحين 🙏" % p
-    en = ("Hi %s, " % g if g else "Hi, ") + \
-        "this is %s from Ouja. Just checking — have you checked out? " \
-        "Our cleaning team is heading over now 🙏" % p
-    return _strip_digits(ar + NL + en)
+    m = _strip_digits(manager).strip()
+    hi_ar = ("هلا وغلا %s" % g) if g else "هلا وغلا"
+    hi_en = ("Hello %s" % g) if g else "Hello"
+    who_ar = ("معك مدير العقار %s من Airbnb." % m) if m else "معك مدير العقار من Airbnb."
+    who_en = ("this is the property manager %s from Airbnb." % m) if m \
+        else "this is the property manager from Airbnb."
+    ar = "%s%s %s حاب اتاكد انك طلعت بسبب ان فريق التنظيف متوجه الان الى الشقة." % (
+        hi_ar, "، نعيد نسأل:" if again else "", who_ar)
+    en = "%s%s %s Just checking if u checked out or not because the cleaning team is on " \
+        "their way to ur apartment." % (hi_en, ", following up —" if again else "", who_en)
+    return _strip_digits(ar + NL + NL + en)
+
+
+def airbnb_body(guest, manager="", second=False):
+    """The automatic Airbnb message on «ما رد». The second one must DIFFER from the first:
+    send_guest_message de-duplicates on the raw body, so an identical follow-up would be
+    silently suppressed — hence «نعيد نسأل / following up»."""
+    return _checkout_ask(guest, manager, again=second)
+
+
+def wa_text(guest, manager):
+    """What 📱 types into WhatsApp, signed with the responsible person's name."""
+    return _checkout_ask(guest, manager)
 
 
 def wa_link(number, text):

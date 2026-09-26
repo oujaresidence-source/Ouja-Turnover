@@ -216,6 +216,16 @@ class TestTexts(unittest.TestCase):
                          texts.wa_text(g, "ناصر"), texts.wa_text(g, "Agent 007")):
                 self.assertFalse(any(c.isdigit() for c in body), (g, body))
 
+    def test_the_owners_exact_wording(self):
+        want = ("هلا وغلا Sara معك مدير العقار ناصر من Airbnb. حاب اتاكد انك طلعت بسبب ان "
+                "فريق التنظيف متوجه الان الى الشقة." + texts.NL + texts.NL +
+                "Hello Sara this is the property manager ناصر from Airbnb. Just checking if u "
+                "checked out or not because the cleaning team is on their way to ur apartment.")
+        self.assertEqual(texts.wa_text("Sara Ahmed", "ناصر"), want)
+        self.assertEqual(texts.airbnb_body("Sara Ahmed", "ناصر"), want)
+        self.assertIn("هلا وغلا، نعيد نسأل:", texts.airbnb_body("", "ناصر", second=True))
+        self.assertIn("معك مدير العقار من Airbnb.", texts.wa_text("Sara", ""))
+
     def test_second_airbnb_body_differs(self):
         self.assertNotEqual(texts.airbnb_body("Sara"), texts.airbnb_body("Sara", second=True))
 

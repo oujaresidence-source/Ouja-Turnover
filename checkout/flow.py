@@ -313,7 +313,7 @@ async def _airbnb(row, now_, second=False):
     if not airbnb_enabled():
         return
     wk = row["work_key"]
-    body = texts.airbnb_body(row.get("guest"), second=second)
+    body = texts.airbnb_body(row.get("guest"), row.get("responsible") or "", second=second)
     sent = int(row.get("airbnb_sent") or 0)
     if row.get("demo"):
         await _post(row, texts.demo_airbnb_preview(body))

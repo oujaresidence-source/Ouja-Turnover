@@ -403,6 +403,12 @@ class TestAirbnb(FlowCase):
         self.start(at(9))
         self.tick(at(12, 0))
 
+    def test_the_airbnb_message_is_the_owners_wording_with_the_names(self):
+        run(flow.answer_noanswer(WK, "ناصر", "111", at(12, 5)))
+        self.assertEqual(self.sent[0][1], texts.airbnb_body("Sara Ahmed", "ناصر"))
+        self.assertTrue(self.sent[0][1].startswith(
+            "هلا وغلا Sara معك مدير العقار ناصر من Airbnb."))
+
     def test_first_noanswer_then_third_reminder_never_a_third(self):
         run(flow.answer_noanswer(WK, "ناصر", "111", at(12, 5)))
         self.assertEqual(len(self.sent), 1)
@@ -511,8 +517,8 @@ class TestWhatsApp(FlowCase):
         target = flow.wa_redirect(db.link_for(WK)["token"])
         self.assertTrue(target.startswith("https://wa.me/966501234567?text="))
         body = urllib.parse.unquote(target.split("text=", 1)[1])
-        self.assertIn("معك ناصر من عوجا", body)
-        self.assertIn("مرحبا Sara", body)
+        self.assertIn("هلا وغلا Sara معك مدير العقار ناصر من Airbnb.", body)
+        self.assertIn("Hello Sara this is the property manager ناصر from Airbnb.", body)
         self.assertGreater(len(target), 512)              # why the short link exists
         self.assertEqual(db.events(WK, ["wa_link"])[0]["detail"], "opened")
 
@@ -535,7 +541,7 @@ class TestWhatsApp(FlowCase):
     def test_legacy_button_still_answers_with_the_presser_name(self):
         res = run(flow.whatsapp(WK, "نورة", "222", at(12)))
         body = urllib.parse.unquote(res["url"].split("text=", 1)[1])
-        self.assertIn("معك نورة من عوجا", body)
+        self.assertIn("معك مدير العقار نورة من Airbnb", body)
 
 
 # ============================================================== board + 17:00 (§10)
@@ -714,7 +720,7 @@ class TestDemo(FlowCase):
         target = flow.wa_redirect(url.rsplit("/", 1)[1])
         self.assertTrue(target.startswith("https://wa.me/966501130431?text="))
         body = urllib.parse.unquote(target.split("text=", 1)[1])
-        self.assertIn("معك فيصل من عوجا", body)
+        self.assertIn("معك مدير العقار فيصل من Airbnb", body)
         self.assertEqual(self.sent, [])                     # opening a chat sends nothing
 
     def test_demo_no_scenario_shows_the_red_cap(self):
