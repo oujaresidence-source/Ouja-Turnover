@@ -296,6 +296,16 @@ except Exception as _ops_err:           # pragma: no cover
     _ops = None
     _HAS_OPS = False
 
+# Checkout Watch «متابعة الخروج» — hotel-style due-out control in every turnover room. Ships
+# OFF: nothing is posted until an admin runs /checkout-start. Additive; reuses brain.db.
+try:
+    import checkout as _checkout
+    _HAS_CHECKOUT = True
+except Exception as _cw_err:            # pragma: no cover
+    print("[checkout] import failed (checkout watch disabled, bot unaffected):", _cw_err)
+    _checkout = None
+    _HAS_CHECKOUT = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -4527,6 +4537,7 @@ class CleaningDoneView(discord.ui.View):
             "كرت المراجعة تم نشره هنا في نفس الروم — الاعتماد أو الرفض من أزرار الكرت، "
             "والداشبورد يعرض نفس الحالة." + _flag,
             ephemeral=False)
+        await _cw_after_submit(ch, key, interaction.user)   # «متابعة الخروج»: warn, never block
 
 def channel_name(internal_name):
     # Discord channel names must be lowercase, no spaces/symbols.
@@ -5436,7 +5447,8 @@ DEFAULT_CLEANING_PHOTO_SLOTS = [
 ]
 
 OUJACT_CHECKOUT_STATES = ("unknown", "guest_confirmed", "checkout_button", "airbnb_confirmed",
-                          "late_checkout", "inside", "checkout_passed")
+                          "late_checkout", "inside", "checkout_passed",
+                          "no_answer")   # «متابعة الخروج»: guest not answering — don't enter yet
 def _oc_key(lid, date_iso):
     return f"{lid}|{str(date_iso)[:10]}"
 def _oujact_checkout_state(lid, date_iso):
@@ -5929,6 +5941,7 @@ _OUJACT_REASON = {
     "urgent":          ("بلاغ عاجل", "Urgent issue"),
     "late_checkout":   ("خروج متأخر معتمد", "Late checkout approved"),
     "inside":          ("الضيف باقي داخل", "Guest still inside"),
+    "no_answer":       ("الضيف ما رد — لا تدخل قبل التأكيد", "Guest not answering — confirm before entering"),
     "flexible":        ("مرن", "Flexible"),
 }
 def _oujact_priority(it, cstate, done, now):
@@ -5936,6 +5949,8 @@ def _oujact_priority(it, cstate, done, now):
     passed = it["checkout"] <= now
     if cstate == "inside":
         return (95, "inside")                       # blocker — last
+    if cstate == "no_answer":
+        return (90, "no_answer")                    # «متابعة الخروج»: nobody confirmed the guest left
     if cstate == "late_checkout":
         return (80, "late_checkout")
     if cstate in ("guest_confirmed", "checkout_button", "airbnb_confirmed"):
@@ -8696,6 +8711,653 @@ async def ops_turnover_loop():
                                            ("asked", "asleep", "closed", "dryrun")})
     except Exception as e:
         print("[ops.turnover] loop error:", e)
+
+# ==================== «متابعة الخروج» Checkout Watch — the Discord glue ====================
+# The rules live in checkout/ (engine, texts, db, flow). This block only answers three
+# questions for it: what does Hostaway say about today's departures, which turnover rooms
+# exist, and how do we draw a card / button / form in Discord. Buttons use STATIC custom_ids
+# handled by ONE listener (_cw_interaction) that finds the turnover by message id, so a press
+# works on a message posted before the last redeploy (the «القفل» pattern).
+
+_CW_IDS = ("cw_yes", "cw_noanswer", "cw_no", "cw_wa", "cw_surprise", "cw_demo_ff")
+_CW_STYLE = {"yes": discord.ButtonStyle.success, "noanswer": discord.ButtonStyle.secondary,
+             "no": discord.ButtonStyle.danger, "wa": discord.ButtonStyle.primary,
+             "surprise": discord.ButtonStyle.danger, "demo_ff": discord.ButtonStyle.secondary}
+_cw_cover_cache = {"day": None, "at": 0.0, "map": {}}
+
+
+def _cw_today_turnovers():
+    """Every CONFIRMED departure today, from a targeted departure-window query (never
+    get_reservations_cached — it truncates). BLOCKING: the package calls it via to_thread.
+    The same query _recovery_todays_checkouts() makes, kept raw because that helper drops the
+    checkout time, the phone and the conversation id this feature needs."""
+    today = datetime.now(TZ).date()
+    iso = today.isoformat()
+    listings = get_listings_map() or {}
+    store = _ls_get()["listings"]
+    deps = _ha_reservations_window("departureStartDate", "departureEndDate", iso, iso)
+    checkins = _ops_checkin_map(today)
+    out, seen = [], set()
+    for r in deps or []:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        if str(r.get("departureDate") or "")[:10] != iso or r.get("id") in seen:
+            continue
+        seen.add(r.get("id"))
+        lid = r.get("listingMapId")
+        if not lid:
+            continue
+        hour = parse_hour(r.get("checkOutTime"), DEFAULT_CHECKOUT_HOUR)
+        co = datetime(today.year, today.month, today.day, min(hour, 23), 0, tzinfo=TZ)
+        rec = store.get(str(lid)) or {}
+        ci = checkins.get(lid)
+        out.append({
+            "lid": lid, "day": iso, "res_id": str(r.get("id") or ""),
+            "unit": listings.get(lid) or rec.get("internal_name") or r.get("listingName")
+                    or "unit-%s" % lid,
+            "guest": r.get("guestName") or r.get("guestFirstName") or "ضيف",
+            "phone": (r.get("phone") or "").strip(),
+            "conversation_id": str(r.get("conversationId") or ""),
+            "channel_name": (r.get("channelName") or "").strip(),
+            "checkout_at": co.isoformat(timespec="seconds"),
+            "checkin_at": ci.isoformat(timespec="seconds") if ci else None,
+            "clean_minutes": int(rec.get("clean_max") or OUJACT_CLEAN_MAX),
+        })
+    return out
+
+
+def _cw_channels_in(guild):
+    """Every turnover room with a stable key, across the Turnovers category AND its overflow
+    categories (M6). The demo category has a different name, so it is never scanned."""
+    if guild is None:
+        return []
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        return []
+    out = []
+    for cat in _category_family(guild, category):
+        for ch in cat.text_channels:
+            topic = getattr(ch, "topic", "") or ""
+            key = parse_topic_oujact_key(topic)
+            if key:
+                out.append({"channel_id": str(ch.id), "key": key,
+                            "review": "cleaning-review:1" in topic})
+    return out
+
+
+def _cw_channels():
+    return _cw_channels_in(bot.get_guild(GUILD_ID))
+
+
+def _cw_cover(lid, day, channel_id=None):
+    """{name, did, role_id}: the Employee Calendar first, then the room's `did:`, then the
+    legacy assignments.json, then the operation role — never nobody."""
+    name, did, role_id = "", "", ""
+    try:
+        if _cw_cover_cache["day"] != day or time.time() - _cw_cover_cache["at"] > 300:
+            _cw_cover_cache.update({"day": day, "at": time.time(),
+                                    "map": _ops_cover_today(datetime.strptime(day, "%Y-%m-%d").date())})
+        hit = _cw_cover_cache["map"].get(int(lid))
+        if hit:
+            name = hit[0] or ""
+            did = _ops_did_for(name) if (name and _HAS_OPS) else ""
+    except Exception as e:
+        print("[checkout] calendar cover failed:", e)
+    ch = None
+    if channel_id:
+        try:
+            ch = bot.get_channel(int(channel_id))
+        except (TypeError, ValueError):
+            ch = None
+    if not did and ch is not None:
+        did = parse_topic_did(getattr(ch, "topic", "") or "") or ""
+    if not name:
+        try:
+            unit = (get_listings_map() or {}).get(int(lid)) or ""
+            if unit:
+                emp, did2, _d = responsible_for(unit, datetime.strptime(day, "%Y-%m-%d"))
+                name = emp or ""
+                did = did or (did2 or "")
+        except Exception:
+            pass
+    if not did:
+        guild = bot.get_guild(GUILD_ID)
+        role = find_operation_role(guild) if guild is not None else None
+        role_id = str(role.id) if role is not None else ""
+    return {"name": name, "did": str(did or ""), "role_id": role_id}
+
+
+def _cw_cleaning_status(lid, day, channel_id=None):
+    """'approved' | 'submitted' | 'none', read from the EXISTING cleaning-report store and room
+    topic. Read-only — the submit/approve buttons are not touched."""
+    try:
+        rep = _cleaning_reports.get(_cleanproof_report_id(int(lid), day)) or {}
+    except Exception:
+        rep = {}
+    status = rep.get("status") or ""
+    if status == "manager_approved":
+        return "approved"
+    if status in ("pending_manager_review", "submitted_for_review", "issue_found",
+                  "manager_rejected", "needs_reshoot"):
+        return "submitted"
+    if _oujact_is_done("%s:%s" % (lid, day)):
+        return "submitted"
+    if channel_id:
+        try:
+            ch = bot.get_channel(int(channel_id))
+        except (TypeError, ValueError):
+            ch = None
+        if ch is not None and "cleaning-review:1" in (getattr(ch, "topic", "") or ""):
+            return "submitted"
+    return "none"
+
+
+def _cw_early_checkin(lid, day):
+    for rec in list(_early_checkin_decisions.values()):
+        try:
+            if (rec.get("status") == "approved" and str(rec.get("listing_id")) == str(lid)
+                    and str(rec.get("arrival") or "")[:10] == day):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _cw_view(buttons, disabled=False):
+    v = discord.ui.View(timeout=None)
+    for b in buttons or []:
+        v.add_item(discord.ui.Button(label=_checkout.texts.BUTTON_LABELS[b],
+                                     style=_CW_STYLE.get(b, discord.ButtonStyle.secondary),
+                                     custom_id="cw_" + b, disabled=disabled))
+    return v
+
+
+def _cw_embed(e):
+    return discord.Embed(title=e.get("title") or "", description=e.get("description") or "",
+                         color=e.get("color") or GOLD)
+
+
+async def _cw_channel(channel_id):
+    cid = int(channel_id)
+    return bot.get_channel(cid) or await bot.fetch_channel(cid)
+
+
+async def _cw_post(channel_id, text=None, embed=None, buttons=None, demo=False, pin=False,
+                   mentions=True):
+    ch = await _cw_channel(channel_id)
+    kw = {}
+    if embed:
+        kw["embed"] = _cw_embed(embed)
+    if buttons:
+        kw["view"] = _cw_view(buttons)
+    am = (discord.AllowedMentions(users=True, roles=True, everyone=False) if mentions
+          else discord.AllowedMentions.none())
+    msg = await ch.send(content=text, allowed_mentions=am, **kw)
+    if pin:
+        try:
+            await msg.pin()
+        except Exception as e:
+            print("[checkout] pin failed:", e)
+    return str(msg.id)
+
+
+async def _cw_edit(channel_id, message_id, text=None, embed=None, buttons=None, demo=False,
+                   disabled=False):
+    try:
+        ch = await _cw_channel(channel_id)
+        msg = ch.get_partial_message(int(message_id))
+        kw = {}
+        if text is not None:
+            kw["content"] = text
+        if embed is not None:
+            kw["embed"] = _cw_embed(embed)
+        if buttons is not None:
+            kw["view"] = _cw_view(buttons, disabled) if buttons else None
+        if kw:
+            await msg.edit(**kw)
+        return True
+    except (discord.NotFound, discord.Forbidden):
+        return False
+    except Exception as e:
+        print("[checkout] edit failed:", e)
+        return False
+
+
+async def _cw_board_channel():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return None
+    ch = await ensure_channel(guild, _checkout.flow.board_channel_name(), None)
+    return str(ch.id) if ch is not None else None
+
+
+def _cw_wire():
+    """Idempotent. Called from start_web_server (next to ops.wire) and again from the loop if
+    the web server never started, so the watch never depends on webhooks being enabled."""
+    if not _HAS_CHECKOUT:
+        return False
+    _checkout.wire({
+        "now": now_riyadh,
+        "today_turnovers": _cw_today_turnovers,
+        "send_guest": (lambda cid, body: send_guest_message(cid, body, "email")),
+        "guest_links": guest_conversation_links,
+        "channels": _cw_channels,
+        "cover": _cw_cover,
+        "cleaning_status": _cw_cleaning_status,
+        "early_hint": _clean_early_departure_active,
+        "early_checkin": _cw_early_checkin,
+        "set_oujact_state": _oujact_set_checkout_state,
+        "log_oujact": _oujact_log_status,
+        "wa_number": _wa_from_phone,
+        "clean_minutes_default": OUJACT_CLEAN_MAX,
+        "post": _cw_post,
+        "edit": _cw_edit,
+        "board_channel": _cw_board_channel,
+    })
+    return True
+
+
+def _cw_presser_name(user):
+    """The Arabic employee name for a Discord user (Employee Calendar ids), else display name."""
+    did = str(getattr(user, "id", "") or "")
+    if _HAS_OPS and did:
+        try:
+            for e in _ops.notify.employees() or []:
+                if str(e.get("did") or "") == did:
+                    return e.get("name") or ""
+        except Exception as ex:
+            print("[checkout] employee map failed:", ex)
+    return getattr(user, "display_name", None) or getattr(user, "name", None) or str(user)
+
+
+async def _cw_reply(interaction, message, view=None):
+    try:
+        kw = {"ephemeral": True}
+        if view is not None:
+            kw["view"] = view
+        if interaction.response.is_done():
+            await interaction.followup.send(message or "تم", **kw)
+        else:
+            await interaction.response.send_message(message or "تم", **kw)
+    except Exception as e:
+        print("[checkout] reply failed:", e)
+
+
+def _cw_link_view(links):
+    v = discord.ui.View(timeout=600)
+    for url, label in links[:4]:
+        v.add_item(discord.ui.Button(label=label[:80], url=url, style=discord.ButtonStyle.link))
+    return v
+
+
+class CwNoModal(discord.ui.Modal, title="⛔ ما طلع"):
+    """Only what the two lists cannot say: the free-text reason and/or a typed exit time."""
+
+    def __init__(self, work_key, reason, choice, reason_text=""):
+        super().__init__(timeout=600)
+        self.work_key, self.reason, self.choice = work_key, reason, choice
+        self.reason_box = self.time_box = None
+        if reason == "other":
+            self.reason_box = discord.ui.TextInput(
+                label="السبب", style=discord.TextStyle.paragraph, required=True,
+                max_length=300, default=reason_text or None)
+            self.add_item(self.reason_box)
+        if choice == "custom":
+            self.time_box = discord.ui.TextInput(
+                label="متى بيطلع؟ (24 ساعة، مثل 14:30)", required=True, max_length=5,
+                placeholder="14:30")
+            self.add_item(self.time_box)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        rtext = str(self.reason_box.value).strip() if self.reason_box else ""
+        typed = str(self.time_box.value).strip() if self.time_box else None
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _cw_save_no(interaction, self.work_key, self.reason, rtext, self.choice, typed)
+
+
+class CwRetryView(discord.ui.View):
+    """An invalid time is sent back to the person to re-type — never guessed."""
+
+    def __init__(self, work_key, reason, choice, reason_text):
+        super().__init__(timeout=600)
+        self.args = (work_key, reason, choice, reason_text)
+
+    @discord.ui.button(label="✏️ اكتب الوقت مرة ثانية", style=discord.ButtonStyle.primary)
+    async def again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CwNoModal(*self.args))
+
+
+async def _cw_save_no(interaction, work_key, reason, reason_text, choice, typed=None):
+    name = await asyncio.to_thread(_cw_presser_name, interaction.user)
+    res = await _checkout.flow.answer_no(work_key, name, str(interaction.user.id), reason,
+                                         reason_text, choice, typed)
+    if not res.get("ok") and res.get("error") in ("format", "past", "tomorrow"):
+        await _cw_reply(interaction, "⚠️ " + res["message"],
+                        CwRetryView(work_key, reason, "custom", reason_text))
+        return
+    await _cw_reply(interaction, res.get("message"))
+
+
+class CwNoView(discord.ui.View):
+    """⛔ ما طلع: a reason, an expected exit, and «حفظ». Dismissing it changes nothing."""
+
+    def __init__(self, work_key):
+        super().__init__(timeout=600)
+        self.work_key, self.reason, self.choice = work_key, None, None
+        tx = _checkout.texts
+        rs = discord.ui.Select(placeholder="ليش ما طلع؟", min_values=1, max_values=1,
+                               options=[discord.SelectOption(label=tx.REASONS_AR[c], value=c)
+                                        for c in _checkout.engine.REASON_CODES])
+        es = discord.ui.Select(placeholder="متى بيطلع؟", min_values=1, max_values=1,
+                               options=[discord.SelectOption(label=tx.EXPECT_AR[c], value=c)
+                                        for c, _m in _checkout.engine.EXPECT_CHOICES])
+
+        async def on_reason(interaction):
+            self.reason = rs.values[0]
+            await interaction.response.defer()
+
+        async def on_expect(interaction):
+            self.choice = es.values[0]
+            await interaction.response.defer()
+
+        rs.callback, es.callback = on_reason, on_expect
+        save = discord.ui.Button(label="حفظ", style=discord.ButtonStyle.success)
+
+        async def on_save(interaction):
+            if not self.reason or not self.choice:
+                await _cw_reply(interaction, "اختر السبب ووقت الخروج المتوقع، بعدها اضغط حفظ.")
+                return
+            if self.reason == "other" or self.choice == "custom":
+                await interaction.response.send_modal(CwNoModal(self.work_key, self.reason,
+                                                                self.choice))
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await _cw_save_no(interaction, self.work_key, self.reason, "", self.choice)
+
+        save.callback = on_save
+        for it in (rs, es, save):
+            self.add_item(it)
+
+
+async def _cw_interaction(interaction):
+    """The card / ping / reminder buttons. A LISTENER, not a bound view."""
+    try:
+        if not _HAS_CHECKOUT or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if cid not in _CW_IDS:
+            return
+        mid = str(getattr(interaction.message, "id", "") or "")
+        row = await asyncio.to_thread(_checkout.db.item_by_message, mid)
+        if not row:
+            await _cw_reply(interaction, _checkout.texts.REPLY_NOT_FOUND)
+            return
+        wk = row["work_key"]
+        if cid == "cw_no":
+            ok, why = await asyncio.to_thread(_checkout.flow.can_answer, wk, "no")
+            if not ok:
+                await _cw_reply(interaction, why)
+                return
+            await interaction.response.send_message("⛔ ليش ما طلع الضيف، ومتى بيطلع؟",
+                                                    view=CwNoView(wk), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        name = await asyncio.to_thread(_cw_presser_name, interaction.user)
+        did = str(interaction.user.id)
+        fl = _checkout.flow
+        if cid == "cw_yes":
+            res = await fl.answer_yes(wk, name, did)
+        elif cid == "cw_noanswer":
+            res = await fl.answer_noanswer(wk, name, did)
+        elif cid == "cw_surprise":
+            res = await fl.surprise(wk, name, did)
+        elif cid == "cw_demo_ff":
+            res = await fl.demo_ff(wk)
+        else:
+            res = await fl.whatsapp(wk, name, did)
+            links = ([(res["url"], _checkout.texts.BUTTON_LABELS["wa"])] if res.get("url")
+                     else list(res.get("links") or []))
+            await _cw_reply(interaction, res.get("message"),
+                            _cw_link_view(links) if links else None)
+            return
+        await _cw_reply(interaction, res.get("message"))
+    except Exception as e:
+        print("[checkout] button error:", e)
+        try:
+            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+        except Exception:
+            pass
+
+
+async def _cw_after_submit(ch, key, user):
+    """§5.8 — one extra line when cleaning is submitted before anyone confirmed the guest left.
+    Warning only: the submit already went through."""
+    if not (_HAS_CHECKOUT and key):
+        return
+    try:
+        if await asyncio.to_thread(_checkout.flow.submitted_before_out, key, str(user)):
+            await ch.send(_checkout.texts.BEFORE_OUT)
+    except Exception as e:
+        print("[checkout] before-out warning failed:", e)
+
+
+@tasks.loop(minutes=2)
+async def checkout_watch_loop():
+    """Every 2 minutes: attach cards, ping at checkout, remind, re-ask, sync cleaning, edit the
+    board, post the 17:00 summary. Returns at once while the watch is stopped."""
+    if not _HAS_CHECKOUT:
+        return
+    await bot.wait_until_ready()
+    try:
+        if _checkout.HOST.today_turnovers is None:
+            _cw_wire()
+        if not await asyncio.to_thread(_checkout.flow.live):
+            return
+        rep = await _checkout.flow.tick()
+        if rep.get("posted") or rep.get("actions"):
+            print("[checkout] tick:", {k: rep.get(k) for k in ("posted", "actions")})
+    except Exception as e:
+        print("[checkout] loop error:", e)
+
+
+# ---------------- «متابعة الخروج» commands (slash + !ouja fallback, admin only) ----------------
+
+async def _cw_run_start(user):
+    if _checkout.HOST.today_turnovers is None:
+        _cw_wire()
+    try:
+        await sync_oujact_turnovers(day="today")     # the existing guarded path opens missing rooms
+    except Exception as e:
+        print("[checkout] oujact sync before start failed:", e)
+    rep = await _checkout.flow.start(str(getattr(user, "display_name", "") or user))
+    return _checkout.texts.start_summary(len(rep.get("posted") or []),
+                                         len(rep.get("pinged") or []),
+                                         len(rep.get("cleaned") or []),
+                                         rep.get("no_channel") or [])
+
+
+async def _cw_run_risk(channel_id):
+    if _checkout.HOST.today_turnovers is None:
+        _cw_wire()
+    demo_ch = await asyncio.to_thread(_checkout.db.setting, "demo_risk_channel", "")
+    demo = bool(demo_ch) and str(channel_id) == str(demo_ch)
+    now_ = now_riyadh()
+    rows = await _checkout.flow.risk_rows(now_, demo_only=demo)
+    return _checkout.flow.risk_chunks(rows, now_)
+
+
+async def _cw_demo_category(guild, create):
+    want = _checkout.flow.demo_category_name()
+    cat = next((c for c in guild.categories if c.name == want), None)
+    if cat is None and create:
+        cat = await guild.create_category(want)
+    return cat
+
+
+async def _cw_demo_clear(guild):
+    """Deletes the demo category's channels (and the empty category) and every demo row."""
+    n = 0
+    cat = await _cw_demo_category(guild, False)
+    if cat is not None:
+        for ch in list(cat.channels):
+            try:
+                await ch.delete(reason="checkout demo reset")
+                n += 1
+            except Exception as e:
+                print("[checkout] demo channel delete failed:", e)
+    rows = await asyncio.to_thread(_checkout.flow.demo_end)
+    return n, rows, cat
+
+
+async def _cw_run_demo(guild, user):
+    if _checkout.HOST.today_turnovers is None:
+        _cw_wire()
+    _n, _rows, cat = await _cw_demo_clear(guild)
+    if cat is None:
+        cat = await _cw_demo_category(guild, True)
+    chans = {}
+    for name, scen in _checkout.texts.DEMO_CHANNELS:
+        ch = await guild.create_text_channel(name, category=cat, topic="checkout-demo:1")
+        chans[scen] = str(ch.id)
+    name = await asyncio.to_thread(_cw_presser_name, user)
+    await _checkout.flow.demo_setup(chans, name, str(user.id))
+    return _checkout.texts.DEMO_READY % " ".join("<#%s>" % c for c in chans.values())
+
+
+async def _cw_run_demo_end(guild):
+    n, rows, cat = await _cw_demo_clear(guild)
+    if cat is not None:
+        try:
+            await cat.delete(reason="checkout demo ended")
+        except Exception as e:
+            print("[checkout] demo category delete failed:", e)
+    return _checkout.texts.DEMO_ENDED % (n, rows)
+
+
+async def _cw_slash_guard(interaction):
+    if not _HAS_CHECKOUT:
+        await interaction.response.send_message("متابعة الخروج مو شغالة في هذا السيرفر.",
+                                                ephemeral=True)
+        return False
+    if not _can_delete_channels(interaction.user):
+        await interaction.response.send_message(_checkout.texts.ADMIN_ONLY, ephemeral=True)
+        return False
+    return True
+
+
+@bot.tree.command(name="checkout-start", description="تشغيل متابعة الخروج — يحول قنوات اليوم ويبدأ يسأل")
+async def slash_checkout_start(interaction: discord.Interaction):
+    if not await _cw_slash_guard(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.followup.send((await _cw_run_start(interaction.user))[:1990], ephemeral=True)
+
+
+@bot.tree.command(name="checkout-stop", description="إيقاف متابعة الخروج (الأزرار تظل تسجل)")
+async def slash_checkout_stop(interaction: discord.Interaction):
+    if not await _cw_slash_guard(interaction):
+        return
+    await asyncio.to_thread(_checkout.flow.stop, str(interaction.user.display_name))
+    await interaction.response.send_message(_checkout.texts.STOP_REPLY, ephemeral=True)
+
+
+@bot.tree.command(name="checkout-risk", description="تحليل خطر اليوم — كل خروج اليوم مع السبب والخطوة")
+async def slash_checkout_risk(interaction: discord.Interaction):
+    if not await _cw_slash_guard(interaction):
+        return
+    await interaction.response.defer(thinking=True)
+    chunks = await _cw_run_risk(getattr(interaction.channel, "id", ""))
+    for c in chunks or ["ما فيه خروج اليوم."]:
+        await interaction.followup.send(c, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.tree.command(name="checkout-demo", description="تجربة متابعة الخروج — ٥ قنوات لتصوير الفيديو")
+async def slash_checkout_demo(interaction: discord.Interaction):
+    if not await _cw_slash_guard(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.followup.send(await _cw_run_demo(interaction.guild, interaction.user),
+                                    ephemeral=True)
+
+
+@bot.tree.command(name="checkout-demo-end", description="إنهاء التجربة — يمسح قنوات التجربة وبياناتها بس")
+async def slash_checkout_demo_end(interaction: discord.Interaction):
+    if not await _cw_slash_guard(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.followup.send(await _cw_run_demo_end(interaction.guild), ephemeral=True)
+
+
+@bot.tree.command(name="checkout-report", description="تقرير الخروج لكل مسؤول — يظهر لك بس")
+@app_commands.describe(period="اليوم أو آخر ٧ أيام")
+@app_commands.choices(period=[app_commands.Choice(name="اليوم", value=1),
+                              app_commands.Choice(name="آخر ٧ أيام", value=7)])
+async def slash_checkout_report(interaction: discord.Interaction,
+                                period: app_commands.Choice[int] = None):
+    if not await _cw_slash_guard(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    days = period.value if period else 1
+    for c in await asyncio.to_thread(_checkout.flow.report_text, now_riyadh(), days):
+        await interaction.followup.send(c, ephemeral=True)
+
+
+async def _cw_prefix_guard(ctx):
+    if not _HAS_CHECKOUT:
+        await ctx.reply("متابعة الخروج مو شغالة في هذا السيرفر.")
+        return False
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply(_checkout.texts.ADMIN_ONLY)
+        return False
+    return True
+
+
+@bot.command(name="تشغيل-الخروج", aliases=["checkout-start"])
+async def cmd_checkout_start(ctx):
+    if await _cw_prefix_guard(ctx):
+        await ctx.reply((await _cw_run_start(ctx.author))[:1990])
+
+
+@bot.command(name="ايقاف-الخروج", aliases=["checkout-stop", "إيقاف-الخروج"])
+async def cmd_checkout_stop(ctx):
+    if await _cw_prefix_guard(ctx):
+        await asyncio.to_thread(_checkout.flow.stop, str(ctx.author.display_name))
+        await ctx.reply(_checkout.texts.STOP_REPLY)
+
+
+@bot.command(name="خطر-اليوم", aliases=["checkout-risk"])
+async def cmd_checkout_risk(ctx):
+    if await _cw_prefix_guard(ctx):
+        for c in (await _cw_run_risk(ctx.channel.id)) or ["ما فيه خروج اليوم."]:
+            await ctx.send(c, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.command(name="تجربة-الخروج", aliases=["checkout-demo"])
+async def cmd_checkout_demo(ctx):
+    if await _cw_prefix_guard(ctx):
+        await ctx.reply(await _cw_run_demo(ctx.guild, ctx.author))
+
+
+@bot.command(name="انهاء-التجربة", aliases=["checkout-demo-end", "إنهاء-التجربة"])
+async def cmd_checkout_demo_end(ctx):
+    if await _cw_prefix_guard(ctx):
+        await ctx.reply(await _cw_run_demo_end(ctx.guild))
+
+
+@bot.command(name="تقرير-الخروج", aliases=["checkout-report"])
+async def cmd_checkout_report(ctx, days: str = "1"):
+    """A prefix command cannot answer privately in a channel, so the report goes to the
+    invoker's DMs — it stays out of every shared room, like the slash version."""
+    if not await _cw_prefix_guard(ctx):
+        return
+    n = 7 if str(days).strip() in ("7", "٧") else 1
+    try:
+        for c in await asyncio.to_thread(_checkout.flow.report_text, now_riyadh(), n):
+            await ctx.author.send(c)
+        await ctx.reply("📈 أرسلت لك التقرير خاص.")
+    except Exception as e:
+        print("[checkout] report DM failed:", e)
+        await ctx.reply("ما قدرت أرسل لك خاص — افتح الرسائل الخاصة أو استخدم /checkout-report.")
 
 @tasks.loop(time=dt_time(hour=3, minute=0, tzinfo=TZ))
 async def business_snapshot_loop():
@@ -34473,7 +35135,7 @@ async function ctCancelTask(tid){
 }
 function _ctLogLabel(e){
   var ar=(L==='ar'); var a=e.action||'';
-  var M={arrived:['🚪 وصل','🚪 Arrived'],started:['🧹 بدأ التنظيف','🧹 Started'],done:['📷 أرسل للمراجعة','📷 Submitted for review'],issue:['⚠️ بلاغ','⚠️ Issue'],guest_inside:['🛑 الضيف داخل','🛑 Guest inside'],report_submitted:['📷 رفع التقرير','📷 Report submitted'],manager_approve:['✓ اعتمد','✓ Approved'],manager_reject:['× رفض','× Rejected'],manager_reshoot:['↻ إعادة تصوير','↻ Reshoot'],manual_task_added:['➕ مهمة يدوية','➕ Manual task'],manual_task_canceled:['✕ ألغى مهمة','✕ Task canceled']};
+  var M={guest_out:['✅ الضيف طلع','✅ Guest out'],arrived:['🚪 وصل','🚪 Arrived'],started:['🧹 بدأ التنظيف','🧹 Started'],done:['📷 أرسل للمراجعة','📷 Submitted for review'],issue:['⚠️ بلاغ','⚠️ Issue'],guest_inside:['🛑 الضيف داخل','🛑 Guest inside'],report_submitted:['📷 رفع التقرير','📷 Report submitted'],manager_approve:['✓ اعتمد','✓ Approved'],manager_reject:['× رفض','× Rejected'],manager_reshoot:['↻ إعادة تصوير','↻ Reshoot'],manual_task_added:['➕ مهمة يدوية','➕ Manual task'],manual_task_canceled:['✕ ألغى مهمة','✕ Task canceled']};
   var m=M[a]; var lab=m?(ar?m[0]:m[1]):a;
   return lab+(e.note?(' — '+e.note):'');
 }
@@ -63692,6 +64354,14 @@ async def start_web_server():
             except Exception as _opse:
                 print("[ops] wiring failed (accountability disabled, bot unaffected):", _opse)
 
+        # ---- «متابعة الخروج» Checkout Watch — additive; reuses brain.db. Ships OFF.
+        if _HAS_CHECKOUT:
+            try:
+                _cw_wire()
+                _checkout.bootstrap()
+            except Exception as _cwe:
+                print("[checkout] wiring failed (checkout watch disabled, bot unaffected):", _cwe)
+
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
             try:
@@ -72365,6 +73035,10 @@ async def on_ready():
         if not getattr(bot, "_ops_clean_listener", False):
             bot.add_listener(_ops_clean_interaction, "on_interaction")
             bot._ops_clean_listener = True
+    if _HAS_CHECKOUT and not getattr(bot, "_cw_listener", False):
+        # «متابعة الخروج» buttons: one listener, static custom_ids, row found by message id
+        bot.add_listener(_cw_interaction, "on_interaction")
+        bot._cw_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(EarlyCheckinDecisionView())  # early check-in approve/reject
@@ -72526,6 +73200,8 @@ async def on_ready():
         _pending.append(ops_ladder_loop)        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
     if _HAS_OPS and _ops.turnover.enabled() and not ops_turnover_loop.is_running():
         _pending.append(ops_turnover_loop)      # «القفل»: private turnover nudges (dry-run by default)
+    if _HAS_CHECKOUT and not checkout_watch_loop.is_running():
+        _pending.append(checkout_watch_loop)    # «متابعة الخروج»: returns at once until /checkout-start
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)

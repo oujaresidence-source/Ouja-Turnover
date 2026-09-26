@@ -269,6 +269,55 @@ its own Discord room under «تحصيل الحجوزات المباشرة» (top
   `DIRECTPAY_VARIANCE_PCT`(0.01), `DIRECTPAY_PROOF_MAX_MB`(12), `DIRECTPAY_WATCH_DAYS`(30),
   `DIRECTPAY_EXTRA_CHANNELS`(empty).
 
+## Checkout Watch «متابعة الخروج» — the `checkout/` package
+Hotel front-desk "due-out" control inside every turnover room: at checkout time the bot mentions
+the responsible person «طلع الضيف؟» on a Checkout Card with ✅ طلع / 📵 ما رد / ⛔ ما طلع /
+📱 واتساب الضيف / 🚨 وصلنا والضيف داخل. It exists so the ops manager (أصيل) stops tracking every
+checkout in her head. **Ships OFF** — nothing posts until an admin runs `/checkout-start`.
+- **THE OWNER RULES, absolute:** (1) **no escalation to أصيل or the owner** — the only places it
+  writes are the apartment's own room and ONE board channel (`متابعة-الخروج`); (2) **warning only,
+  never block** — cleaners are warned via the oujact state + the card, and a cleaning submit before
+  ✅ gets one extra line «⚠️ انتبهوا: ما تأكدنا إن الضيف طلع قبل الدخول», never a refusal;
+  (3) **the presser is accountable** — every answer stores who pressed it (`state_by`, `cw_events`),
+  and a 🚨 surprise is logged against whoever pressed ✅; (4) **the demo is isolated** — `demo=1`
+  rows never call Hostaway, never write `oujact_checkout.json`, never reach the board / 17:00
+  summary / report / risk (all readers filter `demo=0`); the demo lives in its own category.
+- **State machine** (`engine.py`, PURE): `waiting → asking → out | no_answer | inside →
+  cleaned_pending → approved`. Ping once at the reservation's checkOutTime; a reminder every
+  `CHECKOUT_REMIND_MIN` after «ما رد» (and after an unanswered ping) until ✅/⛔; re-ask at the
+  exit time promised under ⛔; silence 23:00–08:00. First-final-wins via `db.transition`
+  (conditional UPDATE under a lock) — a late press is told «انحفظت قبلك من …». Late-exit cap:
+  `latest_ok_exit = min(check-in, 17:00) − clean_max` → red line on the card when exceeded.
+- **Airbnb message:** on the first «ما رد» and with the 3rd reminder, never more than 2; the two
+  bodies DIFFER (send_guest_message de-dups identical bodies); NO DIGITS (firewall R1); a
+  `SEND_*` block or exception is logged `airbnb_failed` once and never retried.
+- **Oujact wiring (the cleaners' warning):** ✅ → `guest_confirmed` (+ status `guest_out`),
+  ⛔ late_ok/late_ask → `late_checkout`, other ⛔ → `inside`, ما رد → **`no_answer`** (new state in
+  `OUJACT_CHECKOUT_STATES`, `_OUJACT_REASON`, tier 90 in `_oujact_priority`), 🚨 → `inside`.
+- **Switch precedence:** stored `cw_settings.live` > env `CHECKOUT_WATCH_LIVE` > `0`, read through a
+  3-second cache, so `/checkout-stop` lands within seconds and survives redeploys. Stopped = the
+  tick returns at once; buttons STILL record answers.
+- **Commands** (slash + `!ouja` fallback, admin = `_can_delete_channels`): `/checkout-start`
+  (`تشغيل-الخروج`: switch on, `sync_oujact_turnovers('today')`, sweep every room of today in the
+  Turnovers family incl. overflow, list departures with no room), `/checkout-stop`
+  (`ايقاف-الخروج`), `/checkout-risk` (`خطر-اليوم`, in-channel; inside the demo risk room it reads
+  demo rows only), `/checkout-demo` (`تجربة-الخروج`), `/checkout-demo-end` (`انهاء-التجربة`),
+  `/checkout-report` (`تقرير-الخروج`, ephemeral; prefix version DMs the invoker — per-person
+  numbers stay OUT of every shared room).
+- **Mechanics:** one listener `_cw_interaction` for static ids `cw_yes/cw_noanswer/cw_no/cw_wa/
+  cw_surprise/cw_demo_ff`, row found by message id (`cw_items.card_message_id` or `cw_messages`),
+  so buttons survive redeploys. `checkout_watch_loop` every 2 min; Hostaway read once per 5 min
+  (`_cw_today_turnovers` = targeted departure + arrival windows, never the truncated cache).
+  `work_key` PRIMARY KEY = one card per apartment+day; `cw_daily` = the 17:00 summary latch.
+- Env (all defaults correct — the owner never opens Railway): `CHECKOUT_WATCH_LIVE`(0),
+  `CHECKOUT_WATCH_AIRBNB`(1), `CHECKOUT_REMIND_MIN`(30), `CHECKOUT_DEADLINE`(17:00),
+  `CHECKOUT_QUIET_FROM`(23:00), `CHECKOUT_QUIET_TO`(08:00), `CHECKOUT_BOARD_CHANNEL`(متابعة-الخروج),
+  `CHECKOUT_DEMO_CATEGORY`(🎬 تجربة الخروج).
+- Tests: `tests/test_checkout_watch_engine.py` (clock, cap, risk, report, texts),
+  `tests/test_checkout_watch_flow.py` (idempotency, Airbnb, oujact, demo isolation, WhatsApp,
+  board, 17:00), `tests/test_checkout_watch_bot.py` (REAL firewall, tier 90, overflow sweep,
+  synthetic Hostaway rows, wiring). Run them before any edit here.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
