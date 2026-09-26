@@ -237,7 +237,7 @@ def wa_redirect(token):
         return None
     text = texts.wa_text(row.get("guest"), row.get("responsible") or "")
     number = ""
-    if not row.get("demo") and row.get("phone") and HOST.wa_number:
+    if row.get("phone") and HOST.wa_number:
         number = HOST.wa_number(row["phone"]) or ""
     if not number and not row.get("demo"):
         return None
@@ -660,7 +660,8 @@ async def whatsapp(wk, presser_name, by_did="", now_=None):
     text = texts.wa_text(row.get("guest"), presser_name)
     out = {"ok": True, "url": "", "links": [], "message": texts.WA_REPLY}
     if row.get("demo"):
-        out.update(url=texts.wa_link("", text), message=texts.WA_DEMO)
+        number = HOST.wa_number(row["phone"]) if (row.get("phone") and HOST.wa_number) else ""
+        out.update(url=texts.wa_link(number or "", text), message=texts.WA_DEMO)
     else:
         number = ""
         if row.get("phone") and HOST.wa_number:
@@ -943,7 +944,8 @@ async def demo_setup(channels, by, by_did, now_=None, emoji=""):
                 print("[checkout] demo turnover card failed:", e)
         wk = "demo:%d" % n
         db.insert_item(wk, {"lid": 0, "day": day, "unit": unit, "guest": texts.DEMO_GUEST,
-                            "phone": "", "conversation_id": "", "channel_name": "Airbnb",
+                            "phone": texts.DEMO_PHONE, "conversation_id": "",
+                            "channel_name": "Airbnb",
                             "checkout_at": _iso(co), "checkin_at": _iso(ci),
                             "clean_minutes": int(HOST.clean_minutes_default or 40),
                             "responsible": by, "responsible_did": str(by_did or ""),

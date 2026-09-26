@@ -708,11 +708,14 @@ class TestDemo(FlowCase):
         self.assertEqual(flow.report_text(at(18), 7), ["📈 **تقرير الخروج — آخر 7 أيام** — للإدارة فقط"
                                                       + texts.NL + "ما فيه بيانات للفترة." + texts.NL])
 
-    def test_demo_whatsapp_opens_the_contact_picker(self):
+    def test_demo_whatsapp_opens_a_chat_directly_like_a_real_guest(self):
         card = [p for p in self.d.posts if p["channel"] == "701"][1]
         url = [b for b in card["buttons"] if isinstance(b, tuple)][0][2]
         target = flow.wa_redirect(url.rsplit("/", 1)[1])
-        self.assertTrue(target.startswith("https://wa.me/?text="))
+        self.assertTrue(target.startswith("https://wa.me/966501234567?text="))
+        body = urllib.parse.unquote(target.split("text=", 1)[1])
+        self.assertIn("معك فيصل من عوجا", body)
+        self.assertEqual(self.sent, [])                     # opening a chat sends nothing
 
     def test_demo_no_scenario_shows_the_red_cap(self):
         run(flow.demo_next("703", at(12, 1)))

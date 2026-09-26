@@ -312,7 +312,7 @@ def wa_link(number, text):
 
 WA_REPLY = "📱 رسالة جاهزة باسمك — اضغط الزر وتفتح المحادثة:"
 WA_NO_PHONE = "ما عندنا رقم الضيف"
-WA_DEMO = "(تجربة) الرابط يفتح قائمة الأسماء بدون رقم، عشان ما تنرسل لأحد حقيقي."
+WA_DEMO = "(تجربة) الرابط يفتح محادثة برقم تجريبي والرسالة مكتوبة — لا تضغط إرسال."
 
 
 def airbnb_failed(reason):
@@ -437,6 +437,10 @@ DEMO_READY = "جهزت التجربة: %s — اكتب /checkout-demo-next دا�
 # ------------------------------------------------------------------ demo (§9)
 
 DEMO_GUEST = "ضيف تجريبي"
+# The demo guest's phone, so 📱 opens a chat DIRECTLY exactly like a real guest (owner ruling
+# 2026-09-26: "a random Saudi number"). The message is only typed, never sent — WhatsApp
+# waits for the presser's own send button. No Hostaway/Airbnb message ever goes to it.
+DEMO_PHONE = "0501234567"
 
 # (room name, scenario, apartment). Apartment rooms get their name from bot.py's own
 # _oujact_channel (None here), so they read exactly like real turnover rooms; only the risk
