@@ -24,22 +24,22 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . permits/GAT
 - [x] G3: all permits tests pass, none skipped (Python 3.9 local, hijridate 2.5 dev-installed)
   CHECK: python3 -m unittest discover -s tests -p "test_permits_*.py" 2>&1 | python3 -c "import sys,re;t=sys.stdin.read();m=re.search(r'^Ran (\d+) tests',t,re.M);print('PERMITS_TESTS_OK ran=%s' % m.group(1) if m and int(m.group(1))>=100 and re.search(r'^OK$',t,re.M) else 'PERMITS_TESTS_BAD')"
   EXPECT: /^PERMITS_TESTS_OK ran=\d+$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=68133c339c64fe037d2646f70456fcbca7db14def9a2ef5801704c3f7c11d088; exit=0; EXPECT=matched; output-sha256=2dce0c113aa7c15c326620f37bdd9982fec7d02b7ccbcb533b1c4c42fb6132dd; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=68133c339c64fe037d2646f70456fcbca7db14def9a2ef5801704c3f7c11d088; exit=0; EXPECT=matched; output-sha256=62b0f635047bd39283e3eefb600bb620fc4b757d36eeb721423ca473d23ddc9b; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
-- [ ] G3b: the pure permits tests also pass on Python 3.13 with hijridate 2.6 (Railway's runtime)
+- [x] G3b: the pure permits tests also pass on Python 3.13 with hijridate 2.6 (Railway's runtime)
   CHECK: $PERMITS_PY313 -m unittest tests.test_permits_dates tests.test_permits_engine tests.test_permits_importer tests.test_permits_service tests.test_permits_seed_real 2>&1 | grep -E '^(Ran [0-9]+ tests|OK|FAILED)'
   EXPECT: /^OK$/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=400a6b4b92c46ff64dbe287cad87f5c2608141659efad9cadb801104252df6d0; exit=0; EXPECT=matched; output-sha256=d6ab60c601c72294062bc0d9867aff731ec39df67c5ed8e090ce0ba6d0c9db6d; output-bytes=27; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G4: full suite — no NEW failures vs baseline
   CHECK: python3 permits/tools_compare_baseline.py
   EXPECT: /^NO_NEW_FAILURES/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=2d2acac2610e5ceb3412c058a6f5d0a4e5769842c87a76afb2643edbc2dfc1c8; exit=0; EXPECT=matched; output-sha256=b9d65fe383400d730202531752f5c8b963102241dbe0d25128c30694cc61188c; output-bytes=43; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=2d2acac2610e5ceb3412c058a6f5d0a4e5769842c87a76afb2643edbc2dfc1c8; exit=0; EXPECT=matched; output-sha256=269ef91c3ce726413fa74d56b0ef25deaf0c20f7ae2b8dd454107ecbcc1af268; output-bytes=43; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
-- [ ] G5: every DASHBOARD_HTML <script> parses (esprima) and the tab JS parses (node --check)
+- [x] G5: every DASHBOARD_HTML <script> parses (esprima) and the tab JS parses (node --check)
   CHECK: python3 -m unittest tests.test_permits_dashboard 2>&1 | grep -E '^(Ran [0-9]+ tests|OK|FAILED)'
   EXPECT: /^OK$/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=bffedcf07ef10fd5c549488a1e6c558bfcad3edef7a79ff1e8087d8ced144fca; exit=0; EXPECT=matched; output-sha256=08dac8a6ab0a8127790ebb3e0f45de2caacdd0572fed3afd3c539eb7534891be; output-bytes=26; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G6: no asyncio.to_thread in request handlers
   CHECK: test -f permits/routes.py && (grep -c "to_thread" permits/routes.py || true)
@@ -49,7 +49,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . permits/GAT
 - [x] G7: duplicate-proof — DB refuses a second live ticket (index present + race test)
   CHECK: python3 -m unittest tests.test_permits_service.RaceTest 2>&1 | grep -E '^(Ran [0-9]+ tests|OK|FAILED)'
   EXPECT: /^OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=74dec0e8bfd2c2c66120f11780e50151c0a9610a4abce413b0e20e5823b50df1; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=252f57b1482e010ec123d977d80576a0e30c3127fe6b8a4c3f0515f0f4852739; exit=0; EXPECT=matched; output-sha256=9997c356ed8b5b2e7b57cf6768dff2029aef6425377a3c2156a282ab154b7746; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G8: nothing dropped — all 45 seed rows in the normalized JSON, F2 ends 2026-10-12, 6B ends 2027-08-04
   CHECK: python3 -c "import json;d=json.load(open('permits/seed/permits_seed.normalized.json'));r={x['permit_no']:x for x in d['rows']};print('SEED_OK' if d['source_rows']==45 and len(d['rows'])==45 and r['50035533']['end_date']=='2026-10-12' and r['50048967']['end_date']=='2027-08-04' else 'SEED_BAD')"
@@ -59,7 +59,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . permits/GAT
 - [x] G9: default mode is dry on a fresh DB
   CHECK: python3 -m unittest tests.test_permits_service.DryDefaultTest 2>&1 | grep -E '^(Ran [0-9]+ tests|OK|FAILED)'
   EXPECT: /^OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=e8342aab20493a554ab29b82d03d2531b32b9fa0cd8d9a99ff770853428486f8; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=ee48fe39ff5742f390903dedf17351eadcdcd49939fe1b5d8a92bb551d9692d1; exit=0; EXPECT=matched; output-sha256=b5e489fc7005085f6b2c6ef5b991d69ae8e38888620ea74b42b2fdc4d94962c2; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G10: scope — only OWNS files differ from origin/main (committed or not)
   CHECK: { git diff --name-only origin/main; git ls-files -o --exclude-standard; } | sort -u | grep -vE '^(permits/|tests/test_permits_|tests/permits_fakes.py|tests/fixtures/permits/|bot.py$|requirements.txt$|CLAUDE.md$|\.gitignore$|docs/superpowers/(specs|plans)/2026-10-01-permits)' | wc -l | tr -d ' ' | sed 's/^0$/SCOPE_CLEAN/'
@@ -69,17 +69,17 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . permits/GAT
 - [x] G11: local smoke — real bot auth + role middleware in front of the package: tab JS served, summary answers with DASHBOARD_TOKEN, refuses without it
   CHECK: python3 permits/tools_smoke.py
   EXPECT: /^SMOKE_OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=ffbb44df2a5cedc07cf03ea7cd58aa383e6a0852a7a42e5f5c582099bad06cc5; exit=0; EXPECT=matched; output-sha256=502f617e5b9e9e98e96acf30f54a635de0b85b8a3c4eea65b5de134f3453b55a; output-bytes=1253; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=ffbb44df2a5cedc07cf03ea7cd58aa383e6a0852a7a42e5f5c582099bad06cc5; exit=0; EXPECT=matched; output-sha256=90b8417774fc079bf86c93a50c4039db8a1ac56e0995227a68066c9fa3d544b7; output-bytes=1253; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G13: privacy — no national ID in any file that would be committed (added bot.py lines only), and the xlsx is git-ignored
   CHECK: python3 permits/tools_privacy_scan.py
   EXPECT: /^PRIVACY_OK$/m
   EVIDENCE: automatic-evidence=v1; definition-sha256=1742fc2ded1125f104a8c8e33a78eb62ebb254c350b1840bcf992753a9a92409; exit=0; EXPECT=matched; output-sha256=ba2746d80621683209dcff4780a2950351cdd78b3b5a047362293bbdf2136679; output-bytes=80; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
-- [ ] G14: real seed matches the oracle row-for-row
+- [x] G14: real seed matches the oracle row-for-row
   CHECK: python3 -m unittest tests.test_permits_seed_real 2>&1 | grep -E '^(Ran [0-9]+ tests|OK|FAILED)'
   EXPECT: /^OK$/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=762b83ec5cfb85a23ae13c56f4bc071dc60288a9fa676201915a6291691493ca; exit=0; EXPECT=matched; output-sha256=985a19034cd610659e7e1c265cdc6638cd437a46741d78f66edf77949ef05b22; output-bytes=26; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-permits; path=82de56a067b7/18 entries
 
 - [x] G15: Railway gets hijridate, and CLAUDE.md documents the package + fixes trap 2
   CHECK: grep -q "^hijridate~=2.6" requirements.txt && grep -q "the \`permits/\` package" CLAUDE.md && grep -q "NAV_DEF" CLAUDE.md && echo DOCS_OK
