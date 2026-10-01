@@ -81,10 +81,11 @@ Behavior flags:
    literal CSS/JS braces. Do **not** introduce Python `{var}` interpolation into it. Inside
    the JS, don't use raw `\n` / `\s` escape sequences in string literals that get mangled —
    prior code used `String.fromCharCode(10)` and ` *` regex instead.
-2. **Tab labels resolve via `t()[id]`.** The tab bar is built from a `tb` array of
-   `[id, emoji]`. Each tab `id` (today, ov, inbox, rev, pr, strat, auto, log) **must have a
-   matching i18n key of the same name in BOTH `T.ar` and `T.en`.** A mismatch renders the
-   literal word **"undefined"** in the tab. (This exact bug happened with `strat`.)
+2. **Tab labels resolve via `t()[tk]`.** There is no `tb` array any more: the sidebar is
+   built from **`NAV_DEF`** in bot.py (`cats` → ids per section, `items` → `{id, ic, tk, badge}`,
+   `labels.ar` / `labels.en`), merged into `T.ar` / `T.en` at boot. Every item's `tk` **must
+   have a label in BOTH `labels.ar` and `labels.en`** or the sidebar shows the literal word
+   **"undefined"** (this exact bug happened with `strat`). NAV ids auto-join `_USER_TABS`.
 3. **Panels are shown via `showPanel()` / JS classes** — do not hardcode `class="panel on"`
    in the HTML for more than the default panel; it caused a panel-mismatch bug.
 4. **Reservation history pagination truncates (~6,000 rows).** Counting current occupancy
@@ -183,6 +184,37 @@ morning ops summary all render from it. Storage REUSES `brain.db` via `schedule/
 Superpowers = the PROCESS (brainstorm → plan → TDD → build → verify, no skipping); Impeccable =
 audit → critique → polish → harden every view (kill AI-slop); emil-design-eng = the FEEL
 (micro-interactions, motion, the drawer/transition craft). Use them on every UI change.
+
+## Permits «التصاريح» — the `permits/` package
+Every dated permit/licence Ouja holds (today: the 45 Ministry of Tourism «تصريح مرافق الضيافة
+السياحية الخاصة», one per apartment, one year, issued in the OWNER's name). THE GUARANTEE: **no
+permit expires without a ticket.** At `days_left <= lead` (10; per-permit `lead_days` overrides —
+`<=`, so a missed day is caught up) a ticket channel opens under «صيانه» (`_tk_make_channel`, spills
+into «صيانه ٢…٨»), nudges daily at 13:00 and escalates; it closes ONLY by renewal (new date + proof
+in the room / an upload in the dashboard), an authorised «لن يُجدَّد» with a reason, or a date
+correction that moves it out of the window. There is no snooze, by design.
+- **Invariants (tests/test_permits_*.py):** one live ticket per permit is a partial UNIQUE INDEX
+  (`idx_permits_one_live_ticket`); every Discord side effect goes through `permits_outbox` (unique
+  `ref`, atomic claim, backoff 1/5/15/60 min) so overlapping bot copies cannot double-post; the
+  digest + reminder latches are PERSISTED dates; a deleted room → `lost` + a replacement; "couldn't
+  check" is never "deleted". **No unique index on `permit_no`** — the seed has a real duplicate
+  (serials 19/44): it is a review flag, never a reason to drop a row. Review flags never block tickets.
+- **Ships DRY.** `permits_settings.mode` defaults to `dry`: no Discord output, no ticket rows, only
+  `state='dry'` would-open rows. An admin types «تشغيل» in the tab to go live (ops/switch CONFIRM_WORD).
+- **Privacy (PDPL):** national IDs are stored as the **last 4 digits only** (`holder_id_last4`),
+  never in Discord, shown masked to admin/ops only. The raw `permits/seed/source/*.xlsx` is
+  **git-ignored** — only `permits_seed.normalized.json` is committed; `permits/tools_privacy_scan.py`
+  greps every changed file for `\b[12][0-9]{9}\b`. Rebuild the seed: `python3 -m permits.seed.build_seed`.
+- **Dates:** stored ISO Gregorian, shown both; Hijri via `hijridate` (Umm al-Qura, needs 3.10+ —
+  locally `pip install --user hijridate==2.5.0` on 3.9). Ambiguous / unreadable dates are FLAGGED
+  (`date_issue`, `needs_data`), never guessed; an unknown date never opens a ticket but is red daily.
+- **Tab JS lives in `permits/static/permits_tab.js`** (a real file, `node --check`); DASHBOARD_HTML holds
+  only the section + a ≤15-line backslash-free stub. Handlers use `HOST.web_thread` — never `to_thread`.
+  Topic prefix `ouja-permit:` (never `ouja-ticket:` / `ouja-watchman:`). Gates: `permits/GATES.md`.
+- Env (read at call time): `PERMITS_ENABLED`(1), `PERMITS_LEAD_DAYS`(10), `PERMITS_HEADSUP_DAYS`(30),
+  `PERMITS_DAILY_HOUR`(13), `PERMITS_OPEN_FROM`/`TO`(9/22), `PERMITS_TICK_MIN`(5),
+  `PERMITS_DIGEST_CHANNEL`(تنبيهات-التصاريح), `PERMITS_PING_ROLE_ID`(0), `PERMITS_ESCALATE_IDS`
+  (= MAINT_CLOSE_IDS), `PERMITS_FORCE_DRY`(0 — the emergency mute).
 
 ## Decoration orders «تنسيق الحفلات» — the `decor/` package
 Guests tap «أنا مهتم» on one of the five Ouja Moments packages in `/guide/{slug}`; the button

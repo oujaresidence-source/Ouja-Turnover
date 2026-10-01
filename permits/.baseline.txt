@@ -1,0 +1,5 @@
+# Full-suite baseline on untouched origin/main 7d2110b, before any permits change (2026-10-01, Python 3.9.6)
+Ran 4464 tests in 86.687s
+FAILED (failures=2, skipped=1)
+FAIL: test_an_unlinked_apartment_is_counted_as_unattributed (test_ops_capture.TestBackfill)
+FAIL: test_it_reports_how_much_it_could_attribute (test_ops_capture.TestBackfill)

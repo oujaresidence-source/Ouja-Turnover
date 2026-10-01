@@ -18,3 +18,5 @@ PyMuPDF~=1.28
 brotli>=1.1.0
 # weekend digest «وش صاير بالرياض» — offline QR codes printed on every card (pure Python).
 segno~=1.6
+# permits «التصاريح» — Umm al-Qura Hijri ⇄ Gregorian for the ministry permit dates (pure Python; needs 3.10+).
+hijridate~=2.6

@@ -160,6 +160,18 @@ except Exception as _wifi_err:          # pragma: no cover
     _wifi = None
     _HAS_WIFI = False
 
+# ==== PERMITS «التصاريح» ====  permit & licence expiry tracker (permits/ package). A ticket
+# opens under «صيانه» at ≤ PERMITS_LEAD_DAYS (10) left and cannot close without a renewal
+# + proof or an authorised «لن يُجدَّد». Ships DRY: nothing reaches Discord until an admin
+# types «تشغيل» in the tab. PERMITS_ENABLED=0 unloads it; PERMITS_FORCE_DRY=1 mutes it.
+try:
+    import permits as _permits
+    _HAS_PERMITS = os.environ.get("PERMITS_ENABLED", "1") == "1"
+except Exception as _permits_err:       # pragma: no cover
+    print("[permits] import failed (permits tab disabled, bot unaffected):", _permits_err)
+    _permits = None
+    _HAS_PERMITS = False
+
 # Ministry of Tourism compliance «مطابقة وزارة السياحة» — dated inspection rounds per unit
 # against the 47 standards; gaps become an owner quote + tickets + a re-check date.
 try:
@@ -22521,6 +22533,36 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="wifiBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ PERMITS «التصاريح» (every dated permit · its ticket under صيانه before it expires) ============ -->
+      <section class="view" id="view_permits">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📄 التصاريح</div>
+            <div class="page-sub">كل تصريح وترخيص · متى ينتهي · تذكرته في ديسكورد</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" data-pa="export">⬇ تصدير</button>
+            <button class="btn ghost sm" data-pa="import" data-edit="1">⬆ استيراد</button>
+            <button class="btn ghost sm" onclick="loadPermits(1)">↻ تحديث</button>
+            <button class="btn primary sm" data-pa="new" data-edit="1">+ أضف تصريح</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_permits" data-help-key="permits">
+          <button class="ph-x" onclick="dismissHelp('permits')" title="إخفاء">×</button>
+          <div class="ph-t">ما ينتهي تصريح بدون تذكرة</div>
+          <div class="ph-b">
+            لما يبقى على أي تصريح <b>١٠ أيام أو أقل</b> تنفتح له تذكرة تحت «صيانه» في ديسكورد، وتذكّر يومياً الساعة ١ الظهر،
+            وتصعّد كل ما قرب التاريخ. <b>ما تنقفل التذكرة</b> إلا بتجديد (التاريخ الجديد + صورة أو PDF)،
+            أو «لن يُجدَّد» من شخص مخوّل مع السبب. أي صف عليه «تحتاج مراجعة» يتابَع عادي — المراجعة ما توقف التنبيه.
+          </div>
+        </div>
+
+        <div id="pmTop"></div>
+        <div class="kpis" id="pmKpis"></div>
+        <div id="pmBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -25665,6 +25707,7 @@ function badgeCount(key){
   }
   if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
   if(key==='promises') return ((D.promises && D.promises.counts) || {}).overdue || 0;
+  if(key==='permits') return ((D.permits && D.permits.counts) || {}).alert || 0;
   return 0;
 }
 function badgeInfo(key){
@@ -25679,6 +25722,8 @@ function badgeInfo(key){
     cls = 'danger';
   }else if(key==='pricing'){
     cls = 'info';
+  }else if(key==='permits'){
+    cls = (((D.permits || {}).counts || {}).expired > 0) ? 'danger' : 'warn';
   }
   const label = (L==='ar' ? 'عدد التنبيهات: ' : 'Alert count: ') + count;
   return {count:count, cls:cls, label:label};
@@ -25960,6 +26005,7 @@ function go(id){
   if(id==='cleanteams') loadCleanTeams();
   if(id==='coverage') loadCoverage();
   if(id==='wifi') loadWifi();
+  if(id==='permits') loadPermits();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -26230,6 +26276,7 @@ async function loadSlow(){
 }
 async function loadAll(){
   await Promise.all([loadMed(), loadFast(), loadSlow()]);
+  try{ permitsBadgeRefresh(); }catch(_){ }   /* PERMITS: non-blocking, swallows errors */
 }
 var _pePanel = null;
 var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'▦',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'✺',ar:'مناسبة',en:'Event'}};
@@ -36016,6 +36063,21 @@ var _drawerReturnEl = null;
    ============================================================ */
 var WIFI = {data:null, team:null, loading:false, unit:null, form:null, blocked:null, mode:''};
 
+/* PERMITS «التصاريح» — the tab's code is the real file /permits/static/permits_tab.js (no backslash trap here) */
+function loadPermits(force){
+  if(window.__permitsJs){ return window.PermitsTab.load(force); }
+  if(window.__permitsLoading){ return; }
+  window.__permitsLoading=1;
+  var s=document.createElement('script');
+  s.src='/permits/static/permits_tab.js?v=__PERMITS_JS_V__';
+  s.onload=function(){ window.__permitsJs=1; window.PermitsTab.load(force); };
+  s.onerror=function(){ window.__permitsLoading=0; putHtml('pmBody', errorState('loadPermits(1)')); };
+  document.head.appendChild(s);
+}
+var __permitsBadgeAt=0;
+function permitsBadgeRefresh(){ if(Date.now()-__permitsBadgeAt<600000 || !canRead('permits')) return; __permitsBadgeAt=Date.now();
+  api('/api/permits/summary').then(function(r){ if(r && r.ok){ D.permits=r; buildSideNav(); } }).catch(function(){}); }
+
 async function loadWifi(force){
   if(WIFI.loading) return;
   WIFI.loading = true;
@@ -44786,7 +44848,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "wifi", "listings", "quality", "onb", "mot", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "permits", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
@@ -44813,6 +44875,7 @@ NAV_DEF = {
         {"id": "cleanteams", "ic": "cleanteams", "tk": "cleanteams"},
         {"id": "coverage", "ic": "cleanteams", "tk": "coverage"},
         {"id": "wifi", "ic": "listings", "tk": "wifi"},
+        {"id": "permits", "ic": "tickets", "tk": "permits", "badge": "permits"},   # PERMITS «التصاريح»
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -44854,7 +44917,7 @@ NAV_DEF = {
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت",
+            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح",
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
@@ -44878,7 +44941,7 @@ NAV_DEF = {
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions",
+            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits",
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
@@ -44911,6 +44974,9 @@ for _nav_it in NAV_DEF.get("items", []):
 _NAV_DEF_JSON = json.dumps(NAV_DEF, ensure_ascii=False)
 # One-time bake at import: the dashboard's `const NAVD = __NAV_DEF_JSON__;` becomes real JS.
 DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
+# PERMITS «التصاريح»: the tab script lives in permits/static/; the ?v= cache-buster is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__PERMITS_JS_V__", (_permits.routes.js_version() if _permits is not None else "0"), 1)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
@@ -63258,6 +63324,7 @@ _ROLE_WRITE_RULES = [
     ("/api/wifi/", "wifi"),                  # /api/wifi/fill-save is exempt above (public team page)
     ("/api/mot/", "mot"),                    # /api/mot/check-* are exempt above (inspector link)
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
+    ("/api/permits/", "permits"),            # PERMITS «التصاريح» — no public door (admin/ops re-checked inside)
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -63306,6 +63373,9 @@ _ROLE_READ_RULES = [
     # and schedule there is no public share link to keep working, so the broad prefix is
     # correct here.
     ("/api/kb/", "kb"),
+    # PERMITS «التصاريح»: owners' names + permit numbers. No public read; the tab script is
+    # served at /permits/static/ — outside /api/ — so this broad prefix cannot lock it out.
+    ("/api/permits/", "permits"),
     # «تدريب مساعد»: full guest transcripts + who wrote each reply. Private by definition.
     ("/api/train/", "train"),
 ]
@@ -64252,6 +64322,18 @@ async def start_web_server():
                       % (_wifi.engine.MIN_OBSERVATIONS, _wifi.engine.LOCK_GRACE_DAYS))
             except Exception as _we:
                 print("[wifi] wiring failed (internet tab disabled, bot unaffected):", _we)
+
+        # ---- PERMITS «التصاريح» — the tab + /api/permits/*. The Discord side (tickets, the
+        # daily digest) is permits_loop; this only wires the web door and seeds on first boot.
+        if _HAS_PERMITS:
+            try:
+                _permits.wire(_permits_caps())
+                _seeded = _permits.bootstrap()
+                _permits.register_routes(app)
+                print("[permits] wired + routes registered (/api/permits/*) — seeded %d, mode=%s"
+                      % (_seeded, _permits.service.effective_mode()))
+            except Exception as _pe:
+                print("[permits] wiring failed (permits tab disabled, bot unaffected):", _pe)
 
         if _HAS_MOT:
             try:
@@ -72844,6 +72926,398 @@ async def _send_long_to_channel(ch, text):
         await ch.send(buf)
 
 
+# ==== PERMITS «التصاريح» ====
+# Discord glue for the permits/ package: the port the service drives (permits/port.py is the
+# contract), the ticket buttons, the 5-minute loop and /permits. Every RULE lives in the
+# package; this block only translates it into discord.py.
+# Topic prefix is `ouja-permit:` — NEVER `ouja-ticket:` (the maint parsers _tk_rec_for /
+# _wd_open_maint_by_lid) and never `ouja-watchman:` (its bulk cleanup DELETES those rooms).
+PERMITS_TICK_MIN = (_permits.engine.cfg()["tick_min"] if _permits is not None else 5)
+
+
+def _permits_listings():
+    """[{id, internal_name, public_name, active}] from the LISTINGS MASTER STORE (local JSON —
+    never a Hostaway call). Inactive units are KEPT with active=False so the tab can say
+    «الشقة غير نشطة» instead of making a permit vanish."""
+    out = []
+    try:
+        for k, v in _ls_get()["listings"].items():
+            try:
+                lid = int(k)
+            except (TypeError, ValueError):
+                continue
+            out.append({"id": lid, "internal_name": v.get("internal_name") or "",
+                        "public_name": v.get("public_name") or "", "active": bool(v.get("active", True))})
+    except Exception as e:
+        print("[permits] listings unavailable:", e)
+    return out
+
+
+def _permits_onb_reader():
+    """READ-ONLY rows of «ضم الوحدات» projects for the import screen. Never writes onb_*."""
+    if not _HAS_ONB:
+        return []
+    return _onb.db.projects()
+
+
+def _permits_caps():
+    return {"dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor, "json_response": _json,
+            "web": web, "tz": TZ, "now": now_riyadh, "web_thread": web_thread,
+            "listings": _permits_listings, "guild_id": GUILD_ID, "maint_assignee_for": maint_assignee_for,
+            "dashboard_url": lambda: _dispatch_base_url() + "/dashboard#permits",
+            "onb_reader": _permits_onb_reader, "state_dir": STATE_DIR}
+
+
+def _permits_ensure_wired():
+    if _permits is not None and _permits.HOST.listings is None:
+        _permits.wire(_permits_caps())
+
+
+def _permits_embed(card):
+    e = discord.Embed(title=card.get("title") or "", description=card.get("description") or None,
+                      color=card.get("color") or 0x8A8F98)
+    for name, value, inline in card.get("fields") or []:
+        e.add_field(name=name, value=value, inline=inline)
+    e.set_footer(text=card.get("footer") or "")
+    return e
+
+
+def _permits_allowed(users=(), roles=()):
+    u = [discord.Object(id=int(x)) for x in users if str(x).isdigit()]
+    r = [discord.Object(id=int(x)) for x in roles if str(x).isdigit()]
+    return discord.AllowedMentions(everyone=False, users=u or False, roles=r or False)
+
+
+async def _permits_get_channel(guild, cid):
+    ch = guild.get_channel(int(cid))
+    if ch is None:
+        ch = await bot.fetch_channel(int(cid))      # discord.NotFound when it is really gone
+    return ch
+
+
+class _PermitsDiscordPort:
+    """permits/port.py's DiscordPort, for real. Raises on failure; never fakes success."""
+
+    def __init__(self, guild):
+        self.guild = guild
+
+    def ready(self):
+        return self.guild is not None
+
+    async def _post_card(self, ch, card):
+        msg = await ch.send(content=card.get("content") or None, embed=_permits_embed(card),
+                            view=PermitTicketView(),
+                            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+        try:
+            await msg.pin()
+        except Exception as e:
+            print("[permits] pin failed (non-fatal):", e)
+        return str(msg.id)
+
+    async def create_ticket_channel(self, name, topic, card, responsible_id=None):
+        # under «صيانه», spilling into «صيانه ٢…٨» at Discord's 50-channel cap (F5)
+        ch = await _tk_make_channel(self.guild, "maint", name[:100], topic[:1024])
+        mid = await self._post_card(ch, card)
+        return {"channel_id": str(ch.id), "card_msg_id": mid}
+
+    async def find_channel_by_tid(self, tid):
+        for ch in self.guild.text_channels:
+            parsed = _permits.engine.parse_topic(getattr(ch, "topic", "") or "")
+            if parsed and parsed[1] == int(tid):
+                return str(ch.id)
+        return None
+
+    async def ensure_card(self, channel_id, card):
+        ch = await _permits_get_channel(self.guild, channel_id)
+        want = card.get("footer") or ""
+        try:
+            async for m in ch.history(limit=50, oldest_first=True):
+                if m.author.id == bot.user.id and m.embeds and (m.embeds[0].footer.text or "") == want:
+                    return str(m.id)
+        except Exception as e:
+            print("[permits] card scan failed — posting a fresh card:", e)
+        return await self._post_card(ch, card)
+
+    async def channel_exists(self, channel_id):
+        if self.guild.get_channel(int(channel_id)) is not None:
+            return True
+        try:
+            await bot.fetch_channel(int(channel_id))
+            return True
+        except discord.NotFound:
+            return False
+        # Forbidden / HTTPException / timeouts propagate: "couldn't check" is NOT "deleted" (F8)
+
+    async def post(self, channel_id, text, user_ids=(), role_ids=()):
+        ch = await _permits_get_channel(self.guild, channel_id)
+        await ch.send(str(text)[:2000], allowed_mentions=_permits_allowed(user_ids, role_ids))
+
+    async def close_channel(self, channel_id, card_msg_id, note):
+        try:
+            ch = await _permits_get_channel(self.guild, channel_id)
+        except discord.NotFound:
+            return                                   # already gone — nothing left to close
+        await ch.send(str(note)[:2000], allowed_mentions=discord.AllowedMentions.none())
+        if card_msg_id:
+            try:
+                msg = await ch.fetch_message(int(card_msg_id))
+                await msg.edit(view=PermitTicketView(disabled=True))
+            except Exception as e:
+                print("[permits] could not disable the card buttons (non-fatal):", e)
+        try:
+            await _tk_lock_channel(ch)
+        except Exception as e:
+            print("[permits] lock failed (non-fatal):", e)
+        if not ch.name.startswith("مغلقة-"):
+            try:
+                await ch.edit(name=("مغلقة-" + ch.name)[:100])
+            except Exception as e:
+                print("[permits] rename failed (non-fatal):", e)
+
+    async def post_digest(self, chunks, user_ids=()):
+        cat = await _tk_category(self.guild, "maint")
+        ch = await ensure_channel(self.guild, _permits.engine.cfg()["digest_channel"], cat)
+        if ch is None:
+            raise RuntimeError("digest channel unavailable")
+        for c in chunks:
+            await ch.send(str(c)[:2000], allowed_mentions=_permits_allowed(user_ids, ()))
+
+
+_permits_lock = {"lock": None}
+
+
+async def _permits_tick_once():
+    """One service tick, never two at once in this process (the DB already makes two
+    PROCESSES safe — the unique index + the atomic outbox claim)."""
+    if not _HAS_PERMITS:
+        return
+    _permits_ensure_wired()
+    if _permits_lock["lock"] is None:
+        _permits_lock["lock"] = asyncio.Lock()
+    async with _permits_lock["lock"]:
+        port = _PermitsDiscordPort(bot.get_guild(GUILD_ID))
+        await _permits.service.tick(port, now_riyadh(), run=asyncio.to_thread)
+
+
+def _permits_kick():
+    """Deliver a just-made decision (renewed / won't renew) now instead of at the next tick."""
+    try:
+        _tk_spawn(_permits_tick_once())
+    except RuntimeError:
+        pass
+
+
+@tasks.loop(minutes=PERMITS_TICK_MIN)
+async def permits_loop():
+    """reconcile → plan → enqueue → drain, every PERMITS_TICK_MIN minutes. The digest and the
+    in-ticket reminders latch on PERSISTED dates, so a redeploy re-running the first
+    iteration can never double-post (never @tasks.loop(time=...) here)."""
+    try:
+        await _permits_tick_once()
+    except Exception as e:
+        print("[permits] tick error (non-fatal):", e)
+
+
+@permits_loop.before_loop
+async def _permits_loop_ready():
+    await bot.wait_until_ready()
+
+
+def _permits_ticket_here(interaction):
+    _permits_ensure_wired()
+    return _permits.service.ticket_for_channel(interaction.channel_id,
+                                               getattr(interaction.channel, "topic", "") or "")
+
+
+def _permits_who(user):
+    return getattr(user, "display_name", None) or str(user)
+
+
+class _PermitRenewConfirm(discord.ui.View):
+    """Step 2 of «✅ تم التجديد»: the parsed date said back in words. The person and the proof
+    are re-checked at the PRESS (the _TkCloseConfirm rule — a check made when the window
+    opened is not the same as a check at the moment of saving)."""
+
+    def __init__(self, tid, raw, new_no, notes, uid):
+        super().__init__(timeout=180)
+        self.tid, self.raw, self.new_no, self.notes, self.uid = tid, raw, new_no, notes, uid
+
+    @discord.ui.button(label="✅ أكّد التجديد", style=discord.ButtonStyle.success)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("🙏 التأكيد لصاحب الطلب.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="⏳ جاري الحفظ…", view=None)
+        t = _permits.db.ticket(self.tid)
+        if not t or t["state"] not in ("opening", "open"):
+            await interaction.edit_original_response(content="هذي التذكرة انقفلت من قبل — ما تغيّر شي.")
+            return
+        if not await _maint_has_proof(interaction.channel):
+            await interaction.edit_original_response(
+                content="📎 ما لقيت صورة أو PDF للتصريح المجدَّد في الروم — ارفعه وجرّب مرة ثانية.")
+            return
+        r = _permits.service.renew(t["permit_id"], self.raw, _permits_who(interaction.user),
+                                   now_riyadh().date().isoformat(), new_no=self.new_no, notes=self.notes,
+                                   proof=True, via="discord")
+        if not r.get("ok"):
+            await interaction.edit_original_response(content="⚠️ " + r.get("error_ar", "ما انحفظ"))
+            return
+        await interaction.edit_original_response(content="✅ انحفظ التجديد — التذكرة تنقفل خلال لحظات.")
+        _permits_kick()
+
+    @discord.ui.button(label="رجوع", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="تم التراجع — ما تغيّر شي.", view=None)
+
+
+class _PermitRenewModal(discord.ui.Modal, title="تسجيل تجديد التصريح"):
+    new_end = discord.ui.TextInput(label="تاريخ الانتهاء الجديد",
+                                   placeholder="2027-10-11 أو 11/10/2027 أو 01/05/1449", max_length=40)
+    new_no = discord.ui.TextInput(label="رقم التصريح الجديد (اختياري)", required=False, max_length=40)
+    notes = discord.ui.TextInput(label="ملاحظات (اختياري)", style=discord.TextStyle.paragraph,
+                                 required=False, max_length=500)
+
+    def __init__(self, tid):
+        super().__init__(timeout=600)
+        self.tid = tid
+
+    async def on_submit(self, interaction: discord.Interaction):
+        t = _permits.db.ticket(self.tid)
+        p = _permits.db.permit(t["permit_id"]) if t else None
+        if not p or t["state"] not in ("opening", "open"):
+            await interaction.response.send_message("هذي التذكرة انقفلت من قبل.", ephemeral=True)
+            return
+        raw = str(self.new_end.value or "").strip()
+        pd = _permits.dates.parse_date(raw)
+        iso, today = pd["iso"], now_riyadh().date().isoformat()
+        err = None
+        if not iso:
+            err = "ما قدرت أقرأ «%s» — اكتبه مثل 2027-10-11 أو 11/10/2027 أو 01/05/1449" % raw
+        elif p.get("end_date") and iso <= p["end_date"]:
+            err = "التاريخ الجديد لازم يكون بعد القديم (%s)" % p["end_date"]
+        elif iso < today:
+            err = "التاريخ الجديد في الماضي — تأكد منه"
+        if err:
+            await interaction.response.send_message("⚠️ " + err, ephemeral=True)
+            return
+        left = _permits.engine.days_left(iso, today)
+        msg = "تأكيد: ينتهي الجديد %s (%s يوم)؟" % (_permits.dates.words_ar(iso), _permits.dates.ar_digits(left))
+        hj = _permits.dates.to_hijri_str(iso)
+        if hj:
+            msg += "\n" + hj
+        if pd["issue"] == "ambiguous_day_month":
+            msg += "\n⚠️ قريته يوم/شهر — تأكد إنه صح."
+        await interaction.response.send_message(
+            msg, ephemeral=True,
+            view=_PermitRenewConfirm(self.tid, raw, str(self.new_no.value or "").strip(),
+                                     str(self.notes.value or "").strip(), interaction.user.id))
+
+
+class _PermitCancelModal(discord.ui.Modal, title="لن يُجدَّد — السبب"):
+    reason = discord.ui.TextInput(label="ليش ما راح نجدّده؟", style=discord.TextStyle.paragraph,
+                                  min_length=5, max_length=400)
+
+    def __init__(self, tid):
+        super().__init__(timeout=600)
+        self.tid = tid
+
+    async def on_submit(self, interaction: discord.Interaction):
+        t = _permits.db.ticket(self.tid)
+        if not t:
+            await interaction.response.send_message("ما لقيت التذكرة.", ephemeral=True)
+            return
+        r = _permits.service.cancel(t["permit_id"], str(self.reason.value or ""),
+                                    _permits_who(interaction.user),
+                                    allowed=_maint_can_close(interaction.user))   # re-checked at submit
+        if not r.get("ok"):
+            await interaction.response.send_message("⚠️ " + r.get("error_ar", "ما انحفظ"), ephemeral=True)
+            return
+        await interaction.response.send_message("🚫 انحفظ «لن يُجدَّد» — التذكرة تنقفل خلال لحظات.", ephemeral=True)
+        _permits_kick()
+
+
+class PermitTicketView(discord.ui.View):
+    """Lives on every permit-ticket card. Persistent; custom_ids are `permit_*` so they can
+    never collide with `maint_*`. There is no snooze button — by design."""
+
+    def __init__(self, disabled=False):
+        super().__init__(timeout=None)
+        if disabled:
+            for item in self.children:
+                item.disabled = True
+
+    async def _open_ticket(self, interaction):
+        t = _permits_ticket_here(interaction)
+        if not t or t["state"] not in ("opening", "open"):
+            await interaction.response.send_message("هذي التذكرة مقفلة.", ephemeral=True)
+            return None
+        return t
+
+    @discord.ui.button(label="✋ أستلمها", style=discord.ButtonStyle.secondary, custom_id="permit_claim")
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._open_ticket(interaction)
+        if not t:
+            return
+        u = interaction.user
+        _permits.service.claim(t["id"], _permits_who(u), u.id, str(u))
+        await interaction.response.send_message(
+            "✋ %s استلم التذكرة — التذكير اليومي يستمر لين تتجدد." % u.mention,
+            allowed_mentions=discord.AllowedMentions.none())
+
+    @discord.ui.button(label="✅ تم التجديد", style=discord.ButtonStyle.success, custom_id="permit_renewed")
+    async def renewed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self._open_ticket(interaction)
+        if not t:
+            return
+        if not await _maint_has_proof(interaction.channel):
+            await interaction.response.send_message(
+                "📎 ارفع صورة أو PDF للتصريح المجدَّد هنا في الروم أول، بعدين اضغط «✅ تم التجديد».",
+                ephemeral=True)
+            return
+        await interaction.response.send_modal(_PermitRenewModal(t["id"]))
+
+    @discord.ui.button(label="🚫 لن يُجدَّد", style=discord.ButtonStyle.danger, custom_id="permit_cancel")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not _maint_can_close(interaction.user):
+            await interaction.response.send_message(
+                "🙏 «لن يُجدَّد» لأصحاب صلاحية إقفال الصيانة بس. لو التصريح فعلاً ما راح يتجدد، بلّغهم.",
+                ephemeral=True)
+            return
+        t = await self._open_ticket(interaction)
+        if not t:
+            return
+        await interaction.response.send_modal(_PermitCancelModal(t["id"]))
+
+    @discord.ui.button(label="📋 التفاصيل", style=discord.ButtonStyle.secondary, custom_id="permit_info")
+    async def info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = _permits_ticket_here(interaction)
+        if not t:
+            await interaction.response.send_message("ما لقيت تذكرة التصريح لهذي الروم.", ephemeral=True)
+            return
+        card, lines = _permits.service.ticket_details(t["id"])
+        if not card:
+            await interaction.response.send_message("ما لقيت التصريح.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            content=("**آخر الأحداث:**\n" + ("\n".join(lines) or "—"))[:1900], embed=_permits_embed(card),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.tree.command(name="permits", description="التصاريح: المنتهية والقريبة")
+async def permits_slash(interaction: discord.Interaction):
+    if not _HAS_PERMITS:
+        await interaction.response.send_message("التصاريح غير مفعّلة.", ephemeral=True)
+        return
+    _permits_ensure_wired()
+    chunks, _mentions = _permits.service.build_digest(now_riyadh())
+    link = "\n🔗 " + _dispatch_base_url() + "/dashboard#permits"
+    first = (chunks[0] if chunks else "—")
+    await interaction.response.send_message((first + link)[:2000] if len(first) + len(link) <= 2000 else first[:2000],
+                                            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    for c in chunks[1:3]:
+        await interaction.followup.send(c[:2000], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
 async def _post_ops_to_watchdog(text):
     """Post an on-demand ops summary to the watchdog room (غرفة-المراقبة). Best-effort."""
     if not text:
@@ -73205,6 +73679,8 @@ async def on_ready():
     bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR/مشتريات)
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
+    if _HAS_PERMITS:
+        bot.add_view(PermitTicketView())   # PERMITS «التصاريح» ticket-card buttons (re-bind after restart)
     bot.add_view(RRTicketView())
     bot.add_view(RRCloseoutView())     # «أرسلتها للمالك» / «اعتمد وأقفل» under the owner message
     bot.add_view(ProcPanelView())      # vendor-purchase ticket panel + room buttons
@@ -73292,7 +73768,8 @@ async def on_ready():
                      (watchman_loop, "watchman_loop"),
                      (watchdog_loop, "watchdog_loop"),
                      (directpay_poll_loop, "directpay_poll_loop"),
-                     (directpay_nudge_loop, "directpay_nudge_loop")):
+                     (directpay_nudge_loop, "directpay_nudge_loop"),
+                     (permits_loop, "permits_loop")):
         if getattr(_lp, "_error_guarded", False):
             continue                    # on_ready can re-fire on re-identify
         _loop_guard(_lp, _nm)
@@ -73454,6 +73931,8 @@ async def on_ready():
         _pending.append(directpay_poll_loop)      # «التحصيل»: direct bookings → collection rooms (dry-run by default)
     if DIRECTPAY_ENABLED and _HAS_DIRECTPAY and not directpay_nudge_loop.is_running():
         _pending.append(directpay_nudge_loop)     # «التحصيل»: aging nudges + the 13:00 daily summary
+    if _HAS_PERMITS and not permits_loop.is_running():
+        _pending.append(permits_loop)             # PERMITS «التصاريح»: tickets + 13:00 digest (DRY until «تشغيل»)
     # Fire them off spread over time, in the background: on_ready must keep going
     # (the web server starts a few lines above this) while the loops trickle up.
     _pending = ([persist_loop] if persist_loop in _pending else []) + \
