@@ -6,3 +6,6 @@ __pycache__/
 .worktrees/
 /_*.py
 ouja-redesign-v3.html
+
+# «التصاريح» — the raw permits spreadsheet holds owners' national IDs. Never commit it.
+permits/seed/source/
