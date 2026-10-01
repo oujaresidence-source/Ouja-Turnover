@@ -59,6 +59,23 @@ def _now():
         return datetime.datetime.now(RIYADH)
 
 
+def safe_url(u):
+    return str(u or "").strip().lower().startswith("https://")
+
+
+def _cfg(c=None):
+    """engine.cfg() + the escalation fallback: PERMITS_ESCALATE_IDS empty → the maintenance
+    closers (bot.py's _maint_close_ids), so an overdue permit never escalates to nobody."""
+    c = dict(c or engine.cfg())
+    if not c.get("escalate_ids"):
+        try:
+            c["escalate_ids"] = [int(x) for x in (HOST.escalate_default() if HOST.escalate_default else [])]
+        except Exception as e:
+            print("[permits] escalation fallback unavailable:", e)
+            c["escalate_ids"] = []
+    return c
+
+
 def backoff_minutes(attempts):
     return _BACKOFF[min(max(int(attempts), 1), len(_BACKOFF)) - 1]
 
@@ -165,12 +182,23 @@ def described(now, c=None, status="active"):
     return [engine.describe(p, today, c) for p in db.permits(status)]
 
 
+def problems():
+    """Every Discord side effect still failing — the digest's «مشاكل النظام» and the tab's banner."""
+    out = []
+    for o in db.outbox_rows("failed"):
+        pl = json.loads(o["payload_json"] or "{}")
+        out.append({"kind": o["kind"], "tid": pl.get("ticket_id"), "error": o["last_error"],
+                    "attempts": o["attempts"], "ref": o["ref"]})
+    return out
+
+
 def summary(now, c=None):
     c = c or engine.cfg()
     rows = described(now, c)
     return {"ok": True, "counts": engine.counts(rows), "mode": mode_info(c),
-            "last_tick_at": db.get_setting("last_tick_at", ""), "lead_days": c["lead_days"],
-            "headsup_days": c["headsup_days"]}
+            "last_tick_at": db.get_setting("last_tick_at", ""),
+            "last_discord_ok_at": db.get_setting("last_discord_ok_at", ""),
+            "problems": problems(), "lead_days": c["lead_days"], "headsup_days": c["headsup_days"]}
 
 
 # ---------------- plan ----------------
@@ -240,7 +268,7 @@ def enqueue_reminders(now, c=None):
         if not engine.reminder_due(t, now, c):
             continue
         with db.transaction() as cx:
-            db.enqueue("reminder", "reminder:t%d:%s" % (t["id"], today), {"ticket_id": t["id"]}, cx=cx)
+            db.enqueue("reminder", "reminder:t%d:%s" % (t["id"], today), {"ticket_id": t["id"], "day": today}, cx=cx)
             db.update_ticket(t["id"], cx=cx, last_reminder_date=today)
         n += 1
     return n
@@ -314,9 +342,8 @@ async def reconcile(port, now, run=_direct, c=None):
         cid = await port.find_channel_by_tid(t["id"])
         if cid:
             await _adopt(port, t["id"], cid, now, c or engine.cfg(), run, "reconcile")
-        else:
-            await run(db.execute, "UPDATE permits_outbox SET state='pending', next_at=NULL "
-                                  "WHERE ref=? AND state='claimed'", ("open:t%d" % t["id"],))
+        # else: nothing here. A dead claim is reset by _reset_stale_claims, which checks the
+        # CLAIM's age — resetting by the ticket's age could steal another copy's live claim.
     # lost channels — and "couldn't check" is NEVER "deleted"
     for t in await run(db.live_tickets):
         if t["state"] != "open" or not t.get("channel_id"):
@@ -324,8 +351,8 @@ async def reconcile(port, now, run=_direct, c=None):
         try:
             exists = await port.channel_exists(t["channel_id"])
         except Exception as e:
-            print("[permits] channel check failed — no change this tick:", e)
-            return
+            print("[permits] channel check failed — this ticket unchanged this tick:", e)
+            continue
         if exists is False:
             await run(_mark_lost, t)
 
@@ -373,15 +400,29 @@ def _open_payload(tid, now, c):
 
 
 def _mark_open(tid, res, how="created", now=None):
+    """Record the room. ONLY an `opening` ticket becomes `open`: if it was renewed / cancelled /
+    corrected while Discord was making the room, the ticket stays closed and the late room is
+    closed too — a decision already taken is never undone by a slow channel create."""
+    cid, mid = str(res["channel_id"]), str(res.get("card_msg_id") or "")
     with db.transaction() as cx:
-        db.update_ticket(tid, cx=cx, state="open", channel_id=str(res["channel_id"]),
-                         card_msg_id=str(res.get("card_msg_id") or ""), last_error="")
+        n = cx.execute("UPDATE permits_tickets SET state='open', channel_id=?, card_msg_id=?, last_error='' "
+                       "WHERE id=? AND state='opening'", (cid, mid, int(tid))).rowcount
         if how != "created":                      # adopted outside the drain's own claim
             cx.execute("UPDATE permits_outbox SET state='done', done_at=? WHERE ref=?",
                        (_utc(now or _now()), "open:t%d" % tid))
         t = cx.execute("SELECT permit_id FROM permits_tickets WHERE id=?", (tid,)).fetchone()
-        db.log_event("ticket_opened" if how == "created" else "ticket_adopted", t["permit_id"], tid,
-                     {"channel_id": str(res["channel_id"]), "how": how}, cx=cx)
+        if n == 1:
+            db.log_event("ticket_opened" if how == "created" else "ticket_adopted", t["permit_id"], tid,
+                         {"channel_id": cid, "how": how}, cx=cx)
+            return
+        cx.execute("UPDATE permits_tickets SET channel_id=?, card_msg_id=? WHERE id=?", (cid, mid, int(tid)))
+        close = cx.execute("SELECT state, payload_json FROM permits_outbox WHERE ref=?",
+                           ("close:t%d" % tid,)).fetchone()
+        if close is None or close["state"] == "done":   # its close already ran with no room to close
+            note = (json.loads(close["payload_json"] or "{}").get("note") if close else "") or \
+                "🔒 هذي التذكرة انقفلت قبل ما تجهز الروم — ما تحتاج شي."
+            db.enqueue("close_ticket", "close-late:t%d" % tid, {"ticket_id": int(tid), "note": note}, cx=cx)
+        db.log_event("ticket_room_late", t["permit_id"] if t else None, tid, {"channel_id": cid}, cx=cx)
 
 
 async def _adopt(port, tid, cid, now, c, run, how):
@@ -399,7 +440,7 @@ def _reminder_payload(tid, now, c):
     if not t or t["state"] != "open" or not t.get("channel_id"):
         return None
     p = db.permit(t["permit_id"])
-    if not p:
+    if not p or p["status"] != "active":
         return None
     d = engine.describe(p, _riyadh_day(now), c)
     rname, rid = responsible(p)
@@ -421,10 +462,6 @@ def build_digest(now, c=None):
         r["ticket"] = live.get(p["id"])
         r["resp_name"], r["resp_id"] = responsible(p)
         rows.append(r)
-    problems = []
-    for o in db.outbox_rows("failed"):
-        if o["kind"] == "open_ticket":
-            problems.append({"tid": json.loads(o["payload_json"]).get("ticket_id"), "error": o["last_error"]})
     yday = (datetime.date.fromisoformat(today) - datetime.timedelta(days=1)).isoformat()
     renewed = []
     for e in db.q("SELECT * FROM permits_events WHERE kind='renewed' ORDER BY id DESC LIMIT 200"):
@@ -434,7 +471,7 @@ def build_digest(now, c=None):
         p = db.permit(e["permit_id"]) or {}
         renewed.append({"permit_type": p.get("permit_type"), "unit_name": engine.unit_label(p, unit_name(p, lmap)),
                         "by": e.get("actor")})
-    return engine.digest_messages(rows, today, c, problems=problems, renewed=renewed, mode=effective_mode(c))
+    return engine.digest_messages(rows, today, c, problems=problems(), renewed=renewed, mode=effective_mode(c))
 
 
 def _set_digest_latch(date):
@@ -456,6 +493,8 @@ async def _execute(row, port, now, c, run):
         res = await port.create_ticket_channel(spec["name"], spec["topic"], spec["card"], spec["responsible_id"])
         await run(_mark_open, tid, res)
     elif kind == "reminder":
+        if payload.get("day") and payload["day"] != _riyadh_day(now):
+            return                                          # yesterday's nudge — today's has its own row
         spec = await run(_reminder_payload, payload["ticket_id"], now, c)
         if spec is None:
             return
@@ -468,8 +507,15 @@ async def _execute(row, port, now, c, run):
     elif kind == "post_note":
         await port.post(payload["channel_id"], payload.get("text") or "")
     elif kind == "digest":
+        if payload.get("date") and payload["date"] != _riyadh_day(now):
+            return                                          # a day late is a day too late: today's posts instead
         chunks, mentions = await run(build_digest, now, c)
-        await port.post_digest(chunks, mentions)
+        sent = int(payload.get("sent") or 0)      # parts already posted by an attempt that died half-way
+        for i in range(sent, len(chunks)):
+            await port.post_digest([chunks[i]], mentions)
+            payload["sent"] = i + 1
+            await run(db.execute, "UPDATE permits_outbox SET payload_json=? WHERE id=?",
+                      (json.dumps(payload, ensure_ascii=False), row["id"]))
         await run(_set_digest_latch, payload.get("date") or _riyadh_day(now))   # ONLY after success
     else:
         print("[permits] unknown outbox kind:", kind)
@@ -498,7 +544,7 @@ async def tick(port, now=None, c=None, run=None):
     request handler); tests pass nothing and everything runs inline."""
     run = run or _direct
     now = now or _now()
-    c = c or engine.cfg()
+    c = _cfg(c)
     out = {"mode": None}
     try:
         await run(db.set_setting, "last_tick_at", _utc(now))
@@ -532,6 +578,8 @@ async def tick(port, now=None, c=None, run=None):
             print("[permits] %s failed:" % name, e)
     try:
         out["drain"] = await drain_outbox(port, now, c, run)
+        # The heartbeat that matters in live mode: Discord was reachable and the queue was worked.
+        await run(db.set_setting, "last_discord_ok_at", _utc(now))
     except Exception as e:
         print("[permits] drain failed:", e)
     return out
@@ -667,8 +715,13 @@ def update(pid, patch, actor, today, reason=""):
             return _err("التكلفة لازم رقم", "cost must be a number")
     if "permit_type" in fields and not fields["permit_type"]:
         return _err("نوع التصريح مطلوب", "type is required")
+    if fields.get("doc_url") and not safe_url(fields["doc_url"]):
+        return _err("رابط المستند لازم يبدأ بـ https://", "doc_url must be https")
     end_changed = "end_date" in fields and fields["end_date"] != p.get("end_date")
     reason = str(reason or "").strip()
+    if end_changed and not fields.get("end_date") and db.live_ticket(p["id"]):
+        return _err("ما يصير تمسح تاريخ الانتهاء وتذكرته مفتوحة — صحّحه بتاريخ مقروء",
+                    "cannot clear the end date while its ticket is open")
     if end_changed and len(reason) < 3:
         return _err("تغيير تاريخ الانتهاء يحتاج سبب", "changing the end date needs a reason")
     if end_changed and p["status"] != "active":
@@ -682,7 +735,7 @@ def update(pid, patch, actor, today, reason=""):
             newp = dict(p, **fields)
             db.log_event("corrected", p["id"], None, {"old_end": p.get("end_date"), "new_end": fields.get("end_date"),
                                                       "reason": reason}, actor, cx=cx)
-            if not engine.should_open(newp, today, c):
+            if newp.get("end_date") and not engine.should_open(newp, today, c):
                 closed = _close_live_ticket(cx, p["id"], "corrected",
                                             engine.corrected_note(fields.get("end_date"), today, reason, actor), actor)
         else:
@@ -756,6 +809,12 @@ def ticket_details(tid, now=None):
     for e in db.events_for([x["id"] for x in db.chain(p["id"])], 10):
         pl = json.loads(e.get("payload_json") or "{}")
         extra = pl.get("reason") or pl.get("new_end") or pl.get("by") or ""
-        lines.append("• %s — %s%s" % (str(e.get("at") or "")[:16].replace("T", " "), e.get("kind"),
+        at_r = ""
+        try:
+            at_r = (datetime.datetime.fromisoformat(str(e.get("at"))[:19]) + datetime.timedelta(hours=3)) \
+                .strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            pass
+        lines.append("• %s — %s%s" % (at_r, e.get("kind"),
                                       (" · " + str(extra)) if extra else ""))
     return card, lines

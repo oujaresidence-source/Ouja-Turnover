@@ -20,6 +20,7 @@ class _Host:
     dashboard_url = None       # () -> 'https://…/dashboard#permits'  (optional)
     onb_reader = None          # () -> [onb_projects rows]   READ-ONLY (optional)
     state_dir = None           # str — where permits_docs/ lives (STATE_DIR)
+    escalate_default = None    # () -> [discord ids] pinged on EXPIRED when PERMITS_ESCALATE_IDS is empty
 
     def require(self, attr):
         v = getattr(self, attr, None)

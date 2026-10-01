@@ -132,6 +132,13 @@
     return T('باقي ' + nDays(d), nDays(d) + ' left');
   }
 
+  function riyadhTime(iso) {
+    var t = Date.parse(String(iso || '') + 'Z');
+    if (!isFinite(t)) return '';
+    try { return new Date(t).toLocaleString(L === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    catch (_) { return String(iso).replace('T', ' ').slice(0, 16) + ' UTC'; }
+  }
+
   function ago(iso) {
     if (!iso) return null;
     var t = Date.parse(iso + (/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? '' : 'Z'));
@@ -192,10 +199,12 @@
 
   function renderTop(d) {
     var m = d.mode || {}, h = '';
-    var mins = ago(d.last_tick_at);
+    var live = (m.mode === 'live');
+    var mins = ago(live ? d.last_discord_ok_at : d.last_tick_at);
     var stale = mins === null || mins > 30;
     var beat = '<span class="pm-beat' + (stale ? ' stale' : '') + '"><span class="pm-dot ' + (stale ? 'expired' : 'ok') + '"></span>'
-      + esc(mins === null ? T('ما صار فحص للحين', 'No check yet') : T('آخر فحص: قبل ' + mins + ' دقيقة', 'Last check: ' + mins + ' min ago'))
+      + esc(mins === null ? (live ? T('ما وصلنا ديسكورد للحين', 'Discord not reached yet') : T('ما صار فحص للحين', 'No check yet'))
+        : (live ? T('آخر وصول لديسكورد: قبل ' + mins + ' دقيقة', 'Discord last reached ' + mins + ' min ago') : T('آخر فحص: قبل ' + mins + ' دقيقة', 'Last check: ' + mins + ' min ago')))
       + (stale && mins !== null ? esc(T(' — المراقب متوقف؟', ' — is the watcher down?')) : '') + '</span>';
     if (m.forced) {
       h += '<div class="pm-banner forced"><div class="t">' + esc(T('التنبيهات موقوفة من Railway (PERMITS_FORCE_DRY=1)', 'Alerts forced off from Railway (PERMITS_FORCE_DRY=1)')) + '</div>'
@@ -219,6 +228,11 @@
         + beat
         + (d.is_admin ? '<button class="btn ghost sm" data-pa="godry">' + esc(T('رجّعها وضع التجربة', 'Back to dry mode')) + '</button>' : '')
         + '</div>';
+    }
+    var pr = arr(d.problems);
+    if (pr.length) {
+      h += '<div class="pm-err"><b>' + esc(T('مشاكل بالإرسال لديسكورد (تُعاد المحاولة تلقائياً):', 'Discord delivery problems (retrying automatically):')) + '</b> '
+        + pr.slice(0, 5).map(function (x) { return esc((x.tid ? '#' + String(x.tid).padStart(3, '0') + ' ' : '') + x.error); }).join(' · ') + '</div>';
     }
     putHtml('pmTop', h);
   }
@@ -402,7 +416,7 @@
     Object.keys(ex).forEach(function (k) { h += kv(k, esc(ex[k])); });
     h += '</div>';
     h += '<div class="pm-row-actions">';
-    if (p.doc_url) h += '<a class="btn ghost sm" href="' + esc(p.doc_url) + '" target="_blank" rel="noopener">' + esc(T('افتح التصريح', 'Open the permit')) + '</a>';
+    if (/^https:\/\//i.test(p.doc_url || '')) h += '<a class="btn ghost sm" href="' + esc(p.doc_url) + '" target="_blank" rel="noopener">' + esc(T('افتح التصريح', 'Open the permit')) + '</a>';
     if (p.has_doc) h += '<button class="btn ghost sm" data-pa="doc">' + esc(T('المستند المرفوع', 'Uploaded document')) + '</button>';
     var t = row.ticket;
     if (t && t.url) h += '<a class="btn ghost sm" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(T('افتح التذكرة #', 'Open ticket #') + String(t.id).padStart(3, '0')) + '</a>';
@@ -432,7 +446,7 @@
       evs.slice(0, 30).forEach(function (e) {
         var lb = EV[e.kind] || [e.kind, e.kind];
         var extra = e.payload && (e.payload.reason || e.payload.note || e.payload.new_end || e.payload.mode || '');
-        h += '<div class="pm-ev">' + esc(T(lb[0], lb[1])) + (extra ? ' — ' + esc(extra) : '') + '<div class="w">' + esc((e.at || '').replace('T', ' ').slice(0, 16) + ' UTC · ' + (e.actor || '')) + '</div></div>';
+        h += '<div class="pm-ev">' + esc(T(lb[0], lb[1])) + (extra ? ' — ' + esc(extra) : '') + '<div class="w">' + esc(riyadhTime(e.at) + ' · ' + (e.actor || '')) + '</div></div>';
       });
     }
     setDrawerBody(h);

@@ -192,6 +192,9 @@ def parse(data, filename, default_type=None, default_issuer=""):
                 t = _cell_text(v)
                 row["serial"] = int(float(t)) if re.fullmatch(r"\d+(\.0+)?", t) else None
                 continue
+            if fld == "permit_no":                # a 10-digit CR number is a permit number, not an ID
+                row[fld] = _cell_text(v)
+                continue
             if fld:
                 row[fld] = mask_ids(_cell_text(v))
                 continue
@@ -333,6 +336,15 @@ def commit(preview, actor, source="import", decisions=None, extra_fields=None):
                 old = db.q1("SELECT * FROM permits_permits WHERE id=?", (r["exists_id"],))
                 patch = {k: v for k, v in data.items() if v not in (None, "", [], {})
                          and k not in ("source", "review_issues", "extra_json")}
+                # An unreadable date in the new file NEVER replaces a readable one (it would close
+                # the live ticket as "corrected" with nothing to reopen it).
+                for side in ("end", "start"):
+                    if not data.get(side + "_date"):
+                        for k in (side + "_date_raw",) + (("needs_data", "date_issue") if side == "end" else ()):
+                            patch.pop(k, None)
+                if (old or {}).get("listing_link_kind") == "manual":   # a person's link outranks a file
+                    patch.pop("listing_id", None)
+                    patch.pop("listing_link_kind", None)
                 db.update_permit(r["exists_id"], patch, actor, cx=cx)
                 db.log_event("import_update", r["exists_id"], payload={
                     "source_ref": r.get("source_ref"), "old_end": (old or {}).get("end_date"),

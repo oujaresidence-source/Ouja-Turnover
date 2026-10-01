@@ -143,6 +143,26 @@ class TestNothingDropped(DbCase):
         self.assertEqual(db.count_permits(), 1)
 
 
+class TestReviewFixes(DbCase):
+
+    def test_a_ten_digit_permit_number_is_kept_whole(self):
+        cr = "1" + "0" * 5 + "3456"          # a commercial-registration-shaped number
+        p = importer.parse(csv_bytes([["الشقة", "رقم التصريح", "تاريخ الانتهاء"], ["A", cr, "2026-12-01"]]), "x.csv")
+        self.assertEqual(p["rows"][0]["permit_no"], cr)
+
+    def test_a_manual_link_survives_an_update_import(self):
+        importer.commit(importer.parse(csv_bytes([["الشقة", "رقم التصريح", "تاريخ الانتهاء"],
+                                                  ["A", "77", "2026-12-01"]]), "a.csv"), "t")
+        pid = db.permits("active")[0]["id"]
+        db.update_permit(pid, {"listing_id": 5, "listing_link_kind": "manual"})
+        pv = importer.from_onboarding(lambda: [{"id": 1, "unit_name": "A", "listing_id": 9,
+                                                "license_no": "77", "license_expiry": "2027-12-01"}])
+        importer.mark_existing(pv)
+        importer.commit(pv, "t", decisions={pv["rows"][0]["row_index"]: "update"})
+        p = db.permit(pid)
+        self.assertEqual((p["listing_id"], p["listing_link_kind"], p["end_date"]), (5, "manual", "2027-12-01"))
+
+
 class TestDatesAndColumns(DbCase):
 
     def test_ambiguous_is_flagged_in_the_preview(self):

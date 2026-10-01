@@ -118,7 +118,8 @@ def core_list(now=None, role="viewer"):
     rows = sorted((_row(p, today, c, lmap, live) for p in db.permits("active")), key=_sort_key)
     s = service.summary(now, c)
     out = {"ok": True, "today": today, "rows": rows, "counts": s["counts"], "mode": s["mode"],
-           "last_tick_at": s["last_tick_at"], "lead_days": c["lead_days"], "headsup_days": c["headsup_days"],
+           "last_tick_at": s["last_tick_at"], "last_discord_ok_at": s["last_discord_ok_at"],
+           "problems": s["problems"], "lead_days": c["lead_days"], "headsup_days": c["headsup_days"],
            "can_edit": role in EDIT_ROLES, "is_admin": role == "admin",
            "type_suggestions": engine.TYPE_SUGGESTIONS,
            "listings": sorted([{"id": k, "name": v.get("internal_name") or v.get("public_name") or ("#%s" % k)}
@@ -245,6 +246,8 @@ def core_create(b, actor, now=None):
         data[k + "_raw"] = dates.clean_text(raw)
         if k == "end_date":
             data["date_issue"] = pd["issue"]
+    if data.get("doc_url") and not service.safe_url(data["doc_url"]):
+        return 400, {"ok": False, "error_ar": "رابط المستند لازم يبدأ بـ https://", "error_en": "doc_url must be https"}
     lid = b.get("listing_id")
     if str(lid or "").strip().isdigit():
         data["listing_id"] = int(lid)
@@ -406,7 +409,8 @@ def core_import_commit(source, filename, data, default_type, decisions, actor, n
     for pid in out["ids"]:                        # an updated date may move a ticket out of its window
         p = db.permit(pid)
         lt = db.live_ticket(pid)
-        if p and lt and not engine.should_open(p, today, engine.cfg()):
+        if p and lt and p.get("end_date") and not p.get("needs_data") \
+                and not engine.should_open(p, today, engine.cfg()):
             with db.transaction() as cx:
                 service._close_live_ticket(cx, pid, "corrected", engine.corrected_note(
                     p.get("end_date"), today, "تحديث من الاستيراد", actor), actor)

@@ -447,6 +447,15 @@ def ticket_card(permit, tid, today, c, unit_name="", responsible="", dashboard_u
 
 # ---------------- reminder + closing notes ----------------
 
+def riyadh_day_of_utc(iso):
+    """Stored timestamps are naive UTC; a person reads them as a Riyadh day (UTC+3, no DST)."""
+    try:
+        t = datetime.datetime.fromisoformat(str(iso)[:19])
+    except (TypeError, ValueError):
+        return str(iso or "")[:10]
+    return (t + datetime.timedelta(hours=3)).date().isoformat()
+
+
 def reminder_text(permit, ticket, today, c, unit_name="", mentions=""):
     p = describe(permit, today, c)
     unit = unit_label(p, unit_name)
@@ -465,7 +474,7 @@ def reminder_text(permit, ticket, today, c, unit_name="", mentions=""):
     lines = [((mentions + " ") if mentions else "") + body]
     t = ticket or {}
     if t.get("claimed_by"):
-        since = str(t.get("claimed_at") or "")[:10]
+        since = riyadh_day_of_utc(t["claimed_at"]) if t.get("claimed_at") else ""
         lines.append("✋ مستلمها **%s**%s — التذكير يستمر يومياً لين تتجدد."
                      % (t["claimed_by"], (" من " + since) if since else ""))
     else:
@@ -608,9 +617,13 @@ def digest_messages(rows, today, c, problems=(), renewed=(), mode="live"):
                                              else "تاريخ الانتهاء مو مسجّل"))
     if problems:
         lines += ["", "⚠️ مشاكل النظام"]
+        what = {"open_ticket": "فتح تذكرة", "reminder": "تذكير تذكرة", "close_ticket": "إقفال تذكرة",
+                "post_note": "رسالة في تذكرة", "digest": "التقرير اليومي"}
         for pr in problems:
-            lines.append("• فشل فتح تذكرة #%03d: %s — يُعاد المحاولة تلقائياً"
-                         % (int(pr.get("tid") or 0), _cut(pr.get("error") or "خطأ غير معروف", 200)))
+            label = what.get(pr.get("kind") or "open_ticket", "إرسال")
+            if pr.get("tid"):
+                label += " #%03d" % int(pr["tid"])
+            lines.append("• فشل %s: %s — يُعاد المحاولة تلقائياً" % (label, _cut(pr.get("error") or "خطأ غير معروف", 200)))
     if renewed:
         lines += ["", "✅ تجدّد أمس"]
         for rn in renewed:

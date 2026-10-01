@@ -48,6 +48,7 @@ class Case(unittest.TestCase):
         bdb.set_db_path_for_tests(os.path.join(self.tmp, "brain.db"))
         db.reset_init_cache()
         self._saved = (HOST.maint_assignee_for, HOST.listings, HOST.dashboard_url)
+        HOST.escalate_default = None
         HOST.maint_assignee_for = lambda lid: ("ناصر", "111")
         HOST.listings = lambda: [{"id": 501, "internal_name": "Ouja | F2", "public_name": "", "active": True}]
         HOST.dashboard_url = lambda: "https://ouja.example/dashboard#permits"
@@ -402,6 +403,146 @@ class DigestTest(Case):
         text = "\n".join(self.port.digests[-1][0])
         self.assertIn("✅ تجدّد أمس", text)
         self.assertIn("ناصر", text)
+
+
+class StaleDayTest(Case):
+    """A post that failed all of yesterday must not be retried TODAY next to today's own."""
+
+    def test_yesterdays_failed_digest_is_dropped_not_posted_today(self):
+        self.add("2026-12-05")
+        self.live()
+        self.port.fail_post = RuntimeError("503")
+        self.tick(at("2026-10-01", 13))
+        self.assertEqual(db.outbox("digest:2026-10-01")["state"], "failed")
+        self.port.fail_post = None
+        self.tick(at("2026-10-02", 13))
+        self.assertEqual(len(self.port.digests), 1)             # today's only
+        self.assertEqual(db.outbox("digest:2026-10-01")["state"], "done")
+        self.assertEqual(db.get_setting("digest_date"), "2026-10-02")
+
+    def test_yesterdays_failed_reminder_is_dropped(self):
+        pid = self.add("2026-10-09")
+        self.live()
+        self.tick(at("2026-09-30", 10))
+        t = self.tickets()[0]
+        self.port.fail_post = RuntimeError("503")
+        self.tick(at("2026-10-01", 13))
+        self.port.fail_post = None
+        self.tick(at("2026-10-02", 13))
+        texts = [m for m in self.port.messages(t["channel_id"]) if "text" in m]
+        self.assertEqual(len(texts), 1)
+        self.assertEqual(pid, t["permit_id"])
+
+
+class LateOpenTest(Case):
+    """Renewed while its channel was being created: the room must be closed, never reopened."""
+
+    def test_a_ticket_closed_mid_create_stays_closed_and_its_room_is_locked(self):
+        pid = self.add("2026-10-05")
+        self.live()
+        port = self.port
+        orig = port.create_ticket_channel
+
+        async def create_then_renew(name, topic, card, responsible_id=None):
+            res = await orig(name, topic, card, responsible_id)
+            r = service.renew(pid, "2027-10-05", "ناصر", "2026-10-01", proof=True, via="discord")
+            assert r["ok"], r
+            return res
+        port.create_ticket_channel = create_then_renew
+        self.tick(at("2026-10-01", 13))
+        t = self.tickets()[0]
+        self.assertEqual((t["state"], t["close_kind"]), ("closed", "renewed"))
+        self.assertTrue(t["channel_id"])
+        self.tick(at("2026-10-01", 13, 5))
+        ch = port.channels[t["channel_id"]]
+        self.assertTrue(ch["locked"])
+        self.assertTrue(ch["name"].startswith("مغلقة-"))
+        self.assertEqual([x["state"] for x in db.live_tickets()], [])
+
+
+class ReviewFixesTest(Case):
+    """Findings from the independent review (2026-10-01)."""
+
+    def open_one(self, end="2026-10-05"):
+        pid = self.add(end)
+        self.live()
+        self.tick(at("2026-10-01", 10))
+        return pid, self.tickets()[0]
+
+    def test_clearing_the_end_date_of_a_live_ticket_is_refused(self):
+        pid, t = self.open_one()
+        r = service.update(pid, {"end_date": ""}, "x", "2026-10-01", reason="مو متأكدين")
+        self.assertFalse(r["ok"])
+        self.assertEqual(db.ticket(t["id"])["state"], "open")
+        self.assertEqual(db.permit(pid)["end_date"], "2026-10-05")
+
+    def test_a_reimport_with_an_unreadable_date_never_closes_the_ticket(self):
+        from permits import importer
+        pid, t = self.open_one()
+        rows = "الشقة,رقم التصريح,تاريخ الانتهاء\nF2,50035533,غير واضح\n".encode("utf-8")
+        pv = importer.parse(rows, "again.csv")
+        importer.mark_existing(pv)
+        importer.commit(pv, "x", decisions={pv["rows"][0]["row_index"]: "update"})
+        p = db.permit(pid)
+        self.assertEqual((p["end_date"], p["needs_data"]), ("2026-10-05", 0))
+        self.tick(at("2026-10-01", 10, 5))
+        self.assertEqual(db.ticket(t["id"])["state"], "open")
+
+    def test_expired_escalates_to_the_maint_closers_when_the_env_is_empty(self):
+        HOST.escalate_default = lambda: [777, 888]
+        try:
+            pid, t = self.open_one("2026-10-02")
+            self.tick(at("2026-10-04", 13))
+            m = [x for x in self.port.messages(t["channel_id"]) if "text" in x][-1]
+            self.assertEqual(m["users"], ["111", "777", "888"])
+        finally:
+            HOST.escalate_default = None
+
+    def test_a_skipped_discord_pass_is_visible(self):
+        self.add("2026-12-05")
+        self.live()
+        self.tick(at("2026-10-01", 13), port=FakePort(ready=False))
+        s = service.summary(at("2026-10-01", 13))
+        self.assertTrue(s["last_tick_at"])
+        self.assertEqual(s["last_discord_ok_at"], "")
+        self.tick(at("2026-10-01", 13, 5))
+        self.assertTrue(service.summary(at("2026-10-01", 13, 5))["last_discord_ok_at"])
+
+    def test_a_digest_that_fails_half_way_does_not_repost_its_first_part(self):
+        for i in range(60):
+            self.add("2026-10-%02d" % (2 + i % 8), permit_no="9%04d" % i, notes="x" * 40)
+        self.live()
+        service.consume_golive_sweep()
+        port = self.port
+        sent = []
+
+        async def flaky(chunks, user_ids=()):
+            for c in chunks:
+                if len(sent) == 1 and not getattr(flaky, "failed", False):
+                    flaky.failed = True
+                    raise RuntimeError("503 on part 2")
+                sent.append(c)
+        port.post_digest = flaky
+        self.tick(at("2026-10-01", 13))
+        self.tick(at("2026-10-01", 13, 2))
+        self.assertGreater(len(sent), 2)
+        self.assertEqual(len(sent), len(set(sent)))             # no part posted twice
+        self.assertTrue(sent[0].startswith("📋 تقرير التصاريح اليومي"))
+        self.assertEqual(db.get_setting("digest_date"), "2026-10-01")
+
+    def test_failed_posts_show_as_problems(self):
+        _pid, t = self.open_one("2026-10-09")
+        self.port.fail_post = RuntimeError("Missing Access")
+        self.tick(at("2026-10-02", 13))
+        s = service.summary(at("2026-10-02", 13))
+        self.assertTrue(any("Missing Access" in p["error"] for p in s["problems"]))
+
+    def test_the_claim_date_is_riyadh_not_utc(self):
+        from permits import engine as eng
+        t = {"id": 3, "claimed_by": "فهد", "claimed_at": "2026-10-01T22:30:00"}   # 01:30 on the 2nd in Riyadh
+        txt = eng.reminder_text({"id": 1, "permit_type": "t", "end_date": "2026-10-09", "status": "active"},
+                                t, "2026-10-02", eng.cfg({}), "U")
+        self.assertIn("من 2026-10-02", txt)
 
 
 class RenewTest(Case):

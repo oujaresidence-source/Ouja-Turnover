@@ -72965,7 +72965,9 @@ def _permits_caps():
             "web": web, "tz": TZ, "now": now_riyadh, "web_thread": web_thread,
             "listings": _permits_listings, "guild_id": GUILD_ID, "maint_assignee_for": maint_assignee_for,
             "dashboard_url": lambda: _dispatch_base_url() + "/dashboard#permits",
-            "onb_reader": _permits_onb_reader, "state_dir": STATE_DIR}
+            "onb_reader": _permits_onb_reader, "state_dir": STATE_DIR,
+            # PERMITS_ESCALATE_IDS empty → an EXPIRED permit pings the maintenance closers
+            "escalate_default": _maint_close_ids}
 
 
 def _permits_ensure_wired():
@@ -73075,10 +73077,12 @@ class _PermitsDiscordPort:
                 print("[permits] rename failed (non-fatal):", e)
 
     async def post_digest(self, chunks, user_ids=()):
-        cat = await _tk_category(self.guild, "maint")
-        ch = await ensure_channel(self.guild, _permits.engine.cfg()["digest_channel"], cat)
+        # Found anywhere in the server by name; created with the 50-channel spill when missing —
+        # ensure_channel would swallow a "category full" error and the digest would never post.
+        name = _permits.engine.cfg()["digest_channel"]
+        ch = discord.utils.get(self.guild.text_channels, name=name)
         if ch is None:
-            raise RuntimeError("digest channel unavailable")
+            ch = await _make_channel_spill(self.guild, await _tk_category(self.guild, "maint"), name)
         for c in chunks:
             await ch.send(str(c)[:2000], allowed_mentions=_permits_allowed(user_ids, ()))
 
@@ -73123,6 +73127,21 @@ async def _permits_loop_ready():
     await bot.wait_until_ready()
 
 
+async def _permits_quick_proof(channel):
+    """A FAST version of _maint_has_proof for the button that must answer within Discord's 3 s:
+    one history page, time-boxed. A slow/failed read counts as "proof present" (the same
+    fail-open rule) — the confirm step re-checks with the full scan at the moment of saving."""
+    async def _scan():
+        async for m in channel.history(limit=50):
+            if m.attachments:
+                return True
+        return False
+    try:
+        return await asyncio.wait_for(_scan(), timeout=1.8)
+    except Exception:
+        return True
+
+
 def _permits_ticket_here(interaction):
     _permits_ensure_wired()
     return _permits.service.ticket_for_channel(interaction.channel_id,
@@ -73156,9 +73175,9 @@ class _PermitRenewConfirm(discord.ui.View):
             await interaction.edit_original_response(
                 content="📎 ما لقيت صورة أو PDF للتصريح المجدَّد في الروم — ارفعه وجرّب مرة ثانية.")
             return
-        r = _permits.service.renew(t["permit_id"], self.raw, _permits_who(interaction.user),
-                                   now_riyadh().date().isoformat(), new_no=self.new_no, notes=self.notes,
-                                   proof=True, via="discord")
+        r = await asyncio.to_thread(_permits.service.renew, t["permit_id"], self.raw, _permits_who(interaction.user),
+                                    now_riyadh().date().isoformat(), new_no=self.new_no, notes=self.notes,
+                                    proof=True, via="discord")
         if not r.get("ok"):
             await interaction.edit_original_response(content="⚠️ " + r.get("error_ar", "ما انحفظ"))
             return
@@ -73226,13 +73245,14 @@ class _PermitCancelModal(discord.ui.Modal, title="لن يُجدَّد — الس
         if not t:
             await interaction.response.send_message("ما لقيت التذكرة.", ephemeral=True)
             return
-        r = _permits.service.cancel(t["permit_id"], str(self.reason.value or ""),
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        r = await asyncio.to_thread(_permits.service.cancel, t["permit_id"], str(self.reason.value or ""),
                                     _permits_who(interaction.user),
                                     allowed=_maint_can_close(interaction.user))   # re-checked at submit
         if not r.get("ok"):
-            await interaction.response.send_message("⚠️ " + r.get("error_ar", "ما انحفظ"), ephemeral=True)
+            await interaction.followup.send("⚠️ " + r.get("error_ar", "ما انحفظ"), ephemeral=True)
             return
-        await interaction.response.send_message("🚫 انحفظ «لن يُجدَّد» — التذكرة تنقفل خلال لحظات.", ephemeral=True)
+        await interaction.followup.send("🚫 انحفظ «لن يُجدَّد» — التذكرة تنقفل خلال لحظات.", ephemeral=True)
         _permits_kick()
 
 
@@ -73259,17 +73279,17 @@ class PermitTicketView(discord.ui.View):
         if not t:
             return
         u = interaction.user
-        _permits.service.claim(t["id"], _permits_who(u), u.id, str(u))
         await interaction.response.send_message(
             "✋ %s استلم التذكرة — التذكير اليومي يستمر لين تتجدد." % u.mention,
             allowed_mentions=discord.AllowedMentions.none())
+        await asyncio.to_thread(_permits.service.claim, t["id"], _permits_who(u), u.id, str(u))
 
     @discord.ui.button(label="✅ تم التجديد", style=discord.ButtonStyle.success, custom_id="permit_renewed")
     async def renewed(self, interaction: discord.Interaction, button: discord.ui.Button):
         t = await self._open_ticket(interaction)
         if not t:
             return
-        if not await _maint_has_proof(interaction.channel):
+        if not await _permits_quick_proof(interaction.channel):
             await interaction.response.send_message(
                 "📎 ارفع صورة أو PDF للتصريح المجدَّد هنا في الروم أول، بعدين اضغط «✅ تم التجديد».",
                 ephemeral=True)
@@ -73294,11 +73314,12 @@ class PermitTicketView(discord.ui.View):
         if not t:
             await interaction.response.send_message("ما لقيت تذكرة التصريح لهذي الروم.", ephemeral=True)
             return
-        card, lines = _permits.service.ticket_details(t["id"])
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        card, lines = await asyncio.to_thread(_permits.service.ticket_details, t["id"])
         if not card:
-            await interaction.response.send_message("ما لقيت التصريح.", ephemeral=True)
+            await interaction.followup.send("ما لقيت التصريح.", ephemeral=True)
             return
-        await interaction.response.send_message(
+        await interaction.followup.send(
             content=("**آخر الأحداث:**\n" + ("\n".join(lines) or "—"))[:1900], embed=_permits_embed(card),
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
