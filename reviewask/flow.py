@@ -170,8 +170,8 @@ def plan_day(day, known=()):
         return out
     # 2026-10-03 lesson: the live bot held only the May CSV seed, so 50 of 82 apartments looked
     # weak and 60 rooms opened. No fresh review from Hostaway itself = no decision at all.
-    newest = engine.newest_live_review(revs)
     today = engine.parse_day(now().date())
+    newest = engine.newest_live_review(revs, today)
     if newest is None or (today - newest).days > config.fresh_days():
         out["error"] = ("ما وصلتني تقييمات جديدة من Hostaway (آخر تقييم: %s) — ما فتحت شي، "
                         "لأن الحسبة على بيانات قديمة تفتح غرف لشقق ما تحتاج." % (newest or "ولا واحد"))
@@ -1078,7 +1078,8 @@ def health():
             "weak_apartments": sum(1 for s in prog.values() if s.get("in_program")),
             "apartments": len(prog), "open_tickets": len(db.open_tickets()),
             "last_tick_at": db.setting("last_tick_at") or "",
-            "newest_live_review": str(engine.newest_live_review(revs) or ""),
+            "newest_live_review": str(engine.newest_live_review(revs, now().date()) or ""),
+            "with_reservation": audit["with_reservation"],
             "fresh_days": config.fresh_days(),
             "review_pull": _pull_status(),
             "purge_done": db.setting("purge_2026_10_03_done") == "1",

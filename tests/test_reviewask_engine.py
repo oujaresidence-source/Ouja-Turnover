@@ -148,6 +148,28 @@ class TestTypeAudit(unittest.TestCase):
         self.assertEqual(E.type_audit(revs)["unknown_types"], [])
 
 
+class TestFreshness(unittest.TestCase):
+    def test_only_scored_past_guest_reviews_from_hostaway(self):
+        today = datetime.date(2026, 10, 3)
+        live = rev(1, 10, "a")
+        live["date"] = "2026-09-20"
+        empty_future = rev(1, None, "b")                 # Hostaway's pre-created empty row
+        empty_future["date"] = "2027-02-23"
+        scored_future = rev(1, 10, "c")
+        scored_future["date"] = "2027-01-01"
+        host = rev(1, 10, "d", typ="host-to-guest")
+        host["date"] = "2026-10-02"
+        seed = rev(1, 10, "e", typ=None)
+        seed.pop("raw", None)
+        seed["date"] = "2026-10-02"
+        got = E.newest_live_review([live, empty_future, scored_future, host, seed], today)
+        self.assertEqual(got, datetime.date(2026, 9, 20))
+        self.assertIsNone(E.newest_live_review([empty_future, seed], today))
+
+    def test_audit_counts_reservation_links(self):
+        self.assertEqual(E.type_audit([rev(1, 10, "a"), rev(1, 10, None)])["with_reservation"], 1)
+
+
 class TestApartmentStatus(unittest.TestCase):
     def test_pins_override_and_both_numbers_shown(self):
         reviews = [rev(8, 10, str(i)) for i in range(5)]           # 5.0, computed OUT

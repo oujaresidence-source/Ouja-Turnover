@@ -216,7 +216,10 @@ def type_audit(reviews):
     A `type` that is neither a guest nor a host value means our filter does not understand the
     data: the caller must refuse to decide anything on it (fail closed)."""
     types, channels = {}, {}
+    with_res = 0
     for r in reviews or []:
+        if str((r or {}).get("reservation_id") or "").strip():
+            with_res += 1
         raw = (r or {}).get("raw") or {}
         t = raw.get("type") if isinstance(raw, dict) else None
         key = "(بدون نوع)" if t is None or str(t).strip() == "" else str(t).strip()
@@ -226,19 +229,24 @@ def type_audit(reviews):
     unknown = sorted(k for k in types if k != "(بدون نوع)"
                      and k.lower() not in GUEST_TYPES and k.lower() not in HOST_TYPES)
     return {"types": types, "channels": channels, "unknown_types": unknown,
-            "total": len(reviews or [])}
+            "total": len(reviews or []), "with_reservation": with_res}
 
 
-def newest_live_review(reviews):
-    """The newest review date that came from Hostaway itself (rows with `raw`), or None. The
-    shipped CSV seed has no `raw` and is months old — deciding on it alone is how 60 rooms
-    opened on 2026-10-03, so the flow refuses without fresh live data."""
+def newest_live_review(reviews, today=None):
+    """The newest date of a REAL guest review that came from Hostaway itself (rows with `raw`,
+    a score, guest-to-host), never after `today` — or None. The CSV seed has no `raw` and is
+    months old (the 2026-10-03 incident); Hostaway also pre-creates EMPTY review rows for every
+    booking, future ones included (seen live: 2027-02-23), so only scored, past rows count."""
     best = None
     for r in reviews or []:
         if not isinstance((r or {}).get("raw"), dict) or not r.get("raw"):
             continue
-        d = parse_day(r.get("date") or r["raw"].get("departureDate") or r["raw"].get("submittedAt"))
-        if d and (best is None or d > best):
+        if review_score(r) is None or not is_guest_review(r):
+            continue
+        d = parse_day(r.get("date") or r["raw"].get("submittedAt") or r["raw"].get("departureDate"))
+        if d is None or (today is not None and d > today):
+            continue
+        if best is None or d > best:
             best = d
     return best
 

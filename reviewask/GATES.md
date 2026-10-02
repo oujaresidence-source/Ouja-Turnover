@@ -64,8 +64,8 @@ Scope: the owner-approved Review Push (spec 2026-10-03-review-push-design.md) �
   EXPECT: /SELFTEST PASSED/i
   EVIDENCE: automatic-evidence=v1; definition-sha256=1ab2c97f90d62b623d865a282d470c6db63915a8cc4593c7905fa6d2cd88a69a; exit=0; EXPECT=matched; output-sha256=882f634676dd095379208467579ed665f29c1871dc25f64b819eb1cd4087dcde; output-bytes=103; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
-- [ ] G12: live Hostaway review `type` / `channelName` values were printed and the guest-to-host + Airbnb filter in engine matches them (record the values here)
-  EVIDENCE: pending
+- [x] G12: live Hostaway review `type` / `channelName` values were printed and the guest-to-host + Airbnb filter in engine matches them (record the values here)
+  EVIDENCE: 2026-10-03 02:50 Riyadh, live GET /reviewask/health after the /v1/v1 pull fix (4b77dff): review_pull n=17186 pages=172 error='' ; types guest-to-host=8593, host-to-guest=8593, unknown=[] ; channelName Airbnb=17186 ; guest reviews with a real score=3101. Matches engine.GUEST_TYPES/HOST_TYPES + Airbnb filter. Measured by the bot itself (owner's terminal could not pass the key).
 
 - [ ] G13: owner dry run — with REVIEWASK_LIVE=0, /تقييمات-بكرة replied with the would-open list and skip reasons for tomorrow; owner confirmed the list looks right before /تقييمات-تشغيل
   EVIDENCE: pending
