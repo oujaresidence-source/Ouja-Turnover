@@ -95,7 +95,13 @@ def review_url():
 
 
 def open_at():
-    return _hhmm("REVIEWASK_OPEN_AT", "00:05")
+    """Owner ruling 2026-10-03: a checkout's room opens the EVENING BEFORE, at 20:00."""
+    return _hhmm("REVIEWASK_OPEN_AT", "20:00")
+
+
+def fresh_days():
+    """Refuse to open rooms unless Hostaway delivered a review dated within this many days."""
+    return _int("REVIEWASK_FRESH_DAYS", 30, 1)
 
 
 def report_every():

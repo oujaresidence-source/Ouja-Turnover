@@ -229,6 +229,20 @@ def type_audit(reviews):
             "total": len(reviews or [])}
 
 
+def newest_live_review(reviews):
+    """The newest review date that came from Hostaway itself (rows with `raw`), or None. The
+    shipped CSV seed has no `raw` and is months old — deciding on it alone is how 60 rooms
+    opened on 2026-10-03, so the flow refuses without fresh live data."""
+    best = None
+    for r in reviews or []:
+        if not isinstance((r or {}).get("raw"), dict) or not r.get("raw"):
+            continue
+        d = parse_day(r.get("date") or r["raw"].get("departureDate") or r["raw"].get("submittedAt"))
+        if d and (best is None or d > best):
+            best = d
+    return best
+
+
 def counted_reviews(reviews):
     """Guest-to-host Airbnb reviews with a real score, one per reservation (a live Hostaway row
     beats the CSV seed copy of the same stay)."""

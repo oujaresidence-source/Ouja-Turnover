@@ -4747,12 +4747,14 @@ def _category_family(guild, category):
             fam.append(cat)
     return fam
 
-async def _make_channel_spill(guild, category, name, topic=None):
+async def _make_channel_spill(guild, category, name, topic=None, overwrites=None):
     """guild.create_text_channel that survives the 50-channel category cap by
     spilling into overflow categories («<name> ٢» …). Any other Discord error
-    bubbles up so the caller can surface the REAL reason (M6)."""
+    bubbles up so the caller can surface the REAL reason (M6). `overwrites` (optional, «رفع
+    التقييم» private rooms) is passed through unchanged; every older caller passes none."""
+    extra = {"overwrites": overwrites} if overwrites is not None else {}
     try:
-        return await guild.create_text_channel(name, category=category, topic=topic)
+        return await guild.create_text_channel(name, category=category, topic=topic, **extra)
     except discord.HTTPException as e:
         if not _tk_category_full(e):
             raise
@@ -4766,13 +4768,13 @@ async def _make_channel_spill(guild, category, name, topic=None):
             cat = await (guild.create_category(oname, overwrites=ow) if ow
                          else guild.create_category(oname))
         try:
-            return await guild.create_text_channel(name, category=cat, topic=topic)
+            return await guild.create_text_channel(name, category=cat, topic=topic, **extra)
         except discord.HTTPException as e:
             if _tk_category_full(e):
                 continue          # this overflow is full too — try the next one
             raise
     # every overflow category is also full — last resort: guild root (no category)
-    return await guild.create_text_channel(name, topic=topic)
+    return await guild.create_text_channel(name, topic=topic, **extra)
 
 async def _turnover_create_failed_alert(guild, unit, err):
     """M6: a cleaner who never gets their channel is INVISIBLE if we only
@@ -9671,30 +9673,60 @@ def _rv_find_category(guild):
     return next((c for c in guild.categories if _tk_cat_norm(c.name) == want), None)
 
 
+_RV_SEE = dict(view_channel=True, send_messages=True, read_message_history=True,
+               attach_files=True, embed_links=True)
+
+
+def _rv_private_overwrites(guild, member=None):
+    """Owner ruling 2026-10-03: a review room is seen by the responsible manager, admins and the
+    bot ONLY. @everyone is denied; Administrator roles see it anyway (Discord rule). The bot's
+    own overwrite never carries manage_* bits (only a guild admin may write those — tidy trap)."""
+    ow = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+    if getattr(guild, "me", None) is not None:
+        ow[guild.me] = discord.PermissionOverwrite(**_RV_SEE)
+    if member is not None:
+        ow[member] = discord.PermissionOverwrite(**_RV_SEE)
+    return ow
+
+
+async def _rv_member(guild, member_id):
+    if not str(member_id or "").isdigit():
+        return None
+    try:
+        return guild.get_member(int(member_id)) or await guild.fetch_member(int(member_id))
+    except Exception as e:
+        print("[reviewask] responsible member not found:", member_id, e)
+        return None
+
+
 async def _rv_category(guild):
-    """«طلبات التقييم» — born with the maintenance category's overwrites (the ops department
-    sees ticket rooms), never wider. Manage-permission bits are dropped: only a guild
-    Administrator may write them into an overwrite (the !ouja-tidy 403 trap)."""
+    """«طلبات التقييم» — private: hidden from @everyone, visible to the bot (admins always see)."""
     cat = _rv_find_category(guild)
     if cat is not None:
         return cat
-    parent = await _tk_category(guild, "maint")
-    ow = {}
-    for target, perm in dict(getattr(parent, "overwrites", None) or {}).items():
-        keep = {k: v for k, v in perm if v is not None
-                and k not in ("manage_permissions", "manage_roles", "manage_channels")}
-        ow[target] = discord.PermissionOverwrite(**keep)
-    name = _reviewask.config.category()
-    return await (guild.create_category(name, overwrites=ow) if ow else guild.create_category(name))
+    return await guild.create_category(_reviewask.config.category(),
+                                       overwrites=_rv_private_overwrites(guild))
 
 
-async def _rv_open_room(name, topic):
+async def _rv_open_room(name, topic, member_id=""):
+    """The room carries its OWN overwrites (not the category's), so a category that still has the
+    old team-wide permissions can never leak a room to the whole Operation team."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         raise RuntimeError("guild not ready")
     cat = await _rv_category(guild)
-    ch = await _make_channel_spill(guild, cat, name, topic)   # 50-per-category cap → «… ٢»
+    member = await _rv_member(guild, member_id)
+    ch = await _make_channel_spill(guild, cat, name, topic,
+                                   overwrites=_rv_private_overwrites(guild, member))
     return str(ch.id)
+
+
+async def _rv_grant(channel_id, member_id):
+    """The call on day+1 can belong to another manager: let them see this one room."""
+    ch = await _cw_channel(channel_id)
+    member = await _rv_member(ch.guild, member_id)
+    if member is not None:
+        await ch.set_permissions(member, overwrite=discord.PermissionOverwrite(**_RV_SEE))
 
 
 def _rv_known_rooms():
@@ -9825,6 +9857,8 @@ def _rv_wire():
         "guest_links": guest_conversation_links,
         "listings": lambda: dict(get_listings_map() or {}),
         "open_room": _rv_open_room,
+        "grant": _rv_grant,
+        "reviews_status": lambda: dict(_reviews_fetch_status),
         "known_rooms": _rv_known_rooms,
         "post": _rv_post,
         "edit": _rv_edit,
@@ -10065,6 +10099,11 @@ async def reviewask_loop():
     await bot.wait_until_ready()
     try:
         _rv_ready()
+        try:
+            # the owner-approved removal of the 60 rooms opened by mistake (runs while OFF)
+            await _reviewask.flow.maybe_purge_mistake()
+        except Exception as e:
+            print("[reviewask] mistake purge error:", e)
         if not await _reviewask.flow.run_blocking(_reviewask.flow.live):
             return
         rep = await _reviewask.flow.tick()
@@ -17419,6 +17458,9 @@ def _ticket_from_escalation(esc_id, esc):
         created_by="bot",
     )
 
+_reviews_fetch_status = {"at": "", "n": 0, "pages": 0, "error": ""}   # last pull — counts only
+
+
 def fetch_reviews_from_hostaway(limit=20000, page_size=100):
     """Pull recent reviews from Hostaway across all listings. Returns list of
     normalised review dicts (newest first). Default cap is 20k — effectively
@@ -17426,6 +17468,7 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
     has ~14.6k reviews on disk so this comfortably covers every published one."""
     out = []
     offset = 0
+    pages, err = 0, ""
     while len(out) < limit:
         batch_size = min(page_size, limit - len(out))
         try:
@@ -17433,9 +17476,13 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
                                                "sortOrder": "departureDate:desc"})
         except Exception as e:
             print("fetch_reviews_from_hostaway error:", e)
+            err = ("%s: %s" % (type(e).__name__, e))[:160]
             break
+        pages += 1
         rows = (j or {}).get("result") or []
         if not rows:
+            if isinstance(j, dict) and j.get("status") not in (None, "success"):
+                err = ("hostaway %s: %s" % (j.get("status"), j.get("message") or ""))[:160]
             break
         for r in rows:
             rid = str(r.get("id") or "")
@@ -17467,6 +17514,8 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
         if len(rows) < batch_size:
             break
         offset += batch_size
+    _reviews_fetch_status.update({"at": datetime.now(TZ).isoformat(timespec="seconds"),
+                                  "n": len(out), "pages": pages, "error": err})
     return out
 
 def refresh_reviews():

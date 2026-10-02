@@ -19,6 +19,7 @@ class _Host:
     departures = None
     reservation = None       # (res_id) -> same shape | None (None = could not read)
     reviews = None           # () -> [normalised review dicts] (bot.py's _reviews, in memory)
+    reviews_status = None    # () -> {at, n, error}   bot.py's last Hostaway review pull
     open_ticket_counts = None  # () -> {lid: open maintenance tickets}
     maint_tickets = None     # (lid) -> [{created_at, closed_at}]   Discord + dashboard tickets
     has_recovery = None      # (res_id) -> bool   a recovery ticket exists for the stay
@@ -28,7 +29,9 @@ class _Host:
     listings = None          # () -> {lid: name}
 
     # --- Discord (coroutines) ---
-    open_room = None         # async (name, topic) -> channel id   «طلبات التقييم» + spill
+    open_room = None         # async (name, topic, member_id) -> channel id   «طلبات التقييم» + spill;
+                             #   PRIVATE: @everyone denied, only member_id (+ admins + the bot) sees it
+    grant = None             # async (channel_id, member_id)   let one more manager see a room
     known_rooms = None       # () -> {res_id: channel_id}   topics across the category family
     post = None              # async (channel_id, text=None, embed=None, buttons=None,
                              #        mentions=True) -> message id | None

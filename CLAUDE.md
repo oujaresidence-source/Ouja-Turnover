@@ -431,11 +431,20 @@ Owner-approved 2026-10-03 (spec: `docs/superpowers/specs/2026-10-03-review-push-
 above 4.75 on Airbnb. Every checkout from a weak apartment gets its own Discord ROOM under «طلبات
 التقييم» (spills «… ٢»), topic `ouja-rv:<res_id> lid:<lid> seq:<n>`; a WhatsApp step on checkout
 day and a call the next evening; every press recorded against the presser; the review closes it.
-**ON by default since 2026-10-03 01:30** (owner ruling «شغل البوت بدون ما اسوي شي» — it first shipped
-OFF); `/reviews-stop` (stored switch) still wins. `GET /reviewask/health` (PUBLIC, counts only — no
-names/phones) shows the switch, review `type`/channel counts, weak apartments, open tickets and the
-last tick: use it to verify the live filter instead of asking him for a Hostaway key. A review
-`type` that is neither guest-to-host nor host-to-guest makes `plan_day` REFUSE to open anything.
+**OFF until `/reviews-start`.** INCIDENT 2026-10-03 01:48: a default-ON push opened **60 rooms**
+because the live bot held ONLY the May CSV seed (2,473 reviews, no `raw`) — Hostaway's review pull
+had never landed — so 50 of 82 apartments looked weak, plus a «yesterday» catch-up and care-mode
+rooms, all visible to the whole Operation team. Rolled back to OFF; the owner approved deleting
+those 60 (`flow.maybe_purge_mistake`, window 01:00–02:30, latched `purge_2026_10_03_done`, same
+fence as the sweep). Owner rulings after it: **weak apartments ONLY** (no care-mode rooms),
+**rooms open the evening before at 20:00** (`REVIEWASK_OPEN_AT`; today's are a catch-up only,
+never yesterday), **rooms PRIVATE** to the responsible manager + admins + bot (the room carries
+its own overwrites — `_rv_private_overwrites`; a later day's manager is added by `_rv_grant`).
+**Freshness lock:** `plan_day` refuses unless a review that came from Hostaway itself (`raw`) is
+dated within `REVIEWASK_FRESH_DAYS` (30) — and refuses on a review `type` it does not know.
+`GET /reviewask/health` (PUBLIC, counts only) shows switch, type/channel counts, newest live
+review, the last Hostaway review pull (`review_pull` = bot.py `_reviews_fetch_status`: at, n,
+pages, error) and purge progress — read it instead of asking the owner for a Hostaway key.
 - **THE OWNER RULES, absolute (spec §2 R1–R10):** rooms not threads; **button labels carry text
   only, never an emoji** (meaning = label + colour; embeds/guest text may keep emoji); a
   maintenance ticket from a call says «من مكالمة تقييم» + field «المصدر» linking the review room;
@@ -447,8 +456,8 @@ last tick: use it to verify the live filter instead of asking him for a Hostaway
   = in; `reviews_needed = 19n − 2R + 1`. **A 0 / empty / None score is not a review** (owner
   ruling 2026-10-03; the CSV seed has 143 of them) — not in R, not in n. Seed rows have no `type`
   → guest reviews; one review per reservation (live beats seed). Admin pins (`rv_overrides`)
-  win, both numbers shown. Care mode: a maintenance ticket open during the stay (or a recovery
-  ticket) gets a room whatever the rating — call first, «راضي» unlocks the WhatsApp step.
+  win, both numbers shown. Care mode (a maintenance ticket during the stay → a care call) still
+  exists in the engine but **no longer opens rooms** — owner ruling 2026-10-03: weak apartments only.
 - **State machine** (`engine.next_action` / `engine.press`, PURE, TDD-locked):
   `waiting → wa_due → wa_sent → call_due ⇄ call_retry` (+ `care_due`, `promised`); terminal
   `reviewed · promised_expired · declined · wrong_number · no_answer_final · complaint · expired ·
@@ -497,13 +506,13 @@ last tick: use it to verify the live filter instead of asking him for a Hostaway
 - **Zero backslashes in `reviewask/*.py`**; never `import bot`; never `to_thread(`; no money figure
   in any staff room. Tests: `tests/test_reviewask_{engine,flow,delete,bot,structure}.py` +
   `tests/test_ops_tidy_rules.py` (review rooms untouched).
-- Env (defaults correct): `REVIEWASK_ENABLED`(1), `REVIEWASK_LIVE`(**1** since 2026-10-03 — the stored switch wins),
+- Env (defaults correct): `REVIEWASK_ENABLED`(1), `REVIEWASK_LIVE`(0 — the stored switch wins), `REVIEWASK_FRESH_DAYS`(30),
   `REVIEWASK_THRESHOLD`(4.75), `REVIEWASK_MIN_REVIEWS`(3), `REVIEWASK_WA_AT`(17:00),
   `REVIEWASK_CALL_AT`(auto), `REVIEWASK_MAX_CALLS`(2), `REVIEWASK_WINDOW_DAYS`(14),
   `REVIEWASK_QUIET_FROM`/`TO`(22:00/13:00), `REVIEWASK_DELETE_AFTER_DAYS`(7),
   `REVIEWASK_CATEGORY`(طلبات التقييم), `REVIEWASK_BOARD_CHANNEL`(متابعة-التقييمات),
   `REVIEWASK_REVIEW_URL`(https://www.airbnb.com/users/reviews — if the phone test lands wrong, use
-  https://www.airbnb.com/trips), `REVIEWASK_RAMADAN`(empty), `REVIEWASK_OPEN_AT`(00:05),
+  https://www.airbnb.com/trips), `REVIEWASK_RAMADAN`(empty), `REVIEWASK_OPEN_AT`(20:00, the evening before),
   `REVIEWASK_LEAD_ROLES`(Managment), `REVIEWASK_REPORT_MIN`(30).
 
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps

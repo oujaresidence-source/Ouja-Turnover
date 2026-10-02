@@ -56,6 +56,7 @@ class Fake:
         self.recovery = set()
         self.dep_fail = False
         self.res_by_id = {}
+        self.granted = []
 
     # data
     def departures(self, start, end):
@@ -76,10 +77,13 @@ class Fake:
         return self.tickets_by_lid.get(lid, [])
 
     # discord
-    async def open_room(self, name, topic):
+    async def open_room(self, name, topic, member_id=""):
         self.next_id += 1
-        self.rooms[str(self.next_id)] = {"name": name, "topic": topic}
+        self.rooms[str(self.next_id)] = {"name": name, "topic": topic, "member": member_id}
         return str(self.next_id)
+
+    async def grant(self, channel_id, member_id):
+        self.granted.append((str(channel_id), str(member_id)))
 
     def known_rooms(self):
         out = {}
@@ -128,6 +132,8 @@ class Fake:
                                         ("https://www.airbnb.com/hosting/stay/ABC123", "airbnb")]
         HOST.listings = lambda: {1: "Ouja | Narjis 101", 2: "Ouja | Malqa 7", 3: "Ouja | Yasmin 3"}
         HOST.open_room = self.open_room
+        HOST.grant = self.grant
+        HOST.reviews_status = lambda: {"at": "2026-10-14T00:00:00+03:00", "n": 9, "error": ""}
         HOST.known_rooms = self.known_rooms
         HOST.post = self.post
         HOST.edit = self.edit
@@ -148,7 +154,7 @@ def dep(res_id, lid, day=D, status="new", channel="airbnb", phone="+966 50 111 2
 
 def weak_reviews(lid, n=4, raw=8):
     return [{"id": "w%s-%d" % (lid, i), "listing_id": lid, "rating_raw": raw,
-             "channel": "Airbnb", "reservation_id": "old%s-%d" % (lid, i),
+             "channel": "Airbnb", "reservation_id": "old%s-%d" % (lid, i), "date": "2026-10-01",
              "raw": {"type": "guest-to-host"}} for i in range(n)]
 
 
@@ -222,16 +228,51 @@ class TestOpening(Base):
         self.assertEqual(run(flow.tick(at(2026, 10, 14, 17, 0))), {"skipped": "off"})
         self.assertEqual(self.f.posts, [])
 
-    def test_card_is_silent_and_strong_care_stay_gets_a_room(self):
+    def test_card_is_silent_and_a_strong_apartment_never_gets_a_room(self):
+        # owner ruling 2026-10-03: weak apartments ONLY — a maintenance ticket during the stay
+        # no longer opens a room for a strong apartment
         self.f.tickets_by_lid[2] = [{"created_at": "2026-10-11T10:00:00+03:00", "closed_at": None}]
         rep = self.open_today()
-        self.assertEqual(sorted(o["res_id"] for o in rep["opened"]), ["501", "502"])
-        self.assertEqual(self.t("502")["mode"], "care")
+        self.assertEqual([o["res_id"] for o in rep["opened"]], ["501"])
+        self.assertIn("502", [s["res_id"] for s in rep["skipped"] if s["reason"] == "out_of_program"])
         for ch, _text, embed, buttons, mentions in self.f.posts:
             self.assertFalse(mentions)
             self.assertIsNone(buttons)
-        care_card = [p[2] for p in self.f.posts if p[2] and "Unit 2" in p[2]["title"]][0]
-        self.assertIn(texts.CARE_WARNING, str(care_card))
+
+    def test_room_is_private_to_the_responsible_manager(self):
+        self.open_today()
+        room = list(self.f.rooms.values())[0]
+        self.assertEqual(room["member"], "111")            # cover of the checkout day only
+
+    def test_the_next_days_manager_is_let_in(self):
+        self.open_today()
+        tid = self.t()["id"]
+        db.update_ticket(tid, {"state": engine.WA_SENT,
+                               "next_due_at": engine.iso(at(2026, 10, 15, 20, 0))})
+        run(flow.tick(at(2026, 10, 15, 20, 0)))             # call day → cover is نورة (222)
+        self.assertIn((self.t()["channel_id"], "222"), self.f.granted)
+
+    def test_no_fresh_hostaway_reviews_refuses_to_open(self):
+        for r in self.f.reviews:
+            r.pop("raw", None)                               # seed-only data (the 2026-10-03 case)
+        rep = self.open_today()
+        self.assertIn("ما وصلتني تقييمات جديدة", rep["error"])
+        self.assertEqual(self.f.rooms, {})
+        self.setUp()
+        for r in self.f.reviews:
+            r["date"] = "2026-08-01"                         # live, but stale (> 30 days)
+        rep = self.open_today()
+        self.assertTrue(rep["error"])
+        self.assertEqual(self.f.rooms, {})
+
+    def test_rooms_open_the_evening_before_never_for_yesterday(self):
+        self.f.deps = [dep(601, 1, day="2026-10-13"), dep(602, 1, day="2026-10-15")]
+        run(flow.tick(at(2026, 10, 14, 19, 59)))
+        self.assertEqual(self.f.rooms, {})                   # yesterday is never opened
+        run(flow.tick(at(2026, 10, 14, 20, 0)))
+        topics = [r["topic"] for r in self.f.rooms.values()]
+        self.assertEqual(len(topics), 1)
+        self.assertTrue(topics[0].startswith("ouja-rv:602 "))
 
     def test_already_reviewed_is_a_skip(self):
         self.f.reviews.append({"id": "x", "listing_id": 1, "rating_raw": 10, "channel": "Airbnb",
@@ -284,6 +325,8 @@ class TestOpening(Base):
         self.assertEqual(h["unknown_types"], [])
         self.assertEqual(h["open_tickets"], 1)
         self.assertTrue(h["last_tick_at"])
+        self.assertEqual(h["review_pull"]["n"], 9)
+        self.assertEqual(h["newest_live_review"], "2026-10-01")
         blob = json.dumps(h, ensure_ascii=False)
         for secret in ("Sara", "Unit 1", "501", "966", "Narjis"):
             self.assertNotIn(secret, blob)
@@ -415,9 +458,9 @@ class TestClockFlow(Base):
         self.assertEqual(self.t()["state"], engine.PROMISED_EXPIRED)
 
     def test_satisfied_opens_whatsapp_at_once(self):
-        self.f.tickets_by_lid[1] = [{"created_at": "2026-10-11T10:00:00+03:00", "closed_at": None}]
         self.open_today()
-        run(flow.tick(at(2026, 10, 14, 17, 0)))
+        db.update_ticket(self.t()["id"], {"mode": "care"})     # care rows are no longer opened,
+        run(flow.tick(at(2026, 10, 14, 17, 0)))               # but the engine path stays sound
         self.assertEqual(self.t()["state"], engine.CARE_DUE)
         run(flow.answer(self.t()["id"], "satisfied", "أصيل", "111", now_=at(2026, 10, 14, 18, 0)))
         self.assertEqual(self.t()["state"], engine.WA_DUE)

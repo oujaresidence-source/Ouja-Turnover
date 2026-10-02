@@ -192,6 +192,71 @@ class TestDeletes(Base):
         self.assertEqual(self.r.deleted, ["c13"])
 
 
+class TestMistakePurge(Base):
+    """2026-10-03: the owner approved deleting exactly the 60 rooms opened by the default-ON run
+    (created 01:00–02:30). Same fence as the sweep: stored id, matching topic, transcript first."""
+
+    def bad(self, res, cid, at="2026-10-03T01:48:50+03:00", state=engine.WAITING, topic=None):
+        _c, row = db.insert_ticket({"reservation_id": res, "lid": 1, "day": "2026-10-03",
+                                    "unit": "Ouja | A", "guest": "G", "state": state,
+                                    "channel_id": cid}, at=at)
+        self.r.rooms[cid] = topic if topic is not None else engine.topic(res, 1, row["id"])
+        return row
+
+    def purge(self):
+        async def _noop(*a, **k):
+            return True
+        HOST.edit = _noop
+        HOST.post = _noop
+        return run(flow.maybe_purge_mistake(NOW, pause=0))
+
+    def test_only_the_bad_run_is_voided_and_deleted(self):
+        a = self.bad("p1", "cp1")
+        b = self.bad("p2", "cp2", state=engine.WA_DUE)
+        keep_before = self.bad("p3", "cp3", at="2026-10-02T23:00:00+03:00")
+        keep_after = self.bad("p4", "cp4", at="2026-10-03T03:00:00+03:00")
+        self.purge()
+        self.assertEqual(sorted(self.r.deleted), ["cp1", "cp2"])
+        for row in (a, b):
+            t = db.ticket(row["id"])
+            self.assertEqual(t["state"], engine.VOID)
+            self.assertIn("بالغلط", t["close_note"])
+            self.assertIsNotNone(db.transcript(row["id"]))       # the record stays forever
+        for row in (keep_before, keep_after):
+            self.assertEqual(db.ticket(row["id"])["state"], engine.WAITING)
+        self.assertEqual(db.setting("purge_2026_10_03_done"), "1")
+        self.r.calls.clear()
+        self.purge()                                             # latched: never again
+        self.assertEqual(self.r.calls, [])
+
+    def test_wrong_topic_in_the_window_is_still_refused(self):
+        row = self.bad("p5", "cp5", topic="ouja-ticket:maint lid:1 seq:9")
+        self.purge()
+        self.assertEqual(self.r.deleted, [])
+        self.assertTrue(db.ticket(row["id"])["delete_note"].startswith("refused"))
+        self.assertEqual(db.setting("purge_2026_10_03_done"), "1")   # refused ≠ pending forever
+
+    def test_could_not_check_keeps_it_pending(self):
+        self.bad("p6", "cp6")
+        self.r.fail_info.add("cp6")
+        self.purge()
+        self.assertEqual(self.r.deleted, [])
+        self.assertNotEqual(db.setting("purge_2026_10_03_done"), "1")
+        self.r.fail_info.clear()
+        self.purge()
+        self.assertEqual(self.r.deleted, ["cp6"])
+
+    def test_more_than_one_batch(self):
+        for i in range(25):
+            self.bad("m%d" % i, "cm%d" % i)
+        self.purge()
+        self.assertEqual(len(self.r.deleted), 20)
+        self.assertNotEqual(db.setting("purge_2026_10_03_done"), "1")
+        self.purge()
+        self.assertEqual(len(self.r.deleted), 25)
+        self.assertEqual(db.setting("purge_2026_10_03_done"), "1")
+
+
 # The package logs with print(); the gate reads the LAST line of the combined output, so the
 # logs are captured here (unittest reports on stderr, untouched).
 _REAL_STDOUT = sys.stdout

@@ -288,6 +288,56 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(v.children[2].style, discord.ButtonStyle.link)
 
 
+class TestPrivateRooms(unittest.TestCase):
+    """Owner ruling 2026-10-03: a review room is seen by the responsible manager + admins + bot."""
+
+    class G:
+        def __init__(self):
+            self.default_role = "EVERYONE"
+            self.me = "BOT"
+            self.calls = []
+
+        async def create_text_channel(self, name, **kw):
+            self.calls.append(kw)
+            return type("Ch", (), {"id": 5})()
+
+    def test_old_spill_callers_pass_no_overwrites(self):
+        g = self.G()
+        asyncio.run(bot._make_channel_spill(g, "CAT", "n", "t"))
+        self.assertEqual(g.calls, [{"category": "CAT", "topic": "t"}])     # byte-for-byte the old call
+
+    def test_review_room_overwrites(self):
+        g = self.G()
+        ow = bot._rv_private_overwrites(g, "MEMBER")
+        self.assertEqual(set(ow), {"EVERYONE", "BOT", "MEMBER"})
+        self.assertFalse(ow["EVERYONE"].view_channel)
+        for who in ("BOT", "MEMBER"):
+            self.assertTrue(ow[who].view_channel)
+            self.assertTrue(ow[who].send_messages)
+            self.assertIsNone(ow[who].manage_permissions)                  # the tidy 403 trap
+            self.assertIsNone(ow[who].manage_channels)
+        asyncio.run(bot._make_channel_spill(g, "CAT", "n", "t", overwrites=ow))
+        self.assertIs(g.calls[0]["overwrites"], ow)
+
+    def test_no_member_means_nobody_but_admins_and_bot(self):
+        ow = bot._rv_private_overwrites(self.G(), None)
+        self.assertEqual(set(ow), {"EVERYONE", "BOT"})
+
+    def test_the_review_pull_is_recorded(self):
+        saved = bot.api_get
+        bot.api_get = lambda path, params=None: {"status": "fail", "message": "no access"}
+        try:
+            self.assertEqual(bot.fetch_reviews_from_hostaway(limit=10), [])
+        finally:
+            bot.api_get = saved
+        st = dict(bot._reviews_fetch_status)
+        self.assertEqual((st["n"], st["pages"]), (0, 1))
+        self.assertIn("no access", st["error"])
+        bot._rv_wire()
+        self.assertEqual(HOST.reviews_status()["error"], st["error"])
+        self.assertIsNotNone(HOST.grant)
+
+
 class TestReservationShape(unittest.TestCase):
     def test_departures_use_the_targeted_window(self):
         seen = {}

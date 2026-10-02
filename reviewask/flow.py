@@ -145,24 +145,6 @@ def departures(start_iso, end_iso, fresh=False):
     return rows
 
 
-def _care(res):
-    lid = res.get("lid")
-    reason = ""
-    try:
-        if HOST.maint_tickets and engine.care_from_tickets(
-                HOST.maint_tickets(lid) or [], res.get("arrival"), res.get("departure")):
-            reason = "maint"
-    except Exception as e:
-        print("[reviewask] maintenance lookup failed:", e)
-    if not reason and HOST.has_recovery:
-        try:
-            if HOST.has_recovery(res.get("res_id")):
-                reason = "recovery"
-        except Exception as e:
-            print("[reviewask] recovery lookup failed:", e)
-    return reason
-
-
 def plan_day(day, known=()):
     """BLOCKING. -> {day, eligible: [...], skipped: [...], error}. Every skip has a reason."""
     day = engine.parse_day(day).isoformat()
@@ -186,6 +168,14 @@ def plan_day(day, known=()):
         out["error"] = ("فيه نوع تقييم ما نعرفه (%s) — ما فتحت شي لين نراجع الفلتر."
                         % "، ".join(audit["unknown_types"][:5]))
         return out
+    # 2026-10-03 lesson: the live bot held only the May CSV seed, so 50 of 82 apartments looked
+    # weak and 60 rooms opened. No fresh review from Hostaway itself = no decision at all.
+    newest = engine.newest_live_review(revs)
+    today = engine.parse_day(now().date())
+    if newest is None or (today - newest).days > config.fresh_days():
+        out["error"] = ("ما وصلتني تقييمات جديدة من Hostaway (آخر تقييم: %s) — ما فتحت شي، "
+                        "لأن الحسبة على بيانات قديمة تفتح غرف لشقق ما تحتاج." % (newest or "ولا واحد"))
+        return out
     prog = program(revs)
     reviewed = {str(r.get("reservation_id")): r for r in engine.counted_reviews(revs)
                 if str(r.get("reservation_id") or "").strip()}
@@ -205,7 +195,7 @@ def plan_day(day, known=()):
         in_prog = st["in_program"] if st else engine.in_program(0, 0, config.threshold(),
                                                                 config.min_reviews())
         exists = res_id in known or db.by_reservation(res_id) is not None
-        care = _care(r) if lid is not None and not exists else ""
+        care = ""       # owner ruling 2026-10-03: weak apartments ONLY — no care-mode rooms
         mode, skip = engine.eligibility(dict(r, lid=lid), in_prog, bool(care), exists=exists)
         if mode and res_id in reviewed:
             mode, skip = None, "already_reviewed"
@@ -273,7 +263,9 @@ async def _open_one(it, by, now_):
             db.update_ticket(row["id"], cov)
         name = engine.room_name(row["unit"], row["guest"])
         topic = engine.topic(row["reservation_id"], row["lid"], row["id"])
-        ch = await HOST.require("open_room")(name, topic)
+        row = db.ticket(row["id"])
+        # PRIVATE: only the responsible manager (+ admins + the bot) sees the room (owner 2026-10-03)
+        ch = await HOST.require("open_room")(name, topic, _person(row.get("responsible_did")))
         if not ch:
             raise RuntimeError("no channel")
         db.update_ticket(row["id"], {"channel_id": str(ch)})
@@ -293,6 +285,22 @@ async def _open_one(it, by, now_):
                 pass
         print("[reviewask] room open failed (will retry):", it.get("res_id"), e)
         return "failed"
+
+
+def _person(did):
+    """A Discord user id, or '' for a role / nobody (a role would expose the room to a team)."""
+    did = str(did or "")
+    return did if did.isdigit() else ""
+
+
+async def _grant(row, did):
+    """Let a newly responsible manager see an existing room (the call on day+1 can be someone else)."""
+    if not (HOST.grant and row.get("channel_id") and _person(did)):
+        return
+    try:
+        await HOST.grant(row["channel_id"], _person(did))
+    except Exception as e:
+        print("[reviewask] could not add the responsible person to the room:", row.get("id"), e)
 
 
 async def _cover(row, day):
@@ -483,6 +491,8 @@ async def process(row, now_, c):
     fields = dict(act.get("fields") or {})
     if a in ("stage", "ping"):
         fields.update(await _cover(row, now_.date()))
+        if fields.get("responsible_did") and fields["responsible_did"] != row.get("responsible_did"):
+            await _grant(row, fields["responsible_did"])
     if a == "stage":
         moved, row2 = db.transition(tid, (row["state"],), fields, at=_iso(now_))
         if not moved:
@@ -598,19 +608,22 @@ async def tick(now_=None, force=False):
         db.set_setting("last_tick_at", _iso(now_))
         c = cfg()
         today = now_.date()
-        # 1) the 00:05 rule — anything missing for today (and yesterday, after downtime)
+        # 1) rooms open the EVENING BEFORE (20:00) for tomorrow's checkouts; today's are only a
+        #    catch-up for a room missed while the bot was down. Never yesterday (2026-10-03).
+        days = [today]
         if now_ >= engine.at_clock(today, config.open_at()):
-            for d in (today - datetime.timedelta(days=1), today):
-                key = "open_check:%s" % d.isoformat()
-                last = engine.parse_dt(db.setting(key))
-                if last and (now_ - last).total_seconds() < _OPEN_EVERY:
-                    continue
-                db.set_setting(key, _iso(now_))
-                try:
-                    r = await open_rooms(d, "النظام", dry=False, now_=now_)
-                    rep["opened"] += [it["res_id"] for it in r.get("opened") or []]
-                except Exception as e:
-                    print("[reviewask] catch-up open failed:", d, e)
+            days.append(today + datetime.timedelta(days=1))
+        for d in days:
+            key = "open_check:%s" % d.isoformat()
+            last = engine.parse_dt(db.setting(key))
+            if last and (now_ - last).total_seconds() < _OPEN_EVERY:
+                continue
+            db.set_setting(key, _iso(now_))
+            try:
+                r = await open_rooms(d, "النظام", dry=False, now_=now_)
+                rep["opened"] += [it["res_id"] for it in r.get("opened") or []]
+            except Exception as e:
+                print("[reviewask] catch-up open failed:", d, e)
         # 2) reviews that landed close their rooms
         try:
             got = await run_blocking(reviews_by_reservation)
@@ -957,7 +970,7 @@ async def maybe_sweep(now_):
     return await sweep_closed(now_)
 
 
-async def sweep_closed(now_=None, pause=1.0, limit=10):
+async def sweep_closed(now_=None, pause=1.0, limit=10, rows=None, ignore_age=False):
     """Deletes closed review rooms ≥ DELETE_AFTER_DAYS after closing — and nothing else.
     Order is the safety: fetch by the stored id → the topic must carry THIS reservation → the
     transcript is saved and read back → only then delete. 'Could not check' is never 'deleted'."""
@@ -965,12 +978,12 @@ async def sweep_closed(now_=None, pause=1.0, limit=10):
         now_ = now_ or now()
         cutoff = now_ - datetime.timedelta(days=config.delete_after_days())
         done = []
-        rows = db.due_for_sweep(_iso(cutoff), limit)
+        rows = db.due_for_sweep(_iso(cutoff), limit) if rows is None else list(rows)[:limit]
         for i, row in enumerate(rows):
-            if row.get("state") not in engine.TERMINAL:
+            if row.get("state") not in engine.TERMINAL or row.get("deleted_at"):
                 continue
             closed = engine.parse_dt(row.get("closed_at"))
-            if closed is None or closed > cutoff:
+            if closed is None or (closed > cutoff and not ignore_age):
                 continue
             tid, cid = row["id"], str(row.get("channel_id") or "")
             try:
@@ -1015,6 +1028,41 @@ async def sweep_closed(now_=None, pause=1.0, limit=10):
         return done
 
 
+# ------------------------------------------------------------------ the 2026-10-03 mistake (one-off)
+
+# The default-ON push opened 60 rooms at 01:48 on 2026-10-03 from stale review data. The owner
+# approved deleting exactly those (2026-10-03 ~02:05). Window = the bad run only.
+MISTAKE_FROM = "2026-10-03T01:00:00+03:00"
+MISTAKE_TO = "2026-10-03T02:30:00+03:00"
+MISTAKE_NOTE = "انفتحت بالغلط (بيانات تقييم قديمة) — حذف بموافقة المالك 2026-10-03"
+
+
+async def maybe_purge_mistake(now_=None, pause=1.0):
+    """Void every ticket created in the bad run, then delete its room through sweep_closed (the
+    same fence: stored id, matching topic, transcript first). Runs while switched OFF, a
+    batch per tick, until none is left; then latched."""
+    if db.setting("purge_2026_10_03_done") == "1":
+        return []
+    now_ = now_ or now()
+    rows = db.q("SELECT * FROM rv_tickets WHERE created_at>=? AND created_at<=? ORDER BY id",
+                (MISTAKE_FROM, MISTAKE_TO))
+    for r in rows:
+        if r.get("state") in engine.OPEN:
+            await close(r, engine.VOID, "النظام", MISTAKE_NOTE, now_)
+    todo = [r for r in db.q("SELECT * FROM rv_tickets WHERE created_at>=? AND created_at<=? "
+                            "AND deleted_at IS NULL AND channel_id IS NOT NULL AND channel_id<>'' "
+                            "AND (delete_note IS NULL OR delete_note NOT LIKE 'refused%%') ORDER BY id",
+                            (MISTAKE_FROM, MISTAKE_TO))]
+    done = await sweep_closed(now_, pause=pause, limit=20, rows=todo, ignore_age=True) if todo else []
+    left = db.q1("SELECT COUNT(*) AS n FROM rv_tickets WHERE created_at>=? AND created_at<=? "
+                 "AND deleted_at IS NULL AND channel_id IS NOT NULL AND channel_id<>'' "
+                 "AND (delete_note IS NULL OR delete_note NOT LIKE 'refused%%')",
+                 (MISTAKE_FROM, MISTAKE_TO))["n"]
+    if not left:
+        db.set_setting("purge_2026_10_03_done", "1", "النظام")
+    return done
+
+
 # ------------------------------------------------------------------ public health (counts only)
 
 def health():
@@ -1029,7 +1077,22 @@ def health():
             "counted": len(engine.counted_reviews(revs)),
             "weak_apartments": sum(1 for s in prog.values() if s.get("in_program")),
             "apartments": len(prog), "open_tickets": len(db.open_tickets()),
-            "last_tick_at": db.setting("last_tick_at") or ""}
+            "last_tick_at": db.setting("last_tick_at") or "",
+            "newest_live_review": str(engine.newest_live_review(revs) or ""),
+            "fresh_days": config.fresh_days(),
+            "review_pull": _pull_status(),
+            "purge_done": db.setting("purge_2026_10_03_done") == "1",
+            "deleted_rooms": db.q1("SELECT COUNT(*) AS n FROM rv_tickets WHERE deleted_at IS NOT NULL")["n"]}
+
+
+def _pull_status():
+    """bot.py's last Hostaway review pull: {at, n, error} — counts and an error class only."""
+    if not HOST.reviews_status:
+        return {}
+    try:
+        return dict(HOST.reviews_status() or {})
+    except Exception:
+        return {}
 
 
 # ------------------------------------------------------------------ the editor preview (R4)
