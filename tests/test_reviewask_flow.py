@@ -11,6 +11,7 @@ Run: python3 -m unittest tests.test_reviewask_flow
 """
 
 import asyncio
+import io
 import datetime
 import os
 import sys
@@ -531,6 +532,19 @@ class TestBoardAndReports(Base):
         self.assertEqual((p["wa_due"], p["wa_done"]), (1, 1))
         self.assertEqual(apts[0]["needed"], flow.program()[1]["needed"])
         self.assertIn("أصيل", "".join(flow.report_text(at(2026, 10, 14, 23, 0), 7)))
+
+
+# The package logs with print(); the gate reads the LAST line of the combined output, so the
+# logs are captured here (unittest reports on stderr, untouched).
+_REAL_STDOUT = sys.stdout
+
+
+def setUpModule():
+    sys.stdout = io.StringIO()
+
+
+def tearDownModule():
+    sys.stdout = _REAL_STDOUT
 
 
 if __name__ == "__main__":

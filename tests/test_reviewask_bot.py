@@ -9,6 +9,7 @@ Run: python3 -m unittest tests.test_reviewask_bot
 """
 
 import asyncio
+import io
 import os
 import sys
 import unittest
@@ -329,6 +330,19 @@ class TestReservationShape(unittest.TestCase):
         finally:
             bot.bot.get_guild = saved
         self.assertEqual(rooms, {"11": "1", "12": "2", "13": "3"})
+
+
+# The package logs with print(); the gate reads the LAST line of the combined output, so the
+# logs are captured here (unittest reports on stderr, untouched).
+_REAL_STDOUT = sys.stdout
+
+
+def setUpModule():
+    sys.stdout = io.StringIO()
+
+
+def tearDownModule():
+    sys.stdout = _REAL_STDOUT
 
 
 if __name__ == "__main__":
