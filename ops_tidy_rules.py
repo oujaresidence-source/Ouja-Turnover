@@ -49,6 +49,7 @@ BOT_OWNED_DEFAULT = {
     "تنسيق-الحفلات", "تحصيل-الملخص", "غرفة-المراقبة", "ouja-studio", "نشرة-الاسبوع",
     "wilt", "فتح-تذكرة-صيانة", "فتح-تذكرة-rr", "فتح-تذكرة-مشتريات", "مطابقة-الأسماء",
     "متابعة-الخروج", "team-calendar", "تسليم-الوحدات", "expenses-alerts", "finance-help",
+    "متابعة-التقييمات",
 }
 
 # Price / revenue numbers — staff must not see company figures (owner rule 2026-09-20).
@@ -62,6 +63,18 @@ DEAD_CATEGORIES = {
 }
 
 DIRECTPAY_CATEGORY = "تحصيل الحجوزات المباشرة"
+
+# «رفع التقييم» (2026-10-03): its rooms are never archived, locked or renamed here — the review
+# system itself deletes a room 7 days after it closes (owner ruling R7), after saving it.
+REVIEW_CATEGORY = "طلبات التقييم"
+REVIEW_TOPIC = "ouja-rv:"
+
+
+def is_review_room(ch):
+    cat = ch.get("category") or ""
+    return (str(ch.get("topic") or "").startswith(REVIEW_TOPIC)
+            or norm(cat) == norm(REVIEW_CATEGORY)
+            or overflow_parent(cat, (REVIEW_CATEGORY,)) is not None)
 TICKET_PARENTS = ("RR", "صيانه", "مشتريات", DIRECTPAY_CATEGORY)
 
 MGMT_ROLE = "Managment"
@@ -148,6 +161,8 @@ def classify_channel(ch, now, bot_owned=BOT_OWNED_DEFAULT, panel_names=()):
     cat = ch.get("category") or ""
     if is_panel(name, panel_names):
         return "keep", "روم فتح تذاكر — ما نلمسه", None
+    if is_review_room(ch):
+        return "keep", "غرفة رفع تقييم — نظامها يحذفها بعد ٧ أيام من القفل", None
     if name in ANNOUNCE:
         return "keep", "إعلانات للكل", None
     if cat in UNTOUCHED_CATEGORIES:

@@ -425,6 +425,83 @@ report; plan must be < 24h old) → `!ouja-tidy undo` (word **رجّع**) / `!ou
   (Managment), `TIDY_PAUSE`(1.0). The bot needs **temporary Administrator** during `run` to reach
   the ~47 channels it cannot read today; remove it afterwards.
 
+## رفع التقييم — the `reviewask/` package (Review Push)
+Owner-approved 2026-10-03 (spec: `docs/superpowers/specs/2026-10-03-review-push-design.md`, gates
+`reviewask/GATES.md`, plan `docs/superpowers/plans/2026-10-03-review-push.md`). Goal: every apartment
+above 4.75 on Airbnb. Every checkout from a weak apartment gets its own Discord ROOM under «طلبات
+التقييم» (spills «… ٢»), topic `ouja-rv:<res_id> lid:<lid> seq:<n>`; a WhatsApp step on checkout
+day and a call the next evening; every press recorded against the presser; the review closes it.
+**Ships OFF** — nothing opens or posts until an admin runs `/reviews-start`.
+- **THE OWNER RULES, absolute (spec §2 R1–R10):** rooms not threads; **button labels carry text
+  only, never an emoji** (meaning = label + colour; embeds/guest text may keep emoji); a
+  maintenance ticket from a call says «من مكالمة تقييم» + field «المصدر» linking the review room;
+  the WhatsApp text + call script are the OWNER's (rv_settings, seeded once from
+  `templates.seed.json`) — **no discount or offer is ever hard-coded** (the 10% lives only in his
+  template); closed review rooms are deleted 7 days after closing and NOTHING else is.
+- **Which apartments:** guest-to-host Airbnb reviews only, exact integer math on Hostaway's
+  10-point `rating_raw` (avg > 4.75 ⇔ 2R > 19n — never the rounded `rating`); fewer than 3 reviews
+  = in; `reviews_needed = 19n − 2R + 1`. **A 0 / empty / None score is not a review** (owner
+  ruling 2026-10-03; the CSV seed has 143 of them) — not in R, not in n. Seed rows have no `type`
+  → guest reviews; one review per reservation (live beats seed). Admin pins (`rv_overrides`)
+  win, both numbers shown. Care mode: a maintenance ticket open during the stay (or a recovery
+  ticket) gets a room whatever the rating — call first, «راضي» unlocks the WhatsApp step.
+- **State machine** (`engine.next_action` / `engine.press`, PURE, TDD-locked):
+  `waiting → wa_due → wa_sent → call_due ⇄ call_retry` (+ `care_due`, `promised`); terminal
+  `reviewed · promised_expired · declined · wrong_number · no_answer_final · complaint · expired ·
+  cancelled · void`. WhatsApp at 17:00 (reminders 18:00, 19:30); call at `call_time` = 20:00 Sep–Apr,
+  20:45 May–Aug, 21:30 in Ramadan (hijridate, else `REVIEWASK_RAMADAN`), env HH:MM wins; reminders
+  +45 min and 21:30. **Staff misses never burn a guest attempt** — at 22:00 with no press the
+  miss is logged against the responsible person and the SAME attempt rolls to the next call
+  time. 2nd «ما رد» closes; «كلمني بعدين» is free once. **Nothing guest-facing 22:00–13:00.**
+  D+13 23:59 → expired. First-final-wins = `db.transition` (conditional UPDATE under a lock).
+- **Anti-duplicate (directpay's three layers):** `UNIQUE(reservation_id)` + `_once_claim
+  ("reviewask:open:<id>")` released on failure + `_rv_known_rooms` reads every `ouja-rv:` topic
+  across `_category_family` AND the archive. Detection reads `_ha_reservations_window` —
+  never `get_reservations_cached()`. A cancellation needs POSITIVE evidence (status or a moved
+  departure, re-read by id when missing); a failed read cancels nothing.
+- **Deletion (R7) is fenced:** `flow.sweep_closed` is the only caller of `HOST.delete_room`
+  (`_rv_delete_room`, the only `.delete(` in the block): terminal + closed ≥ 7 days + fetched by
+  the stored id + topic carries THE SAME reservation (else `delete_refused`, never retried) +
+  transcript saved to `rv_transcripts` and read back → delete; NotFound → «كانت محذوفة»; any other
+  error = "could not check" = kept. Max 10/run, hourly. `ops_tidy_rules.is_review_room` keeps
+  every such room out of `!ouja-tidy` (above the stale/closed/dead rules); never call
+  `archive_closed_channel` from here.
+- **Wiring (bot.py, one block «رفع التقييم» after the Checkout Watch commands):** `_rv_wire` /
+  `_rv_ready` (brain path hand-over, like `_cw_ready`), listener `_rv_interaction` (static ids
+  `rv_<kind>`, row by message id via `rv_messages`), `reviewask_loop` (2 min) +
+  `reviewask_reviews_loop` (30-min 2-page review pull through `_reviews_merge`, the merge
+  `refresh_reviews` now shares), both guarded and staggered and silent while off.
+  `_maint_open_ticket(..., origin="review_call", origin_ref, origin_room)` — old callers are
+  byte-for-byte unchanged (`tests/test_reviewask_bot.py` replays the frozen original).
+  «الضيف رد» and the complaint urgency are ephemeral VIEWS, not modal selects (Railway pins
+  discord.py ≥ 2.4; selects in modals need 2.6).
+- **WhatsApp = one tap** on `/rv/<token>` (public, 16-char token, 30 hits/IP/min, `web_thread`) →
+  302 wa.me with the owner's text rendered (966… → ar, else en, empty en → ar), signed with the
+  RESPONSIBLE person (a link button cannot know who pressed); «أرسلت الرسالة» records the presser.
+- **Commands** — slash names ASCII (owner ruling: a rejected Arabic name kills the whole tree
+  sync), Arabic `!ouja` names: `/reviews-tomorrow` (`تقييمات-بكرة`, lists would-open + skip reasons
+  while off), `/reviews-today` (`تقييمات-اليوم`) — admins + `REVIEWASK_LEAD_ROLES` (Managment);
+  `/reviews-start` (`تقييمات-تشغيل`), `/reviews-stop` (`تقييمات-ايقاف`), `/review-message`
+  (`رسالة-التقييم`, the modal; prefix replies with a button that opens it), `/reviews-report`
+  (`تقرير-التقييمات`, ephemeral / DM). Tracking: board «متابعة-التقييمات» (edited in place),
+  30-min report → «غرفة-المراقبة» 17:00–22:00 naming people, 22:00 summary (persisted latches).
+- **Dashboard tab `rvpush` «رفع التقييم»** (cat_ops, `_ROLE_READ_RULES`/`_ROLE_WRITE_RULES`
+  permission tab — non-admins see it after the owner ticks it in الصلاحيات): real file
+  `reviewask/static/reviewask_tab.js` + ≤15-line stub; views الشقق (+ pin) · التكتات الحية · الأداء ·
+  الأرشيف (events + saved transcript, forever) · نص الرسالة (the editor; both editors write through
+  `db.save_templates`, which keeps every previous version in `rv_template_history`).
+- **Zero backslashes in `reviewask/*.py`**; never `import bot`; never `to_thread(`; no money figure
+  in any staff room. Tests: `tests/test_reviewask_{engine,flow,delete,bot,structure}.py` +
+  `tests/test_ops_tidy_rules.py` (review rooms untouched).
+- Env (defaults correct): `REVIEWASK_ENABLED`(1), `REVIEWASK_LIVE`(0 — the stored switch wins),
+  `REVIEWASK_THRESHOLD`(4.75), `REVIEWASK_MIN_REVIEWS`(3), `REVIEWASK_WA_AT`(17:00),
+  `REVIEWASK_CALL_AT`(auto), `REVIEWASK_MAX_CALLS`(2), `REVIEWASK_WINDOW_DAYS`(14),
+  `REVIEWASK_QUIET_FROM`/`TO`(22:00/13:00), `REVIEWASK_DELETE_AFTER_DAYS`(7),
+  `REVIEWASK_CATEGORY`(طلبات التقييم), `REVIEWASK_BOARD_CHANNEL`(متابعة-التقييمات),
+  `REVIEWASK_REVIEW_URL`(https://www.airbnb.com/users/reviews — if the phone test lands wrong, use
+  https://www.airbnb.com/trips), `REVIEWASK_RAMADAN`(empty), `REVIEWASK_OPEN_AT`(00:05),
+  `REVIEWASK_LEAD_ROLES`(Managment), `REVIEWASK_REPORT_MIN`(30).
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log

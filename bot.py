@@ -318,6 +318,16 @@ except Exception as _cw_err:            # pragma: no cover
     _checkout = None
     _HAS_CHECKOUT = False
 
+# Review Push «رفع التقييم» — one Discord room per checkout from a weak apartment (≤ 4.75 on
+# Airbnb), a WhatsApp step + a next-evening call. Ships OFF until /reviews-start. Additive.
+try:
+    import reviewask as _reviewask
+    _HAS_REVIEWASK = True
+except Exception as _rv_err:            # pragma: no cover
+    print("[reviewask] import failed (review push disabled, bot unaffected):", _rv_err)
+    _reviewask = None
+    _HAS_REVIEWASK = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -9549,6 +9559,688 @@ async def cmd_checkout_report(ctx, days: str = "1"):
         print("[checkout] report DM failed:", e)
         await ctx.reply("ما قدرت أرسل لك خاص — افتح الرسائل الخاصة أو استخدم /checkout-report.")
 
+
+# ==== «رفع التقييم» Review Push (reviewask/ package) ==========================================
+# Every checkout from a weak apartment (≤ 4.75 on Airbnb, or fewer than 3 reviews) — or from any
+# apartment with a maintenance ticket during the stay — gets its own Discord ROOM under
+# «طلبات التقييم»: a WhatsApp step on checkout day and a call the next evening, every press
+# recorded against the presser, closed by the review itself. Ships OFF until /reviews-start.
+# Spec: docs/superpowers/specs/2026-10-03-review-push-design.md. Buttons carry TEXT ONLY (R2);
+# one LISTENER (_rv_interaction), static custom_ids, the row found by message id → presses
+# survive redeploys. Blocking work runs on the package's own pool, never asyncio.to_thread.
+
+_RV_KINDS = ("sent", "replied", "no_phone", "rated", "promise", "noanswer", "later",
+             "complaint", "decline", "wrong", "satisfied")
+_RV_IDS = tuple("rv_" + k for k in _RV_KINDS)
+_RV_STYLE = {"success": discord.ButtonStyle.success, "danger": discord.ButtonStyle.danger,
+             "secondary": discord.ButtonStyle.secondary, "primary": discord.ButtonStyle.primary}
+
+
+def _rv_res_row(r):
+    """A Hostaway reservation → the plain shape reviewask expects."""
+    lid = r.get("listingMapId")
+    try:
+        lid = int(lid) if lid is not None else None
+    except (TypeError, ValueError):
+        lid = None
+    listings = get_listings_map() or {}
+    return {"res_id": str(r.get("id") or ""), "lid": lid,
+            "unit": listings.get(lid) or r.get("listingName") or ("unit-%s" % lid),
+            "guest": r.get("guestName") or r.get("guestFirstName") or "",
+            "phone": (r.get("phone") or "").strip(),
+            "conversation_id": str(r.get("conversationId") or ""),
+            "status": (r.get("status") or "").lower(), "channel": _finance_channel(r),
+            "arrival": str(r.get("arrivalDate") or "")[:10],
+            "departure": str(r.get("departureDate") or "")[:10]}
+
+
+def _rv_departures(start_iso, end_iso):
+    """BLOCKING. A targeted departure window — never get_reservations_cached (trap 4).
+    Raises when Hostaway cannot be read, so the package never mistakes it for 'no stays'."""
+    return [_rv_res_row(r) for r in _ha_reservations_window(
+        "departureStartDate", "departureEndDate", start_iso, end_iso) or []]
+
+
+def _rv_reservation(res_id):
+    """BLOCKING. One reservation by id, or None when it could not be read."""
+    try:
+        r = (api_get(f"/reservations/{int(res_id)}") or {}).get("result")
+    except Exception as e:
+        print("[reviewask] reservation read failed:", res_id, e)
+        return None
+    return _rv_res_row(r) if isinstance(r, dict) and r.get("id") else None
+
+
+def _rv_maint_tickets(lid):
+    """[{created_at, closed_at}] for one listing: Discord maintenance tickets + dashboard
+    tickets that are not just the mirror of a Discord one."""
+    out, mirrored = [], set()
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return out
+    for r in list(_dtk["tickets"].values()):
+        if r.get("kind") != "maint" or r.get("lid") != lid:
+            continue
+        mirrored.add(r.get("dash_id"))
+        out.append({"created_at": r.get("created_at"),
+                    "closed_at": r.get("closed_at") if r.get("status") == "closed" else None})
+    for t in list(_tickets):
+        if t.get("lid") != lid or t.get("id") in mirrored:
+            continue
+        closed = None
+        if t.get("status") not in ("open", "in_progress"):
+            log = t.get("log") or []
+            closed = (log[-1].get("at") if log and isinstance(log[-1], dict) else None) or t.get("created_at")
+        out.append({"created_at": t.get("created_at"), "closed_at": closed})
+    return out
+
+
+def _rv_open_ticket_counts():
+    out = {}
+    mirrored = set()
+    for r in list(_dtk["tickets"].values()):
+        if r.get("kind") == "maint" and r.get("status") != "closed" and r.get("lid") is not None:
+            out[int(r["lid"])] = out.get(int(r["lid"]), 0) + 1
+        mirrored.add(r.get("dash_id"))
+    for t in list(_tickets):
+        if (t.get("lid") is not None and t.get("status") in ("open", "in_progress")
+                and t.get("id") not in mirrored):
+            out[int(t["lid"])] = out.get(int(t["lid"]), 0) + 1
+    return out
+
+
+def _rv_has_recovery(res_id):
+    if not _HAS_RECOVERY:
+        return False
+    try:
+        return bool(_recovery.db.q1("SELECT 1 AS x FROM recovery_tickets WHERE reservation_id=?",
+                                    (str(res_id),)))
+    except Exception as e:
+        print("[reviewask] recovery lookup failed:", e)
+        return False
+
+
+def _rv_cover(lid, day):
+    c = _cw_cover(lid, day) or {}
+    return {"name": c.get("name") or "", "did": c.get("did") or "", "role_id": c.get("role_id") or ""}
+
+
+def _rv_find_category(guild):
+    want = _tk_cat_norm(_reviewask.config.category())
+    return next((c for c in guild.categories if _tk_cat_norm(c.name) == want), None)
+
+
+async def _rv_category(guild):
+    """«طلبات التقييم» — born with the maintenance category's overwrites (the ops department
+    sees ticket rooms), never wider. Manage-permission bits are dropped: only a guild
+    Administrator may write them into an overwrite (the !ouja-tidy 403 trap)."""
+    cat = _rv_find_category(guild)
+    if cat is not None:
+        return cat
+    parent = await _tk_category(guild, "maint")
+    ow = {}
+    for target, perm in dict(getattr(parent, "overwrites", None) or {}).items():
+        keep = {k: v for k, v in perm if v is not None
+                and k not in ("manage_permissions", "manage_roles", "manage_channels")}
+        ow[target] = discord.PermissionOverwrite(**keep)
+    name = _reviewask.config.category()
+    return await (guild.create_category(name, overwrites=ow) if ow else guild.create_category(name))
+
+
+async def _rv_open_room(name, topic):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        raise RuntimeError("guild not ready")
+    cat = await _rv_category(guild)
+    ch = await _make_channel_spill(guild, cat, name, topic)   # 50-per-category cap → «… ٢»
+    return str(ch.id)
+
+
+def _rv_known_rooms():
+    """{reservation_id: channel_id} from every `ouja-rv:` topic in the category family (and the
+    archive), so a wiped volume never re-opens a room (directpay layer 3)."""
+    out = {}
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None or not _HAS_REVIEWASK:
+        return out
+    cat = _rv_find_category(guild)
+    cats = _category_family(guild, cat) if cat is not None else []
+    cats += [c for c in guild.categories if ops_tidy.R.is_archive_category(c.name)]
+    for c in cats:
+        for ch in c.text_channels:
+            rid = _reviewask.engine.topic_reservation(getattr(ch, "topic", "") or "")
+            if rid:
+                out[rid] = str(ch.id)
+    return out
+
+
+def _rv_view(buttons, disabled=False):
+    v = discord.ui.View(timeout=None)
+    tx = _reviewask.texts
+    for b in buttons or []:
+        if isinstance(b, (tuple, list)) and b and b[0] == "link":
+            v.add_item(discord.ui.Button(label=b[1][:80], url=b[2], disabled=disabled,
+                                         style=discord.ButtonStyle.link))
+            continue
+        v.add_item(discord.ui.Button(label=tx.BUTTON_LABELS[b],
+                                     style=_RV_STYLE.get(tx.BUTTON_STYLE.get(b), discord.ButtonStyle.secondary),
+                                     custom_id="rv_" + b, disabled=disabled))
+    return v
+
+
+async def _rv_post(channel_id, text=None, embed=None, buttons=None, mentions=True):
+    ch = await _cw_channel(channel_id)
+    kw = {}
+    if embed:
+        kw["embed"] = _cw_embed(embed)
+    if buttons:
+        kw["view"] = _rv_view(buttons)
+    am = (discord.AllowedMentions(users=True, roles=True, everyone=False) if mentions
+          else discord.AllowedMentions.none())
+    msg = await ch.send(content=text, allowed_mentions=am, **kw)
+    return str(msg.id)
+
+
+async def _rv_edit(channel_id, message_id, text=None, embed=None, buttons=None, disabled=False):
+    try:
+        ch = await _cw_channel(channel_id)
+        msg = ch.get_partial_message(int(message_id))
+        kw = {}
+        if text is not None:
+            kw["content"] = text
+        if embed is not None:
+            kw["embed"] = _cw_embed(embed)
+        if buttons is not None:
+            kw["view"] = _rv_view(buttons, disabled) if buttons else None
+        if kw:
+            await msg.edit(**kw)
+        return True
+    except (discord.NotFound, discord.Forbidden):
+        return False
+    except Exception as e:
+        print("[reviewask] edit failed:", e)
+        return False
+
+
+async def _rv_room_info(channel_id):
+    """{"exists", "topic"} by the STORED id. NotFound = gone; any other error is raised so the
+    sweep treats it as 'could not check' (never as deleted)."""
+    try:
+        ch = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
+    except discord.NotFound:
+        return {"exists": False, "topic": ""}
+    return {"exists": True, "topic": getattr(ch, "topic", "") or ""}
+
+
+def _rv_embed_text(e):
+    bits = [e.title or "", e.description or ""]
+    for f in getattr(e, "fields", []) or []:
+        bits.append("%s: %s" % (f.name, f.value))
+    if getattr(e, "footer", None) and e.footer.text:
+        bits.append(e.footer.text)
+    return chr(10).join(b for b in bits if b)
+
+
+async def _rv_fetch_transcript(channel_id, limit=500):
+    ch = await _cw_channel(channel_id)
+    out = []
+    async for m in ch.history(limit=limit, oldest_first=True):
+        out.append({"author": getattr(m.author, "display_name", None) or str(m.author),
+                    "at": m.created_at.isoformat(timespec="seconds"), "content": m.content or "",
+                    "embeds": [_rv_embed_text(e) for e in m.embeds],
+                    "attachments": [a.url for a in m.attachments]})
+    return out
+
+
+async def _rv_delete_room(channel_id):
+    """The ONLY channel delete in «رفع التقييم». Called by reviewask.flow.sweep_closed alone,
+    after it re-read the topic and saved the transcript (owner ruling R7, 2026-10-03)."""
+    ch = await _cw_channel(channel_id)
+    await ch.delete(reason="رفع التقييم: غرفة مقفلة من ٧ أيام — السجل محفوظ في اللوحة")
+    return True
+
+
+async def _rv_board_channel():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return None
+    ch = await ensure_channel(guild, _reviewask.config.board_channel(), None)
+    return str(ch.id) if ch is not None else None
+
+
+def _rv_wire():
+    if not _HAS_REVIEWASK:
+        return False
+    _reviewask.wire({
+        "now": now_riyadh,
+        "departures": _rv_departures,
+        "reservation": _rv_reservation,
+        "reviews": lambda: list(_reviews.values()),
+        "open_ticket_counts": _rv_open_ticket_counts,
+        "maint_tickets": _rv_maint_tickets,
+        "has_recovery": _rv_has_recovery,
+        "cover": _rv_cover,
+        "wa_number": _wa_from_phone,
+        "guest_links": guest_conversation_links,
+        "listings": lambda: dict(get_listings_map() or {}),
+        "open_room": _rv_open_room,
+        "known_rooms": _rv_known_rooms,
+        "post": _rv_post,
+        "edit": _rv_edit,
+        "room_info": _rv_room_info,
+        "fetch_transcript": _rv_fetch_transcript,
+        "delete_room": _rv_delete_room,
+        "board_channel": _rv_board_channel,
+        "monitor_channel": _cw_monitor_channel,      # «غرفة-المراقبة», same room as Checkout Watch
+        "link_base": _dispatch_base_url,
+        "once_claim": _once_claim,
+        "once_release": _once_release,
+        "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+        "json_response": _json, "web": web, "web_thread": web_thread, "guild_id": GUILD_ID,
+    })
+    return True
+
+
+def _rv_ready():
+    """Usable the moment Discord is (before start_web_server): hand brain.db its folder, wire."""
+    if not _HAS_REVIEWASK:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[reviewask] brain path hand-over failed:", e)
+    if _reviewask.HOST.departures is None:
+        _rv_wire()
+    return True
+
+
+def _rv_pull_recent_reviews():
+    """BLOCKING. Spec §12: the daily refresh is too slow to close rooms — the first 2 pages,
+    newest departures first, merged the same way refresh_reviews merges."""
+    fresh = fetch_reviews_from_hostaway(limit=200, page_size=100)
+    _reviews_merge(fresh)
+    return len(fresh)
+
+
+async def _rv_send_result(interaction, res):
+    msg = res.get("message") or "تم"
+    for url, label in (res.get("links") or [])[:2]:
+        msg += chr(10) + "[%s](%s)" % (label, url)
+    await _cw_reply(interaction, msg[:1990])
+
+
+async def _rv_press(interaction, tid, kind):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    fl = _reviewask.flow
+    name = await fl.run_blocking(_cw_presser_name, interaction.user)
+    res = await fl.answer(tid, kind, name, str(interaction.user.id))
+    await _rv_send_result(interaction, res)
+
+
+class RvComplaintModal(discord.ui.Modal, title="عنده ملاحظة"):
+    """R3: the guest's words verbatim → a maintenance room that says it came from a review call."""
+
+    def __init__(self, tid, urgency):
+        super().__init__(timeout=900)
+        self.tid, self.urgency = tid, urgency
+        self.words = discord.ui.TextInput(label="وش قال الضيف؟ (بالحرف)", style=discord.TextStyle.paragraph,
+                                          required=True, min_length=10, max_length=1000)
+        self.where = discord.ui.TextInput(label="وين المشكلة في الشقة؟", required=False, max_length=200)
+        self.add_item(self.words)
+        self.add_item(self.where)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        fl, tx = _reviewask.flow, _reviewask.texts
+        ok, why = await fl.run_blocking(fl.can_press, self.tid, "complaint")
+        if not ok:
+            await _cw_reply(interaction, why)
+            return
+        row = await fl.run_blocking(_reviewask.db.ticket, self.tid)
+        name = await fl.run_blocking(_cw_presser_name, interaction.user)
+        try:
+            ch = await _maint_open_ticket(
+                interaction, row["lid"], row["unit"], self.urgency, "صيانة",
+                tx.maint_summary(row["unit"], row["guest"]),
+                tx.maint_details(str(self.words.value), name, row["reservation_id"], row["day"]),
+                str(self.where.value or "").strip(), "",
+                origin="review_call", origin_ref="rv:%s" % row["reservation_id"],
+                origin_room=row.get("channel_id"))
+        except Exception as e:
+            print("[reviewask] maintenance room failed:", repr(e))
+            await _cw_reply(interaction, _tk_open_error_msg(
+                e, "⚠️ ما انفتحت تذكرة الصيانة — جرّب مرة ثانية. الملاحظة ما انحفظت."))
+            return
+        res = await fl.complaint_opened(self.tid, str(ch.id), name, str(interaction.user.id))
+        await _cw_reply(interaction, (res.get("message") or "تم") + " <#%s>" % ch.id)
+
+
+class RvComplaintView(discord.ui.View):
+    """Urgency first (a select cannot live inside a modal on discord.py 2.4), then the words."""
+
+    def __init__(self, tid):
+        super().__init__(timeout=900)
+        self.tid, self.urgency = tid, "normal"
+        sel = discord.ui.Select(placeholder="الاستعجال", min_values=1, max_values=1,
+                                options=[discord.SelectOption(label=u[1][:100], value=u[0],
+                                                              default=(u[0] == "normal"))
+                                         for u in _URGENCY])
+
+        async def on_sel(interaction):
+            self.urgency = sel.values[0]
+            await interaction.response.defer()
+        sel.callback = on_sel
+        write = discord.ui.Button(label=_reviewask.texts.BUTTON_LABELS["complaint_write"],
+                                  style=discord.ButtonStyle.danger)
+
+        async def on_write(interaction):
+            await interaction.response.send_modal(RvComplaintModal(self.tid, self.urgency))
+        write.callback = on_write
+        self.add_item(sel)
+        self.add_item(write)
+
+
+class RvRepliedView(discord.ui.View):
+    """«الضيف رد» — what did the guest say?"""
+
+    def __init__(self, tid):
+        super().__init__(timeout=900)
+        self.tid = tid
+        tx = _reviewask.texts
+        for key in ("replied_will", "replied_complaint", "replied_no", "replied_quiet"):
+            b = discord.ui.Button(label=tx.BUTTON_LABELS[key],
+                                  style=_RV_STYLE.get(tx.BUTTON_STYLE.get(key), discord.ButtonStyle.secondary))
+            b.callback = self._make(key)
+            self.add_item(b)
+
+    def _make(self, key):
+        async def cb(interaction):
+            if key == "replied_complaint":
+                await interaction.response.edit_message(content=_reviewask.texts.COMPLAINT_ASK,
+                                                        view=RvComplaintView(self.tid))
+                return
+            await _rv_press(interaction, self.tid, key)
+        return cb
+
+
+async def _rv_interaction(interaction):
+    """The review-room buttons. A LISTENER, not a bound view."""
+    try:
+        if not _HAS_REVIEWASK or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if cid not in _RV_IDS:
+            return
+        _rv_ready()
+        fl, tx = _reviewask.flow, _reviewask.texts
+        mid = str(getattr(interaction.message, "id", "") or "")
+        row = await fl.run_blocking(_reviewask.db.by_message, mid)
+        if not row:
+            await _cw_reply(interaction, tx.NOT_FOUND)
+            return
+        kind = cid[3:]
+        if kind in ("replied", "complaint"):
+            ok, why = await fl.run_blocking(fl.can_press, row["id"],
+                                            "replied_will" if kind == "replied" else "complaint")
+            if not ok:
+                await _cw_reply(interaction, why)
+                return
+            if kind == "replied":
+                await interaction.response.send_message(tx.REPLIED_ASK, view=RvRepliedView(row["id"]),
+                                                        ephemeral=True)
+            else:
+                await interaction.response.send_message(tx.COMPLAINT_ASK, view=RvComplaintView(row["id"]),
+                                                        ephemeral=True)
+            return
+        await _rv_press(interaction, row["id"], kind)
+    except Exception as e:
+        print("[reviewask] button error:", e)
+        try:
+            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+        except Exception:
+            pass
+
+
+class RvTemplateModal(discord.ui.Modal, title="نص رسالة التقييم"):
+    """R4: the owner's words. Writes through the SAME db.save_templates as the dashboard editor."""
+
+    def __init__(self, cur):
+        super().__init__(timeout=1800)
+        cap = 4000                                       # Discord's modal input maximum
+        self.ar = discord.ui.TextInput(label="رسالة الواتساب — عربي", style=discord.TextStyle.paragraph,
+                                       required=True, max_length=cap, default=(cur.get("ar") or "")[:cap])
+        self.en = discord.ui.TextInput(label="WhatsApp message — English", style=discord.TextStyle.paragraph,
+                                       required=False, max_length=cap, default=(cur.get("en") or "")[:cap] or None)
+        self.script = discord.ui.TextInput(label="نص المكالمة", style=discord.TextStyle.paragraph,
+                                           required=False, max_length=cap,
+                                           default=(cur.get("call_script") or "")[:cap] or None)
+        for it in (self.ar, self.en, self.script):
+            self.add_item(it)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        fl = _reviewask.flow
+        name = await fl.run_blocking(_cw_presser_name, interaction.user)
+        saved = await fl.run_blocking(_reviewask.db.save_templates, str(self.ar.value),
+                                      str(self.en.value or ""), str(self.script.value or ""), name)
+        pv = await fl.run_blocking(fl.preview, saved)
+        unknown = sorted(set(pv["ar"]["unknown"] + pv["en"]["unknown"] + pv["call_script"]["unknown"]))
+        msg = _reviewask.texts.TEMPLATE_SAVED
+        if unknown:
+            msg += chr(10) + "⚠️ كلمات بين { } ما نعرفها وبتطلع للضيف كما هي: " + "، ".join(unknown)
+        await _cw_reply(interaction, msg)
+
+
+async def _rv_open_editor(interaction):
+    if not _can_delete_channels(interaction.user):
+        await _cw_reply(interaction, _reviewask.texts.ADMIN_ONLY)
+        return
+    _rv_ready()
+    cur = await _reviewask.flow.run_blocking(_reviewask.db.templates)
+    await interaction.response.send_modal(RvTemplateModal(cur))
+
+
+class RvEditorOpenView(discord.ui.View):
+    """`!ouja رسالة-التقييم` cannot open a form (a modal needs an interaction) — a button can."""
+
+    def __init__(self):
+        super().__init__(timeout=600)
+        b = discord.ui.Button(label=_reviewask.texts.BUTTON_LABELS["open_editor"],
+                              style=discord.ButtonStyle.primary)
+        b.callback = _rv_open_editor
+        self.add_item(b)
+
+
+@tasks.loop(minutes=2)
+async def reviewask_loop():
+    """Every 2 minutes: open missing rooms after 00:05, close on reviews and cancellations, run
+    the clock, edit the board, the 30-min report, the 22:00 summary, the hourly sweep.
+    Returns at once while switched off."""
+    if not (_HAS_REVIEWASK and _reviewask.config.enabled()):
+        return
+    await bot.wait_until_ready()
+    try:
+        _rv_ready()
+        if not await _reviewask.flow.run_blocking(_reviewask.flow.live):
+            return
+        rep = await _reviewask.flow.tick()
+        if rep.get("opened") or rep.get("actions") or rep.get("reviewed"):
+            print("[reviewask] tick:", {k: rep.get(k) for k in ("opened", "actions", "reviewed",
+                                                               "cancelled")})
+    except Exception as e:
+        print("[reviewask] loop error:", e)
+
+
+@tasks.loop(minutes=30)
+async def reviewask_reviews_loop():
+    """Spec §12: a targeted 2-page review pull every 30 min while Review Push is on."""
+    if not (_HAS_REVIEWASK and _reviewask.config.enabled()):
+        return
+    await bot.wait_until_ready()
+    try:
+        _rv_ready()
+        if not await _reviewask.flow.run_blocking(_reviewask.flow.live):
+            return
+        await _reviewask.flow.run_blocking(_rv_pull_recent_reviews)
+    except Exception as e:
+        print("[reviewask] review pull error:", e)
+
+
+# ---------------- «رفع التقييم» commands (slash ASCII names + Arabic !ouja names) ----------------
+# Owner ruling 2026-10-03: slash names stay ASCII (a rejected name fails the WHOLE tree sync)
+# with Arabic descriptions; the !ouja prefix keeps the Arabic names. Admin = _can_delete_channels;
+# the two opening commands are also open to REVIEWASK_LEAD_ROLES (default «Managment»).
+
+def _rv_is_lead(user):
+    if _can_delete_channels(user):
+        return True
+    want = {x.strip().lower() for x in os.environ.get("REVIEWASK_LEAD_ROLES", "Managment").split(",")
+            if x.strip()}
+    return any((getattr(r, "name", "") or "").lower() in want for r in getattr(user, "roles", None) or [])
+
+
+async def _rv_guard_reply(send, user, lead=False):
+    if not _HAS_REVIEWASK:
+        await send("رفع التقييم مو شغال في هذا السيرفر.")
+        return False
+    if not (_rv_is_lead(user) if lead else _can_delete_channels(user)):
+        await send(_reviewask.texts.LEAD_ONLY if lead else _reviewask.texts.ADMIN_ONLY)
+        return False
+    _rv_ready()
+    return True
+
+
+async def _rv_slash_guard(interaction, lead=False):
+    async def send(m):
+        await interaction.response.send_message(m, ephemeral=True)
+    return await _rv_guard_reply(send, interaction.user, lead)
+
+
+async def _rv_run_open(user, offset):
+    fl = _reviewask.flow
+    day = now_riyadh().date() + timedelta(days=offset)
+    name = await fl.run_blocking(_cw_presser_name, user)
+    dry = not await fl.run_blocking(fl.live)
+    rep = await fl.open_rooms(day, name, dry=dry)
+    return fl.split(_reviewask.texts.open_summary(rep, day.isoformat(), dry).split(chr(10)))
+
+
+async def _rv_run_start(user):
+    fl = _reviewask.flow
+    await fl.run_blocking(fl.start, str(getattr(user, "display_name", "") or user))
+    await fl.tick(force=True)
+    return _reviewask.texts.START_REPLY
+
+
+async def _rv_run_stop(user):
+    await _reviewask.flow.run_blocking(_reviewask.flow.stop, str(getattr(user, "display_name", "") or user))
+    return _reviewask.texts.STOP_REPLY
+
+
+@bot.tree.command(name="reviews-tomorrow", description="رفع التقييم: افتح غرف تقييمات خروج بكرة الحين (أو اعرضها لو النظام موقف)")
+async def slash_reviews_tomorrow(interaction: discord.Interaction):
+    if await _rv_slash_guard(interaction, lead=True):
+        await _cw_answer(interaction, lambda: _rv_run_open(interaction.user, 1))
+
+
+@bot.tree.command(name="reviews-today", description="رفع التقييم: افتح غرف تقييمات خروج اليوم")
+async def slash_reviews_today(interaction: discord.Interaction):
+    if await _rv_slash_guard(interaction, lead=True):
+        await _cw_answer(interaction, lambda: _rv_run_open(interaction.user, 0))
+
+
+@bot.tree.command(name="reviews-start", description="رفع التقييم: تشغيل")
+async def slash_reviews_start(interaction: discord.Interaction):
+    if await _rv_slash_guard(interaction):
+        await _cw_answer(interaction, lambda: _rv_run_start(interaction.user))
+
+
+@bot.tree.command(name="reviews-stop", description="رفع التقييم: إيقاف (الأزرار تظل تسجل)")
+async def slash_reviews_stop(interaction: discord.Interaction):
+    if await _rv_slash_guard(interaction):
+        await _cw_answer(interaction, lambda: _rv_run_stop(interaction.user))
+
+
+@bot.tree.command(name="review-message", description="رفع التقييم: عدّل نص رسالة الواتساب ونص المكالمة")
+async def slash_review_message(interaction: discord.Interaction):
+    if not _HAS_REVIEWASK:
+        await interaction.response.send_message("رفع التقييم مو شغال في هذا السيرفر.", ephemeral=True)
+        return
+    try:
+        await _rv_open_editor(interaction)
+    except Exception as e:
+        print("[reviewask] editor failed:", e)
+        await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+
+
+@bot.tree.command(name="reviews-report", description="تقرير رفع التقييم لكل مسؤول ولكل شقة — يظهر لك بس")
+@app_commands.describe(period="آخر ٧ أيام أو آخر ٣٠ يوم")
+@app_commands.choices(period=[app_commands.Choice(name="آخر ٧ أيام", value=7),
+                              app_commands.Choice(name="آخر ٣٠ يوم", value=30)])
+async def slash_reviews_report(interaction: discord.Interaction,
+                               period: app_commands.Choice[int] = None):
+    if not await _rv_slash_guard(interaction):
+        return
+    days = period.value if period else 7
+    await _cw_answer(interaction, lambda: _reviewask.flow.run_blocking(
+        _reviewask.flow.report_text, now_riyadh(), days))
+
+
+async def _rv_prefix_guard(ctx, lead=False):
+    return await _rv_guard_reply(ctx.reply, ctx.author, lead)
+
+
+@bot.command(name="تقييمات-بكرة", aliases=["reviews-tomorrow"])
+async def cmd_reviews_tomorrow(ctx):
+    if await _rv_prefix_guard(ctx, lead=True):
+        for c in await _rv_run_open(ctx.author, 1):
+            await ctx.send(c, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.command(name="تقييمات-اليوم", aliases=["reviews-today"])
+async def cmd_reviews_today(ctx):
+    if await _rv_prefix_guard(ctx, lead=True):
+        for c in await _rv_run_open(ctx.author, 0):
+            await ctx.send(c, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.command(name="تقييمات-تشغيل", aliases=["reviews-start"])
+async def cmd_reviews_start(ctx):
+    if await _rv_prefix_guard(ctx):
+        await ctx.reply(await _rv_run_start(ctx.author))
+
+
+@bot.command(name="تقييمات-ايقاف", aliases=["reviews-stop", "تقييمات-إيقاف"])
+async def cmd_reviews_stop(ctx):
+    if await _rv_prefix_guard(ctx):
+        await ctx.reply(await _rv_run_stop(ctx.author))
+
+
+@bot.command(name="رسالة-التقييم", aliases=["review-message"])
+async def cmd_review_message(ctx):
+    if await _rv_prefix_guard(ctx):
+        await ctx.reply("اضغط الزر يفتح لك المحرر:", view=RvEditorOpenView())
+
+
+@bot.command(name="تقرير-التقييمات", aliases=["reviews-report"])
+async def cmd_reviews_report(ctx, days: str = "7"):
+    """A prefix command cannot answer privately, so the report goes to the invoker's DMs."""
+    if not await _rv_prefix_guard(ctx):
+        return
+    n = 30 if str(days).strip() in ("30", "٣٠") else 7
+    try:
+        for c in await _reviewask.flow.run_blocking(_reviewask.flow.report_text, now_riyadh(), n):
+            await ctx.author.send(c)
+        await ctx.reply("📈 أرسلت لك التقرير خاص.")
+    except Exception as e:
+        print("[reviewask] report DM failed:", e)
+        await ctx.reply("ما قدرت أرسل لك خاص — افتح الرسائل الخاصة أو استخدم /reviews-report.")
+
+
 @tasks.loop(time=dt_time(hour=3, minute=0, tzinfo=TZ))
 async def business_snapshot_loop():
     """Nightly 03:00 Riyadh: refresh /business metrics_snapshot.json from Hostaway,
@@ -16781,6 +17473,13 @@ def refresh_reviews():
     """Fetch + merge into _reviews. Returns number fetched from Hostaway."""
     global _reviews_last_fetch
     fresh = fetch_reviews_from_hostaway()
+    _reviews_merge(fresh)
+    _reviews_last_fetch = int(time.time())
+    return len(fresh)
+
+def _reviews_merge(fresh):
+    """Merge freshly fetched reviews into _reviews (the daily refresh AND «رفع التقييم»'s
+    30-minute targeted pull share this one rule)."""
     # When Hostaway returns the live version of a review we already hold from the
     # CSV seed (same reservation), drop the seed copy first so it isn't shown twice.
     seed_by_resid = {}
@@ -16793,8 +17492,6 @@ def refresh_reviews():
             for sk in seed_by_resid.pop(resid):
                 _reviews.pop(sk, None)
         _reviews[r["id"]] = r
-    _reviews_last_fetch = int(time.time())
-    return len(fresh)
 
 def merge_reviews_seed():
     """Load the shipped reviews_seed.json (full Airbnb history exported from
@@ -22588,6 +23285,21 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="pmBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «رفع التقييم» Review Push (weak apartments · one room per checkout · WhatsApp + call) ============ -->
+      <section class="view" id="view_rvpush">
+        <div class="page-head">
+          <div>
+            <div class="page-title">⭐ رفع التقييم</div>
+            <div class="page-sub">كل شقة فوق ٤.٧٥ — غرفة لكل خروج، رسالة واتساب، ومكالمة الليلة اللي بعدها</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadRvpush(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="rvTabs"></div>
+        <div id="rvBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -26031,6 +26743,7 @@ function go(id){
   if(id==='coverage') loadCoverage();
   if(id==='wifi') loadWifi();
   if(id==='permits') loadPermits();
+  if(id==='rvpush') loadRvpush();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -36088,6 +36801,17 @@ var _drawerReturnEl = null;
    ============================================================ */
 var WIFI = {data:null, team:null, loading:false, unit:null, form:null, blocked:null, mode:''};
 
+/* «رفع التقييم» — the tab's code is the real file /reviewask/static/reviewask_tab.js (no backslash trap here) */
+function loadRvpush(force){
+  if(window.__rvJs){ return window.RvTab.load(force); }
+  if(window.__rvLoading){ return; }
+  window.__rvLoading=1;
+  var s=document.createElement('script');
+  s.src='/reviewask/static/reviewask_tab.js?v=__REVIEWASK_JS_V__';
+  s.onload=function(){ window.__rvJs=1; window.RvTab.load(force); };
+  s.onerror=function(){ window.__rvLoading=0; putHtml('rvBody', errorState('loadRvpush(1)')); };
+  document.head.appendChild(s);
+}
 /* PERMITS «التصاريح» — the tab's code is the real file /permits/static/permits_tab.js (no backslash trap here) */
 function loadPermits(force){
   if(window.__permitsJs){ return window.PermitsTab.load(force); }
@@ -44873,7 +45597,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "wifi", "permits", "listings", "quality", "onb", "mot", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "permits", "rvpush", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
@@ -44901,6 +45625,7 @@ NAV_DEF = {
         {"id": "coverage", "ic": "cleanteams", "tk": "coverage"},
         {"id": "wifi", "ic": "listings", "tk": "wifi"},
         {"id": "permits", "ic": "tickets", "tk": "permits", "badge": "permits"},   # PERMITS «التصاريح»
+        {"id": "rvpush", "ic": "reviews", "tk": "rvpush"},                          # «رفع التقييم»
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -44942,7 +45667,7 @@ NAV_DEF = {
             "pricing": "التسعير الديناميكي",
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
-            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح",
+            "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح", "rvpush": "رفع التقييم",
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
@@ -44966,7 +45691,7 @@ NAV_DEF = {
             "pricing": "Dynamic Pricing",
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
-            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits",
+            "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits", "rvpush": "Review Push",
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
@@ -45002,6 +45727,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
 # PERMITS «التصاريح»: the tab script lives in permits/static/; the ?v= cache-buster is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__PERMITS_JS_V__", (_permits.routes.js_version() if _permits is not None else "0"), 1)
+# «رفع التقييم»: same pattern — the tab script lives in reviewask/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__REVIEWASK_JS_V__", (_reviewask.routes.js_version() if _reviewask is not None else "0"), 1)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
@@ -63350,6 +64078,7 @@ _ROLE_WRITE_RULES = [
     ("/api/mot/", "mot"),                    # /api/mot/check-* are exempt above (inspector link)
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
     ("/api/permits/", "permits"),            # PERMITS «التصاريح» — no public door (admin/ops re-checked inside)
+    ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -63403,6 +64132,9 @@ _ROLE_READ_RULES = [
     ("/api/permits/", "permits"),
     # «تدريب مساعد»: full guest transcripts + who wrote each reply. Private by definition.
     ("/api/train/", "train"),
+    # «رفع التقييم»: guest names, phones in transcripts, per-person numbers. The public door is
+    # /rv/<token> (outside /api/) and the tab script /reviewask/static/ — neither matches here.
+    ("/api/reviewask/", "rvpush"),
 ]
 
 def _perm_403(tab, action):
@@ -64621,6 +65353,16 @@ async def start_web_server():
                 _checkout.bootstrap()
             except Exception as _cwe:
                 print("[checkout] wiring failed (checkout watch disabled, bot unaffected):", _cwe)
+
+        # ---- «رفع التقييم» Review Push — additive; reuses brain.db. Ships OFF.
+        if _HAS_REVIEWASK:
+            try:
+                _rv_wire()
+                _reviewask.bootstrap()
+                _reviewask.register_routes(app)
+                print("[reviewask] wired + routes registered (/rv/{token}, /api/reviewask/*)")
+            except Exception as _rve:
+                print("[reviewask] wiring failed (review push disabled, bot unaffected):", _rve)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
@@ -67125,7 +67867,11 @@ class MaintModal(discord.ui.Modal, title="🛠️ تذكرة صيانة جديد
                 ephemeral=True)
 
 async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
-                             summary, details, location, access):
+                             summary, details, location, access,
+                             origin=None, origin_ref=None, origin_room=None):
+    """origin="review_call" (رفع التقييم): the dashboard ticket is source="review" with
+    origin_ref, and the card says where it came from + links back to origin_room. Every other
+    caller passes nothing and gets exactly the old ticket."""
     guild = interaction.guild
     lid = int(lid)
     ukey, ulbl, uprio, ucolor = _urgency_rec(urgency)
@@ -67143,8 +67889,10 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
     if access:
         desc += f"\n🚪 الدخول: {access}"
     desc += f"\n\n(فُتحت من ديسكورد — روم التذكرة: #{ch.name})"
+    from_review = origin == "review_call"
     dash = _ticket_create(summary, description=desc, lid=lid, priority=uprio,
-                          category=category, source="manual", source_ref=f"discord:{ch.id}",
+                          category=category, source="review" if from_review else "manual",
+                          source_ref=(origin_ref or f"discord:{ch.id}") if from_review else f"discord:{ch.id}",
                           created_by=str(interaction.user), assignee=aname)
     try:
         _save_json("tickets.json", _tickets[:1000])
@@ -67160,9 +67908,12 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
            "opener_id": interaction.user.id, "opener": str(interaction.user),
            "assignee": aname, "assignee_id": aid, "dash_id": dash["id"],
            "status": "open", "created_at": datetime.now(TZ).isoformat(timespec="seconds")}
+    if from_review:
+        rec["origin"], rec["origin_ref"] = origin, origin_ref
     _dtk["tickets"][str(ch.id)] = rec
     _dtk_save()
-    card = discord.Embed(title=f"🛠️ تذكرة صيانة #{seq:03d} — {ulbl}"[:256],
+    card = discord.Embed(title=(f"🛠️ من مكالمة تقييم — تذكرة صيانة #{seq:03d} — {ulbl}" if from_review
+                                else f"🛠️ تذكرة صيانة #{seq:03d} — {ulbl}")[:256],
                          description=f"**{summary}**\n\n{details}"[:4000], color=ucolor)
     card.add_field(name="🏠 الشقة", value=unit_name[:1024], inline=True)
     card.add_field(name="🗂️ التصنيف", value=category, inline=True)
@@ -67172,6 +67923,9 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
     if access:
         card.add_field(name="🚪 ملاحظات الدخول", value=access[:1024], inline=False)
     card.add_field(name="👷 المسؤول", value=_tk_mention(aname, aid), inline=False)
+    if from_review:
+        card.add_field(name="📞 المصدر", value=("مكالمة تقييم — <#%s>" % origin_room) if origin_room
+                       else "مكالمة تقييم", inline=False)
     if dup_ch:
         card.add_field(name="⚠️ تنبيه",
                        value=f"فيه تذكرة ثانية مفتوحة لنفس الشقة: <#{dup_ch}>", inline=False)
@@ -73722,6 +74476,10 @@ async def on_ready():
         # «متابعة الخروج» buttons: one listener, static custom_ids, row found by message id
         bot.add_listener(_cw_interaction, "on_interaction")
         bot._cw_listener = True
+    if _HAS_REVIEWASK and not getattr(bot, "_rv_listener", False):
+        # «رفع التقييم» buttons: one listener, static custom_ids, row found by message id
+        bot.add_listener(_rv_interaction, "on_interaction")
+        bot._rv_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(EarlyCheckinDecisionView())  # early check-in approve/reject
@@ -73888,6 +74646,13 @@ async def on_ready():
         _pending.append(ops_turnover_loop)      # «القفل»: private turnover nudges (dry-run by default)
     if _HAS_CHECKOUT and not checkout_watch_loop.is_running():
         _pending.append(checkout_watch_loop)    # «متابعة الخروج»: returns at once until /checkout-start
+    if _HAS_REVIEWASK:
+        for _rvl, _rvn in ((reviewask_loop, "reviewask_loop"), (reviewask_reviews_loop, "reviewask_reviews_loop")):
+            if not _rvl.is_running():
+                if not getattr(_rvl, "_error_guarded", False):
+                    _loop_guard(_rvl, _rvn)
+                    _rvl._error_guarded = True
+                _pending.append(_rvl)           # «رفع التقييم»: both return at once until /reviews-start
     if WATCHMAN_ENABLED:
         try:
             _wg = bot.get_guild(GUILD_ID)

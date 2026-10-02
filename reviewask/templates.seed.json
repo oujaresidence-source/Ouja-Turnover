@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "note": "Seed only — read on first boot. The owner edits the live text from the dashboard (رفع التقييم ← نص الرسالة) or /رسالة-التقييم. Placeholders: {الاسم} {الموظف} {الشقة} {رابط_التقييم}",
+  "ar": "هلا {الاسم} 🌿\nمعك {الموظف} من عوجا للسكن، الحمد لله على السلامة وشكراً إنك اخترتنا في {الشقة}.\n\nكهدية شكر على إقامتك، لك خصم ١٠٪ على حجزك الجاي معنا.\n\nوعندي طلب صغير: لو تكرّمت تكتب تقييمك لإقامتك في Airbnb — ياخذ دقيقة، ويفرق معنا كثير لأننا نقرأ كل تقييم بأنفسنا ونطوّر عليه:\n{رابط_التقييم}\n\nولو فيه أي شي ما كان على مستوى توقعك، قل لي هنا مباشرة وأوعدك نعالجه 🙏",
+  "en": "Hi {الاسم} 🌿\nThis is {الموظف} from Ouja Residence — thank you for staying with us at {الشقة}, we hope you got home safely.\n\nAs a thank-you for your stay, you have 10% off your next booking with us.\n\nOne small favour: could you leave a review of your stay on Airbnb? It takes a minute and means a lot — we read every review ourselves:\n{رابط_التقييم}\n\nAnd if anything wasn't up to your expectations, just reply here and I'll personally make it right 🙏",
+  "call_script": "١) السلام عليكم، معك {الموظف} من عوجا للسكن — أبشرك وصلت بالسلامة؟\n٢) حبيت أتطمن على إقامتك في {الشقة}، كل شي كان تمام؟\n٣) إذا فيه ملاحظة: اسمعه للآخر، اعتذر، وقل «بنعالجها اليوم» — واضغط «عنده ملاحظة» واكتب كلامه بالحرف. لا تطلب تقييم.\n٤) إذا كان مبسوط: «يسعدنا! عندي طلب صغير، لو تكتب تقييمك في Airbnb يفرق معنا كثير، أرسلت لك الرابط على الواتساب».\n٥) اشكره وسكّر — مكالمة وحدة بس، لا تضغط عليه."
+}

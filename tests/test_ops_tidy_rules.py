@@ -189,3 +189,43 @@ class TestSnapshotAndPurity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewRoomsUntouched(unittest.TestCase):
+    """«رفع التقييم» (2026-10-03): review rooms are never archived, locked or renamed by the
+    tidy — their own system deletes them 7 days after closing (owner ruling R7). The rule sits
+    ABOVE the stale/closed/dead rules, and the 2026-10-02 decisions above are unchanged."""
+
+    def _ch(self, **kw):
+        ch = {"id": "1", "name": "تقييم-narjis-101-sara", "category": "طلبات التقييم",
+              "topic": "ouja-rv:555 lid:1 seq:7", "last_message_at": None, "accessible": True,
+              "overwrites": []}
+        ch.update(kw)
+        return ch
+
+    def test_review_room_kept_even_when_it_looks_archivable(self):
+        cases = [self._ch(),                                                     # never written
+                 self._ch(name="مغلقة-تقييم-x"),                                  # closed-looking
+                 self._ch(last_message_at="2026-01-01T00:00:00+00:00"),          # stale
+                 self._ch(accessible=False),                                     # unreadable
+                 self._ch(category="DUMP"),                                      # dead category
+                 self._ch(category="طلبات التقييم ٢", topic=""),                 # overflow, no topic
+                 self._ch(category=" طلبات التقييم ", topic="")]                 # stray spaces
+        for ch in cases:
+            decision, _reason, action = R.classify_channel(ch, NOW)
+            self.assertEqual((decision, action), ("keep", None), ch)
+
+    def test_board_channel_is_bot_owned(self):
+        self.assertIn("متابعة-التقييمات", R.BOT_OWNED_DEFAULT)
+        self.assertEqual(R.classify_channel(self._ch(name="متابعة-التقييمات", category="", topic=""),
+                                            NOW)[0], "keep")
+
+    def test_a_non_review_topic_elsewhere_is_unaffected(self):
+        ch = self._ch(category="صيانه", topic="ouja-ticket:maint lid:1 seq:3", name="مغلقة-صيانة-1")
+        self.assertEqual(R.classify_channel(ch, NOW)[0], "archive")
+
+    def test_plan_over_the_real_audit_unchanged_with_review_rooms_added(self):
+        inv = copy.deepcopy(INV)
+        inv["channels"] = inv["channels"] + [self._ch(id="rv1"), self._ch(id="rv2", name="مغلقة-x")]
+        plan = R.build_plan(inv, NOW)
+        self.assertEqual(plan["counts"], {"keep": 96, "restrict": 24, "archive": 196})
