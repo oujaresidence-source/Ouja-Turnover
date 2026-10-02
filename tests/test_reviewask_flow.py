@@ -263,7 +263,9 @@ class TestOpening(Base):
 
     def test_on_by_default_and_stop_still_wins(self):
         db.set_setting("live", "")
-        self.assertTrue(flow.live())                    # owner ruling 2026-10-03: no /reviews-start
+        self.assertFalse(flow.live())                   # OFF until /reviews-start (rolled back 02:00)
+        flow.start("فيصل")
+        self.assertTrue(flow.live())
         flow.stop("فيصل")
         self.assertFalse(flow.live())
         os.environ["REVIEWASK_LIVE"] = "0"
