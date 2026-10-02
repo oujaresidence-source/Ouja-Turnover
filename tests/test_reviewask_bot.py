@@ -338,6 +338,38 @@ class TestPrivateRooms(unittest.TestCase):
         self.assertIsNotNone(HOST.grant)
 
 
+class TestReviewPull(unittest.TestCase):
+    """2026-10-03: the pull asked for /v1/v1/reviews (BASE already ends in /v1) and 404'd on every
+    run since 2026-05-28 — the bot only ever had the May CSV seed."""
+
+    def test_path_is_not_doubled_and_raw_is_compact(self):
+        self.assertTrue(bot.BASE.endswith("/v1"))
+        seen = []
+        big = {"id": 7, "type": "guest-to-host", "channelName": "Airbnb", "channelId": 2018,
+               "reservationId": 55, "listingMapId": 3, "rating": 10, "departureDate": "2026-10-01",
+               "reviewCategory": [{"category": "cleanliness", "rating": 10}],
+               "publicReview": "x" * 3000, "privateFeedback": "y" * 3000, "guestName": "Sara"}
+
+        def fake(path, params=None):
+            seen.append(path)
+            return {"status": "success", "result": [big] if params.get("offset") == 0 else []}
+        saved = bot.api_get
+        bot.api_get = fake
+        try:
+            out = bot.fetch_reviews_from_hostaway(limit=200)
+        finally:
+            bot.api_get = saved
+        self.assertEqual(set(seen), {"/reviews"})
+        self.assertEqual(len(out), 1)
+        raw = out[0]["raw"]
+        self.assertEqual(raw["type"], "guest-to-host")
+        self.assertEqual(raw["reviewCategory"][0]["category"], "cleanliness")
+        for dropped in ("publicReview", "privateFeedback", "guestName"):
+            self.assertNotIn(dropped, raw)
+        self.assertEqual(out[0]["public_review"], "x" * 3000)      # the text itself is kept once
+        self.assertEqual(bot._reviews_fetch_status["n"], 1)
+
+
 class TestReservationShape(unittest.TestCase):
     def test_departures_use_the_targeted_window(self):
         seen = {}

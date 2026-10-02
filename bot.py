@@ -17459,6 +17459,12 @@ def _ticket_from_escalation(esc_id, esc):
     )
 
 _reviews_fetch_status = {"at": "", "n": 0, "pages": 0, "error": ""}   # last pull — counts only
+# The few raw Hostaway fields anything reads (business/metrics + the review-category split +
+# «رفع التقييم»'s type/channel filter). The full object is ~1–2 KB; ~14k of them would make
+# reviews.json tens of MB, rewritten by persist_loop every minute.
+_REVIEW_RAW_KEEP = ("id", "type", "status", "channelId", "channelName", "reservationId",
+                    "listingMapId", "rating", "reviewCategory", "reviewCategories", "categories",
+                    "departureDate", "arrivalDate", "submittedAt", "insertedOn")
 
 
 def fetch_reviews_from_hostaway(limit=20000, page_size=100):
@@ -17472,7 +17478,9 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
     while len(out) < limit:
         batch_size = min(page_size, limit - len(out))
         try:
-            j = api_get("/v1/reviews", params={"limit": batch_size, "offset": offset,
+            # BASE already ends in /v1 — "/v1/reviews" became /v1/v1/reviews → 404 on every pull
+            # from 2026-05-28 until 2026-10-03, so the bot only ever had the CSV seed.
+            j = api_get("/reviews", params={"limit": batch_size, "offset": offset,
                                                "sortOrder": "departureDate:desc"})
         except Exception as e:
             print("fetch_reviews_from_hostaway error:", e)
@@ -17509,7 +17517,7 @@ def fetch_reviews_from_hostaway(limit=20000, page_size=100):
                 "date": str(date_str)[:10] if date_str else "",
                 "is_public": bool(r.get("isPublic", True)),
                 "reservation_id": r.get("reservationId"),
-                "raw": r,
+                "raw": {k: r[k] for k in _REVIEW_RAW_KEEP if k in r},
             })
         if len(rows) < batch_size:
             break
