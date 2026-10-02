@@ -57,7 +57,7 @@ Scope: the owner-approved Review Push (spec 2026-10-03-review-push-design.md) â€
 - [x] G10: dashboard still logs in â€” every DASHBOARD_HTML <script> parses and the tab JS passes node --check
   CHECK: node --check reviewask/static/reviewask_tab.js && python3 -c "import bot,esprima,re;[esprima.parseScript(j) for j in re.findall(r'<script>(.*?)</script>',bot.DASHBOARD_HTML,re.S)];print('JS_OK')"
   EXPECT: /^JS_OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=2a1d8231f48a04ad147689c9836a391f9e9dffa42efa94a944ebc4865dc347d0; exit=0; EXPECT=matched; output-sha256=335ce64b9782335f8df0737f9101747e07f768c02e883e2fb1fd08bb81d8c767; output-bytes=1229; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=2a1d8231f48a04ad147689c9836a391f9e9dffa42efa94a944ebc4865dc347d0; exit=0; EXPECT=matched; output-sha256=01b2f3111f7aa5f2b8beef0ec0c52cfd0510448836ec690f36445c402ffa0b9f; output-bytes=1229; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
 - [x] G11: musaed selftest unaffected
   CHECK: python3 eval_musaed.py --selftest 2>&1 | tail -3
