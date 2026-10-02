@@ -1,52 +1,81 @@
-# Gates: Checkout Watch «متابعة الخروج»
+# Gates: Discord tidy «ترتيب ديسكورد» (`!ouja-tidy`)
 
-OWNS: checkout/**, tests/test_checkout_watch_*.py, bot.py, CLAUDE.md, GATES.md
+OWNS: ops_tidy.py, ops_tidy_rules.py, tests/test_ops_tidy*.py, tests/fixtures/tidy/**, bot.py, CLAUDE.md, GATES.md
 
-Scope: the checkout/ package (engine, db, texts, host, flow, board, risk, report, demo), its
-Discord glue in bot.py (card, buttons, loop, six commands, demo), the oujact «no_answer» state,
-the tests, and the CLAUDE.md section — shipped OFF until an admin runs /checkout-start.
+Scope: the `!ouja-tidy plan|run|undo|status` command (ops_tidy.py, executing the pure plan from
+ops_tidy_rules.py), plus five targeted bot.py edits: env-gated members intent, overflow categories
+copy their parent's overwrites, the directpay category is created locked, closed tickets auto-move
+to «📦 أرشيف N», and archived directpay rooms are still "known" (and move back on reopen).
+Spec: docs/superpowers/specs/2026-10-02-discord-tidy-design.md
 
-- [x] G1: bot.py compiles clean
-  CHECK: rm -rf __pycache__ && python3 -W error::SyntaxWarning -m py_compile bot.py && echo COMPILED_OK
+- [x] G0: baseline captured BEFORE any edit (full suite on the untouched tree)
+  CHECK: test -f .unlazy-baseline.txt && grep -c "^Ran " .unlazy-baseline.txt | xargs -I{} sh -c 'test {} -ge 1 && echo BASELINE_OK'
+  EXPECT: BASELINE_OK
+  EVIDENCE (2026-10-02): BASELINE_OK (4683 tests; 2 pre-existing failures: test_ops_capture.TestBackfill ×2, expired dates)
+
+- [x] G1: bot.py and the new modules compile clean
+  CHECK: rm -rf __pycache__ && python3 -W error::SyntaxWarning -m py_compile bot.py ops_tidy.py ops_tidy_rules.py && echo COMPILED_OK
   EXPECT: COMPILED_OK
-  EVIDENCE: COMPILED_OK (python3 3.9.6, exit 0) — 2026-09-26
+  EVIDENCE (2026-10-02): COMPILED_OK
 
-- [x] G2: checkout package + bot.py have no pyflakes errors (unused imports allowed)
-  CHECK: python3 -m pyflakes checkout/*.py bot.py | grep -v "imported but unused" | grep -c . | xargs -I{} sh -c 'test {} -eq 0 && echo FLAKES_OK'
+- [x] G2: no pyflakes findings in the new modules/tests and none new in bot.py (unused imports allowed)
+  CHECK: python3 -m pyflakes ops_tidy.py ops_tidy_rules.py tests/test_ops_tidy*.py bot.py | grep -v "imported but unused" | grep -c . | xargs -I{} sh -c 'test {} -eq 0 && echo FLAKES_OK'
   EXPECT: FLAKES_OK
-  EVIDENCE: FLAKES_OK — 0 non-unused-import findings across checkout/*.py + bot.py
+  EVIDENCE (2026-10-02): FLAKES_OK
 
-- [x] G3: new tests pass
-  CHECK: python3 -m unittest discover -s tests -p "test_checkout_watch*.py" 2>&1 | tail -1
-  EXPECT: ^OK
-  EVIDENCE: OK — Ran 92 tests (engine 34, flow 45, bot 13)
+- [x] G3: the owner-approved decisions still hold (pure rules, real 2026-10-02 audit)
+  CHECK: python3 -m unittest tests.test_ops_tidy_rules 2>&1 | grep -E "^(OK|FAILED)"
+  EXPECT: ^OK$
+  EVIDENCE (2026-10-02): OK (23 tests)
 
-- [ ] G4: full suite still green
-  CHECK: python3 -m unittest discover -s tests -p "test_*.py" 2>&1 | tail -1
-  EXPECT: ^OK
-  EVIDENCE: UNMET — last line is `sys:1: DeprecationWarning: builtin type swigvarlink…` (printed at interpreter exit, so `tail -1` can never be ^OK), and the suite has 2 failures that ALSO fail on untouched origin/main dcd11b5 (baseline run before any edit: Ran 4342, failures=2, the same two tests). See ABANDON below.
+- [x] G4: the Discord layer + bot.py integration tests pass (fakes, no network)
+  CHECK: python3 -m unittest discover -s tests -p "test_ops_tidy_*.py" 2>&1 | grep -E "^(OK|FAILED)"
+  EXPECT: ^OK$
+  EVIDENCE (2026-10-02): OK (50 tests)
 
-- [x] G4b: full suite has no failure beyond the two that already fail on untouched origin/main (dcd11b5)
-  CHECK: python3 -m unittest discover -s tests -p "test_*.py" 2>&1 | python3 -c "import sys,re;t=sys.stdin.read();bad=set(re.findall(r'^(?:FAIL|ERROR): (\S+ \(\S+\))',t,re.M));ok={'test_an_unlinked_apartment_is_counted_as_unattributed (test_ops_capture.TestBackfill)','test_it_reports_how_much_it_could_attribute (test_ops_capture.TestBackfill)'};ran=re.search(r'^Ran (\d+) tests',t,re.M);print('NO_NEW_FAILURES ran=%s' % ran.group(1) if ran and bad<=ok else 'NEW_FAILURES %s' % sorted(bad-ok))"
+- [x] G5: full suite has no failure that is not already in the baseline
+  CHECK: python3 -m unittest discover -s tests -p "test_*.py" 2>&1 | python3 -c "import sys,re;t=sys.stdin.read();b=open('.unlazy-baseline.txt').read();f=lambda s:set(re.findall(r'^(?:FAIL|ERROR): (\S+ \(\S+\))',s,re.M));new=f(t)-f(b);ran=re.search(r'^Ran (\d+) tests',t,re.M);print('NO_NEW_FAILURES ran=%s'%ran.group(1) if ran and not new else 'NEW_FAILURES %s'%sorted(new))"
   EXPECT: ^NO_NEW_FAILURES
-  EVIDENCE: NO_NEW_FAILURES ran=4434 — the only failures are the two pre-existing test_ops_capture.TestBackfill ones (hard-coded 2026-07-29 dates now outside the 30-day window)
-
-- [x] G5: musaed selftest unaffected
-  CHECK: python3 eval_musaed.py --selftest 2>&1 | tail -3
-  EXPECT: (?i)pass
-  EVIDENCE: SELFTEST PASSED
+  EVIDENCE (2026-10-02): NO_NEW_FAILURES ran=4733
 
 - [x] G6: embedded dashboard JS still parses
   CHECK: python3 -c "import bot,esprima,re;[esprima.parseScript(j) for j in re.findall(r'<script>(.*?)</script>',bot.DASHBOARD_HTML,re.S)];print('JS_OK')"
   EXPECT: JS_OK
-  EVIDENCE: JS_OK (DASHBOARD_HTML changed by one label entry: guest_out in the cleaning-log map)
+  EVIDENCE (2026-10-02): JS_OK
 
-- [x] G7: only allowed files changed
-  CHECK: git status --porcelain | awk '{print $2}' | grep -v -E '^(bot\.py|CLAUDE\.md|GATES\.md|checkout/.*|tests/test_checkout_watch_.*\.py)$' | wc -l | xargs -I{} sh -c 'test {} -eq 0 && echo SCOPE_OK'
-  EXPECT: SCOPE_OK
-  EVIDENCE: SCOPE_OK — M CLAUDE.md, M bot.py, ?? GATES.md, ?? checkout/, ?? tests/test_checkout_watch_{bot,engine,flow}.py
+- [x] G7: musaed selftest unaffected
+  CHECK: python3 eval_musaed.py --selftest 2>&1 | tail -3
+  EXPECT: (?i)pass
+  EVIDENCE (2026-10-02): SELFTEST PASSED
 
-- [ ] G8: MANUAL (owner, after deploy): /checkout-demo shows 5 channels; every button works; ⏩ advances; /checkout-demo-end removes them.
-  EVIDENCE: pending
+- [x] G8: members intent is env-gated (bot must still boot when the portal toggle is OFF)
+  CHECK: python3 -c "import re;s=open('bot.py',encoding='utf-8').read();m=re.findall(r'^intents\.members\s*=.*$',s,re.M);print('GATED_OK' if len(m)==1 and 'MEMBERS_INTENT' in m[0] else 'BAD %r'%m)"
+  EXPECT: ^GATED_OK$
+  EVIDENCE (2026-10-02): GATED_OK
 
-ABANDON: G4 cannot be met by this work: on untouched origin/main the full suite already has 2 failures (test_ops_capture.TestBackfill, date-expired fixtures) and the interpreter prints a DeprecationWarning after the verdict, so `tail -1` never shows OK. Fixing either means editing files outside this brief's allowed list. G4b proves no new failures. Handoff: owner decides whether to push.
+- [x] G9: ops_tidy is wired exactly like ops_audit/ops_archive and never imports bot
+  CHECK: python3 -c "import re;s=open('bot.py',encoding='utf-8').read();t=open('ops_tidy.py',encoding='utf-8').read();ok=('ops_tidy.setup(bot' in s) and not re.search(r'^\s*(import bot\b|from bot import)',t,re.M) and bool(re.search(r'^\s*(import ops_tidy_rules|from ops_tidy_rules import)',t,re.M));print('WIRED_OK' if ok else 'NOT_WIRED')"
+  EXPECT: ^WIRED_OK$
+  EVIDENCE (2026-10-02): WIRED_OK
+
+- [x] G10: plan is read-only (fake guild records ZERO edits/creates/deletes during `plan`)
+  CHECK: python3 -m unittest tests.test_ops_tidy_discord.TestPlanIsReadOnly 2>&1 | grep -E "^(OK|FAILED)"
+  EXPECT: ^OK$
+  EVIDENCE (2026-10-02): OK
+
+- [x] G11: ticket-opening rooms are never edited by run, undo, or auto-archive
+  CHECK: python3 -m unittest tests.test_ops_tidy_discord.TestPanelsUntouched 2>&1 | grep -E "^(OK|FAILED)"
+  EXPECT: ^OK$
+  EVIDENCE (2026-10-02): OK
+
+- [x] G12: nothing is ever deleted or renamed by ops_tidy.py
+  CHECK: python3 -c "import re;t=open('ops_tidy.py',encoding='utf-8').read();bad=re.findall(r'\.delete\(|\.edit\([^)]*\bname\s*=',t);print('NO_DELETE_OK' if not bad else 'FOUND %r'%bad)"
+  EXPECT: ^NO_DELETE_OK$
+  EVIDENCE (2026-10-02): NO_DELETE_OK
+
+## Result — 13/13 MET (2026-10-02)
+Independent review before shipping found 4 real issues, all fixed test-first and re-gated:
+the bot must not grant itself Manage Permissions in an overwrite (admin-only → 403 after the run);
+moves pass the archive overwrites explicitly (gateway-cache lag); an unconfirmed category lock
+never syncs its channels; undo writes a position only when it changed; a reopened collection room
+returns to the first collection category with room.

@@ -4455,6 +4455,7 @@ handled = load_handled()
 # directly without @-mentioning the bot, AND silences the startup warning.
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = os.environ.get("MEMBERS_INTENT", "0").strip() == "1"   # portal toggle FIRST, else the bot cannot connect
 bot = commands.Bot(command_prefix="!ouja ", intents=intents)
 
 import ops_audit, sys as _oad_sys   # read-only: !ouja-audit + !ouja-msgdump (temporary)
@@ -4462,6 +4463,9 @@ ops_audit.setup(bot, _oad_sys.modules[__name__])    # hand over the LIVE module 
 
 import ops_archive, sys as _oa_sys  # Drive archive + guarded purge: !ouja-archive / !ouja-purge
 ops_archive.setup(bot, _oa_sys.modules[__name__])   # hand over the LIVE module (never `import bot`)
+
+import ops_tidy, sys as _ot_sys    # !ouja-tidy plan|run|undo|status + auto-archive on close
+ops_tidy.setup(bot, _ot_sys.modules[__name__])
 
 class CleaningDoneView(discord.ui.View):
     def __init__(self):
@@ -4747,7 +4751,10 @@ async def _make_channel_spill(guild, category, name, topic=None):
         cat = next((c for c in guild.categories
                     if _tk_cat_norm(c.name) == _tk_cat_norm(oname)), None)
         if cat is None:
-            cat = await guild.create_category(oname)
+            # born with the parent's overwrites — a bare «RR ٢» was open to the whole server
+            ow = dict(getattr(category, "overwrites", None) or {})
+            cat = await (guild.create_category(oname, overwrites=ow) if ow
+                         else guild.create_category(oname))
         try:
             return await guild.create_text_channel(name, category=cat, topic=topic)
         except discord.HTTPException as e:
@@ -8176,7 +8183,11 @@ async def _directpay_category(guild):
     cat = _directpay_find_category(guild)
     if cat is not None:
         return cat
-    cat = await guild.create_category(DIRECTPAY_CATEGORY)
+    try:
+        cat = await guild.create_category(DIRECTPAY_CATEGORY, overwrites=ops_tidy.directpay_overwrites(guild))
+    except Exception as e:      # a refused lock must never stop a collection room from opening
+        print("[directpay] locked category refused — creating it plain (non-fatal):", e)
+        cat = await guild.create_category(DIRECTPAY_CATEGORY)
     try:
         below = next((c for c in guild.categories
                       if _tk_cat_norm(c.name) == _tk_cat_norm(DECOR_CATEGORY)), None)
@@ -8322,6 +8333,10 @@ async def _directpay_finalize_close(channel, ticket, text):
             await channel.edit(name=("مغلقة-" + channel.name)[:100])
     except Exception as e:
         print("[directpay] rename error:", e)
+    try:
+        await ops_tidy.archive_closed_channel(channel)   # «📦 أرشيف N» — only after the first !ouja-tidy run
+    except Exception as e:
+        print("[directpay] archive move skipped (non-fatal):", e)
 
 def _dp_actor(interaction):
     u = interaction.user
@@ -8378,6 +8393,14 @@ async def _directpay_deliver(payload):
         if kind == "nudge":
             await ch.send((mentions + " " if mentions else "") + text, allowed_mentions=_DP_ALLOWED)
         elif kind == "price_up":
+            if ops_tidy.R.is_archive_category(getattr(getattr(ch, "category", None), "name", "")):
+                try:   # back to the first collection category with room (its «… ٢» when full)
+                    base = await _directpay_category(guild)
+                    dest = next((c for c in _category_family(guild, base)
+                                 if len(c.text_channels) < 50), base)
+                    ch = (await ch.edit(category=dest, sync_permissions=True)) or ch   # fresh overwrites
+                except Exception as e:
+                    print("[directpay] move back from the archive skipped (non-fatal):", e)
             await _directpay_unlock_channel(ch)
             m = await ch.send((mentions + " " if mentions else "") + text, allowed_mentions=_DP_ALLOWED)
             try:
@@ -8615,9 +8638,11 @@ def _directpay_known_rooms(guild):
     out = {}
     try:
         cat = _directpay_find_category(guild)
-        if cat is None:
-            return out
-        for c in _category_family(guild, cat):
+        cats = _category_family(guild, cat) if cat is not None else []
+        # closed rooms live in «📦 أرشيف N» after !ouja-tidy — still "known", or the poller
+        # would open a second room for a reservation that was already handled
+        cats += [c for c in guild.categories if ops_tidy.R.is_archive_category(c.name)]
+        for c in cats:
             for ch in c.text_channels:
                 m = re.search(r"ouja-dp:(\d+)(?:\s+seq:(\d+))?", ch.topic or "")
                 if m:
@@ -67321,6 +67346,10 @@ async def _tk_close(interaction):
         await msg.pin()
     except Exception as e:
         print("ticket close pin error:", e)
+    try:
+        await ops_tidy.archive_closed_channel(ch)        # «📦 أرشيف N» — only after the first !ouja-tidy run
+    except Exception as e:
+        print("ticket archive move skipped (non-fatal):", e)
 
 _MAINT_CLOSE_REFUSAL = (
     "🙏 **إغلاق تذاكر الصيانة للمسؤولين المحددين فقط.**\n"
@@ -73075,6 +73104,10 @@ class _PermitsDiscordPort:
                 await ch.edit(name=("مغلقة-" + ch.name)[:100])
             except Exception as e:
                 print("[permits] rename failed (non-fatal):", e)
+        try:
+            await ops_tidy.archive_closed_channel(ch)    # «📦 أرشيف N» — only after the first !ouja-tidy run
+        except Exception as e:
+            print("[permits] archive move skipped (non-fatal):", e)
 
     async def post_digest(self, chunks, user_ids=()):
         # Found anywhere in the server by name; created with the 50-channel spill when missing —

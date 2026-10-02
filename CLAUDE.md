@@ -381,6 +381,50 @@ checkout in her head. **Ships OFF** — nothing posts until an admin runs `/chec
   board, 17:00), `tests/test_checkout_watch_bot.py` (REAL firewall, tier 90, overflow sweep,
   synthetic Hostaway rows, wiring). Run them before any edit here.
 
+## ترتيب ديسكورد — `!ouja-tidy` (`ops_tidy.py` + `ops_tidy_rules.py`)
+Owner-approved 2026-10-02 (spec: `docs/superpowers/specs/2026-10-02-discord-tidy-design.md`).
+`!ouja-tidy plan` (READ-ONLY: summary + `tidy_plan_<date>.json` + `tidy_people_<date>.csv` «مين
+يفقد وش») → `!ouja-tidy run` (word **نفّذ**, or **نفّذ بدون تقرير** when there is no people
+report; plan must be < 24h old) → `!ouja-tidy undo` (word **رجّع**) / `!ouja-tidy status`. Owner
+(`OWNER_DISCORD_ID`) or a guild admin only; diacritics are ignored in the words.
+- **Split:** `ops_tidy_rules.py` is the PURE brain (no discord import), pinned by
+  `tests/test_ops_tidy_rules.py` against the REAL 2026-10-02 audit (196 archive / 24 restrict /
+  94 keep). Don't change its behaviour to make the Discord layer pass. `ops_tidy.py` only
+  executes the plan; wired like ops_audit/ops_archive (`setup(bot, host)`, never `import bot`).
+- **The 4 rules:** (1) ticket-opening rooms («فتح/افتح/تكت», the 3 `*_PANEL_CHANNEL`s,
+  `rr-tickets` — also when renamed «مغلقة-…») are NEVER written; (2) nothing is deleted or
+  renamed (gate G12 greps for it); (3) the archive «📦 أرشيف N» (50 per category) is hidden from
+  @everyone and **read-only for Managment** (`TIDY_ARCHIVE_ROLE`), the bot keeps view/send/history;
+  (4) only the 3 leaks are locked — overflow categories copy their parent, «تحصيل الحجوزات
+  المباشرة» is locked (Accounting + Managment + `DIRECTPAY_PING_ROLE_ID` + `DIRECTPAY_CLOSE_IDS`),
+  the 4 price/revenue channels become Managment-only (the bot's own member overwrite goes in
+  FIRST so it never locks itself out). Live Turnovers/صيانه/مشتريات permissions are not touched.
+- **Run safety:** the snapshot is saved AND posted as an attachment BEFORE the first write
+  (Railway's disk can be wiped — undo accepts the attachment); every row is re-checked right
+  before its write (gone / moved / reopened / panel → «تجاوزت»); Forbidden is counted, never
+  fatal (re-run plan → run picks up only the rest); one op at a time; `TIDY_PAUSE` (1.0 s)
+  between writes. Undo restores categories FIRST, then channels in reverse order.
+- **Auto-archive on close** (`archive_closed_channel`, called at the end of `_tk_close`,
+  `_directpay_finalize_close` and the permits `close_channel` — a test asserts every
+  `"مغلقة-" +` rename site is followed by it): OFF until the first successful `run` writes
+  `tidy_state.json {"auto_archive": true}`; `undo` turns it off again. `TIDY_AUTO_ARCHIVE=0/1`
+  forces it. Never raises. A reopened collection room (`price_up`) moves back out of the archive.
+- **TRAP — `_directpay_known_rooms` must scan the archive categories too.** Closed collection
+  rooms live in «📦 أرشيف N» after a run; if the scan only looked at the collection category the
+  poller would open a SECOND room for an already-handled reservation. Same rule for any future
+  code that finds rooms by topic inside a category.
+- **TRAP — never put `manage_permissions`/`manage_channels` in the bot's OWN overwrite.** Only a
+  guild Administrator may set Manage Permissions inside a channel overwrite; the bot is admin only
+  during the owner's run, so every later archive/collection-category create would 403. Moves also
+  pass `overwrites=dict(dest.overwrites)` next to `sync_permissions=True` — discord.py's sync reads
+  the category from the gateway CACHE, which lags a just-created category.
+- **TRAP — never set `intents.members = True` without the env gate.** It is
+  `os.environ.get("MEMBERS_INTENT","0") == "1"`: with the portal's «Server Members Intent» OFF a
+  hard True makes the whole bot fail to log in. Order: portal toggle first, then `MEMBERS_INTENT=1`.
+- Env: `MEMBERS_INTENT`(0), `TIDY_AUTO_ARCHIVE`(unset = follow the first run), `TIDY_ARCHIVE_ROLE`
+  (Managment), `TIDY_PAUSE`(1.0). The bot needs **temporary Administrator** during `run` to reach
+  the ~47 channels it cannot read today; remove it afterwards.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
