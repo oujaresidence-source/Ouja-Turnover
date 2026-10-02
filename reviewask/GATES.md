@@ -24,20 +24,20 @@ Scope: the owner-approved Review Push (spec 2026-10-03-review-push-design.md) �
   EXPECT: /^OK/m
   EVIDENCE: automatic-evidence=v1; definition-sha256=be0e0b562a49f8f2ee7286a73743640adc9440c0f9c07e64442a69d5dfc867b4; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
-- [ ] G4: flow + db — one room per reservation across 3 overlapping ticks, first-final-wins, a matched review closes from any open state, cancellation closes, /rv/<token> logs wa_opened and 302s to wa.me with the rendered template
+- [x] G4: flow + db — one room per reservation across 3 overlapping ticks, first-final-wins, a matched review closes from any open state, cancellation closes, /rv/<token> logs wa_opened and 302s to wa.me with the rendered template
   CHECK: python3 -m unittest tests.test_reviewask_flow 2>&1 | tail -1
   EXPECT: /^OK/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=d458af0adb4ebf2bf5be8e317b071fd553f0fe51e6c9b53bd536d3ca12544cb4; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
-- [ ] G5: deletion safety — only rv rooms closed ≥7 days whose topic carries the same reservation id are deleted; a wrong topic is refused; the transcript row exists before delete; "couldn't fetch" is never "deleted"
+- [x] G5: deletion safety — only rv rooms closed ≥7 days whose topic carries the same reservation id are deleted; a wrong topic is refused; the transcript row exists before delete; "couldn't fetch" is never "deleted"
   CHECK: python3 -m unittest tests.test_reviewask_delete 2>&1 | tail -1
   EXPECT: /^OK/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=68c00457b4a2ba93083a1e9e1c7ff9fb48d9de02dfc2644e11211b9883323abf; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
-- [ ] G6: bot.py integration — «عنده ملاحظة» opens a maintenance room whose title starts «من مكالمة تقييم», source=review, field «المصدر», link back; existing _maint_open_ticket callers unchanged; commands registered; NAV labels in BOTH ar and en
+- [x] G6: bot.py integration — «عنده ملاحظة» opens a maintenance room whose title starts «من مكالمة تقييم», source=review, field «المصدر», link back; existing _maint_open_ticket callers unchanged; commands registered; NAV labels in BOTH ar and en
   CHECK: python3 -m unittest tests.test_reviewask_bot 2>&1 | tail -1
   EXPECT: /^OK/m
-  EVIDENCE: pending
+  EVIDENCE: automatic-evidence=v1; definition-sha256=3bbf624b8ec5df992d6643374cdfc00f4b0bf7f46ea265a1a4b7ad3ab475c39f; exit=0; EXPECT=matched; output-sha256=a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87; output-bytes=3; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
 - [x] G7: structure — every button label in reviewask/ has no emoji, no `import bot`, no asyncio.to_thread, zero backslashes in reviewask/*.py, no discount text hard-coded in .py, channel.delete called only inside sweep_closed
   CHECK: python3 -m unittest tests.test_reviewask_structure 2>&1 | tail -1
