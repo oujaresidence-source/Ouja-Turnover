@@ -144,6 +144,10 @@ class TestWebLane(unittest.TestCase):
         self.assertIn("web_thread(", body)
         self.assertNotIn("to_thread(", body)
 
+    def test_public_health_runs_on_the_web_pool(self):
+        body = _func_src(_read(os.path.join(PKG, "routes.py")), "handle_health")
+        self.assertIn("web_thread(", body)
+
     def test_every_api_handler_goes_through_web_thread(self):
         src = _read(os.path.join(PKG, "routes.py"))
         for name in re.findall(r"^async def (api_[a-z_]+)\(", src, re.M):

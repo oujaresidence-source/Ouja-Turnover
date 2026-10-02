@@ -89,6 +89,7 @@ SKIP_AR = {
 # Review filter (spec §3). The G12 live print decides the exact type value; a row WITHOUT a
 # type (the shipped Airbnb CSV seed) is a guest review.
 GUEST_TYPES = ("guest-to-host", "guest_to_host", "guesttohost")
+HOST_TYPES = ("host-to-guest", "host_to_guest", "hosttoguest")
 AIRBNB_CHANNEL_IDS = (2018,)
 
 # ------------------------------------------------------------------ config shape
@@ -208,6 +209,24 @@ def is_airbnb_review(r):
         if ch:
             return "airbnb" in ch
     return "airbnb" in str((r or {}).get("channel") or "").lower()
+
+
+def type_audit(reviews):
+    """{types, channels, unknown_types, total} over the raw review list — counts only, no names.
+    A `type` that is neither a guest nor a host value means our filter does not understand the
+    data: the caller must refuse to decide anything on it (fail closed)."""
+    types, channels = {}, {}
+    for r in reviews or []:
+        raw = (r or {}).get("raw") or {}
+        t = raw.get("type") if isinstance(raw, dict) else None
+        key = "(بدون نوع)" if t is None or str(t).strip() == "" else str(t).strip()
+        types[key] = types.get(key, 0) + 1
+        ch = (raw.get("channelName") if isinstance(raw, dict) else None) or (r or {}).get("channel") or "—"
+        channels[str(ch)] = channels.get(str(ch), 0) + 1
+    unknown = sorted(k for k in types if k != "(بدون نوع)"
+                     and k.lower() not in GUEST_TYPES and k.lower() not in HOST_TYPES)
+    return {"types": types, "channels": channels, "unknown_types": unknown,
+            "total": len(reviews or [])}
 
 
 def counted_reviews(reviews):

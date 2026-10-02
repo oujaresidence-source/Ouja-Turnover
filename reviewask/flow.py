@@ -180,6 +180,12 @@ def plan_day(day, known=()):
     if not revs:
         out["error"] = "ما قدرت أقرأ التقييمات — ما فتحت شي، جرب بعد شوي."
         return out
+    audit = engine.type_audit(revs)
+    if audit["unknown_types"]:
+        # the guest/host filter does not understand this data — never guess which reviews count
+        out["error"] = ("فيه نوع تقييم ما نعرفه (%s) — ما فتحت شي لين نراجع الفلتر."
+                        % "، ".join(audit["unknown_types"][:5]))
+        return out
     prog = program(revs)
     reviewed = {str(r.get("reservation_id")): r for r in engine.counted_reviews(revs)
                 if str(r.get("reservation_id") or "").strip()}
@@ -589,6 +595,7 @@ async def tick(now_=None, force=False):
         if not force and not live():
             return {"skipped": "off"}
         rep = {"opened": [], "actions": [], "reviewed": [], "cancelled": []}
+        db.set_setting("last_tick_at", _iso(now_))
         c = cfg()
         today = now_.date()
         # 1) the 00:05 rule — anything missing for today (and yesterday, after downtime)
@@ -1006,6 +1013,23 @@ async def sweep_closed(now_=None, pause=1.0, limit=10):
             if pause and i < len(rows) - 1:
                 await asyncio.sleep(pause)
         return done
+
+
+# ------------------------------------------------------------------ public health (counts only)
+
+def health():
+    """BLOCKING. The no-login health view: switch, review-type counts, how many reviews count,
+    weak apartments, open tickets, last tick. NUMBERS ONLY — no guest, phone or apartment name."""
+    revs = _reviews()
+    audit = engine.type_audit(revs)
+    prog = program(revs) if revs else {}
+    return {"ok": True, "enabled": config.enabled(), "live": live(),
+            "reviews_total": audit["total"], "types": audit["types"], "channels": audit["channels"],
+            "unknown_types": audit["unknown_types"],
+            "counted": len(engine.counted_reviews(revs)),
+            "weak_apartments": sum(1 for s in prog.values() if s.get("in_program")),
+            "apartments": len(prog), "open_tickets": len(db.open_tickets()),
+            "last_tick_at": db.setting("last_tick_at") or ""}
 
 
 # ------------------------------------------------------------------ the editor preview (R4)

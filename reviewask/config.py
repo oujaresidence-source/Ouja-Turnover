@@ -35,7 +35,9 @@ def enabled():
 
 
 def live_env():
-    return _env("REVIEWASK_LIVE", "0") == "1"
+    """Owner ruling 2026-10-03 («شغل البوت بدون ما اسوي شي»): ON by default — he never opens
+    Railway or types /reviews-start. /reviews-stop (the stored switch) still wins over this."""
+    return _env("REVIEWASK_LIVE", "1") == "1"
 
 
 def threshold():

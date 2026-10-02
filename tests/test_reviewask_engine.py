@@ -133,6 +133,21 @@ class TestReviewFilter(unittest.TestCase):
         self.assertTrue(E.is_airbnb_review(r))
 
 
+class TestTypeAudit(unittest.TestCase):
+    def test_counts_and_unknown(self):
+        revs = [rev(1, 10, "a"), rev(1, 2, "b", typ="host-to-guest"), rev(1, 8, "c", typ=None),
+                rev(1, 8, "d", typ="mystery")]
+        a = E.type_audit(revs)
+        self.assertEqual(a["types"]["guest-to-host"], 1)
+        self.assertEqual(a["types"]["(بدون نوع)"], 1)
+        self.assertEqual(a["unknown_types"], ["mystery"])
+        self.assertEqual(a["total"], 4)
+
+    def test_known_types_are_not_unknown(self):
+        revs = [rev(1, 10, "a"), rev(1, 2, "b", typ="host-to-guest"), rev(1, 2, "c", typ="Guest-To-Host")]
+        self.assertEqual(E.type_audit(revs)["unknown_types"], [])
+
+
 class TestApartmentStatus(unittest.TestCase):
     def test_pins_override_and_both_numbers_shown(self):
         reviews = [rev(8, 10, str(i)) for i in range(5)]           # 5.0, computed OUT

@@ -254,6 +254,38 @@ class TestOpening(Base):
         self.assertTrue(rep["error"])
         self.assertEqual(self.f.rooms, {})
 
+    def test_unknown_review_type_refuses_to_open(self):
+        self.f.reviews.append({"id": "z", "listing_id": 2, "rating_raw": 2, "channel": "Airbnb",
+                               "reservation_id": "zz", "raw": {"type": "something-new"}})
+        rep = self.open_today()
+        self.assertIn("something-new", rep["error"])
+        self.assertEqual(self.f.rooms, {})
+
+    def test_on_by_default_and_stop_still_wins(self):
+        db.set_setting("live", "")
+        self.assertTrue(flow.live())                    # owner ruling 2026-10-03: no /reviews-start
+        flow.stop("فيصل")
+        self.assertFalse(flow.live())
+        os.environ["REVIEWASK_LIVE"] = "0"
+        try:
+            db.set_setting("live", "")
+            self.assertFalse(flow.live())
+        finally:
+            os.environ.pop("REVIEWASK_LIVE", None)
+
+    def test_public_health_is_counts_only(self):
+        self.open_today()
+        run(flow.tick(at(2026, 10, 14, 1, 0)))
+        h = flow.health()
+        self.assertTrue(h["live"])
+        self.assertEqual(h["types"]["guest-to-host"], len(self.f.reviews))
+        self.assertEqual(h["unknown_types"], [])
+        self.assertEqual(h["open_tickets"], 1)
+        self.assertTrue(h["last_tick_at"])
+        blob = json.dumps(h, ensure_ascii=False)
+        for secret in ("Sara", "Unit 1", "501", "966", "Narjis"):
+            self.assertNotIn(secret, blob)
+
     def test_hostaway_down_is_an_error_not_an_empty_day(self):
         self.f.dep_fail = True
         rep = self.open_today()

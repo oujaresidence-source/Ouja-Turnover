@@ -288,6 +288,12 @@ async def handle_rv(request):
     raise HOST.web.HTTPFound(url)
 
 
+async def handle_health(request):
+    """GET /reviewask/health — PUBLIC, counts only (flow.health). Lets the bot prove its own
+    review filter against live data without anyone handling a Hostaway key."""
+    return _json(await HOST.web_thread(flow.health))
+
+
 # ---------------- the tab's script (public: code, no data) ----------------
 
 _js_cache = {"mtime": None, "text": ""}
@@ -319,6 +325,7 @@ def register(app):
     g = app.router.add_get
     p = app.router.add_post
     g("/rv/{token}", handle_rv)
+    g("/reviewask/health", handle_health)
     g("/reviewask/static/reviewask_tab.js", handle_static_js)
     g("/api/reviewask/summary", _safe(api_summary))
     g("/api/reviewask/apartments", _safe(api_apartments))
