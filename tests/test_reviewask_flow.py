@@ -13,6 +13,7 @@ Run: python3 -m unittest tests.test_reviewask_flow
 import asyncio
 import io
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -465,6 +466,31 @@ class TestTemplates(Base):
         self.assertEqual(db.templates()["ar"], "B {الاسم}")
         hist = db.template_history()
         self.assertEqual([h["ar"] for h in hist][:2], ["A {الاسم}", t["ar"]])
+
+    def test_untouched_seed_follows_the_file_but_an_edit_is_never_replaced(self):
+        old = {"ar": "نص قديم {الاسم}", "en": "old", "call_script": "s",
+               "updated_by": "seed", "updated_at": "2026-10-03T00:00:00+03:00"}
+        db.set_setting("templates", json.dumps(old, ensure_ascii=False), "seed")
+        t = db.templates()
+        self.assertEqual(t["ar"], db._seed()["ar"])                 # the shipped default wins
+        self.assertEqual(db.template_history()[0]["ar"], "نص قديم {الاسم}")
+        self.assertEqual(db.templates()["ar"], t["ar"])             # stable: no history spam
+        self.assertEqual(len(db.template_history()), 1)
+        db.save_templates("نص فيصل {الاسم}", "", "", "فيصل")
+        self.assertEqual(db.templates()["ar"], "نص فيصل {الاسم}")   # a person's edit stays
+
+    def test_owner_text_2026_10_03(self):
+        t = db._seed()
+        self.assertTrue(t["ar"].startswith("*عسا ماشر؟؟*"))
+        self.assertIn("هلا وسهلا {الاسم}!! معك {الموظف} من عوجا ريزيدنس", t["ar"])
+        self.assertIn("{رابط_التقييم}", t["ar"])
+        self.assertTrue(t["ar"].rstrip().endswith("{الموظف}" + chr(10) + "عوجا ريزيدنس"))
+        out, unknown = engine.render_template(t["ar"], flow.values_for(
+            {"guest": "Sara Ali", "responsible": "أصيل", "unit": "Ouja | Narjis 101"}))
+        self.assertEqual(unknown, [])
+        self.assertIn("هلا وسهلا Sara!! معك أصيل", out)
+        self.assertIn("https://www.airbnb.com/users/reviews", out)
+        self.assertNotIn("{", out)
 
     def test_preview_flags_unknown_and_measures_url(self):
         p = flow.preview({"ar": "هلا {الاسم} {غلط}", "en": "", "call_script": "{الموظف}"})

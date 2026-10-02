@@ -439,14 +439,35 @@ def _seed():
         return {"ar": "", "en": "", "call_script": ""}
 
 
+_TEXT_KEYS = ("ar", "en", "call_script")
+
+
+def _refresh_untouched_seed(d):
+    """A stored text nobody has edited (updated_by == "seed") follows templates.seed.json, so a
+    new default shipped in the repo reaches the live bot. Anything a person saved from the
+    dashboard or /review-message is NEVER replaced. The old seed text goes to the history."""
+    if d.get("updated_by") != "seed":
+        return d
+    seed = _seed()
+    if not seed.get("ar") or all((d.get(k) or "") == (seed.get(k) or "") for k in _TEXT_KEYS):
+        return d
+    execute("INSERT INTO rv_template_history (at, by, ar, en, call_script) VALUES (?,?,?,?,?)",
+            (d.get("updated_at") or now_iso(), "seed", d.get("ar") or "", d.get("en") or "",
+             d.get("call_script") or ""))
+    new = dict(seed, updated_by="seed", updated_at=now_iso())
+    set_setting("templates", json.dumps(new, ensure_ascii=False), "seed")
+    return new
+
+
 def templates():
-    """The owner's current text. Seeded from templates.seed.json on first read only."""
+    """The owner's current text. Seeded from templates.seed.json on first read; an untouched
+    seed copy follows the file (see _refresh_untouched_seed)."""
     raw = setting("templates")
     if raw:
         try:
             d = json.loads(raw)
             if isinstance(d, dict):
-                return d
+                return _refresh_untouched_seed(d)
         except ValueError:
             pass
     seed = _seed()
