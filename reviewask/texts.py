@@ -108,7 +108,8 @@ def stars(v):
         f = float(v)
     except (TypeError, ValueError):
         return "—"
-    return ("%.1f" % f).rstrip("0").rstrip(".") + "★"
+    # two decimals: 4.75 must never print as "4.8" next to «ناقص 1» (owner screenshot 2026-10-03)
+    return ("%.2f" % f).rstrip("0").rstrip(".") + "★"
 
 
 def rating_line(row):

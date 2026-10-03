@@ -236,8 +236,28 @@ class TestOpening(Base):
         self.assertEqual([o["res_id"] for o in rep["opened"]], ["501"])
         self.assertIn("502", [s["res_id"] for s in rep["skipped"] if s["reason"] == "out_of_program"])
         for ch, _text, embed, buttons, mentions in self.f.posts:
-            self.assertFalse(mentions)
-            self.assertIsNone(buttons)
+            self.assertFalse(mentions)                              # the card stays SILENT
+            self.assertIn("sent", buttons)                          # …but carries its buttons
+            self.assertTrue(any(isinstance(b, tuple) and b[1] == "فتح واتساب" for b in buttons))
+
+    def test_old_cards_get_their_buttons_once(self):
+        self.open_today()
+        db.set_setting("card_buttons_v1", "")
+        n = len(self.f.edits)
+        run(flow.tick(at(2026, 10, 14, 14, 0)))
+        card_edits = [e for e in self.f.edits[n:] if e[1] == self.t()["card_message_id"]]
+        self.assertTrue(card_edits and "sent" in card_edits[0][4])
+        self.assertEqual(db.setting("card_buttons_v1"), "1")
+
+    def test_pressing_sent_before_five_skips_the_whatsapp_ping(self):
+        self.open_today()
+        res = run(flow.answer(self.t()["id"], "sent", "ناصر", "333", now_=at(2026, 10, 14, 11, 0)))
+        self.assertTrue(res["ok"])
+        n = len(self.f.room_posts())
+        run(flow.tick(at(2026, 10, 14, 17, 0)))
+        self.assertEqual([p for p in self.f.room_posts()[n:] if p[4]], [])     # nobody pinged
+        run(flow.tick(at(2026, 10, 15, 20, 0)))
+        self.assertEqual(self.t()["state"], engine.CALL_DUE)
 
     def test_room_is_private_to_the_responsible_manager(self):
         self.open_today()
@@ -646,6 +666,11 @@ class TestBoardAndReports(Base):
         self.assertIn("متأخر 30 دقيقة", post[1])
         self.assertFalse(run(flow.maybe_monitor_report(at(2026, 10, 14, 17, 45))))   # same slot
         self.assertFalse(run(flow.maybe_monitor_report(at(2026, 10, 14, 16, 30))))   # before 17:00
+
+    def test_stars_never_round_475_up(self):
+        self.assertEqual(texts.stars(4.75), "4.75★")
+        self.assertEqual(texts.stars(4.5), "4.5★")
+        self.assertEqual(texts.stars(5.0), "5★")
 
     def test_monitor_silent_when_nothing_due(self):
         self.open_today()

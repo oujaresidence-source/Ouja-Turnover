@@ -56,16 +56,16 @@ DUE_STATES = (WA_DUE, CARE_DUE, CALL_DUE)          # a prompt with buttons is li
 
 # What a press may move from. Terminal states are never in here (first-final-wins).
 ALLOWED_FROM = {
-    "sent": (WA_DUE,),
-    "no_phone": (WA_DUE,),
-    "replied_will": (WA_DUE, WA_SENT),
-    "replied_no": (WA_DUE, WA_SENT),
-    "replied_quiet": (WA_DUE, WA_SENT),
+    "sent": (WAITING, WA_DUE),
+    "no_phone": (WAITING, WA_DUE),
+    "replied_will": (WAITING, WA_DUE, WA_SENT),
+    "replied_no": (WAITING, WA_DUE, WA_SENT),
+    "replied_quiet": (WAITING, WA_DUE, WA_SENT),
     "rated": (CALL_DUE, CALL_RETRY),
     "promise": (CALL_DUE, CALL_RETRY),
     "noanswer": (CALL_DUE, CALL_RETRY, CARE_DUE),
     "later": (CALL_DUE, CALL_RETRY, CARE_DUE),
-    "complaint": (WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE),
+    "complaint": (WAITING, WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE),
     "decline": (CALL_DUE, CALL_RETRY),
     "wrong": (CALL_DUE, CALL_RETRY, CARE_DUE),
     "satisfied": (CARE_DUE, CALL_RETRY),
@@ -510,12 +510,18 @@ def press(row, kind, now, cfg):
     if kind == "later" and int(row.get("later_used") or 0):
         kind = "noanswer"                     # «كلمني بعدين» is free ONCE, then it is «ما رد»
     f = {}
+    # pressed straight from the silent card (before 17:00): the call still comes the evening
+    # after checkout — a press must never leave a row with no next step
+    call_after_checkout = tomorrow_call
+    if row.get("day"):
+        call_after_checkout = iso(call_at(parse_day(row["day"]) + datetime.timedelta(days=1), cfg))
+    wa_next = row.get("next_due_at") or call_after_checkout
     if kind == "sent":
-        f = {"state": WA_SENT}
+        f = {"state": WA_SENT, "next_due_at": wa_next}
     elif kind == "no_phone":
-        f = {"state": WA_SENT, "wa_note": "no_phone"}
+        f = {"state": WA_SENT, "wa_note": "no_phone", "next_due_at": wa_next}
     elif kind == "replied_quiet":
-        f = {"state": WA_SENT, "wa_note": "replied_quiet"}
+        f = {"state": WA_SENT, "wa_note": "replied_quiet", "next_due_at": wa_next}
     elif kind in ("replied_will", "rated", "promise"):
         f = {"state": PROMISED}
     elif kind in ("replied_no", "decline"):
@@ -543,7 +549,7 @@ def press(row, kind, now, cfg):
 
 def stage_buttons(row):
     st = row.get("state")
-    if st == WA_DUE:
+    if st in (WAITING, WA_DUE):
         return list(WA_BUTTONS)
     if st == WA_SENT:
         return list(WA_SENT_BUTTONS)

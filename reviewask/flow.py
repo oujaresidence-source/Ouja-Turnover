@@ -294,7 +294,9 @@ async def _open_one(it, by, now_):
         db.update_ticket(row["id"], {"channel_id": str(ch)})
         row = db.ticket(row["id"])
         await ensure_link(row)
-        mid = await HOST.post(str(ch), embed=texts.card(row), buttons=None, mentions=False)
+        # the card carries the stage buttons from the start (owner 2026-10-03) — still silent
+        mid = await HOST.post(str(ch), embed=texts.card(row), buttons=buttons_for(row) or None,
+                              mentions=False)
         if mid:
             db.update_ticket(row["id"], {"card_message_id": str(mid)})
         db.log_event(row["id"], "opened", by or "النظام", "",
@@ -427,7 +429,7 @@ async def refresh_card(row):
         return False
     try:
         return await HOST.edit(row["channel_id"], row["card_message_id"], embed=texts.card(row),
-                               buttons=None)
+                               buttons=buttons_for(row))
     except Exception as e:
         print("[reviewask] card edit failed:", row.get("id"), e)
         return False
@@ -652,6 +654,15 @@ async def tick(now_=None, force=False):
                     db.set_setting("early_open_done", "1", "النظام")
             except Exception as e:
                 print("[reviewask] catch-up open failed:", d, e)
+        # 1b) once: cards opened before the card carried buttons get them now (2026-10-03)
+        if db.setting("card_buttons_v1") != "1":
+            for row in db.open_tickets():
+                try:
+                    await ensure_link(row)
+                    await refresh_card(db.ticket(row["id"]))
+                except Exception as e:
+                    print("[reviewask] card buttons backfill failed:", row.get("id"), e)
+            db.set_setting("card_buttons_v1", "1", "النظام")
         # 2) reviews that landed close their rooms
         try:
             got = await run_blocking(reviews_by_reservation)

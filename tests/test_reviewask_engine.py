@@ -477,6 +477,15 @@ class TestPresses(unittest.TestCase):
         self.assertEqual(E.press(row(state=E.WA_SENT), "replied_will", self.NOW, self.C)
                          ["fields"]["state"], E.PROMISED)
 
+    def test_sent_from_the_waiting_card_still_calls_the_evening_after_checkout(self):
+        r = row(state=E.WAITING, day="2026-10-14")
+        p = E.press(r, "sent", at(2026, 10, 13, 21, 0), self.C)        # pressed the night before
+        self.assertIn(E.WAITING, p["allowed_from"])
+        self.assertEqual(p["fields"]["next_due_at"], E.iso(at(2026, 10, 15, 20, 0)))
+        r.update(p["fields"])
+        self.assertIsNone(E.next_action(r, at(2026, 10, 14, 17, 0), self.C))    # no WhatsApp ping
+        self.assertEqual(E.next_action(r, at(2026, 10, 15, 20, 0), self.C)["state"], E.CALL_DUE)
+
     def test_care_retry_returns_to_care(self):
         r = row(state=E.CALL_RETRY, mode="care", care_ok=0,
                 next_due_at=E.iso(at(2026, 10, 15, 20, 0)))
@@ -485,7 +494,7 @@ class TestPresses(unittest.TestCase):
         self.assertEqual(E.next_action(r, at(2026, 10, 15, 20, 0), self.C)["state"], E.CALL_DUE)
 
     def test_stage_buttons(self):
-        self.assertEqual(E.stage_buttons(row(state=E.WAITING)), [])
+        self.assertIn("sent", E.stage_buttons(row(state=E.WAITING)))   # owner 2026-10-03: from the start
         self.assertEqual(E.stage_buttons(row(state=E.PROMISED)), [])
         self.assertIn("sent", E.stage_buttons(row(state=E.WA_DUE)))
         self.assertIn("noanswer", E.stage_buttons(row(state=E.CALL_DUE)))

@@ -434,7 +434,9 @@ day and a call the next evening; every press recorded against the presser; the r
 **ON by default since 2026-10-03 03:10** (owner: «Make it on but make sure the mistake never
 happens again»); `/reviews-stop` still wins. The **circuit breaker** `REVIEWASK_MAX_ROOMS_PER_DAY`
 (20): a day that would open more rooms opens NONE and posts one alert in «متابعة-التقييمات».
-One-off: on 2026-10-03 only, tomorrow's rooms opened at once (`EARLY_OPEN_DAY`, latched
+The card carries the WhatsApp buttons from the moment the room opens (owner 2026-10-03) — still
+silent (no mention until 17:00); «أرسلت الرسالة» pressed early skips the 17:00 ping and keeps the
+call for the evening after checkout. One-off: on 2026-10-03 only, tomorrow's rooms opened at once (`EARLY_OPEN_DAY`, latched
 `early_open_done`); after that, 20:00 the evening before. INCIDENT 2026-10-03 01:48: a default-ON push opened **60 rooms**
 because the live bot held ONLY the May CSV seed (2,473 reviews, no `raw`) — Hostaway's review pull
 had never landed — so 50 of 82 apartments looked weak, plus a «yesterday» catch-up and care-mode
