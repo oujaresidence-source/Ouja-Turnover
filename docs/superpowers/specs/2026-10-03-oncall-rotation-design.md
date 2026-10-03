@@ -71,21 +71,23 @@ the persistent check-in / swap / resolve views, one NAV_DEF entry, one dashboard
 ## 4. Data (brain.db)
 
 ```
-oncall_nights   (date PK, status draft|published|locked, published_at, locked_at,
-                 roster_json, note)
+oncall_config   (key PK, value, set_by, set_at)     -- switch, roster, supervisor, last_tick
+oncall_nights   (date PK, status published|locked, published_at, locked_at, message_id,
+                 roster_json, summary_at)
 oncall_slots    (id PK, date, employee, employee_did, start_min, end_min,
-                 source auto|swap|edit, edited_by, UNIQUE(date,start_min))
-oncall_swaps    (id PK, date, slot_id, requester, target, kind exchange|takeover,
-                 status pending|accepted|declined|expired|cancelled, created_at, decided_at,
-                 message_id)
-oncall_checks   (id PK, slot_id, employee, due_at, sent_at, dm_ok, channel_ok,
-                 answered_at, status pending|answered|late|missed|voided, void_reason,
-                 message_id, UNIQUE(slot_id, due_at))
-oncall_issues   (id PK, kind escalation|maint, ref UNIQUE, owner, slot_id, opened_at,
-                 claimed_at, claimed_by, helper, resolved_at, resolved_by, last_update_at,
-                 stale_alerted_night, claim_alerted_at)
-oncall_events   (id PK, at, kind, employee, detail)          -- append-only audit
-oncall_meta     (key PK, value)                               -- loop heartbeat, last publish
+                 source auto|swap|edit, edited_by, edit_reason, reminded_at, handover_at,
+                 UNIQUE(date,start_min))
+oncall_swaps    (id PK, date, slot_id, requester, requester_did, target, target_did,
+                 kind exchange|takeover, status pending|accepted|declined|expired,
+                 created_at, decided_at, message_id)
+oncall_checks   (id PK, slot_id, date, employee, employee_did, due_at, sent_at, dm_ok,
+                 channel_ok, dm_message_id, ch_message_id, answered_at,
+                 status pending|answered|late|missed|voided, void_reason, decided_at,
+                 UNIQUE(slot_id, due_at))
+oncall_issues   (id PK, kind escalation|maint, ref UNIQUE, title, owner, owner_did, slot_id,
+                 date, opened_at, claimed_at, claimed_by, helper, resolved_at, resolved_by,
+                 last_update_at, claim_alerted_at, stale_alerted_night, note_message_id)
+oncall_events   (id PK, at, kind, employee, detail)   -- append-only audit + downtime windows
 ```
 
 Minutes are minutes after 17:00 local Riyadh (0..420), so a slot is `[start_min, end_min)`.
@@ -153,9 +155,10 @@ target's Discord id can answer.
 3. **3rd+ miss** → اسيل alerted; no second warning (UNIQUE(obligation_id) = one per night).
 
 The principle "the system accuses, humans only forgive" is kept: the warning is issued only
-from `oncall.notify` deadline code, never from a route or button. The ops invariant test
-(`test_issue_warning_is_called_from_exactly_one_place`) is updated to allow exactly this
-second call site and to assert `oncall/routes.py` cannot reach it.
+from `oncall.notify._warn` (reached only from the judge step), never from a route or button.
+The existing ops invariant tests inspect only `ops/` and stay untouched; `oncall` gets its
+own pair (`tests/test_oncall_routes.py`): routes never mention `issue_warning`, and
+`oncall/notify.py` calls `odb.issue_warning(` exactly once.
 
 ## 8. Issue ownership
 
@@ -163,13 +166,14 @@ second call site and to assert `oncall/routes.py` cannot reach it.
 None outside 17:00–24:00 (then nothing changes from today's behaviour).
 
 - **Escalation:** hook where the 🚨 card is posted (`post_assistant_card`, bot.py ~15602).
-  The card gains «المناوب المسؤول: نوره» + a mention, and a «✅ انحلّت» button. «استلمت» is the
+  A reply line under the card says «🌙 المناوب المسؤول: @نوره» and carries a «✅ انحلّت»
+  button (the card's own ClaimView is left untouched). «استلمت» is the
   **existing** Claim button — the hook records `claimed_at/claimed_by`. If someone other
   than the owner claims, the owner stays owner and the claimer is stored as `helper`.
   Not claimed within 10 min → اسيل alerted once (no warning). «انحلّت» may be pressed by
   the owner, the helper, or an admin.
-- **Maintenance ticket:** hook in `_maint_open_ticket` (bot.py ~67925). The ticket card gets
-  «متابع المناوبة: نوره». The existing apartment assignee is **unchanged**; ownership ends
+- **Maintenance ticket:** hook in `_maint_open_ticket` (bot.py ~67925). A line in the ticket
+  room says «🌙 متابع المناوبة: @نوره». The existing apartment assignee is **unchanged**; ownership ends
   when `_tk_close` runs (close rules untouched). A message from the owner in the ticket
   channel counts as an update.
 - **Stale rule (`engine.stale_decision`):** after the owner's slot has ended, and while it is
@@ -199,8 +203,9 @@ existing non-admin users see it only after the owner ticks it). Sections:
 **الحين** (who is on, last answered check, next check, open issues) · **الليلة / بكرة**
 (slots; editors can reassign a slot with a required reason → `source=edit`, logged) ·
 **المشاكل المفتوحة** (owner, helper, age, status) · **السجل** (misses, voided checks with
-reason, warnings with links to /compliance) · **الإعدادات** (roster, supervisor, interval 15,
-window 10, master switch). Built with the locked `:root` tokens; JS esprima-parsed.
+reason, warnings with links to /compliance) · **الإعدادات** (roster, supervisor, master switch;
+the 15-minute interval and 10-minute window are SHOWN but fixed in code for v1 — the owner
+chose both). Built with the locked `:root` tokens; JS esprima-parsed.
 
 Discord channel «المناوبة» is created by an admin command `!ouja oncall-setup`, never
 automatically (visible to the five, اسيل and admins).
