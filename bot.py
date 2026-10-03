@@ -328,6 +328,16 @@ except Exception as _rv_err:            # pragma: no cover
     _reviewask = None
     _HAS_REVIEWASK = False
 
+# «المناوبة» evening on-call rotation — 17:00-24:00 slots, «موجود؟» every 15 minutes, issue
+# ownership. Spec: docs/superpowers/specs/2026-10-03-oncall-rotation-design.md. Additive.
+try:
+    import oncall as _oncall
+    _HAS_ONCALL = True
+except Exception as _oc_err:            # pragma: no cover
+    print("[oncall] import failed (on-call disabled, bot unaffected):", _oc_err)
+    _oncall = None
+    _HAS_ONCALL = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -10039,6 +10049,270 @@ async def _rv_interaction(interaction):
             pass
 
 
+# ======================= «المناوبة» evening on-call (oncall/ package) =======================
+# Discord side only: the package decides, this block delivers. Buttons are handled by ONE
+# listener with static custom_ids (the row is found by message id / slot id), so a press still
+# works on a message posted before the last redeploy.
+
+ONCALL_HERE_ID = "oc_here"
+ONCALL_SWAP_PREFIX = "oc_swap:"
+ONCALL_SWAP_YES, ONCALL_SWAP_NO = "oc_swap_yes", "oc_swap_no"
+ONCALL_RESOLVED_ID = "oc_resolved"
+
+
+def _oc_wire():
+    if not _HAS_ONCALL:
+        return False
+    _oncall.wire({"now": now_riyadh, "send": _oc_send,
+                  "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                  "json_response": _json, "web": web, "web_thread": web_thread})
+    return True
+
+
+def _oc_ready():
+    """Usable the moment Discord is — BEFORE start_web_server runs. Hand brain.db its folder,
+    then wire. Same boot-window fix as _cw_ready (the 2026-09-26 «before brain.wire()» trap)."""
+    if not _HAS_ONCALL:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[oncall] brain path hand-over failed:", e)
+    if _oncall.HOST.send is None:
+        _oc_wire()
+    return True
+
+
+class OcHereView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✋ موجود", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_HERE_ID))
+
+
+class OcSwapAskView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✅ موافق", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_SWAP_YES))
+        self.add_item(discord.ui.Button(label="❌ لا", style=discord.ButtonStyle.danger,
+                                        custom_id=ONCALL_SWAP_NO))
+
+
+class OcScheduleView(discord.ui.View):
+    """One «🔁» button per slot; the custom_id carries the slot id. Disabled once locked."""
+
+    def __init__(self, slots):
+        super().__init__(timeout=None)
+        for s in (slots or [])[:25]:
+            self.add_item(discord.ui.Button(label=("🔁 " + s["label"])[:80],
+                                            style=discord.ButtonStyle.secondary,
+                                            custom_id=ONCALL_SWAP_PREFIX + str(s["id"]),
+                                            disabled=bool(s.get("locked"))))
+
+
+class OcResolveView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✅ انحلّت", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_RESOLVED_ID))
+
+
+def _oc_view(payload, where):
+    v = payload.get("view") or ""
+    if v == "here":
+        return OcHereView()
+    if v == "swap_ask" and where == "dm":
+        return OcSwapAskView()
+    if v == "schedule" and where == "channel":
+        return OcScheduleView(payload.get("slots"))
+    return None
+
+
+def _oc_send(payload):
+    """HOST.send — called from the minute tick's WORKER THREAD and from request handlers.
+    run_coroutine_threadsafe is the only correct call from a thread (the _ops_notify lesson:
+    create_task there silently drops every message)."""
+    if not _HAS_ONCALL:
+        return
+    coro = _oc_deliver(payload)
+    try:
+        loop = getattr(bot, "loop", None)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+    except Exception as e:
+        print("[oncall] cross-thread delivery failed:", e)
+    try:
+        asyncio.create_task(coro)
+    except RuntimeError:
+        print("[oncall] no event loop — message NOT delivered:", payload.get("kind"))
+
+
+def _oc_channel(guild):
+    if guild is None:
+        return None
+    return discord.utils.get(guild.text_channels, name=_oncall.notify.channel_name())
+
+
+async def _oc_deliver(payload):
+    """One payload -> DMs, the «المناوبة» room (post or edit), the private HR room. Reports
+    what actually landed back to the package — that report is how a check knows it was
+    delivered, and an undelivered check can never become a miss."""
+    guild = bot.get_guild(GUILD_ID)
+    dm_ok, dm_mid, ch_ok, ch_mid = False, "", False, ""
+    try:
+        for i, d in enumerate(payload.get("dm") or []):
+            did = str(d.get("did") or "").strip()
+            if not did.isdigit() or not d.get("text"):
+                continue
+            try:
+                user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
+                view = _oc_view(payload, "dm") if i == 0 else None
+                m = await user.send(d["text"], **({"view": view} if view else {}))
+                if i == 0:
+                    dm_ok, dm_mid = True, str(m.id)
+            except Exception as e:
+                print("[oncall] dm failed (%s): %s" % (did, e))
+        text = payload.get("channel_text") or ""
+        ch = _oc_channel(guild) if text else None
+        if text and ch is None:
+            print("[oncall] channel #%s missing — run !ouja oncall-setup"
+                  % _oncall.notify.channel_name())
+        if ch is not None:
+            view = _oc_view(payload, "channel")
+            if payload.get("edit_message_id"):
+                try:
+                    m = await ch.fetch_message(int(payload["edit_message_id"]))
+                    await m.edit(content=text, view=view)
+                    ch_ok, ch_mid = True, str(m.id)
+                except Exception as e:
+                    print("[oncall] schedule edit failed:", e)
+            else:
+                m = await ch.send(text, **({"view": view} if view else {}),
+                                  allowed_mentions=discord.AllowedMentions(users=True))
+                ch_ok, ch_mid = True, str(m.id)
+        if payload.get("hr_channel") and payload.get("hr_text") and guild is not None:
+            hr = discord.utils.get(guild.text_channels, name=payload["hr_channel"])
+            if hr is not None:
+                await hr.send(payload["hr_text"])
+            else:
+                print("[oncall] HR channel missing:", payload["hr_channel"])
+    except Exception as e:
+        print("[oncall] deliver failed:", e)
+    if payload.get("report"):
+        try:
+            await asyncio.to_thread(_oncall.notify.delivered, payload["report"],
+                                    dm_ok, dm_mid, ch_ok, ch_mid)
+        except Exception as e:
+            print("[oncall] delivery report failed:", e)
+
+
+async def _oc_post_note(channel, card_msg, kind, ref, note):
+    """The «🌙 المناوب المسؤول» line under an escalation card / inside a maintenance room.
+    Escalations carry «✅ انحلّت»; a ticket's ownership ends when the room is closed."""
+    try:
+        kw = {"allowed_mentions": discord.AllowedMentions(users=True)}
+        if kind == "escalation":
+            kw["view"] = OcResolveView()
+            kw["reference"] = discord.MessageReference(message_id=card_msg.id,
+                                                       channel_id=channel.id,
+                                                       fail_if_not_exists=False)
+        m = await channel.send(note["text"], **kw)
+        await asyncio.to_thread(_oncall.notify.delivered, {"what": "issue_note", "id": ref},
+                                False, "", True, str(m.id))
+    except Exception as e:
+        print("[oncall] note post failed:", e)
+
+
+async def _oc_finish(interaction, text):
+    """Replace the pressed message's buttons with the outcome; fall back to a private reply."""
+    try:
+        body = (interaction.message.content or "") + chr(10) + text
+        await interaction.response.edit_message(content=body[:2000], view=None)
+    except Exception:
+        await _cw_reply(interaction, text)
+
+
+async def _oc_interaction(interaction):
+    """«المناوبة» buttons. A LISTENER, not a bound view."""
+    try:
+        if not _HAS_ONCALL or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if not (cid in (ONCALL_HERE_ID, ONCALL_SWAP_YES, ONCALL_SWAP_NO, ONCALL_RESOLVED_ID)
+                or cid.startswith(ONCALL_SWAP_PREFIX)):
+            return
+        _oc_ready()
+        n = _oncall.notify
+        mid = str(getattr(interaction.message, "id", "") or "")
+        uid = str(interaction.user.id)
+        if cid == ONCALL_HERE_ID:
+            code, text = await asyncio.to_thread(n.answer_check, mid, uid)
+            if code in ("answered", "already"):
+                await _oc_finish(interaction, "✅ " + text)
+            else:
+                await _cw_reply(interaction, text)
+        elif cid.startswith(ONCALL_SWAP_PREFIX):
+            _ok, text = await asyncio.to_thread(n.request_swap,
+                                                int(cid[len(ONCALL_SWAP_PREFIX):]), uid)
+            await _cw_reply(interaction, text)
+        elif cid in (ONCALL_SWAP_YES, ONCALL_SWAP_NO):
+            ok, text = await asyncio.to_thread(n.answer_swap, mid, uid, cid == ONCALL_SWAP_YES)
+            if ok:
+                await _oc_finish(interaction, text)
+            else:
+                await _cw_reply(interaction, text)
+        else:
+            ok, text = await asyncio.to_thread(n.resolve_press, mid, uid,
+                                               _can_delete_channels(interaction.user))
+            if ok:
+                await _oc_finish(interaction, "✅ " + text)
+            else:
+                await _cw_reply(interaction, text)
+    except Exception as e:
+        print("[oncall] button error:", e)
+        try:
+            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+        except Exception:
+            pass
+
+
+async def _oc_on_message(message):
+    """A message from the on-call owner inside a maintenance room counts as an update."""
+    try:
+        if not _HAS_ONCALL or message.author.bot or message.guild is None:
+            return
+        if "ouja-ticket:maint" not in (getattr(message.channel, "topic", "") or ""):
+            return
+        _oc_ready()
+        await asyncio.to_thread(_oncall.notify.on_ticket_message, str(message.channel.id),
+                                str(message.author.id))
+    except Exception as e:
+        print("[oncall] ticket message hook failed:", e)
+
+
+@tasks.loop(minutes=1)
+async def oncall_loop():
+    """«المناوبة» — one tick a minute: publish 12:00, lock 15:00, «موجود؟» every 15 minutes
+    17:00-24:00, the miss ladder, issue watch, handover, the night summary. Idempotent by
+    database facts (oncall/db.py), so a restart mid-tick can never ping twice."""
+    if not _HAS_ONCALL:
+        return
+    await bot.wait_until_ready()
+    try:
+        _oc_ready()
+        rep = await asyncio.to_thread(_oncall.notify.tick)
+        if any(rep.get(k) for k in ("published", "locked", "checks", "judged", "issues",
+                                    "summary")):
+            print("[oncall] tick:", rep)
+    except Exception as e:
+        print("[oncall] loop error:", e)
+
+
 class RvTemplateModal(discord.ui.Modal, title="نص رسالة التقييم"):
     """R4: the owner's words. Writes through the SAME db.save_templates as the dashboard editor."""
 
@@ -14156,6 +14430,12 @@ class NameSelect(discord.ui.Select):
                     _ops.capture.on_escalation_taken(self.target_message_id, name)
             except Exception as _oct:
                 print("[ops.capture] escalation take skipped:", _oct)
+            if _HAS_ONCALL:
+                try:
+                    await asyncio.to_thread(_oncall.notify.on_escalation_claimed,
+                                            str(self.target_message_id), name)
+                except Exception as _occ:
+                    print("[oncall] claim hook skipped:", _occ)
             if esc.get("conversation_id"):
                 _claimed_convos.add(esc["conversation_id"])   # stop auto-acks
             log_event("escalation", f"تم استلام تصعيد بواسطة {name} · {esc.get('unit','')}")
@@ -15719,6 +15999,17 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
                                     "last_msg_id": item.get("message_id") or 0,
                                     "convo_links": convo_links,
                                     "acks": list(_esc_sent_acks.get(item["conversation_id"], []))}
+            # «المناوبة»: whoever is on duty now owns this escalation, even after their slot.
+            if _HAS_ONCALL:
+                try:
+                    _oc_ready()
+                    _oc_note = await asyncio.to_thread(
+                        _oncall.notify.on_issue_opened, "escalation", str(msg.id),
+                        f"{g} · {item['unit']}")
+                    if _oc_note:
+                        await _oc_post_note(target, msg, "escalation", str(msg.id), _oc_note)
+                except Exception as _oce2:
+                    print("[oncall] escalation hook skipped:", _oce2)
             # Open a linked maintenance ticket so the issue lives in the
             # dashboard's ticket log too — survives Discord scroll-back and
             # gets owners the audit trail they asked for.
@@ -23357,6 +23648,20 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="rvBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «المناوبة» evening on-call (5 PM – 12 AM rotation · «موجود؟» · issue owners) ============ -->
+      <section class="view" id="view_oncall">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🌙 المناوبة</div>
+            <div class="page-sub">٥ العصر – ١٢ الليل · «موجود؟» كل ربع ساعة · كل مشكلة لها صاحب</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadOncall(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="ocBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -26801,6 +27106,7 @@ function go(id){
   if(id==='wifi') loadWifi();
   if(id==='permits') loadPermits();
   if(id==='rvpush') loadRvpush();
+  if(id==='oncall') loadOncall();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -36869,6 +37175,17 @@ function loadRvpush(force){
   s.onerror=function(){ window.__rvLoading=0; putHtml('rvBody', errorState('loadRvpush(1)')); };
   document.head.appendChild(s);
 }
+/* «المناوبة» — the tab's code is the real file /oncall/static/oncall_tab.js (no backslash trap here) */
+function loadOncall(force){
+  if(window.__ocJs){ return window.OncallTab.load(force); }
+  if(window.__ocLoading){ return; }
+  window.__ocLoading=1;
+  var s=document.createElement('script');
+  s.src='/oncall/static/oncall_tab.js?v=__ONCALL_JS_V__';
+  s.onload=function(){ window.__ocJs=1; window.OncallTab.load(force); };
+  s.onerror=function(){ window.__ocLoading=0; putHtml('ocBody', errorState('loadOncall(1)')); };
+  document.head.appendChild(s);
+}
 /* PERMITS «التصاريح» — the tab's code is the real file /permits/static/permits_tab.js (no backslash trap here) */
 function loadPermits(force){
   if(window.__permitsJs){ return window.PermitsTab.load(force); }
@@ -45654,7 +45971,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
-                                  "cleanteams", "coverage", "wifi", "permits", "rvpush", "listings", "quality", "onb", "mot", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
@@ -45683,6 +46000,7 @@ NAV_DEF = {
         {"id": "wifi", "ic": "listings", "tk": "wifi"},
         {"id": "permits", "ic": "tickets", "tk": "permits", "badge": "permits"},   # PERMITS «التصاريح»
         {"id": "rvpush", "ic": "reviews", "tk": "rvpush"},                          # «رفع التقييم»
+        {"id": "oncall", "ic": "calendar", "tk": "oncall"},                         # «المناوبة»
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -45725,7 +46043,7 @@ NAV_DEF = {
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح", "rvpush": "رفع التقييم",
-            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين",
+            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
@@ -45749,7 +46067,7 @@ NAV_DEF = {
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits", "rvpush": "Review Push",
-            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar",
+            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "onb": "Unit onboarding", "mot": "Tourism compliance",
@@ -45787,6 +46105,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace(
 # «رفع التقييم»: same pattern — the tab script lives in reviewask/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__REVIEWASK_JS_V__", (_reviewask.routes.js_version() if _reviewask is not None else "0"), 1)
+# «المناوبة»: same pattern — the tab script lives in oncall/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__ONCALL_JS_V__", (_oncall.routes.js_version() if _oncall is not None else "0"), 1)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
@@ -64136,6 +64457,7 @@ _ROLE_WRITE_RULES = [
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
     ("/api/permits/", "permits"),            # PERMITS «التصاريح» — no public door (admin/ops re-checked inside)
     ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
+    ("/api/oncall/", "oncall"),              # «المناوبة» — writes re-check admin/ops inside
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -64192,6 +64514,8 @@ _ROLE_READ_RULES = [
     # «رفع التقييم»: guest names, phones in transcripts, per-person numbers. The public door is
     # /rv/<token> (outside /api/) and the tab script /reviewask/static/ — neither matches here.
     ("/api/reviewask/", "rvpush"),
+    # «المناوبة»: who missed a check-in, warnings. The tab script is /oncall/static/ (outside /api/).
+    ("/api/oncall/", "oncall"),
 ]
 
 def _perm_403(tab, action):
@@ -65421,6 +65745,16 @@ async def start_web_server():
             except Exception as _rve:
                 print("[reviewask] wiring failed (review push disabled, bot unaffected):", _rve)
 
+        # ---- «المناوبة» evening on-call — additive; reuses brain.db + ops warnings ----
+        if _HAS_ONCALL:
+            try:
+                _oc_wire()
+                _oncall.register_routes(app)
+                print("[oncall] wired + routes registered (/api/oncall/*) — enabled=%s"
+                      % _oncall.notify.enabled())
+            except Exception as _oce:
+                print("[oncall] wiring failed (on-call disabled, bot unaffected):", _oce)
+
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
             try:
@@ -65810,6 +66144,12 @@ async def _resolve_escalation(mid, esc, reason="رد عليه أحد المضي�
         _claimed_convos.add(cid)
     _escalations.pop(mid, None)
     metric_bump("escalations_resolved")
+    if _HAS_ONCALL:
+        try:
+            await asyncio.to_thread(_oncall.notify.on_issue_resolved, str(mid),
+                                    "تلقائي — " + reason)
+        except Exception as _ocr:
+            print("[oncall] resolve hook skipped:", _ocr)
     log_event("escalation", f"أُغلق تلقائياً ({reason}) · {esc.get('guest','')} · {esc.get('unit','')}")
     try:
         ch = bot.get_channel(esc.get("channel_id"))
@@ -68007,6 +68347,15 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
         await msg.pin()
     except Exception:
         pass
+    if _HAS_ONCALL:
+        try:
+            _oc_ready()
+            _oc_note = await asyncio.to_thread(_oncall.notify.on_issue_opened, "maint",
+                                               str(ch.id), f"{unit_name} — {summary[:60]}")
+            if _oc_note:
+                await _oc_post_note(ch, msg, "maint", str(ch.id), _oc_note)
+        except Exception as _ocm:
+            print("[oncall] ticket hook skipped:", _ocm)
     return ch
 
 class _TkCloseConfirm(discord.ui.View):
@@ -68107,6 +68456,12 @@ async def _tk_close(interaction):
         rec["closed_by"] = str(interaction.user)
         rec["closed_at"] = now.isoformat(timespec="seconds")
         _dtk_save()
+        if rec.get("kind") == "maint" and _HAS_ONCALL:
+            try:
+                await asyncio.to_thread(_oncall.notify.on_issue_resolved, str(ch.id),
+                                        str(interaction.user))
+            except Exception as _ock:
+                print("[oncall] close hook skipped:", _ock)
         try:
             opened = datetime.fromisoformat(rec.get("created_at"))
             hrs = (now - opened).total_seconds() / 3600
@@ -70555,6 +70910,55 @@ async def cmd_ops_backfill(ctx, days: str = "30"):
         lines.append(f"⚠️ محادثات ما قدرنا نقراها: {rep['errors']}")
     await status.edit(content=nl.join(lines))
 
+
+@bot.command(name="oncall-setup", aliases=["روم-المناوبة"])
+async def cmd_oncall_setup(ctx):
+    """!ouja oncall-setup — create the private «المناوبة» room: the on-call team, the
+    supervisor and the admins. An owner decision, never automatic. Re-running is safe — an
+    existing room is left exactly as it is."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    if not _HAS_ONCALL:
+        await ctx.reply("🚫 نظام المناوبة مو مفعّل.")
+        return
+    _oc_ready()
+    guild = ctx.guild
+    name = _oncall.notify.channel_name()
+    existing = discord.utils.get(guild.text_channels, name=name)
+    if existing is not None:
+        await ctx.reply("✅ الروم موجودة من قبل: %s" % existing.mention)
+        return
+    me = guild.me
+    if not me.guild_permissions.manage_channels or not (
+            me.guild_permissions.manage_roles or me.guild_permissions.administrator):
+        await ctx.reply("🚫 البوت ناقصه صلاحية «إدارة الرومات» أو «إدارة الأدوار» — ما انفتحت "
+                        "الروم، عشان ما تطلع روم المناوبة للكل.")
+        return
+    dids = []
+    for nm in await asyncio.to_thread(_oncall.roster.roster_names):
+        did = await asyncio.to_thread(_oncall.roster.did_for, nm)
+        if did:
+            dids.append(did)
+    sup = await asyncio.to_thread(_oncall.roster.supervisor)
+    if sup.get("did"):
+        dids.append(sup["did"])
+    overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                  me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                  embed_links=True, read_message_history=True)}
+    missing = []
+    for did in dict.fromkeys(dids):
+        try:
+            m = guild.get_member(int(did)) or await guild.fetch_member(int(did))
+            overwrites[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                        read_message_history=True)
+        except Exception:
+            missing.append(did)
+    cat = next((c for c in guild.categories if c.name == OPS_CATEGORY_NAME), None)
+    ch = await guild.create_text_channel(name, category=cat, overwrites=overwrites,
+                                         topic="ouja-oncall — جدول المناوبة المسائية و«موجود؟»")
+    tail = (chr(10) + "⚠️ ما قدرت أضيف: " + "، ".join(missing)) if missing else ""
+    await ctx.reply("✅ انفتحت %s — جدول بكرة ينزل فيها الساعة ١٢ الظهر.%s" % (ch.mention, tail))
 
 @bot.command(name="ops-channels", aliases=["رومات-الالتزام", "غرف-الالتزام"])
 async def cmd_ops_channels(ctx):
@@ -74537,6 +74941,11 @@ async def on_ready():
         # «رفع التقييم» buttons: one listener, static custom_ids, row found by message id
         bot.add_listener(_rv_interaction, "on_interaction")
         bot._rv_listener = True
+    if _HAS_ONCALL and not getattr(bot, "_oc_listener", False):
+        # «المناوبة» buttons + the maintenance-room update hook: listeners, static custom_ids
+        bot.add_listener(_oc_interaction, "on_interaction")
+        bot.add_listener(_oc_on_message, "on_message")
+        bot._oc_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(EarlyCheckinDecisionView())  # early check-in approve/reject
@@ -74701,6 +75110,11 @@ async def on_ready():
         _pending.append(ops_ladder_loop)        # «نظام الالتزام»: weekly-report ladder (dry-run by default)
     if _HAS_OPS and _ops.turnover.enabled() and not ops_turnover_loop.is_running():
         _pending.append(ops_turnover_loop)      # «القفل»: private turnover nudges (dry-run by default)
+    if _HAS_ONCALL and not oncall_loop.is_running():
+        if not getattr(oncall_loop, "_error_guarded", False):
+            _loop_guard(oncall_loop, "oncall_loop")
+            oncall_loop._error_guarded = True
+        _pending.append(oncall_loop)            # «المناوبة»: publish/lock/«موجود؟»/ladder, every minute
     if _HAS_CHECKOUT and not checkout_watch_loop.is_running():
         _pending.append(checkout_watch_loop)    # «متابعة الخروج»: returns at once until /checkout-start
     if _HAS_REVIEWASK:
