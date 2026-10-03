@@ -9572,6 +9572,270 @@ async def cmd_checkout_report(ctx, days: str = "1"):
         await ctx.reply("ما قدرت أرسل لك خاص — افتح الرسائل الخاصة أو استخدم /checkout-report.")
 
 
+# ======================= «المناوبة» evening on-call (oncall/ package) =======================
+# Discord side only: the package decides, this block delivers. Buttons are handled by ONE
+# listener with static custom_ids (the row is found by message id / slot id), so a press still
+# works on a message posted before the last redeploy.
+
+ONCALL_HERE_ID = "oc_here"
+ONCALL_SWAP_PREFIX = "oc_swap:"
+ONCALL_SWAP_YES, ONCALL_SWAP_NO = "oc_swap_yes", "oc_swap_no"
+ONCALL_RESOLVED_ID = "oc_resolved"
+
+
+def _oc_wire():
+    if not _HAS_ONCALL:
+        return False
+    _oncall.wire({"now": now_riyadh, "send": _oc_send,
+                  "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                  "json_response": _json, "web": web, "web_thread": web_thread})
+    return True
+
+
+def _oc_ready():
+    """Usable the moment Discord is — BEFORE start_web_server runs. Hand brain.db its folder,
+    then wire. Same boot-window fix as _cw_ready (the 2026-09-26 «before brain.wire()» trap)."""
+    if not _HAS_ONCALL:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[oncall] brain path hand-over failed:", e)
+    if _oncall.HOST.send is None:
+        _oc_wire()
+    return True
+
+
+class OcHereView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✋ موجود", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_HERE_ID))
+
+
+class OcSwapAskView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✅ موافق", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_SWAP_YES))
+        self.add_item(discord.ui.Button(label="❌ لا", style=discord.ButtonStyle.danger,
+                                        custom_id=ONCALL_SWAP_NO))
+
+
+class OcScheduleView(discord.ui.View):
+    """One «🔁» button per slot; the custom_id carries the slot id. Disabled once locked."""
+
+    def __init__(self, slots):
+        super().__init__(timeout=None)
+        for s in (slots or [])[:25]:
+            self.add_item(discord.ui.Button(label=("🔁 " + s["label"])[:80],
+                                            style=discord.ButtonStyle.secondary,
+                                            custom_id=ONCALL_SWAP_PREFIX + str(s["id"]),
+                                            disabled=bool(s.get("locked"))))
+
+
+class OcResolveView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✅ انحلّت", style=discord.ButtonStyle.success,
+                                        custom_id=ONCALL_RESOLVED_ID))
+
+
+def _oc_view(payload, where):
+    v = payload.get("view") or ""
+    if v == "here":
+        return OcHereView()
+    if v == "swap_ask" and where == "dm":
+        return OcSwapAskView()
+    if v == "schedule" and where == "channel":
+        return OcScheduleView(payload.get("slots"))
+    return None
+
+
+def _oc_send(payload):
+    """HOST.send — called from the minute tick's WORKER THREAD and from request handlers.
+    run_coroutine_threadsafe is the only correct call from a thread (the _ops_notify lesson:
+    create_task there silently drops every message)."""
+    if not _HAS_ONCALL:
+        return
+    coro = _oc_deliver(payload)
+    try:
+        loop = getattr(bot, "loop", None)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+    except Exception as e:
+        print("[oncall] cross-thread delivery failed:", e)
+    try:
+        asyncio.create_task(coro)
+    except RuntimeError:
+        print("[oncall] no event loop — message NOT delivered:", payload.get("kind"))
+
+
+def _oc_channel(guild):
+    if guild is None:
+        return None
+    return discord.utils.get(guild.text_channels, name=_oncall.notify.channel_name())
+
+
+async def _oc_deliver(payload):
+    """One payload -> DMs, the «المناوبة» room (post or edit), the private HR room. Reports
+    what actually landed back to the package — that report is how a check knows it was
+    delivered, and an undelivered check can never become a miss."""
+    guild = bot.get_guild(GUILD_ID)
+    dm_ok, dm_mid, ch_ok, ch_mid = False, "", False, ""
+    try:
+        for i, d in enumerate(payload.get("dm") or []):
+            did = str(d.get("did") or "").strip()
+            if not did.isdigit() or not d.get("text"):
+                continue
+            try:
+                user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
+                view = _oc_view(payload, "dm") if i == 0 else None
+                m = await user.send(d["text"], **({"view": view} if view else {}))
+                if i == 0:
+                    dm_ok, dm_mid = True, str(m.id)
+            except Exception as e:
+                print("[oncall] dm failed (%s): %s" % (did, e))
+        text = payload.get("channel_text") or ""
+        ch = _oc_channel(guild) if text else None
+        if text and ch is None:
+            print("[oncall] channel #%s missing — run !ouja oncall-setup"
+                  % _oncall.notify.channel_name())
+        if ch is not None:
+            view = _oc_view(payload, "channel")
+            if payload.get("edit_message_id"):
+                try:
+                    m = await ch.fetch_message(int(payload["edit_message_id"]))
+                    await m.edit(content=text, view=view)
+                    ch_ok, ch_mid = True, str(m.id)
+                except Exception as e:
+                    print("[oncall] schedule edit failed:", e)
+            else:
+                m = await ch.send(text, **({"view": view} if view else {}),
+                                  allowed_mentions=discord.AllowedMentions(users=True))
+                ch_ok, ch_mid = True, str(m.id)
+        if payload.get("hr_channel") and payload.get("hr_text") and guild is not None:
+            hr = discord.utils.get(guild.text_channels, name=payload["hr_channel"])
+            if hr is not None:
+                await hr.send(payload["hr_text"])
+            else:
+                print("[oncall] HR channel missing:", payload["hr_channel"])
+    except Exception as e:
+        print("[oncall] deliver failed:", e)
+    if payload.get("report"):
+        try:
+            await asyncio.to_thread(_oncall.notify.delivered, payload["report"],
+                                    dm_ok, dm_mid, ch_ok, ch_mid)
+        except Exception as e:
+            print("[oncall] delivery report failed:", e)
+
+
+async def _oc_post_note(channel, card_msg, kind, ref, note):
+    """The «🌙 المناوب المسؤول» line under an escalation card / inside a maintenance room.
+    Escalations carry «✅ انحلّت»; a ticket's ownership ends when the room is closed."""
+    try:
+        kw = {"allowed_mentions": discord.AllowedMentions(users=True)}
+        if kind == "escalation":
+            kw["view"] = OcResolveView()
+            kw["reference"] = discord.MessageReference(message_id=card_msg.id,
+                                                       channel_id=channel.id,
+                                                       fail_if_not_exists=False)
+        m = await channel.send(note["text"], **kw)
+        await asyncio.to_thread(_oncall.notify.delivered, {"what": "issue_note", "id": ref},
+                                False, "", True, str(m.id))
+    except Exception as e:
+        print("[oncall] note post failed:", e)
+
+
+async def _oc_finish(interaction, text):
+    """Replace the pressed message's buttons with the outcome; fall back to a private reply."""
+    try:
+        body = (interaction.message.content or "") + chr(10) + text
+        await interaction.response.edit_message(content=body[:2000], view=None)
+    except Exception:
+        await _cw_reply(interaction, text)
+
+
+async def _oc_interaction(interaction):
+    """«المناوبة» buttons. A LISTENER, not a bound view."""
+    try:
+        if not _HAS_ONCALL or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if not (cid in (ONCALL_HERE_ID, ONCALL_SWAP_YES, ONCALL_SWAP_NO, ONCALL_RESOLVED_ID)
+                or cid.startswith(ONCALL_SWAP_PREFIX)):
+            return
+        _oc_ready()
+        n = _oncall.notify
+        mid = str(getattr(interaction.message, "id", "") or "")
+        uid = str(interaction.user.id)
+        if cid == ONCALL_HERE_ID:
+            code, text = await asyncio.to_thread(n.answer_check, mid, uid)
+            if code in ("answered", "already"):
+                await _oc_finish(interaction, "✅ " + text)
+            else:
+                await _cw_reply(interaction, text)
+        elif cid.startswith(ONCALL_SWAP_PREFIX):
+            _ok, text = await asyncio.to_thread(n.request_swap,
+                                                int(cid[len(ONCALL_SWAP_PREFIX):]), uid)
+            await _cw_reply(interaction, text)
+        elif cid in (ONCALL_SWAP_YES, ONCALL_SWAP_NO):
+            ok, text = await asyncio.to_thread(n.answer_swap, mid, uid, cid == ONCALL_SWAP_YES)
+            if ok:
+                await _oc_finish(interaction, text)
+            else:
+                await _cw_reply(interaction, text)
+        else:
+            ok, text = await asyncio.to_thread(n.resolve_press, mid, uid,
+                                               _can_delete_channels(interaction.user))
+            if ok:
+                await _oc_finish(interaction, "✅ " + text)
+            else:
+                await _cw_reply(interaction, text)
+    except Exception as e:
+        print("[oncall] button error:", e)
+        try:
+            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+        except Exception:
+            pass
+
+
+async def _oc_on_message(message):
+    """A message from the on-call owner inside a maintenance room counts as an update."""
+    try:
+        if not _HAS_ONCALL or message.author.bot or message.guild is None:
+            return
+        if "ouja-ticket:maint" not in (getattr(message.channel, "topic", "") or ""):
+            return
+        _oc_ready()
+        await asyncio.to_thread(_oncall.notify.on_ticket_message, str(message.channel.id),
+                                str(message.author.id))
+    except Exception as e:
+        print("[oncall] ticket message hook failed:", e)
+
+
+@tasks.loop(minutes=1)
+async def oncall_loop():
+    """«المناوبة» — one tick a minute: publish 12:00, lock 15:00, «موجود؟» every 15 minutes
+    17:00-24:00, the miss ladder, issue watch, handover, the night summary. Idempotent by
+    database facts (oncall/db.py), so a restart mid-tick can never ping twice."""
+    if not _HAS_ONCALL:
+        return
+    await bot.wait_until_ready()
+    try:
+        _oc_ready()
+        rep = await asyncio.to_thread(_oncall.notify.tick)
+        if any(rep.get(k) for k in ("published", "locked", "checks", "judged", "issues",
+                                    "summary")):
+            print("[oncall] tick:", rep)
+    except Exception as e:
+        print("[oncall] loop error:", e)
+
+
 # ==== «رفع التقييم» Review Push (reviewask/ package) ==========================================
 # Every checkout from a weak apartment (≤ 4.75 on Airbnb, or fewer than 3 reviews) — or from any
 # apartment with a maintenance ticket during the stay — gets its own Discord ROOM under
@@ -10047,270 +10311,6 @@ async def _rv_interaction(interaction):
             await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
         except Exception:
             pass
-
-
-# ======================= «المناوبة» evening on-call (oncall/ package) =======================
-# Discord side only: the package decides, this block delivers. Buttons are handled by ONE
-# listener with static custom_ids (the row is found by message id / slot id), so a press still
-# works on a message posted before the last redeploy.
-
-ONCALL_HERE_ID = "oc_here"
-ONCALL_SWAP_PREFIX = "oc_swap:"
-ONCALL_SWAP_YES, ONCALL_SWAP_NO = "oc_swap_yes", "oc_swap_no"
-ONCALL_RESOLVED_ID = "oc_resolved"
-
-
-def _oc_wire():
-    if not _HAS_ONCALL:
-        return False
-    _oncall.wire({"now": now_riyadh, "send": _oc_send,
-                  "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
-                  "json_response": _json, "web": web, "web_thread": web_thread})
-    return True
-
-
-def _oc_ready():
-    """Usable the moment Discord is — BEFORE start_web_server runs. Hand brain.db its folder,
-    then wire. Same boot-window fix as _cw_ready (the 2026-09-26 «before brain.wire()» trap)."""
-    if not _HAS_ONCALL:
-        return False
-    if _HAS_BRAIN:
-        try:
-            from brain.host import HOST as _brain_host
-            if _brain_host.state_path is None:
-                _brain_host.state_path = _state_path
-        except Exception as e:
-            print("[oncall] brain path hand-over failed:", e)
-    if _oncall.HOST.send is None:
-        _oc_wire()
-    return True
-
-
-class OcHereView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="✋ موجود", style=discord.ButtonStyle.success,
-                                        custom_id=ONCALL_HERE_ID))
-
-
-class OcSwapAskView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="✅ موافق", style=discord.ButtonStyle.success,
-                                        custom_id=ONCALL_SWAP_YES))
-        self.add_item(discord.ui.Button(label="❌ لا", style=discord.ButtonStyle.danger,
-                                        custom_id=ONCALL_SWAP_NO))
-
-
-class OcScheduleView(discord.ui.View):
-    """One «🔁» button per slot; the custom_id carries the slot id. Disabled once locked."""
-
-    def __init__(self, slots):
-        super().__init__(timeout=None)
-        for s in (slots or [])[:25]:
-            self.add_item(discord.ui.Button(label=("🔁 " + s["label"])[:80],
-                                            style=discord.ButtonStyle.secondary,
-                                            custom_id=ONCALL_SWAP_PREFIX + str(s["id"]),
-                                            disabled=bool(s.get("locked"))))
-
-
-class OcResolveView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="✅ انحلّت", style=discord.ButtonStyle.success,
-                                        custom_id=ONCALL_RESOLVED_ID))
-
-
-def _oc_view(payload, where):
-    v = payload.get("view") or ""
-    if v == "here":
-        return OcHereView()
-    if v == "swap_ask" and where == "dm":
-        return OcSwapAskView()
-    if v == "schedule" and where == "channel":
-        return OcScheduleView(payload.get("slots"))
-    return None
-
-
-def _oc_send(payload):
-    """HOST.send — called from the minute tick's WORKER THREAD and from request handlers.
-    run_coroutine_threadsafe is the only correct call from a thread (the _ops_notify lesson:
-    create_task there silently drops every message)."""
-    if not _HAS_ONCALL:
-        return
-    coro = _oc_deliver(payload)
-    try:
-        loop = getattr(bot, "loop", None)
-        if loop is not None and loop.is_running():
-            asyncio.run_coroutine_threadsafe(coro, loop)
-            return
-    except Exception as e:
-        print("[oncall] cross-thread delivery failed:", e)
-    try:
-        asyncio.create_task(coro)
-    except RuntimeError:
-        print("[oncall] no event loop — message NOT delivered:", payload.get("kind"))
-
-
-def _oc_channel(guild):
-    if guild is None:
-        return None
-    return discord.utils.get(guild.text_channels, name=_oncall.notify.channel_name())
-
-
-async def _oc_deliver(payload):
-    """One payload -> DMs, the «المناوبة» room (post or edit), the private HR room. Reports
-    what actually landed back to the package — that report is how a check knows it was
-    delivered, and an undelivered check can never become a miss."""
-    guild = bot.get_guild(GUILD_ID)
-    dm_ok, dm_mid, ch_ok, ch_mid = False, "", False, ""
-    try:
-        for i, d in enumerate(payload.get("dm") or []):
-            did = str(d.get("did") or "").strip()
-            if not did.isdigit() or not d.get("text"):
-                continue
-            try:
-                user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
-                view = _oc_view(payload, "dm") if i == 0 else None
-                m = await user.send(d["text"], **({"view": view} if view else {}))
-                if i == 0:
-                    dm_ok, dm_mid = True, str(m.id)
-            except Exception as e:
-                print("[oncall] dm failed (%s): %s" % (did, e))
-        text = payload.get("channel_text") or ""
-        ch = _oc_channel(guild) if text else None
-        if text and ch is None:
-            print("[oncall] channel #%s missing — run !ouja oncall-setup"
-                  % _oncall.notify.channel_name())
-        if ch is not None:
-            view = _oc_view(payload, "channel")
-            if payload.get("edit_message_id"):
-                try:
-                    m = await ch.fetch_message(int(payload["edit_message_id"]))
-                    await m.edit(content=text, view=view)
-                    ch_ok, ch_mid = True, str(m.id)
-                except Exception as e:
-                    print("[oncall] schedule edit failed:", e)
-            else:
-                m = await ch.send(text, **({"view": view} if view else {}),
-                                  allowed_mentions=discord.AllowedMentions(users=True))
-                ch_ok, ch_mid = True, str(m.id)
-        if payload.get("hr_channel") and payload.get("hr_text") and guild is not None:
-            hr = discord.utils.get(guild.text_channels, name=payload["hr_channel"])
-            if hr is not None:
-                await hr.send(payload["hr_text"])
-            else:
-                print("[oncall] HR channel missing:", payload["hr_channel"])
-    except Exception as e:
-        print("[oncall] deliver failed:", e)
-    if payload.get("report"):
-        try:
-            await asyncio.to_thread(_oncall.notify.delivered, payload["report"],
-                                    dm_ok, dm_mid, ch_ok, ch_mid)
-        except Exception as e:
-            print("[oncall] delivery report failed:", e)
-
-
-async def _oc_post_note(channel, card_msg, kind, ref, note):
-    """The «🌙 المناوب المسؤول» line under an escalation card / inside a maintenance room.
-    Escalations carry «✅ انحلّت»; a ticket's ownership ends when the room is closed."""
-    try:
-        kw = {"allowed_mentions": discord.AllowedMentions(users=True)}
-        if kind == "escalation":
-            kw["view"] = OcResolveView()
-            kw["reference"] = discord.MessageReference(message_id=card_msg.id,
-                                                       channel_id=channel.id,
-                                                       fail_if_not_exists=False)
-        m = await channel.send(note["text"], **kw)
-        await asyncio.to_thread(_oncall.notify.delivered, {"what": "issue_note", "id": ref},
-                                False, "", True, str(m.id))
-    except Exception as e:
-        print("[oncall] note post failed:", e)
-
-
-async def _oc_finish(interaction, text):
-    """Replace the pressed message's buttons with the outcome; fall back to a private reply."""
-    try:
-        body = (interaction.message.content or "") + chr(10) + text
-        await interaction.response.edit_message(content=body[:2000], view=None)
-    except Exception:
-        await _cw_reply(interaction, text)
-
-
-async def _oc_interaction(interaction):
-    """«المناوبة» buttons. A LISTENER, not a bound view."""
-    try:
-        if not _HAS_ONCALL or interaction.type != discord.InteractionType.component:
-            return
-        cid = (interaction.data or {}).get("custom_id") or ""
-        if not (cid in (ONCALL_HERE_ID, ONCALL_SWAP_YES, ONCALL_SWAP_NO, ONCALL_RESOLVED_ID)
-                or cid.startswith(ONCALL_SWAP_PREFIX)):
-            return
-        _oc_ready()
-        n = _oncall.notify
-        mid = str(getattr(interaction.message, "id", "") or "")
-        uid = str(interaction.user.id)
-        if cid == ONCALL_HERE_ID:
-            code, text = await asyncio.to_thread(n.answer_check, mid, uid)
-            if code in ("answered", "already"):
-                await _oc_finish(interaction, "✅ " + text)
-            else:
-                await _cw_reply(interaction, text)
-        elif cid.startswith(ONCALL_SWAP_PREFIX):
-            _ok, text = await asyncio.to_thread(n.request_swap,
-                                                int(cid[len(ONCALL_SWAP_PREFIX):]), uid)
-            await _cw_reply(interaction, text)
-        elif cid in (ONCALL_SWAP_YES, ONCALL_SWAP_NO):
-            ok, text = await asyncio.to_thread(n.answer_swap, mid, uid, cid == ONCALL_SWAP_YES)
-            if ok:
-                await _oc_finish(interaction, text)
-            else:
-                await _cw_reply(interaction, text)
-        else:
-            ok, text = await asyncio.to_thread(n.resolve_press, mid, uid,
-                                               _can_delete_channels(interaction.user))
-            if ok:
-                await _oc_finish(interaction, "✅ " + text)
-            else:
-                await _cw_reply(interaction, text)
-    except Exception as e:
-        print("[oncall] button error:", e)
-        try:
-            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
-        except Exception:
-            pass
-
-
-async def _oc_on_message(message):
-    """A message from the on-call owner inside a maintenance room counts as an update."""
-    try:
-        if not _HAS_ONCALL or message.author.bot or message.guild is None:
-            return
-        if "ouja-ticket:maint" not in (getattr(message.channel, "topic", "") or ""):
-            return
-        _oc_ready()
-        await asyncio.to_thread(_oncall.notify.on_ticket_message, str(message.channel.id),
-                                str(message.author.id))
-    except Exception as e:
-        print("[oncall] ticket message hook failed:", e)
-
-
-@tasks.loop(minutes=1)
-async def oncall_loop():
-    """«المناوبة» — one tick a minute: publish 12:00, lock 15:00, «موجود؟» every 15 minutes
-    17:00-24:00, the miss ladder, issue watch, handover, the night summary. Idempotent by
-    database facts (oncall/db.py), so a restart mid-tick can never ping twice."""
-    if not _HAS_ONCALL:
-        return
-    await bot.wait_until_ready()
-    try:
-        _oc_ready()
-        rep = await asyncio.to_thread(_oncall.notify.tick)
-        if any(rep.get(k) for k in ("published", "locked", "checks", "judged", "issues",
-                                    "summary")):
-            print("[oncall] tick:", rep)
-    except Exception as e:
-        print("[oncall] loop error:", e)
 
 
 class RvTemplateModal(discord.ui.Modal, title="نص رسالة التقييم"):
@@ -37164,17 +37164,6 @@ var _drawerReturnEl = null;
    ============================================================ */
 var WIFI = {data:null, team:null, loading:false, unit:null, form:null, blocked:null, mode:''};
 
-/* «رفع التقييم» — the tab's code is the real file /reviewask/static/reviewask_tab.js (no backslash trap here) */
-function loadRvpush(force){
-  if(window.__rvJs){ return window.RvTab.load(force); }
-  if(window.__rvLoading){ return; }
-  window.__rvLoading=1;
-  var s=document.createElement('script');
-  s.src='/reviewask/static/reviewask_tab.js?v=__REVIEWASK_JS_V__';
-  s.onload=function(){ window.__rvJs=1; window.RvTab.load(force); };
-  s.onerror=function(){ window.__rvLoading=0; putHtml('rvBody', errorState('loadRvpush(1)')); };
-  document.head.appendChild(s);
-}
 /* «المناوبة» — the tab's code is the real file /oncall/static/oncall_tab.js (no backslash trap here) */
 function loadOncall(force){
   if(window.__ocJs){ return window.OncallTab.load(force); }
@@ -37184,6 +37173,17 @@ function loadOncall(force){
   s.src='/oncall/static/oncall_tab.js?v=__ONCALL_JS_V__';
   s.onload=function(){ window.__ocJs=1; window.OncallTab.load(force); };
   s.onerror=function(){ window.__ocLoading=0; putHtml('ocBody', errorState('loadOncall(1)')); };
+  document.head.appendChild(s);
+}
+/* «رفع التقييم» — the tab's code is the real file /reviewask/static/reviewask_tab.js (no backslash trap here) */
+function loadRvpush(force){
+  if(window.__rvJs){ return window.RvTab.load(force); }
+  if(window.__rvLoading){ return; }
+  window.__rvLoading=1;
+  var s=document.createElement('script');
+  s.src='/reviewask/static/reviewask_tab.js?v=__REVIEWASK_JS_V__';
+  s.onload=function(){ window.__rvJs=1; window.RvTab.load(force); };
+  s.onerror=function(){ window.__rvLoading=0; putHtml('rvBody', errorState('loadRvpush(1)')); };
   document.head.appendChild(s);
 }
 /* PERMITS «التصاريح» — the tab's code is the real file /permits/static/permits_tab.js (no backslash trap here) */
