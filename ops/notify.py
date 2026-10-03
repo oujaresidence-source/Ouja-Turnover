@@ -708,10 +708,15 @@ def _retirement(name):
     if not db.warnings_for(name, "active"):
         return None
     rows = db.obligations_for_employee(name, WEEKLY_KIND, limit=12)
-    weeks = [{"period_key": r["period_key"],
-              "clean": r["status"] in ("done", "waived", "excused")}
-             for r in sorted(rows, key=lambda r: r["period_key"])
-             if r["status"] != "pending"]
+    by_week = {r["period_key"]: r["status"] in ("done", "waived", "excused")
+               for r in rows if r["status"] != "pending"}
+    # «المناوبة»: a week in which the person missed an on-call night ('OC-YYYY-MM-DD') is
+    # NOT clean, even if the weekly report was on time — otherwise four clean report weeks
+    # BEFORE an on-call warning would retire it the minute it was issued.
+    for r in db.obligations_for_employee(name, "oc", limit=200):
+        if r["status"] == "missed":
+            by_week[engine.iso_week_key(r["period_key"][3:])] = False
+    weeks = [{"period_key": k, "clean": v} for k, v in sorted(by_week.items())]
     r = engine.retirement_check(name, weeks)
     if not r["retire"] or db.retirement_claimed(name, r["through"]):
         return None
