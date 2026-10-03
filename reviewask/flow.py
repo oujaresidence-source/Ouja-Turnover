@@ -38,6 +38,7 @@ _OPEN_EVERY = 1800              # seconds between catch-up opening passes for on
 _SWEEP_EVERY = 3600             # the hourly deletion sweep
 _CANCEL_EVERY = 600
 _MISSING_REREAD = 5             # rows re-read by id per tick when missing from the window
+EARLY_OPEN_DAY = "2026-10-03"   # the one-off «open tomorrow now» (owner, 2026-10-03 03:10)
 
 CALL_OUTCOMES = ("rated", "promise", "noanswer", "later", "complaint", "decline", "wrong",
                  "satisfied")
@@ -231,6 +232,14 @@ async def open_rooms(day, by="", dry=None, now_=None):
         dry = (not live()) if dry is None else bool(dry)
         rep = {"day": plan["day"], "opened": [], "existing": [], "failed": [],
                "skipped": plan["skipped"], "would_open": [], "error": plan["error"]}
+        cap = config.max_rooms_per_day()
+        if len(plan["eligible"]) > cap:
+            # the circuit breaker: never a 60-room night again — open NOTHING, say so once
+            rep["error"] = ("⛔ بينفتح %d غرفة ليوم %s — أكثر من الحد (%d). ما فتحت ولا وحدة؛ "
+                            "شي غلط في البيانات، لازم أحد يراجع." % (len(plan["eligible"]), plan["day"], cap))
+            if not dry:
+                await _cap_alert(plan["day"], len(plan["eligible"]), cap)
+                return rep
         if dry:
             rep["would_open"] = plan["eligible"]
             return rep
@@ -238,6 +247,20 @@ async def open_rooms(day, by="", dry=None, now_=None):
             res = await _open_one(it, by, now_)
             rep[res].append(it)
         return rep
+
+
+async def _cap_alert(day, n, cap):
+    db.set_setting("cap_block:%s" % day, str(n))
+    if not db.claim("cap_alert:%s" % day):
+        return
+    try:
+        ch = await HOST.require("board_channel")()
+        if ch:
+            await HOST.post(ch, text="⛔ رفع التقييم: كان بينفتح %d غرفة ليوم %s (الحد %d) — ما فتحت "
+                                     "شي. البيانات تحتاج مراجعة قبل أي غرفة." % (n, day, cap),
+                            mentions=False)
+    except Exception as e:
+        print("[reviewask] cap alert failed:", e)
 
 
 async def _open_one(it, by, now_):
@@ -611,7 +634,10 @@ async def tick(now_=None, force=False):
         # 1) rooms open the EVENING BEFORE (20:00) for tomorrow's checkouts; today's are only a
         #    catch-up for a room missed while the bot was down. Never yesterday (2026-10-03).
         days = [today]
-        if now_ >= engine.at_clock(today, config.open_at()):
+        # owner 2026-10-03 03:10: «open new rooms for tomorrow's checkout this time only, then it
+        # will be synced» — on 2026-10-03 ONLY, tomorrow opens at once; latched, never repeats
+        early = (today.isoformat() == EARLY_OPEN_DAY and db.setting("early_open_done") != "1")
+        if early or now_ >= engine.at_clock(today, config.open_at()):
             days.append(today + datetime.timedelta(days=1))
         for d in days:
             key = "open_check:%s" % d.isoformat()
@@ -622,6 +648,8 @@ async def tick(now_=None, force=False):
             try:
                 r = await open_rooms(d, "النظام", dry=False, now_=now_)
                 rep["opened"] += [it["res_id"] for it in r.get("opened") or []]
+                if early and d != today and not r.get("error"):
+                    db.set_setting("early_open_done", "1", "النظام")
             except Exception as e:
                 print("[reviewask] catch-up open failed:", d, e)
         # 2) reviews that landed close their rooms
@@ -1083,6 +1111,8 @@ def health():
             "fresh_days": config.fresh_days(),
             "review_pull": _pull_status(),
             "purge_done": db.setting("purge_2026_10_03_done") == "1",
+            "early_open_done": db.setting("early_open_done") == "1",
+            "max_rooms_per_day": config.max_rooms_per_day(),
             "deleted_rooms": db.q1("SELECT COUNT(*) AS n FROM rv_tickets WHERE deleted_at IS NOT NULL")["n"]}
 
 

@@ -265,6 +265,39 @@ class TestOpening(Base):
         self.assertTrue(rep["error"])
         self.assertEqual(self.f.rooms, {})
 
+    def test_circuit_breaker_opens_nothing_above_the_cap(self):
+        os.environ["REVIEWASK_MAX_ROOMS_PER_DAY"] = "3"
+        try:
+            self.f.reviews = [r for lid in range(1, 6) for r in weak_reviews(lid)]
+            self.f.deps = [dep(700 + lid, lid) for lid in range(1, 6)]       # 5 weak checkouts
+            rep = self.open_today()
+            self.assertEqual(rep["opened"], [])
+            self.assertIn("أكثر من الحد", rep["error"])
+            self.assertEqual(self.f.rooms, {})
+            alerts = [p for p in self.f.posts if p[0] == "BOARD"]
+            self.assertEqual(len(alerts), 1)
+            self.open_today()                                                # alert only once
+            self.assertEqual(len([p for p in self.f.posts if p[0] == "BOARD"]), 1)
+            dry = run(flow.open_rooms(D, "x", dry=True, now_=self.f.clock))
+            self.assertEqual(len(dry["would_open"]), 5)                     # the dry list still shows them
+            self.assertIn("أكثر من الحد", dry["error"])
+        finally:
+            os.environ.pop("REVIEWASK_MAX_ROOMS_PER_DAY", None)
+
+    def test_one_off_early_open_on_2026_10_03_only(self):
+        for r in self.f.reviews:
+            r["date"] = "2026-09-30"
+        self.f.deps = [dep(801, 1, day="2026-10-04")]
+        run(flow.tick(at(2026, 10, 3, 3, 15)))
+        self.assertEqual([r["topic"].split()[0] for r in self.f.rooms.values()], ["ouja-rv:801"])
+        self.assertEqual(db.setting("early_open_done"), "1")
+        self.setUp()
+        for r in self.f.reviews:
+            r["date"] = "2026-10-10"
+        self.f.deps = [dep(802, 1, day="2026-10-15")]
+        run(flow.tick(at(2026, 10, 14, 3, 15)))                            # any other day: 20:00 only
+        self.assertEqual(self.f.rooms, {})
+
     def test_rooms_open_the_evening_before_never_for_yesterday(self):
         self.f.deps = [dep(601, 1, day="2026-10-13"), dep(602, 1, day="2026-10-15")]
         run(flow.tick(at(2026, 10, 14, 19, 59)))
@@ -304,9 +337,9 @@ class TestOpening(Base):
 
     def test_on_by_default_and_stop_still_wins(self):
         db.set_setting("live", "")
-        self.assertFalse(flow.live())                   # OFF until /reviews-start (rolled back 02:00)
-        flow.start("فيصل")
-        self.assertTrue(flow.live())
+        self.assertTrue(flow.live())                    # ON by default (owner, 2026-10-03 03:10)
+        flow.stop("فيصل")
+        self.assertFalse(flow.live())                   # /reviews-stop still wins
         flow.stop("فيصل")
         self.assertFalse(flow.live())
         os.environ["REVIEWASK_LIVE"] = "0"

@@ -35,9 +35,16 @@ def enabled():
 
 
 def live_env():
-    """OFF by default again (2026-10-03 02:00): the default-ON experiment opened rooms for every
-    apartment on stale review data. Back to: nothing runs until /reviews-start."""
-    return _env("REVIEWASK_LIVE", "0") == "1"
+    """ON by default — owner ruling 2026-10-03 03:10 («Make it on»), AFTER the 01:48 incident was
+    closed by four locks: fresh Hostaway data (fresh_days), weak apartments only, private rooms,
+    and the per-day room cap (max_rooms_per_day). /reviews-stop (stored switch) still wins."""
+    return _env("REVIEWASK_LIVE", "1") == "1"
+
+
+def max_rooms_per_day():
+    """Circuit breaker: a day that would open MORE rooms than this opens NONE and alerts the board.
+    A normal day is well under it (2026-10-04: 7); the 2026-10-03 incident was 60."""
+    return _int("REVIEWASK_MAX_ROOMS_PER_DAY", 20, 1)
 
 
 def threshold():

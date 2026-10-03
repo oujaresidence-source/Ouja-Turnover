@@ -431,7 +431,11 @@ Owner-approved 2026-10-03 (spec: `docs/superpowers/specs/2026-10-03-review-push-
 above 4.75 on Airbnb. Every checkout from a weak apartment gets its own Discord ROOM under «طلبات
 التقييم» (spills «… ٢»), topic `ouja-rv:<res_id> lid:<lid> seq:<n>`; a WhatsApp step on checkout
 day and a call the next evening; every press recorded against the presser; the review closes it.
-**OFF until `/reviews-start`.** INCIDENT 2026-10-03 01:48: a default-ON push opened **60 rooms**
+**ON by default since 2026-10-03 03:10** (owner: «Make it on but make sure the mistake never
+happens again»); `/reviews-stop` still wins. The **circuit breaker** `REVIEWASK_MAX_ROOMS_PER_DAY`
+(20): a day that would open more rooms opens NONE and posts one alert in «متابعة-التقييمات».
+One-off: on 2026-10-03 only, tomorrow's rooms opened at once (`EARLY_OPEN_DAY`, latched
+`early_open_done`); after that, 20:00 the evening before. INCIDENT 2026-10-03 01:48: a default-ON push opened **60 rooms**
 because the live bot held ONLY the May CSV seed (2,473 reviews, no `raw`) — Hostaway's review pull
 had never landed — so 50 of 82 apartments looked weak, plus a «yesterday» catch-up and care-mode
 rooms, all visible to the whole Operation team. Rolled back to OFF; the owner approved deleting
@@ -506,7 +510,8 @@ pages, error) and purge progress — read it instead of asking the owner for a H
 - **Zero backslashes in `reviewask/*.py`**; never `import bot`; never `to_thread(`; no money figure
   in any staff room. Tests: `tests/test_reviewask_{engine,flow,delete,bot,structure}.py` +
   `tests/test_ops_tidy_rules.py` (review rooms untouched).
-- Env (defaults correct): `REVIEWASK_ENABLED`(1), `REVIEWASK_LIVE`(0 — the stored switch wins), `REVIEWASK_FRESH_DAYS`(30),
+- Env (defaults correct): `REVIEWASK_ENABLED`(1), `REVIEWASK_LIVE`(1 — the stored switch wins), `REVIEWASK_FRESH_DAYS`(30),
+  `REVIEWASK_MAX_ROOMS_PER_DAY`(20),
   `REVIEWASK_THRESHOLD`(4.75), `REVIEWASK_MIN_REVIEWS`(3), `REVIEWASK_WA_AT`(17:00),
   `REVIEWASK_CALL_AT`(auto), `REVIEWASK_MAX_CALLS`(2), `REVIEWASK_WINDOW_DAYS`(14),
   `REVIEWASK_QUIET_FROM`/`TO`(22:00/13:00), `REVIEWASK_DELETE_AFTER_DAYS`(7),
