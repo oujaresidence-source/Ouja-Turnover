@@ -29,7 +29,8 @@
   var CHECK = { missed: ['غياب', 'Missed'], late: ['غياب (ضغط متأخر)', 'Missed (late press)'],
                 voided: ['ملغي', 'Void'] };
   var VOID = { not_delivered: ['ما وصله السؤال', 'Not delivered'], bot_down: ['البوت كان متوقف', 'Bot was down'],
-               unreachable: ['الحساب مو مربوط', 'Not linked'] };
+               unreachable: ['الحساب مو مربوط', 'Not linked'], switched_off: ['النظام كان موقّف', 'System was off'],
+               on_leave: ['إجازة مسجّلة', 'On recorded leave'], reassigned: ['تغيّر المناوب', 'Slot reassigned'] };
 
   function css() {
     if (document.getElementById('ocCss')) return;
@@ -116,7 +117,9 @@
   function nightCard(title, nv, d) {
     var st = STATUS[nv.status] || STATUS.none;
     var h = '<div class="card"><div class="oc-h">' + title + ' · ' + esc(nv.label) +
-      ' <span class="oc-st ' + (nv.status === 'locked' ? 'gold' : '') + '">' + T(st[0], st[1]) + '</span></div>';
+      ' <span class="oc-st ' + (nv.status === 'locked' ? 'gold' : '') + '">' + T(st[0], st[1]) + '</span>' +
+      (d.can_edit && nv.rebuildable ? ' <button class="btn ghost sm" data-oc="rebuild" data-date="' + esc(nv.date) + '">' +
+        T('إعادة توزيع', 'Redistribute') + '</button>' : '') + '</div>';
     if (!nv.slots.length) {
       h += emptyState(nv.status === 'none' ? T('الجدول ينزل الساعة ١٢ الظهر قبلها بيوم', 'Published at 12 PM the day before')
                                            : T('ما فيه أحد متاح', 'Nobody available'));
@@ -243,6 +246,10 @@
       if (!reason) { toast(T('اكتب السبب', 'Write a reason')); return; }
       if (await act('/api/oncall/slot', { slot_id: Number(el.getAttribute('data-id')), employee: field('emp'), reason: reason }, el)) {
         S.editing = null; toast(T('تم — وصلهم خبر بديسكورد', 'Saved — both were told on Discord')); load(true);
+      }
+    } else if (a === 'rebuild') {
+      if (await act('/api/oncall/rebuild', { date: el.getAttribute('data-date') }, el)) {
+        toast(T('انعاد التوزيع — الجدول في ديسكورد تحدّث', 'Redistributed — the Discord post was updated')); load(true);
       }
     } else if (a === 'switch') {
       if (await act('/api/oncall/switch', { on: el.getAttribute('data-on') === '1' }, el)) load(true);

@@ -24,6 +24,7 @@ from . import db, engine, roster, texts
 from .host import HOST
 
 OC_KIND = "oc"                     # ops_obligations.kind for an on-call night
+ISSUE_EXPIRE_HOURS = 48            # an unresolved issue stops being followed after this
 
 
 def channel_name():
@@ -37,6 +38,10 @@ def enabled():
 
 def set_enabled(on, by, at):
     db.config_set("enabled", "1" if on else "0", by, db.iso(at))
+    if not on:
+        # OFF means no misses — including for checks already out. Otherwise turning the
+        # system back ON would judge them against an hour nobody was being asked about.
+        db.void_pending("switched_off", at)
     db.log("switch", at, by, {"on": bool(on)})
 
 
@@ -116,6 +121,31 @@ def _schedule_payload(date_iso, edit=False):
             "report": {"what": "schedule", "id": date_iso} if not edit else None}
 
 
+def _publish(d, now, message_id=""):
+    """Build + store + post one night. roster.availability RAISES on an unreadable calendar,
+    so a transient failure never publishes an empty night — the next tick retries."""
+    di = d.isoformat()
+    av = roster.availability(d)
+    names = [a["name"] for a in av if a["ok"]]
+    dids = {a["name"]: a["did"] for a in av}
+    slots = engine.build_night(d, names, db.history(di, 7))
+    kept = {s["employee"] for s in slots}
+    for a in av:
+        if a["ok"] and a["name"] not in kept:          # more people than hours tonight
+            a["ok"], a["why"] = False, texts.WHY_EXTRA
+    for s in slots:
+        s["employee_did"] = dids.get(s["employee"], "")
+    if not db.publish_night(di, slots, av, now):
+        return None
+    db.log("publish", now, "", {"date": di, "slots": len(slots)})
+    if message_id:
+        db.set_night_message(di, message_id)
+        _send(_schedule_payload(di, edit=True))
+    else:
+        _send(_schedule_payload(di))
+    return av, slots
+
+
 def publish_due(now):
     if now.hour < engine.PUBLISH_HOUR:
         return None
@@ -123,16 +153,10 @@ def publish_due(now):
     di = d.isoformat()
     if db.night(di):
         return None
-    av = roster.availability(d)
-    names = [a["name"] for a in av if a["ok"]]
-    dids = {a["name"]: a["did"] for a in av}
-    slots = engine.build_night(d, names, db.history(di, 7))
-    for s in slots:
-        s["employee_did"] = dids.get(s["employee"], "")
-    if not db.publish_night(di, slots, av, now):
+    done = _publish(d, now)
+    if not done:
         return None
-    db.log("publish", now, "", {"date": di, "slots": len(slots)})
-    _send(_schedule_payload(di))
+    av, slots = done
     unavailable = [a for a in av if not a["ok"]]
     if unavailable or not slots:
         sup = roster.supervisor()
@@ -193,6 +217,20 @@ def checks_due(now):
             if now - due > datetime.timedelta(minutes=engine.SEND_GRACE_MIN):
                 db.claim_check(s, due, status="voided", void_reason="bot_down")
                 continue
+            if db.check_exists(s["id"], due):
+                continue
+            if roster.on_leave(s["employee"], nd):
+                # leave approved AFTER publish still protects them; the slot is uncovered
+                if db.claim_check(s, due, status="voided", void_reason="on_leave") \
+                        and db.voids_for_slot(s["id"], "on_leave") == 1:
+                    sup = roster.supervisor()
+                    _send({"kind": "slot_on_leave",
+                           "dm": [{"did": sup["did"], "text": texts.slot_on_leave(s)}]})
+                continue
+            did = roster.did_for(s["employee"]) or s["employee_did"]
+            if did != s["employee_did"]:          # the id was corrected after publish
+                db.set_slot_did(s["id"], did)
+                s = dict(s, employee_did=did)
             row = db.claim_check(s, due)
             if row is None:
                 continue
@@ -240,9 +278,13 @@ def _judge_one(c, now, downs):
     if verdict == "answered":
         db.decide_check(c["id"], "answered", now)
         return "answered"
-    if db.decide_check(c["id"], "missed", now):
+    if roster.on_leave(c["employee"], _date(c["date"])):
+        db.decide_check(c["id"], "voided", now, "on_leave")
+        return "voided"
+    status = "late" if c["answered_at"] else "missed"     # a press after 10 min is still a miss
+    if db.decide_check(c["id"], status, now):
         _on_miss(c, now)
-    return "missed"
+    return status
 
 
 def judge_due(now):
@@ -288,13 +330,36 @@ def _warn(employee, did, date_iso, now):
     return w
 
 
+def _is_presser(c, presser_did):
+    """The person on duty — by the id stored on the check, or by whoever that id belongs to
+    NOW (an id corrected after publish must not lock the real person out)."""
+    p = str(presser_did or "")
+    if p and p == str(c["employee_did"] or ""):
+        return True
+    who = roster.name_for_did(p)
+    return bool(who) and engine.same_person(who, c["employee"])
+
+
 def answer_check(message_id, presser_did, now=None):
-    """The «✋ موجود» button. Returns (code, text_ar)."""
-    now = now or _now()
+    """The «✋ موجود» button, found by message id. See answer_check_id."""
     c = db.check_by_message(message_id)
     if not c:
         return "unknown", texts.NOT_FOUND
-    if str(presser_did or "") != str(c["employee_did"] or ""):
+    return answer_check_id(c["id"], presser_did, now)
+
+
+def answer_check_id(check_id, presser_did, now=None):
+    """The «✋ موجود» button. Returns (code, text_ar). `now` is the moment of the PRESS
+    (bot.py passes interaction.created_at), never when a worker thread got round to it.
+
+    THE BUTTON NEVER JUDGES. Inside the 10 minutes it records «answered»; after them it only
+    notes WHEN the press came. The tick decides — it is the only path that has recorded bot
+    downtime first, so a press that lands right after a restart can never become a miss."""
+    now = now or _now()
+    c = db.check(check_id)
+    if not c:
+        return "unknown", texts.NOT_FOUND
+    if not _is_presser(c, presser_did):
         return "not_yours", texts.NOT_YOURS
     if c["status"] == "pending":
         due = db.parse(c["due_at"])
@@ -302,7 +367,8 @@ def answer_check(message_id, presser_did, now=None):
             if db.decide_check(c["id"], "answered", now, answered_at=now):
                 return "answered", texts.THANKS
         else:
-            _judge_one(c, now, db.downtimes(now - datetime.timedelta(days=1)))
+            db.note_press(c["id"], now)
+            return "late_noted", texts.LATE_NOTED
         c = db.check(c["id"])
     if c["status"] == "answered":
         return "already", texts.ALREADY
@@ -387,8 +453,10 @@ def edit_slot(slot_id, employee, by, reason, now=None):
         return False, "الاسم مو من فريق المناوبة."
     did = roster.did_for(employee)
     if not did:
-        return False, "حساب %s مو مربوط بديسكورد — ما نقدر نسأله «موجود؟»." % employee
+        return False, "حساب %s مو مربوط بديسكورد — ما نقدر نوصل له «موجود؟»." % employee
     old = dict(s)
+    # the outgoing person's check that is still open is not theirs to miss any more
+    db.void_pending("reassigned", now, slot_id=slot_id)
     s = db.set_slot_employee(slot_id, employee, did, "edit", by, reason)
     _send({"kind": "slot_edit",
            "dm": [{"did": did, "text": texts.slot_edited_new(s, by)},
@@ -396,6 +464,28 @@ def edit_slot(slot_id, employee, by, reason, now=None):
     _send(_schedule_payload(s["date"], edit=True))
     db.log("slot_edit", now, by, {"slot": s["id"], "from": old["employee"], "to": employee,
                                   "reason": reason})
+    return True, ""
+
+
+def rebuild_night(date_iso, by, now=None):
+    """Editor action: throw a night away and distribute it again (someone fell sick, an id
+    was fixed after an empty night). Only while NOT ONE check exists for it — after that the
+    record of who was asked what is evidence and stays."""
+    now = now or _now()
+    n = db.night(date_iso)
+    if not n:
+        return False, "الليلة ما نزل جدولها بعد."
+    if db.checks_on(date_iso):
+        return False, "بدأت أسئلة «موجود؟» الليلة — غيّر السلوتات واحد واحد بدل إعادة التوزيع."
+    old_mid = n.get("message_id") or ""
+    db.delete_night(date_iso, now)
+    done = _publish(_date(date_iso), now, message_id=old_mid)
+    if not done:
+        return False, "ما قدرت أعيد التوزيع — جرّب بعد دقيقة."
+    if n["status"] == "locked":
+        db.lock_night(date_iso, now)
+        _send(_schedule_payload(date_iso, edit=True))
+    db.log("rebuild", now, by, {"date": date_iso})
     return True, ""
 
 
@@ -470,6 +560,11 @@ def issues_due(now):
     n = 0
     for i in db.open_issues():
         opened = db.parse(i["opened_at"])
+        if now - opened >= datetime.timedelta(hours=ISSUE_EXPIRE_HOURS):
+            # nobody pressed «انحلّت» in two days: stop following it, or اسيل gets a stale
+            # alert every night forever and every handover grows without end
+            on_issue_resolved(i["ref"], texts.AUTO_CLOSED, now)
+            continue
         if i["kind"] == "escalation" and engine.claim_overdue(
                 opened, db.parse(i["claimed_at"]), now, bool(i["claim_alerted_at"])):
             db.mark_issue(i["ref"], "claim_alerted_at", db.iso(now))

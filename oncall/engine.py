@@ -107,7 +107,16 @@ def build_night(d, available, history):
             if night["date"] == yiso:
                 yday[p] = int(s["start_min"])
 
-    base, extra_n = divmod(WINDOW_MINUTES // 60, n)
+    hours_total = WINDOW_MINUTES // 60
+    if n > hours_total:
+        # Whole hours only: more people than hours means somebody would get a 0-hour slot
+        # that collides with the next start (UNIQUE(date,start_min)) and publishing would fail
+        # every minute. Keep the 7 with the fewest trailing hours; the rest rest tonight.
+        keep = set(sorted(available, key=lambda p: (hours[p], longs[p], rot[p]))[:hours_total])
+        available = [p for p in available if p in keep]
+        n = hours_total
+        rot = _rot(available, d)
+    base, extra_n = divmod(hours_total, n)
     ranked = sorted(available, key=lambda p: (hours[p], longs[p], rot[p]))
     extra = set(ranked[:extra_n])
     length = {p: (base + (1 if p in extra else 0)) * 60 for p in available}

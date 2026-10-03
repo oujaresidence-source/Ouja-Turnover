@@ -19,6 +19,25 @@ SWAP_GONE = "انتهى وقت التبديل — الجدول مقفل."
 SWAP_CHANGED = "السلوت تغيّر صاحبه من بعد الطلب — الطلب لاغي."
 RESOLVE_NOT_ALLOWED = "«انحلّت» لصاحب المشكلة أو اللي ساعده أو الأدمن بس."
 RESOLVED = "تمام، انقفلت المشكلة ✅"
+LATE_NOTED = ("سجّلنا ضغطتك بعد العشر دقايق ✍️ — البوت يراجعها خلال دقيقة، وإذا كان متوقف "
+              "وقت السؤال ما تنحسب عليك.")
+WHY_EXTRA = "راحة الليلة (المتاحين أكثر من ٧ ساعات)"
+AUTO_CLOSED = "تلقائي — مرّ يومين بدون إقفال"
+LIST_CAP = 10
+_AR = "٠١٢٣٤٥٦٧٨٩"
+
+
+def ar(n):
+    return "".join(_AR[int(c)] if c.isdigit() else c for c in str(n))
+
+
+def capped(items, line):
+    """At most LIST_CAP lines, then «… و١٥ غيرها» — a Discord message stops at 2,000
+    characters and a handover that silently fails is worse than a short one."""
+    out = [line(i) for i in items[:LIST_CAP]]
+    if len(items) > LIST_CAP:
+        out.append("… و%s غيرها في الداشبورد" % ar(len(items) - LIST_CAP))
+    return out
 
 
 def day_label(d):
@@ -54,6 +73,11 @@ def supervisor_roster_alert(d, unavailable, empty):
     head = ("⚠️ ليلة %s ما فيها أحد متاح للمناوبة!" % day_label(d)) if empty else \
            ("للعلم — جدول مناوبة %s نزل، وهذولي مو فيه:" % day_label(d))
     return "\n".join([head] + ["• %s — %s" % (u["name"], u["why"]) for u in unavailable])
+
+
+def slot_on_leave(s):
+    return ("🚨 سلوت %s باسم %s بدون مناوب — الإجازة مسجّلة اليوم في التقويم. غطّي أو غيّري "
+            "المناوب من الداشبورد." % (slot_label(s), s["employee"]))
 
 
 def reminder(s):
@@ -159,7 +183,7 @@ def handover(slot, nxt, issues):
         hm(slot["end_min"]), slot["employee"], who, slot_label(nxt))]
     if issues:
         lines.append("مشاكل مفتوحة (تبقى باسم أصحابها):")
-        lines += ["• %s — %s" % (i.get("title") or "—", i["owner"]) for i in issues]
+        lines += capped(issues, lambda i: "• %s — %s" % (i.get("title") or "—", i["owner"]))
     else:
         lines.append("ما فيه مشاكل مفتوحة 👌")
     return "\n".join(lines)
@@ -174,4 +198,5 @@ def night_summary(d, per, warnings, open_issues):
     if warnings:
         lines.append("إنذارات: " + "، ".join(warnings))
     lines.append("مشاكل للحين مفتوحة: %d" % len(open_issues))
+    lines += capped(open_issues, lambda i: "• %s — %s" % (i.get("title") or "—", i["owner"]))
     return "\n".join(lines)

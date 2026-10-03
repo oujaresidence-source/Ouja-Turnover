@@ -9577,7 +9577,8 @@ async def cmd_checkout_report(ctx, days: str = "1"):
 # listener with static custom_ids (the row is found by message id / slot id), so a press still
 # works on a message posted before the last redeploy.
 
-ONCALL_HERE_ID = "oc_here"
+ONCALL_HERE_ID = "oc_here"                 # (no message carries the bare id; kept for safety)
+ONCALL_HERE_PREFIX = "oc_here:"            # + check id — no race with the delivery report
 ONCALL_SWAP_PREFIX = "oc_swap:"
 ONCALL_SWAP_YES, ONCALL_SWAP_NO = "oc_swap_yes", "oc_swap_no"
 ONCALL_RESOLVED_ID = "oc_resolved"
@@ -9610,10 +9611,10 @@ def _oc_ready():
 
 
 class OcHereView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, check_id):
         super().__init__(timeout=None)
         self.add_item(discord.ui.Button(label="✋ موجود", style=discord.ButtonStyle.success,
-                                        custom_id=ONCALL_HERE_ID))
+                                        custom_id=ONCALL_HERE_PREFIX + str(check_id)))
 
 
 class OcSwapAskView(discord.ui.View):
@@ -9647,7 +9648,7 @@ class OcResolveView(discord.ui.View):
 def _oc_view(payload, where):
     v = payload.get("view") or ""
     if v == "here":
-        return OcHereView()
+        return OcHereView((payload.get("report") or {}).get("id"))
     if v == "swap_ask" and where == "dm":
         return OcSwapAskView()
     if v == "schedule" and where == "channel":
@@ -9695,12 +9696,12 @@ async def _oc_deliver(payload):
             try:
                 user = bot.get_user(int(did)) or await bot.fetch_user(int(did))
                 view = _oc_view(payload, "dm") if i == 0 else None
-                m = await user.send(d["text"], **({"view": view} if view else {}))
+                m = await user.send(d["text"][:1990], **({"view": view} if view else {}))
                 if i == 0:
                     dm_ok, dm_mid = True, str(m.id)
             except Exception as e:
                 print("[oncall] dm failed (%s): %s" % (did, e))
-        text = payload.get("channel_text") or ""
+        text = (payload.get("channel_text") or "")[:1990]      # Discord refuses > 2000
         ch = _oc_channel(guild) if text else None
         if text and ch is None:
             print("[oncall] channel #%s missing — run !ouja oncall-setup"
@@ -9721,7 +9722,7 @@ async def _oc_deliver(payload):
         if payload.get("hr_channel") and payload.get("hr_text") and guild is not None:
             hr = discord.utils.get(guild.text_channels, name=payload["hr_channel"])
             if hr is not None:
-                await hr.send(payload["hr_text"])
+                await hr.send(payload["hr_text"][:1990])
             else:
                 print("[oncall] HR channel missing:", payload["hr_channel"])
     except Exception as e:
@@ -9752,10 +9753,11 @@ async def _oc_post_note(channel, card_msg, kind, ref, note):
 
 
 async def _oc_finish(interaction, text):
-    """Replace the pressed message's buttons with the outcome; fall back to a private reply."""
+    """Replace the pressed message's buttons with the outcome (the press was already
+    deferred); fall back to a private reply."""
     try:
         body = (interaction.message.content or "") + chr(10) + text
-        await interaction.response.edit_message(content=body[:2000], view=None)
+        await interaction.edit_original_response(content=body[:2000], view=None)
     except Exception:
         await _cw_reply(interaction, text)
 
@@ -9767,31 +9769,40 @@ async def _oc_interaction(interaction):
             return
         cid = (interaction.data or {}).get("custom_id") or ""
         if not (cid in (ONCALL_HERE_ID, ONCALL_SWAP_YES, ONCALL_SWAP_NO, ONCALL_RESOLVED_ID)
-                or cid.startswith(ONCALL_SWAP_PREFIX)):
+                or cid.startswith(ONCALL_SWAP_PREFIX) or cid.startswith(ONCALL_HERE_PREFIX)):
             return
+        # Acknowledge at once: a jammed worker pool must not turn into «interaction failed».
+        await interaction.response.defer()
         _oc_ready()
         n = _oncall.notify
         mid = str(getattr(interaction.message, "id", "") or "")
         uid = str(interaction.user.id)
-        if cid == ONCALL_HERE_ID:
-            code, text = await asyncio.to_thread(n.answer_check, mid, uid)
+        # The moment of the PRESS — never when a worker thread got round to it.
+        now = interaction.created_at.astimezone(TZ)
+        if cid.startswith(ONCALL_HERE_PREFIX) or cid == ONCALL_HERE_ID:
+            if cid == ONCALL_HERE_ID:
+                code, text = await asyncio.to_thread(n.answer_check, mid, uid, now)
+            else:
+                code, text = await asyncio.to_thread(n.answer_check_id,
+                                                     int(cid[len(ONCALL_HERE_PREFIX):]), uid, now)
             if code in ("answered", "already"):
                 await _oc_finish(interaction, "✅ " + text)
             else:
                 await _cw_reply(interaction, text)
         elif cid.startswith(ONCALL_SWAP_PREFIX):
             _ok, text = await asyncio.to_thread(n.request_swap,
-                                                int(cid[len(ONCALL_SWAP_PREFIX):]), uid)
+                                                int(cid[len(ONCALL_SWAP_PREFIX):]), uid, now)
             await _cw_reply(interaction, text)
         elif cid in (ONCALL_SWAP_YES, ONCALL_SWAP_NO):
-            ok, text = await asyncio.to_thread(n.answer_swap, mid, uid, cid == ONCALL_SWAP_YES)
+            ok, text = await asyncio.to_thread(n.answer_swap, mid, uid, cid == ONCALL_SWAP_YES,
+                                               now)
             if ok:
                 await _oc_finish(interaction, text)
             else:
                 await _cw_reply(interaction, text)
         else:
             ok, text = await asyncio.to_thread(n.resolve_press, mid, uid,
-                                               _can_delete_channels(interaction.user))
+                                               _can_delete_channels(interaction.user), now)
             if ok:
                 await _oc_finish(interaction, "✅ " + text)
             else:

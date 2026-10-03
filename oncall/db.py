@@ -286,6 +286,19 @@ def set_slot_employee(slot_id, employee, did, source, by="", reason=""):
     return slot(slot_id)
 
 
+def set_slot_did(slot_id, did):
+    execute("UPDATE oncall_slots SET employee_did=? WHERE id=?", (did or "", int(slot_id)))
+
+
+def delete_night(date_iso, at):
+    """Remove a night so it can be rebuilt. Callers guarantee no check exists for it yet."""
+    with transaction() as cx:
+        cx.execute("UPDATE oncall_swaps SET status='expired', decided_at=? WHERE date=? "
+                   "AND status='pending'", (iso(at), date_iso))
+        cx.execute("DELETE FROM oncall_slots WHERE date=?", (date_iso,))
+        cx.execute("DELETE FROM oncall_nights WHERE date=?", (date_iso,))
+
+
 def mark_slot(slot_id, field, at):
     """reminded_at | handover_at, set once. True only for the first caller."""
     assert field in ("reminded_at", "handover_at")
@@ -347,6 +360,34 @@ def claim_check(slot_row, due_at, status="pending", void_reason=""):
                      (int(slot_row["id"]), slot_row["date"], slot_row["employee"],
                       slot_row.get("employee_did") or "", iso(due_at), status, void_reason))
     return check(rid) if n == 1 else None
+
+
+def check_exists(slot_id, due_at):
+    return bool(q1("SELECT 1 x FROM oncall_checks WHERE slot_id=? AND due_at=?",
+                   (int(slot_id), iso(due_at))))
+
+
+def note_press(check_id, at):
+    """A press after the 10 minutes, before the tick judged it: remember WHEN, decide nothing.
+    Only the tick judges — it is the only path that knows about bot downtime."""
+    execute("UPDATE oncall_checks SET answered_at=? WHERE id=? AND status='pending' "
+            "AND answered_at IS NULL", (iso(at), int(check_id)))
+
+
+def void_pending(reason, at, slot_id=None):
+    """Void every pending check (or one slot's). Returns how many."""
+    if slot_id is None:
+        _rid, n = execute("UPDATE oncall_checks SET status='voided', void_reason=?, decided_at=? "
+                          "WHERE status='pending'", (reason, iso(at)))
+    else:
+        _rid, n = execute("UPDATE oncall_checks SET status='voided', void_reason=?, decided_at=? "
+                          "WHERE status='pending' AND slot_id=?", (reason, iso(at), int(slot_id)))
+    return n
+
+
+def voids_for_slot(slot_id, reason):
+    return (q1("SELECT COUNT(*) c FROM oncall_checks WHERE slot_id=? AND void_reason=?",
+               (int(slot_id), reason)) or {}).get("c", 0)
 
 
 def check(check_id):

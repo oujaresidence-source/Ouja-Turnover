@@ -37,8 +37,14 @@ def _calendar():
 
 
 def _ids():
+    """{calendar name: discord id}. RAISES on a read failure: an unreadable calendar must not
+    look like «nobody is linked» — that once would have published an empty night for good.
+    The tick step fails instead and the next minute retries."""
     from ops import notify as _onotify
-    return {e["name"]: e.get("did") or "" for e in _onotify.employees()}
+    rows, err = _onotify.roster_or_error()
+    if err is not None:
+        raise RuntimeError("ops roster unreadable: %s" % err)
+    return {e["name"]: e.get("did") or "" for e in rows}
 
 
 def _leave_ids(date_iso):
@@ -67,7 +73,9 @@ def availability(d):
         did = next((v for k, v in ids.items() if engine.norm(k) == engine.norm(name)), "")
         if emp is None:
             out.append({"name": name, "did": did, "ok": False, "why": WHY_NOT_IN_CALENDAR})
-        elif emp.get("off_day") is not None and int(emp["off_day"]) == sw:
+            continue
+        name = emp["name"]          # the calendar's spelling — warnings and pay key on it
+        if emp.get("off_day") is not None and int(emp["off_day"]) == sw:
             out.append({"name": name, "did": did, "ok": False, "why": WHY_OFF_DAY})
         elif emp.get("id") in away:
             out.append({"name": name, "did": did, "ok": False, "why": WHY_LEAVE})
@@ -76,6 +84,13 @@ def availability(d):
         else:
             out.append({"name": name, "did": did, "ok": True, "why": ""})
     return out
+
+
+def on_leave(name, d):
+    """Recorded leave for this person on the evening of date d — re-read at every check, so
+    leave approved AFTER the night was published still protects them."""
+    emp = next((e for e in _calendar() if engine.norm(e["name"]) == engine.norm(name)), None)
+    return bool(emp) and emp.get("id") in _leave_ids(d.isoformat())
 
 
 def name_for_did(did):

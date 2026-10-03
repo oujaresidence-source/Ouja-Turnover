@@ -5,6 +5,7 @@ oncall.routes — «المناوبة» endpoints.
     GET  /oncall/static/oncall_tab.js   PUBLIC code, no data (the dashboard tab)
     GET  /api/oncall/state              login + «oncall» read (bot.py _ROLE_READ_RULES)
     POST /api/oncall/slot               reassign a slot (reason required)
+    POST /api/oncall/rebuild            redistribute a night (only before its first check)
     POST /api/oncall/switch             master ON/OFF
     POST /api/oncall/settings           roster + supervisor
 Every write: login + «oncall» write (bot.py _ROLE_WRITE_RULES) AND role in admin/ops here.
@@ -78,7 +79,7 @@ def _night_view(d):
     n = db.night(di)
     if not n:
         return {"date": di, "label": texts.day_label(d), "status": "none", "slots": [],
-                "unavailable": []}
+                "unavailable": [], "rebuildable": False}
     try:
         roster_rows = json.loads(n.get("roster_json") or "[]")
     except Exception:
@@ -95,7 +96,8 @@ def _night_view(d):
                       "missed": sum(1 for c in mine if c["status"] in ("missed", "late")),
                       "voided": sum(1 for c in mine if c["status"] == "voided")})
     return {"date": di, "label": texts.day_label(d), "status": n["status"], "slots": slots,
-            "unavailable": [r for r in roster_rows if not r.get("ok")]}
+            "unavailable": [r for r in roster_rows if not r.get("ok")],
+            "rebuildable": not checks}
 
 
 def state_payload(now):
@@ -150,6 +152,14 @@ async def api_slot(request):
     ok, err = await _run(notify.edit_slot, int(b.get("slot_id") or 0),
                          (b.get("employee") or "").strip(), _actor(request),
                          (b.get("reason") or "").strip())
+    return _json({"ok": ok, "error": err})
+
+
+async def api_rebuild(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    ok, err = await _run(notify.rebuild_night, str(b.get("date") or ""), _actor(request))
     return _json({"ok": ok, "error": err})
 
 
@@ -211,5 +221,6 @@ def register_routes(app):
     g("/oncall/static/oncall_tab.js", handle_static_js)
     g("/api/oncall/state", _safe(api_state))
     p("/api/oncall/slot", _safe(api_slot))
+    p("/api/oncall/rebuild", _safe(api_rebuild))
     p("/api/oncall/switch", _safe(api_switch))
     p("/api/oncall/settings", _safe(api_settings))

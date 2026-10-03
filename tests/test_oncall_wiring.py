@@ -66,6 +66,20 @@ class Wiring(unittest.TestCase):
         self.assertIn("_oncall.notify.on_escalation_claimed", self.s)
         self.assertEqual(len(re.findall(r"_oncall\.notify\.on_issue_resolved", self.s)), 2)
 
+    def test_presence_button_carries_the_check_and_the_press_time(self):
+        """Review #6: found by check id (no race with the delivery report), judged at the
+        moment of the PRESS, acknowledged at once so a slow thread is not «interaction failed»."""
+        self.assertIn('ONCALL_HERE_PREFIX = "oc_here:"', self.s)
+        i = self.s.index("async def _oc_interaction(interaction):")
+        body = self.s[i:i + 4000]
+        self.assertIn("await interaction.response.defer()", body)
+        self.assertIn("interaction.created_at", body)
+        self.assertIn("n.answer_check_id", body)
+
+    def test_discord_text_is_capped(self):
+        i = self.s.index("async def _oc_deliver(payload):")
+        self.assertIn("[:1990]", self.s[i:i + 3000])
+
     def test_thread_safe_delivery(self):
         i = self.s.index("def _oc_send(payload):")
         self.assertIn("run_coroutine_threadsafe", self.s[i:i + 900])
