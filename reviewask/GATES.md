@@ -52,12 +52,12 @@ Scope: the owner-approved Review Push (spec 2026-10-03-review-push-design.md) â€
 - [x] G9: full suite has no failure that is not already in the baseline
   CHECK: python3 -m unittest discover -s tests -p "test_*.py" 2>&1 | python3 -c "import sys,re;t=sys.stdin.read();b=open('.unlazy-baseline-rv.txt',encoding='utf-8').read();f=lambda s:set(re.findall(r'^(?:FAIL|ERROR): (\S+ \(\S+\))',s,re.M));new=f(t)-f(b);ran=re.search(r'^Ran (\d+) tests',t,re.M);print('NO_NEW_FAILURES ran=%s'%ran.group(1) if ran and not new else 'NEW_FAILURES %s'%sorted(new))"
   EXPECT: /^NO_NEW_FAILURES ran=\d+$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=0e0199c4b5dde8afc82f29832b8cb833074fbfe5098691825e70fac68c658a45; exit=0; EXPECT=matched; output-sha256=01673916afa043cd12d472119026ae3645073fff74782d8f9f35cca9037e0736; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=0e0199c4b5dde8afc82f29832b8cb833074fbfe5098691825e70fac68c658a45; exit=0; EXPECT=matched; output-sha256=70b2e6664088623c922619aadfb37e744ab779f618a6e22ecee60dff40620eb3; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
 - [x] G10: dashboard still logs in â€” every DASHBOARD_HTML <script> parses and the tab JS passes node --check
   CHECK: node --check reviewask/static/reviewask_tab.js && python3 -c "import bot,esprima,re;[esprima.parseScript(j) for j in re.findall(r'<script>(.*?)</script>',bot.DASHBOARD_HTML,re.S)];print('JS_OK')"
   EXPECT: /^JS_OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=2a1d8231f48a04ad147689c9836a391f9e9dffa42efa94a944ebc4865dc347d0; exit=0; EXPECT=matched; output-sha256=ab5315345f30108df02fbeaf665be382a9172275ab326d8cc2090be45ca12ea1; output-bytes=1229; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=2a1d8231f48a04ad147689c9836a391f9e9dffa42efa94a944ebc4865dc347d0; exit=0; EXPECT=matched; output-sha256=c34e588c74ff94be9d982afd8acba605bca64f15cb839b03571e37b17c348458; output-bytes=1229; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-review; path=82de56a067b7/18 entries
 
 - [x] G11: musaed selftest unaffected
   CHECK: python3 eval_musaed.py --selftest 2>&1 | tail -3
