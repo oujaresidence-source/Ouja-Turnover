@@ -27,7 +27,9 @@ def day_label(d):
 
 
 def slot_label(s):
-    return "%s – %s" % (hm(s["start_min"]), hm(s["end_min"]))
+    # Words, not a dash: «5:00 – 7:00» inside an Arabic line renders right-to-left as
+    # «7:00 – 5:00». «من … لين …» keeps the order whatever the paragraph direction.
+    return "من %s لين %s" % (hm(s["start_min"]), hm(s["end_min"]))
 
 
 def schedule_text(d, slots, unavailable, locked):

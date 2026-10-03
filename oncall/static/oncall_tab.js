@@ -15,7 +15,14 @@
 
   function T(ar, en) { return labelText(ar, en); }
   function arr(x) { return Array.isArray(x) ? x : []; }
-  function hm(s) { return s ? String(s).slice(11, 16) : '—'; }
+  /* ISO timestamp -> 12-hour '6:15', the way the team and the Discord messages say it. */
+  function hm(s) {
+    if (!s) return '—';
+    var h = Number(String(s).slice(11, 13)), m = String(s).slice(14, 16);
+    return isFinite(h) && m ? (h % 12 || 12) + ':' + m : '—';
+  }
+  /* A time range inside Arabic text renders right-to-left ('7:00–5:00'); pin it LTR. */
+  function span(a, b) { return '<span dir="ltr">' + esc(a) + '–' + esc(b) + '</span>'; }
 
   var STATUS = { none: ['ما نزل', 'Not published'], published: ['منشور — التبديل مفتوح', 'Published — swaps open'],
                  locked: ['مقفل', 'Locked'] };
@@ -98,7 +105,7 @@
     }
     function k(v, l) { return '<div class="kpi"><div class="kpi-val">' + v + '</div><div class="kpi-lbl">' + l + '</div></div>'; }
     return '<div class="oc-now">' +
-      k(esc(n.employee), T('المناوب الحين', 'On duty now') + ' · <span class="oc-num">' + esc(n.from) + '–' + esc(n.to) + '</span>') +
+      k(esc(n.employee), T('المناوب الحين', 'On duty now') + ' · <span class="oc-num">' + span(n.from, n.to) + '</span>') +
       k('<span class="oc-num">' + hm(n.last_answered) + '</span>', T('آخر «موجود»', 'Last check-in')) +
       k('<span class="oc-num">' + esc(n.next_check || '—') + '</span>', T('السؤال الجاي', 'Next check')) +
       k('<span class="oc-num">' + arr(d.issues).filter(function (i) { return !i.resolved_at; }).length + '</span>',
@@ -118,7 +125,7 @@
         '</th><th>' + T('ردود', 'Answered') + '</th><th>' + T('غياب', 'Missed') + '</th><th></th></tr></thead><tbody>';
       nv.slots.forEach(function (s) {
         var src = s.source === 'swap' ? T('تبديل', 'swap') : (s.source === 'edit' ? T('تعديل: ', 'edit: ') + esc(s.edited_by) : '');
-        h += '<tr><td class="oc-num">' + esc(s.from) + '–' + esc(s.to) + '</td><td>' + esc(s.employee) +
+        h += '<tr><td class="oc-num">' + span(s.from, s.to) + '</td><td>' + esc(s.employee) +
           (src ? '<span class="oc-sub">' + src + (s.edit_reason ? ' — ' + esc(s.edit_reason) : '') + '</span>' : '') +
           (s.linked ? '' : ' <span class="oc-st bad">' + T('مو مربوط', 'not linked') + '</span>') + '</td>' +
           '<td class="oc-num">' + s.answered + '</td><td class="oc-num">' +
@@ -150,12 +157,14 @@
     h += '<div class="oc-wrap"><table class="data"><thead><tr><th>' + T('المشكلة', 'Issue') + '</th><th>' + T('الصاحب', 'Owner') +
       '</th><th>' + T('فتحت', 'Opened') + '</th><th>' + T('الحالة', 'Status') + '</th></tr></thead><tbody>';
     rows.forEach(function (i) {
+      /* a maintenance ticket has no «استلمت» step — it is open until the room is closed */
       var st = i.resolved_at ? '<span class="oc-st ok">' + T('انحلّت', 'Resolved') + '</span>'
+        : (i.kind === 'maint' ? '<span class="oc-st gold">' + T('مفتوحة', 'Open') + '</span>'
         : (i.claimed_at ? '<span class="oc-st gold">' + T('مستلمة', 'Claimed') + '</span>'
-                        : '<span class="oc-st bad">' + T('ما انستلمت', 'Unclaimed') + '</span>');
+                        : '<span class="oc-st bad">' + T('ما انستلمت', 'Unclaimed') + '</span>'));
       h += '<tr><td>' + (i.kind === 'maint' ? '🛠️ ' : '🚨 ') + esc(i.title || '—') + '</td><td>' + esc(i.owner) +
         (i.helper ? '<span class="oc-sub">' + T('ساعده: ', 'Helped by: ') + esc(i.helper) + '</span>' : '') +
-        '</td><td class="oc-num">' + esc(String(i.opened_at || '').slice(5, 16).replace('T', ' ')) + '</td><td>' + st + '</td></tr>';
+        '</td><td class="oc-num"><span dir="ltr">' + esc(String(i.opened_at || '').slice(5, 10)) + ' ' + hm(i.opened_at) + '</span></td><td>' + st + '</td></tr>';
     });
     return h + '</tbody></table></div></div>';
   }
@@ -169,7 +178,7 @@
     rows.forEach(function (c) {
       var lbl = CHECK[c.status] || [c.status, c.status];
       var why = VOID[c.void_reason];
-      h += '<tr><td>' + esc(c.employee) + '</td><td class="oc-num">' + esc(c.date) + ' ' + hm(c.due_at) + '</td><td>' +
+      h += '<tr><td>' + esc(c.employee) + '</td><td class="oc-num"><span dir="ltr">' + esc(c.date) + ' ' + hm(c.due_at) + '</span></td><td>' +
         '<span class="oc-st ' + (c.status === 'voided' ? '' : 'bad') + '">' + T(lbl[0], lbl[1]) + '</span>' +
         (why ? '<span class="oc-sub">' + T(why[0], why[1]) + '</span>' : '') + '</td></tr>';
     });
