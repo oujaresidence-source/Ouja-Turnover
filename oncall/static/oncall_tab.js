@@ -29,7 +29,7 @@
   var CHECK = { missed: ['غياب', 'Missed'], late: ['غياب (ضغط متأخر)', 'Missed (late press)'],
                 voided: ['ملغي', 'Void'] };
   var VOID = { not_delivered: ['ما وصله السؤال', 'Not delivered'], bot_down: ['البوت كان متوقف', 'Bot was down'],
-               unreachable: ['حسابه مو مربوط', 'Not linked'] };
+               unreachable: ['الحساب مو مربوط', 'Not linked'] };
 
   function css() {
     if (document.getElementById('ocCss')) return;
@@ -88,7 +88,7 @@
       ? T('النظام شغّال — «موجود؟» كل ', 'Running — check every ') + '<b class="oc-num">' + d.settings.every_min +
         '</b>' + T(' دقيقة، و', ' min, ') + '<b class="oc-num">' + d.settings.window_min + '</b>' +
         T(' دقايق للرد. المشرفة: ', ' min to answer. Supervisor: ') + '<b>' + esc(d.settings.supervisor_name) + '</b>' +
-        (d.settings.supervisor_linked ? '' : ' <span class="oc-st bad">' + T('حسابها مو مربوط', 'not linked') + '</span>')
+        (d.settings.supervisor_linked ? '' : ' <span class="oc-st bad">' + T('حساب المشرفة مو مربوط', 'not linked') + '</span>')
       : '<b>' + T('النظام موقّف', 'Stopped') + '</b> — ' + T('ما فيه أسئلة ولا تنبيهات ولا إنذارات.', 'no checks, alerts or warnings.');
     return '<div class="oc-banner' + (on ? '' : ' off') + '"><span>' + txt + '</span>' + btn + '</div>';
   }

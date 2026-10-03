@@ -75,8 +75,8 @@ def miss_dm(nth):
 
 
 def supervisor_miss(employee, nth, slot):
-    tail = " — وانسجل عليه إنذار رسمي." if nth == 2 else ""
-    return "🚨 %s ما ردّ على «موجود؟» (مرة %d الليلة، سلوت %s). غطّي المناوبة لين يرجع%s" % (
+    tail = " — وانسجل إنذار رسمي." if nth == 2 else ""
+    return "🚨 ما وصلنا رد من %s على «موجود؟» (مرة %d الليلة، سلوت %s). غطّي المناوبة لين يوصلنا رد%s" % (
         employee, nth, slot_label(slot), tail)
 
 
@@ -104,22 +104,23 @@ def hr_line(employee, date_label, pct):
 
 def swap_ask(requester, target_slot, requester_slot, kind):
     if kind == "exchange":
-        body = "%s يبي يبدّل معك: ياخذ سلوتك %s وتاخذ سلوته %s." % (
+        body = "طلب من %s: سلوتك %s مقابل سلوت %s." % (
             requester, slot_label(target_slot), slot_label(requester_slot))
     else:
-        body = "%s يبي ياخذ سلوتك %s (وأنت ترتاح)." % (requester, slot_label(target_slot))
+        body = "طلب من %s: تنتقل له مناوبتك %s وترتاح الليلة." % (requester, slot_label(target_slot))
     return "🔁 طلب تبديل مناوبة\n" + body + "\nموافق؟"
 
 
 def swap_result(accepted, target, slot):
     if accepted:
-        return "✅ %s وافق — السلوت %s صار لك." % (target, slot_label(slot))
-    return "❌ %s رفض التبديل على %s." % (target, slot_label(slot))
+        return "✅ تمت الموافقة من %s — السلوت %s صار لك." % (target, slot_label(slot))
+    return "❌ ما تمت الموافقة من %s على التبديل (%s)." % (target, slot_label(slot))
 
 
 def swap_fyi(requester, target, slot, kind):
-    what = "بدّلوا" if kind == "exchange" else "أخذ السلوت"
-    return "للعلم: %s و%s %s — %s." % (requester, target, what, slot_label(slot))
+    if kind == "exchange":
+        return "للعلم: تبديل مناوبة بين %s و%s — %s." % (requester, target, slot_label(slot))
+    return "للعلم: سلوت %s انتقل من %s إلى %s." % (slot_label(slot), target, requester)
 
 
 def swap_expired(slot):
@@ -127,18 +128,18 @@ def swap_expired(slot):
 
 
 def slot_edited_new(slot, by):
-    return "📌 %s حطّتك في مناوبة الليلة %s." % (by, slot_label(slot))
+    return "📌 تعديل من %s: عندك مناوبة الليلة %s." % (by, slot_label(slot))
 
 
 def slot_edited_old(slot, by):
-    return "📌 %s شالتك من مناوبة الليلة %s." % (by, slot_label(slot))
+    return "📌 تعديل من %s: ما عاد عندك مناوبة الليلة %s." % (by, slot_label(slot))
 
 
 def issue_note(kind, owner_did, owner):
     who = ("<@%s>" % owner_did) if owner_did else owner
     if kind == "maint":
-        return "🌙 متابع المناوبة: %s — التذكرة باسمه لين تتقفل." % who
-    return ("🌙 المناوب المسؤول: %s — استلم خلال ١٠ دقايق (🙋 فوق)، وإذا خلصت اضغط ✅ انحلّت."
+        return "🌙 متابعة المناوبة: %s — التذكرة تبقى باسمك لين تتقفل." % who
+    return ("🌙 مسؤولية المناوبة: %s — الاستلام خلال ١٠ دقايق (🙋 فوق)، وبعد الحل اضغط ✅ انحلّت."
             % who)
 
 
@@ -148,13 +149,13 @@ def claim_overdue(issue):
 
 
 def stale(issue):
-    return "🕰️ مشكلة «%s» (صاحبها %s) ما تحدّثت من ٣٠ دقيقة وهو خلّص مناوبته — تابعيها." % (
-        issue.get("title") or "—", issue["owner"])
+    return "🕰️ مشكلة «%s» (باسم %s) ما تحدّثت من ٣٠ دقيقة، ومناوبة %s انتهت — تابعيها." % (
+        issue.get("title") or "—", issue["owner"], issue["owner"])
 
 
 def handover(slot, nxt, issues):
     who = ("<@%s>" % nxt["employee_did"]) if nxt.get("employee_did") else nxt["employee"]
-    lines = ["🔄 تسليم %s: %s خلّص — دورك %s (%s)." % (
+    lines = ["🔄 تسليم %s: انتهى سلوت %s — الدور على %s (%s)." % (
         hm(slot["end_min"]), slot["employee"], who, slot_label(nxt))]
     if issues:
         lines.append("مشاكل مفتوحة (تبقى باسم أصحابها):")
@@ -167,7 +168,7 @@ def handover(slot, nxt, issues):
 def night_summary(d, per, warnings, open_issues):
     lines = ["🌙 ملخص مناوبة %s" % day_label(d)]
     for p in per:
-        lines.append("• %s: ردّ %d من %d%s" % (
+        lines.append("• %s — الردود: %d من %d%s" % (
             p["name"], p["answered"], p["total"],
             (" — غياب %d" % p["missed"]) if p["missed"] else ""))
     if warnings:

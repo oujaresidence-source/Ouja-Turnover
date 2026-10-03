@@ -16,9 +16,9 @@ from . import db, engine
 DEFAULT_ROSTER = ["نورة", "ناصر", "محمد اليامي", "عهود", "مآثر"]
 DEFAULT_SUPERVISOR = "اسيل"
 
-WHY_OFF_DAY = "يوم إجازته الأسبوعية"
+WHY_OFF_DAY = "يوم الإجازة الأسبوعية"
 WHY_LEAVE = "إجازة مسجّلة في تقويم الموظفين"
-WHY_NO_DISCORD = "حسابه مو مربوط بديسكورد"
+WHY_NO_DISCORD = "حساب الديسكورد مو مربوط"
 WHY_NOT_IN_CALENDAR = "مو موجود في تقويم الموظفين"
 
 
