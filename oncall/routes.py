@@ -130,6 +130,7 @@ def state_payload(now):
             "tomorrow": _night_view(today + datetime.timedelta(days=1)),
             "issues": issues, "problems": problems, "warnings": warnings,
             "settings": {"roster": roster.roster_names(), "supervisor_name": sup["name"],
+                         "first_slot": roster.first_slot(),
                          "supervisor_linked": bool(sup["did"]),
                          "supervisor_did": db.config_get("supervisor_did", ""),
                          "every_min": engine.CHECK_EVERY_MIN,
@@ -177,10 +178,16 @@ def _save_settings(b, by, now):
         if not names:
             return False, "لازم يبقى شخص واحد على الأقل في المناوبة."
         db.config_set("roster", json.dumps(names, ensure_ascii=False), by, db.iso(now))
+    if "first_slot" in b:
+        name = str(b.get("first_slot") or "").strip()
+        if name and not any(engine.same_person(name, r) for r in roster.roster_names()):
+            return False, "الاسم مو من فريق المناوبة."
+        db.config_set("first_slot", name, by, db.iso(now))
     if "supervisor_did" in b:
         did = "".join(ch for ch in str(b.get("supervisor_did") or "") if ch.isdigit())
         db.config_set("supervisor_did", did, by, db.iso(now))
-    db.log("settings", now, by, {k: b.get(k) for k in ("roster", "supervisor_did") if k in b})
+    db.log("settings", now, by, {k: b.get(k) for k in ("roster", "supervisor_did", "first_slot")
+                                 if k in b})
     return True, ""
 
 

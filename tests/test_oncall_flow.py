@@ -116,6 +116,26 @@ class Publish(Case):
         self.assertEqual(self.kinds().count("schedule"), 1)
         self.assertEqual(db.night(SUN.isoformat())["message_id"], "ch0")
 
+    def test_ohoud_takes_the_first_slot_every_working_day(self):
+        import datetime as _dt
+        firsts = {}
+        for i in range(7):
+            pub = SAT + _dt.timedelta(days=i)
+            self.tick(at(pub, 12, 0))
+            night = (pub + _dt.timedelta(days=1)).isoformat()
+            firsts[night] = db.slots_for(night)[0]["employee"]
+        worked = {k: v for k, v in firsts.items()
+                  if _dt.date.fromisoformat(k).weekday() != 5}          # her day off: Saturday
+        self.assertEqual(set(worked.values()), {"عهود"}, firsts)
+        self.assertEqual(len(worked), 6)
+
+    def test_first_slot_can_be_switched_off(self):
+        db.config_set("first_slot", "")
+        from oncall import engine as E
+        names = ["نورة", "ناصر", "محمد اليامي", "عهود"]
+        self.assertEqual([x["employee"] for x in self.publish_sunday()],
+                         [x["employee"] for x in E.build_night(SUN, names, [])])
+
     def test_unlinked_person_is_left_out_and_supervisor_told(self):
         del IDS["عهود"]
         try:

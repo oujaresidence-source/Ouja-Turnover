@@ -15,6 +15,9 @@ from . import db, engine
 
 DEFAULT_ROSTER = ["نورة", "ناصر", "محمد اليامي", "عهود", "مآثر"]
 DEFAULT_SUPERVISOR = "اسيل"
+# Owner, 2026-10-04: عهود is the only operations employee who works from the office, so on
+# her working days the 17:00 slot is always hers. Editable in the tab; "" switches it off.
+DEFAULT_FIRST_SLOT = "عهود"
 
 WHY_OFF_DAY = "يوم الإجازة الأسبوعية"
 WHY_LEAVE = "إجازة مسجّلة في تقويم الموظفين"
@@ -108,6 +111,12 @@ def name_for_did(did):
 def did_for(name):
     ids = _ids()
     return next((v for k, v in ids.items() if engine.norm(k) == engine.norm(name)), "")
+
+
+def first_slot():
+    """The name pinned to the 17:00 slot on their working days, or "" for none."""
+    v = db.config_get("first_slot", None)
+    return DEFAULT_FIRST_SLOT if v is None else (v or "").strip()
 
 
 def supervisor():

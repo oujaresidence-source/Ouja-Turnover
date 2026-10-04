@@ -113,6 +113,45 @@ class Rotation(unittest.TestCase):
         self.assertEqual(E.sun_weekday(D0 + datetime.timedelta(days=6)), 6)
 
 
+class FirstSlot(unittest.TestCase):
+    """Owner, 2026-10-04: عهود works from the office — on her working days the 17:00 slot is
+    always hers. Length still follows fairness; the rest of the night rotates as before."""
+
+    def test_pinned_first_when_working(self):
+        h = simulate(14, lambda d: [p for p in FIVE if OFF[p] != E.sun_weekday(d)])
+        for d in range(14):
+            day = D0 + datetime.timedelta(days=d)
+            s = E.build_night(day, [p for p in FIVE if OFF[p] != E.sun_weekday(day)],
+                              h[max(0, d - 7):d], first="عهود")
+            if OFF["عهود"] == E.sun_weekday(day):
+                self.assertNotIn("عهود", [x["employee"] for x in s])
+            else:
+                self.assertEqual(s[0]["employee"], "عهود", day)
+                self.assertEqual(s[0]["start_min"], 0)
+
+    def test_absent_first_changes_nothing(self):
+        av = ["ناصر", "نورة", "محمد اليامي"]
+        self.assertEqual(E.build_night(D0, av, [], first="عهود"), E.build_night(D0, av, []))
+
+    def test_alone_gets_the_whole_night(self):
+        self.assertEqual(E.build_night(D0, ["عهود"], [], first="عهود"),
+                         [{"employee": "عهود", "start_min": 0, "end_min": 420}])
+
+    def test_fairness_and_late_rotation_survive_the_pin(self):
+        hist = []
+        for i in range(28):
+            d = D0 + datetime.timedelta(days=i)
+            av = [p for p in FIVE if OFF[p] != E.sun_weekday(d)]
+            s = E.build_night(d, av, hist[-7:], first="عهود")
+            self.assertNotEqual(s[-1]["employee"], "عهود")            # first is never last
+            self.assertEqual(sum(x["end_min"] - x["start_min"] for x in s), 420)
+            hist.append({"date": d.isoformat(), "slots": s})
+        t = totals(hist)
+        self.assertLessEqual(max(t.values()) - min(t.values()), 1, t)
+        for a, b in zip(hist, hist[1:]):
+            self.assertNotEqual(a["slots"][-1]["employee"], b["slots"][-1]["employee"], b["date"])
+
+
 class Checks(unittest.TestCase):
     def test_two_hour_slot_has_eight_checks(self):
         self.assertEqual(E.check_minutes(0, 120), [0, 15, 30, 45, 60, 75, 90, 105])

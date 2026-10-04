@@ -203,6 +203,12 @@
       }).join('') + '</div>' +
       '<div class="oc-edit"><input data-oc-f="add" placeholder="' + T('اسم كما في تقويم الموظفين', 'Name as in the employee calendar') + '">' +
       '<button class="btn ghost sm" data-oc="add">' + T('إضافة', 'Add') + '</button></div>' +
+      '<label>' + T('أول سلوت (٥ العصر) دايم لـ', 'The 5 PM slot always goes to') + '</label>' +
+      '<div class="oc-edit"><select data-oc-f="first"><option value="">' + T('بدون — توزيع عادي', 'Nobody — normal rotation') + '</option>' +
+      arr(st.roster).map(function (r) {
+        return '<option' + (r === st.first_slot ? ' selected' : '') + '>' + esc(r) + '</option>';
+      }).join('') + '</select><button class="btn ghost sm" data-oc="first">' + T('حفظ', 'Save') + '</button></div>' +
+      '<div class="oc-sub">' + T('في أيام الدوام بس — يوم الإجازة يتوزّع عادي. ينطبق من الجدول الجاي.', 'Working days only; applies from the next published night.') + '</div>' +
       '<label>' + T('ديسكورد المشرفة (رقم الحساب)', 'Supervisor Discord ID') + '</label>' +
       '<div class="oc-edit"><input data-oc-f="sup" inputmode="numeric" value="' + esc(st.supervisor_did || '') + '" placeholder="' +
       T('فاضي = نفس مسؤول الاعتراضات في /compliance', 'Empty = the /compliance appeal lead') + '">' +
@@ -258,6 +264,8 @@
       if (a === 'rm') names = names.filter(function (n) { return n !== el.getAttribute('data-n'); });
       else { var nn = field('add').trim(); if (!nn) return; if (names.indexOf(nn) < 0) names.push(nn); }
       if (await act('/api/oncall/settings', { roster: names }, el)) load(true);
+    } else if (a === 'first') {
+      if (await act('/api/oncall/settings', { first_slot: field('first') }, el)) { toast(T('انحفظ', 'Saved')); load(true); }
     } else if (a === 'sup') {
       if (await act('/api/oncall/settings', { supervisor_did: field('sup').trim() }, el)) { toast(T('انحفظ', 'Saved')); load(true); }
     }

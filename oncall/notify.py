@@ -128,7 +128,9 @@ def _publish(d, now, message_id=""):
     av = roster.availability(d)
     names = [a["name"] for a in av if a["ok"]]
     dids = {a["name"]: a["did"] for a in av}
-    slots = engine.build_night(d, names, db.history(di, 7))
+    pin = roster.first_slot()
+    first = next((n for n in names if pin and engine.same_person(n, pin)), None)
+    slots = engine.build_night(d, names, db.history(di, 7), first=first)
     kept = {s["employee"] for s in slots}
     for a in av:
         if a["ok"] and a["name"] not in kept:          # more people than hours tonight

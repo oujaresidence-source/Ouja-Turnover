@@ -36,6 +36,18 @@ class State(Case):
         self.assertFalse(routes.state_payload(at(SUN, 17, 2))["tonight"]["rebuildable"])
         self.assertIn("/api/oncall/rebuild", inspect.getsource(routes.register_routes))
 
+    def test_first_slot_setting(self):
+        from oncall import db
+        self.assertEqual(routes.state_payload(at(SUN, 12, 0))["settings"]["first_slot"], "عهود")
+        ok, err = routes._save_settings({"first_slot": "فلان"}, "tester", at(SUN, 12, 0))
+        self.assertFalse(ok)
+        ok, _ = routes._save_settings({"first_slot": "نورة"}, "tester", at(SUN, 12, 0))
+        self.assertTrue(ok)
+        self.assertEqual(db.config_get("first_slot"), "نورة")
+        ok, _ = routes._save_settings({"first_slot": ""}, "tester", at(SUN, 12, 0))
+        self.assertTrue(ok)
+        self.assertEqual(routes.state_payload(at(SUN, 12, 0))["settings"]["first_slot"], "")
+
     def test_settings_refuse_an_empty_roster(self):
         ok, err = routes._save_settings({"roster": []}, "tester", at(SUN, 12, 0))
         self.assertFalse(ok)

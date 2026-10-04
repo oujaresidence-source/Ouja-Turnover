@@ -69,7 +69,7 @@ def _rot(available, d):
     return {p: (i - k) % n for i, p in enumerate(available)}
 
 
-def build_night(d, available, history):
+def build_night(d, available, history, first=None):
     """The night of date d, auto-distributed and fair.
 
     available: names, in roster order, who can work tonight (already filtered for weekly day
@@ -82,6 +82,9 @@ def build_night(d, available, history):
         to whoever has the FEWEST trailing hours (ties: fewer long slots, then rotation).
       * the LAST slot (ends 24:00) goes to whoever held it least recently.
       * the rest are rotated so nobody starts at the same time as yesterday when avoidable.
+      * `first` (owner, 2026-10-04: عهود, the one who works from the office), when available
+        and not alone, always takes the 17:00 slot. Its LENGTH still follows fairness, and it
+        is never the last slot, so the late rotation runs among the others.
     Deterministic: same inputs -> same night. Returns [{employee, start_min, end_min}]."""
     available = list(dict.fromkeys(available or []))
     n = len(available)
@@ -121,13 +124,15 @@ def build_night(d, available, history):
     extra = set(ranked[:extra_n])
     length = {p: (base + (1 if p in extra else 0)) * 60 for p in available}
 
-    late = min(available, key=lambda p: (last_late[p], rot[p]))
-    rest = [p for p in available if p != late]
+    pinned = first if (first in available and len(available) >= 2) else None
+    pool = [p for p in available if p != pinned]
+    late = min(pool, key=lambda p: (last_late[p], rot[p]))
+    rest = [p for p in pool if p != late]
     rest.sort(key=lambda p: (yday.get(p, -1), rot[p]))
 
     best = None
     for shift in list(range(1, len(rest))) + [0]:
-        order = rest[shift:] + rest[:shift] + [late]
+        order = ([pinned] if pinned else []) + rest[shift:] + rest[:shift] + [late]
         out, t = [], 0
         for p in order:
             out.append({"employee": p, "start_min": t, "end_min": t + length[p]})
