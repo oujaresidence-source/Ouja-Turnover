@@ -20,6 +20,7 @@ FONTS_DIR = os.path.join(REPO_DIR, "fonts")
 
 CONFIRM_WORD = "اعتماد"
 VERIFY_MAX_FAILS = 5
+VERIFY_MAX_TOTAL = 15          # R5: wrong tries over the link's whole life, then it stops
 LOCK_MINUTES = 60
 VIEW_KEY_MINUTES = 30
 NAME_MIN_SIMILARITY = 0.6
@@ -73,6 +74,20 @@ def env_ttl_days():
 def template_name():
     t = (os.environ.get("AQD_TEMPLATE") or "operating_v2_1").strip()
     return t if re.fullmatch(r"[A-Za-z0-9_]+", t) else "operating_v2_1"
+
+
+# R2 — one line per FIRM-APPROVED template, keyed by (client_kind, account_model). A route that is
+# not here has no template: the contract can be saved as a draft but never sent. The regulation
+# defines «المرخَّص له» as a natural person, so v2.1 (owner = licence holder) fits only an
+# individual on his own account. AQD_TEMPLATE overrides the ("individual", "owner") line only.
+TEMPLATES = {("individual", "owner"): "operating_v2_1"}
+
+
+def template_for_key(kind, model):
+    name = TEMPLATES.get((kind, model))
+    if name and (kind, model) == ("individual", "owner") and (os.environ.get("AQD_TEMPLATE") or "").strip():
+        return template_name()
+    return name
 
 
 def template_path(name=None):

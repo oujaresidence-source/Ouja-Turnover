@@ -14,6 +14,7 @@ import datetime
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -117,7 +118,21 @@ def boot(prefix="aqd_"):
         "public_base": lambda: "https://ouja.test",
         "discord_ids": lambda: {"فيصل": "998877665544332211"},
     })
+    fill_operator()
     return rec, tmp
+
+
+OPERATOR = {"op_rep_name": "فيصل العوجا", "op_wakala_no": "445566", "op_wakala_date": "01/01/2026م",
+            "op_cr_expiry": "01/01/2028م"}
+
+
+def fill_operator(values=None):
+    for k, v in (OPERATOR if values is None else values).items():
+        db.set_setting(k, v, "test")
+
+
+def clear_operator():
+    fill_operator({k: "" for k in OPERATOR})
 
 
 def future(days=20):
@@ -407,17 +422,13 @@ class TestSign(Base):
         run(routes.api_list(_Req()))
         self.assertEqual(len(self.rec.payloads), 1)
 
-    def test_company_verifies_with_cr_and_rep_name(self):
-        self.approve()
+    def test_company_draft_saves_but_no_link_is_created(self):
         a = company(units=[unit(delivery_date=future())])
         cid = self.save(a)
-        self.send(cid)
-        tok = self.token(cid)
-        from tests.test_aqd_engine import CR
-        v = self.verify(tok, CR[-4:])
-        self.assertTrue(v["ok"], v)
-        r = self.sign(tok, v["view_key"], typed_name="سعد الدوسري")
-        self.assertTrue(r["ok"], r)
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertIn("عقود الشركات", r["error"])
+        self.assertEqual(db.get(cid)["status"], "draft")
 
 
 class TestCountersign(Base):
@@ -456,6 +467,125 @@ class TestCountersign(Base):
         r = body(run(routes.api_settings(_Req({"op_sig_png": "data:image/png;base64," +
                                                 base64.b64encode(b"GIF89a....").decode()}))))
         self.assertFalse(r["ok"])
+
+
+def presend_company_contract(test):
+    """A company contract sent BEFORE this release: forced straight into the DB as 'sent'."""
+    from aqd import catalogue, engine
+    a = company(units=[unit(delivery_date=future())])
+    cid = test.save(a)
+    clean, _e = catalogue.validate(a, datetime.date.today())
+    c = db.get(cid)
+    html_doc = routes._render_preview(clean, c["ref"], frozen=True, template_name="operating_v2_1")
+    files.write_text(cid, "frozen.html", html_doc)
+    tok = "legacy" + "x" * 40
+    assert db.transition(cid, ("draft",), "sent", token=tok, template_name="operating_v2_1",
+                         doc_sha256=engine.doc_hash(html_doc), sent_at=db.now_iso(),
+                         expires_at="2099-01-01T00:00:00")
+    return cid, tok
+
+
+class TestUpgradeRules(Base):
+    """R1–R5 at the HTTP boundary (gate G14)."""
+
+    def test_send_refused_for_an_individual_on_the_ouja_account(self):
+        cid = self.save(answers(account_model="ouja"))
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertIn("حساب عوجا", r["error"])
+
+    def test_vat_registered_is_forced_to_the_owner_account_on_save(self):
+        cid = self.save(answers(vat_registered="yes", vat_number="3" + "0" * 13 + "3", account_model="ouja"))
+        self.assertEqual(db.answers(db.get(cid))["account_model"], "owner")
+        self.assertTrue(body(run(routes.api_send(_Req({"id": cid}))))["ok"])
+
+    def test_four_units_in_one_property_cannot_be_sent(self):
+        cid = self.save(answers(units_count="4", same_property="yes", units=[unit(delivery_date=future())] * 4))
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertIn("المادة 4/2", r["error"])
+
+    def test_send_refused_until_operator_data_is_complete_and_names_the_fields(self):
+        clear_operator()
+        cid = self.save()
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["error"].startswith("أكمل بيانات المشغّل في الإعدادات أول"))
+        for label in ("اسم ممثل المشغّل", "رقم الوكالة", "تاريخ الوكالة", "تاريخ انتهاء السجل التجاري"):
+            self.assertIn(label, r["error"])
+        lst = body(run(routes.api_list(_Req())))
+        self.assertEqual(len(lst["operator_missing"]), 4)
+        fill_operator()
+        self.assertTrue(body(run(routes.api_send(_Req({"id": cid}))))["ok"])
+
+    def test_cr_expiry_dash_counts_as_missing(self):
+        fill_operator({"op_cr_expiry": "—"})
+        self.assertEqual(routes.operator_missing(), ["تاريخ انتهاء السجل التجاري"])
+
+    def test_approval_refused_while_operator_data_is_missing(self):
+        clear_operator()
+        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد"}))))
+        self.assertFalse(r["ok"])
+        self.assertIn("أكمل بيانات المشغّل", r["error"])
+        self.assertFalse(routes.is_approved())
+
+    def test_settings_dates_are_stored_as_contract_text(self):
+        run(routes.api_settings(_Req({"values": {"op_wakala_date": "2026-01-02", "op_cr_expiry": "2028-03-04"}})))
+        v = routes.settings_values()
+        self.assertEqual((v["op_wakala_date"], v["op_cr_expiry"]), ("02/01/2026م", "04/03/2028م"))
+
+    def test_preview_of_an_unrouted_contract_carries_the_red_banner(self):
+        r = body(run(routes.api_preview(_Req({"answers": company(units=[unit(delivery_date=future())])}))))
+        self.assertIn("معاينة فقط — هذا النوع من العقود يحتاج نموذج معتمد", r["html"])
+        self.assertTrue(any("عقود الشركات" in b for b in r["blockers"]))
+
+    def test_a_presend_company_contract_can_never_be_signed(self):
+        from tests.test_aqd_engine import CR
+        cid, tok = presend_company_contract(self)
+        self.approve()
+        v = self.verify(tok, CR[-4:])
+        self.assertTrue(v["ok"], v)
+        r = self.sign(tok, v["view_key"], typed_name="سعد الدوسري")
+        self.assertFalse(r["ok"])
+        self.assertIn("هذا العقد يحتاج إعادة إصدار", r["error"])
+        self.assertEqual(db.get(cid)["status"], "verified")
+
+    def test_fifteen_wrong_tries_end_the_link_and_ping_once(self):
+        cid = self.save()
+        self.send(cid)
+        tok = self.token(cid)
+        n = 0
+        for window in range(3):
+            for i in range(5):
+                n += 1
+                self.assertFalse(self.verify(tok, "0000", ip="10.7.%d.%d" % (window, i))["ok"])
+            db.update(cid, locked_until="2000-01-01T00:00:00")   # the 60-min lock passes …
+            routes.LIMITER.reset()                                  # … and so does the 10/min rate limit
+        row = routes.touch(db.get(cid))
+        self.assertEqual(row["status"], "expired")
+        caps = [p for p in self.rec.payloads if p["kind"] == "attempts_cap"]
+        self.assertEqual(len(caps), 1)
+        self.assertFalse(re.search(r"[0-9٠-٩]", caps[0]["text"].replace(row["ref"], "")))
+        self.assertEqual([e["kind"] for e in db.events(cid)].count("attempts_cap"), 1)
+        # the phone only ever sees the ordinary expired state
+        self.assertEqual(body(run(routes.api_public_get(_Req(match={"token": tok}, ip="10.8.0.1"))))["state"],
+                         "expired")
+        r = body(run(routes.api_resend(_Req({"id": cid}))))
+        self.assertTrue(r["ok"], r)
+        row = db.get(cid)
+        self.assertNotEqual(row["token"], tok)
+        self.assertEqual(row["verify_fails_total"], 0)
+
+    def test_bootstrap_flags_a_presend_contract_exactly_once(self):
+        import aqd
+        cid, _tok = presend_company_contract(self)
+        good = self.save()
+        self.send(good)
+        aqd.bootstrap()
+        aqd.bootstrap()
+        self.assertEqual([e["kind"] for e in db.events(cid)].count("needs_reissue"), 1)
+        self.assertEqual([e["kind"] for e in db.events(good)].count("needs_reissue"), 0)
+        self.assertTrue(body(run(routes.api_get(_Req(query={"id": cid}))))["needs_reissue"])
 
 
 class TestEndToEnd(unittest.TestCase):

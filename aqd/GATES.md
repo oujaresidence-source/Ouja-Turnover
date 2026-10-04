@@ -19,7 +19,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G3: full suite — no NEW failures vs the baseline recorded on untouched origin/main (aqd/.baseline.txt)
   CHECK: python3 -c "import re,subprocess,sys;I=re.compile(r'^(?:FAIL|ERROR): (\S+ \(\S+\))',re.M);k=set(I.findall(open('aqd/.baseline.txt',encoding='utf-8').read()));o=subprocess.run([sys.executable,'-m','unittest','discover','-s','tests','-p','test_*.py'],capture_output=True,text=True);t=o.stdout+o.stderr;r=re.search(r'^Ran (\d+) tests',t,re.M);n=sorted(set(I.findall(t))-k);print('NEW_FAILURES',n) if (n or not r) else print('NO_NEW_FAILURES ran=%s' % r.group(1))"
   EXPECT: /^NO_NEW_FAILURES ran=\d+$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=33658c555111712a7cf50c86623463628ccbeaad75f8ba85523ea667b50b3972; exit=0; EXPECT=matched; output-sha256=78ed870955e4647b0de6676e26910c003ec34f9414167eac3f209a346519b518; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=33658c555111712a7cf50c86623463628ccbeaad75f8ba85523ea667b50b3972; exit=0; EXPECT=matched; output-sha256=71186b073caeaa5d18da6fdeded32e2d17ff22d07b52834f3fa586ccd5d4326c; output-bytes=25; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
 
 - [x] G4: both tab scripts parse under node
   CHECK: node --check aqd/static/aqd_tab.js && node --check aqd/static/sign.js && echo JS_OK
@@ -29,7 +29,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G5: every <script> of the served DASHBOARD_HTML parses (esprima)
   CHECK: python3 -c "import bot,esprima,re;[esprima.parseScript(j) for j in re.findall(r'<script>(.*?)</script>',bot.DASHBOARD_HTML,re.S)];print('ESPRIMA_OK')" 2>/dev/null
   EXPECT: /^ESPRIMA_OK$/m
-  EVIDENCE: automatic-evidence=v1; definition-sha256=1900ba5c9e587db90230f6c98b1c0f505a6381554965c8e3b1617687cde83eaa; exit=0; EXPECT=matched; output-sha256=3226b625374b13554b389ad48b05e1d30aca55c9a1e25228ac7ed5a4783b7256; output-bytes=956; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=1900ba5c9e587db90230f6c98b1c0f505a6381554965c8e3b1617687cde83eaa; exit=0; EXPECT=matched; output-sha256=e2fde18fc44caf12a66185080c0bffb9603b03bc61c0041ff6a0559591e22fcf; output-bytes=956; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
 
 - [x] G6: no asyncio.to_thread anywhere in aqd/
   CHECK: test -f aqd/routes.py && (grep -rn "to_thread" aqd/ --include=*.py --include=*.js || echo NO_TO_THREAD)
@@ -39,7 +39,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G7: no national-ID-shaped number leaves through git
   CHECK: python3 permits/tools_privacy_scan.py
   EXPECT: /PRIVACY_OK/
-  EVIDENCE: automatic-evidence=v1; definition-sha256=60432aa470f609ea7ae16934eb797508fafd05d73e4faef4abe96d07c11f6d97; exit=0; EXPECT=matched; output-sha256=3ec1d0a9f3f2b250e999401eab03b2a83a1be03e8b5236d30b4e8161250e6f11; output-bytes=80; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+  EVIDENCE: automatic-evidence=v1; definition-sha256=60432aa470f609ea7ae16934eb797508fafd05d73e4faef4abe96d07c11f6d97; exit=0; EXPECT=matched; output-sha256=5eb919c0bcbb52359f3cff7e94f479cfaf171f575386c066aea1bd44efd84463; output-bytes=80; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
 
 - [x] G8: zero backslashes in aqd/sign_page.py and in the loadAqd stub inside bot.py
   CHECK: python3 -c "s=open('aqd/sign_page.py',encoding='utf-8').read();b=open('bot.py',encoding='utf-8').read();i=b.find('/* AQD-STUB-START */');j=b.find('/* AQD-STUB-END */');print('BACKSLASH_FREE' if (0<i<j and chr(92) not in s and chr(92) not in b[i:j]) else 'BACKSLASH_FOUND')"
@@ -63,6 +63,28 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 
 - [x] G12: impeccable audit + polish pass done on the tab and on /sign at 390px and 1280px (screenshots reviewed)
   EVIDENCE: 2026-10-04 — local test server (fake data) driven by Playwright at 390×844 and 1280×860: gate, wrong digits, unapproved read-only view, sign panel, done state, tab list, wizard steps 1/3/6, signed-contract drawer; zero page errors. Detector: 2 findings (width transition on the reading bar, an <img> without src) fixed, plus manual fixes (SVG state icons instead of glyphs, h1 on the sign page, muted text darkened for AA, themed ::selection/caret, status dots instead of glyphs, masked ID forced LTR). Re-run: detector [] and screenshots clean.
+
+## Upgrade 2 — the six owner rules (R1–R6)
+
+- [x] G13: engine + routes tests pass (the one real-PDF test may skip on local 3.9 — G9 runs it)
+  CHECK: python3 -m unittest tests.test_aqd_engine tests.test_aqd_routes 2>&1 | grep -E '^(OK.*|FAILED.*)$'
+  EXPECT: /^OK( \(skipped=\d\))?$/m
+  EVIDENCE: automatic-evidence=v1; definition-sha256=39ca86f6fdd8172f75c0fa67fc6fe316b2f94e01651bf80d34701d63b817d639; exit=0; EXPECT=matched; output-sha256=faa488b7581ae7bfc00cd12d751f871753558c933945bfa643ce25de502127c3; output-bytes=15; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+
+- [x] G14: the company / Ouja-account / 4-unit / operator / 15-try rules hold at the HTTP boundary (routes.core_* through the handlers, temp STATE_DIR)
+  CHECK: python3 -m unittest tests.test_aqd_routes.TestUpgradeRules 2>&1 | grep -qE '^OK$' && echo ROUTING_OK
+  EXPECT: /^ROUTING_OK$/m
+  EVIDENCE: automatic-evidence=v1; definition-sha256=4225c879542f6a779be79b72e1056e84644397d11f380ac1827426e7de667371; exit=0; EXPECT=matched; output-sha256=29f8739109069bc4640fe317f74f31c2cb8361f99b4bbad769c8c1e4dbc2d42e; output-bytes=11; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+
+- [x] G15: bot.py is unchanged by this task
+  CHECK: git diff --quiet HEAD -- bot.py && echo BOT_UNTOUCHED
+  EXPECT: /^BOT_UNTOUCHED$/m
+  EVIDENCE: automatic-evidence=v1; definition-sha256=97014ac8ba4d2a62f47dc3ab0ba2b6e23b77569005e016b4a2a5baff533c422f; exit=0; EXPECT=matched; output-sha256=e25c4e2febed6c9a8479392cf9e8dc0fdd833961246dcc1eed26a4e954fe7bd7; output-bytes=14; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
+
+- [x] G16: both tab scripts still parse under node
+  CHECK: node --check aqd/static/aqd_tab.js && node --check aqd/static/sign.js && echo JS_OK
+  EXPECT: /^JS_OK$/m
+  EVIDENCE: automatic-evidence=v1; definition-sha256=1727f7fab9d3f6e532537f130b50f271ed1dd7bbefa5299cfc88b7f818d60b3c; exit=0; EXPECT=matched; output-sha256=cb5bbc09ee6cfa19f42a617de658151521bb40c1007e252da3f72c2bf68e47f5; output-bytes=6; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqd; path=82de56a067b7/18 entries
 
 ## Assumptions (decisions this prompt did not foresee — safest, reversible, closest to an existing pattern)
 
@@ -117,3 +139,34 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
     that is when the document is actually issued. Previews show today's date.
 18. **Unit table on a phone** scrolls sideways inside the contract frame (9 legal columns cannot fit
     360 px); the page itself never scrolls sideways.
+
+### Upgrade 2 (R1–R6) — assumptions
+19. **Sign-time route check = "still routes", not "same name".** The prompt asks for
+    `template_for(answers) == c.template_name`. Taken literally, switching `AQD_TEMPLATE` to v2.2
+    would make every sent v2.1 contract unsignable — contradicting the documented swap procedure
+    (sent contracts keep their frozen v2.1). The check refuses when the answers no longer route to
+    ANY approved template (company / Ouja account), which is the defect R2 targets.
+20. **Old contracts without `account_model`:** routed as "owner" only when VAT-registered; otherwise
+    they have no route → draft: a normal "required" error; sent: flagged «needs_reissue» at boot and
+    unsignable. Live had no client-signed contracts (shipped unapproved the same day).
+21. **The VAT-yes line is a `note` field** (`account_model_note`, type "note") so the tab renders it
+    from the catalogue like every other field; validate() skips note fields.
+22. **Rule texts live in `catalogue.py`** (one source for server refusals, tab cards and tests);
+    `engine.template_for` reads them. `send_blockers` imports engine locally (engine imports
+    catalogue at load).
+23. **`aqd/notify.py` is a 12th file** — the attempts-cap Discord line sits with the other notification
+    texts. The commit has 12 files, not 11.
+24. **Settings dates:** the date inputs send ISO; the server stores `dd/mm/yyyyم` (the text the contract
+    prints). Typed text that is not ISO is stored as typed.
+25. **15-try cap:** counted on wrong digits only (not on wrong tokens, which never reach a contract);
+    on the 15th the phone still gets the generic wrong-digits answer, then the ordinary expired card.
+26. **Tests changed** (as allowed): engine fixture `individual()` gained `account_model="owner"` (R1
+    makes it required); `test_more_than_three_in_one_property_needs_the_tick_and_warns` became
+    `…_is_a_hard_block` (+ old-draft test); `test_company_verifies_with_cr_and_rep_name` became
+    `test_company_draft_saves_but_no_link_is_created`; the routes harness `boot()` now fills the
+    operator data (every send needs it; `clear_operator()` exercises the refusal). The 15-try test
+    resets the in-process 10/min rate limit between lock windows (they are an hour apart in life).
+27. **Pre-existing bug fixed during the required audit:** typing in a wizard field and then pressing
+    «التالي» lost the first click (the field's change event re-rendered the footer between mousedown
+    and mouseup). `syncNext()` now updates the existing button in place. Found by the 390/1280 audit
+    run; it blocked the changed steps.

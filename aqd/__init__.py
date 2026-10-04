@@ -22,9 +22,27 @@ from . import catalogue, config, db, engine, files, notify, pdf, routes, sign_pa
 __all__ = ["wire", "register_routes", "bootstrap", "HOST", "engine", "catalogue", "db"]
 
 
+def flag_unrouted():
+    """R2 one-time check: a contract sent before the routing rule whose answers no longer route
+    to an approved template gets ONE «needs_reissue» event (never a second one)."""
+    n = 0
+    for c in db.contracts():
+        if c.get("status") not in ("sent", "opened", "verified"):
+            continue
+        if engine.template_for(db.answers(c))[0]:
+            continue
+        if not db.has_event(c["id"], "needs_reissue"):
+            db.add_event(c["id"], "النظام", "needs_reissue", {})
+            n += 1
+    return n
+
+
 def bootstrap():
     try:
         db._ensure()
+        flagged = flag_unrouted()
+        if flagged:
+            print("[aqd] flagged %d pre-release contract(s) for re-issue" % flagged)
         n = len(db.contracts())
         print("[aqd] ready: contracts=%d template=%s approved=%s"
               % (n, config.template_name(), routes.is_approved()))

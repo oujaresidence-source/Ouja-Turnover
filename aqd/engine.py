@@ -322,7 +322,7 @@ def sig_operator_html(rep_name, sig_b64=None, stamp_b64=None, signed_at=None, op
 # ------------------------------------------------------------------ context + render
 
 def build_context(a, *, ref, created, settings, font_css, contract_css, template_version,
-                  approved=False, frozen=True):
+                  approved=False, frozen=True, banner=None):
     """The 22 values. frozen=True leaves the three overlays as markers (the stored document);
     frozen=False fills them for a one-off preview."""
     s = settings or {}
@@ -350,7 +350,7 @@ def build_context(a, *, ref, created, settings, font_css, contract_css, template
     if frozen:
         ctx.update({k: v for k, v in SLOT.items()})
     else:
-        ctx["version_banner"] = banner_html(approved)
+        ctx["version_banner"] = banner if banner is not None else banner_html(approved)
         ctx["sig_owner"] = sig_owner_html(sig_owner_label(a))
         ctx["sig_operator"] = sig_operator_html(s.get("op_rep_name"))
     return ctx
@@ -407,6 +407,28 @@ def append_evidence(doc, ev):
     i = doc.rfind("</body>")
     block = evidence_html(ev)
     return (doc[:i] + block + doc[i:]) if i >= 0 else doc + block
+
+
+# ------------------------------------------------------------------ template routing (R2)
+
+def template_for(clean):
+    """-> (template name, None) or (None, Arabic reason). Pure: config.TEMPLATES is data.
+    An old draft without account_model counts as 'owner' only when VAT-registered."""
+    from . import config
+    kind = (clean or {}).get("client_kind")
+    model = (clean or {}).get("account_model")
+    if not model and (clean or {}).get("vat_registered") == "yes":
+        model = "owner"
+    if kind == "company":
+        return None, catalogue.COMPANY_REASON
+    if kind != "individual":
+        return None, "اختر نوع العميل"
+    if model == "ouja":
+        return None, catalogue.OUJA_REASON
+    if model != "owner":
+        return None, catalogue.MODEL_MISSING_REASON
+    name = config.template_for_key(kind, model)
+    return (name, None) if name else (None, catalogue.OUJA_REASON)
 
 
 # ------------------------------------------------------------------ state machine

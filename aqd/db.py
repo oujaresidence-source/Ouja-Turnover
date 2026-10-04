@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS aqd_contracts (
     open_count         INTEGER NOT NULL DEFAULT 0,
     verified_at        TEXT,
     verify_fails       INTEGER NOT NULL DEFAULT 0,
+    verify_fails_total INTEGER NOT NULL DEFAULT 0,
     locked_until       TEXT,
     view_key           TEXT,
     view_key_until     TEXT,
@@ -86,7 +87,7 @@ COLUMNS = (
     "ref", "status", "client_kind", "client_name", "gender", "id_last4", "mobile", "units_count",
     "op_pct", "answers_json", "warnings_json", "template_version", "template_name", "doc_sha256",
     "token", "token_created_at", "expires_at", "created_by", "created_at", "updated_at", "sent_at",
-    "first_open_at", "open_count", "verified_at", "verify_fails", "locked_until", "view_key",
+    "first_open_at", "open_count", "verified_at", "verify_fails", "verify_fails_total", "locked_until", "view_key",
     "view_key_until", "signed_at", "signer_typed_name", "signer_ip", "signer_ua",
     "countersigned_by", "countersigned_at", "voided_by", "voided_at", "void_reason",
     "notified_signed_at", "notified_completed_at",
@@ -112,6 +113,9 @@ def _migrate(cx):
     for col in ("view_key", "view_key_until", "template_name", "notified_completed_at", "updated_at"):
         if cols and col not in cols:
             cx.execute("ALTER TABLE aqd_contracts ADD COLUMN %s TEXT" % col)
+    # R5: its own ALTER — the loop above only adds TEXT columns.
+    if cols and "verify_fails_total" not in cols:
+        cx.execute("ALTER TABLE aqd_contracts ADD COLUMN verify_fails_total INTEGER NOT NULL DEFAULT 0")
 
 
 def reset_init_cache():
@@ -214,7 +218,7 @@ def update_where_status(cid, statuses, **fields):
 
 
 def bump(cid, column, by=1):
-    if column not in ("open_count", "verify_fails"):
+    if column not in ("open_count", "verify_fails", "verify_fails_total"):
         raise ValueError(column)
     execute("UPDATE aqd_contracts SET %s=COALESCE(%s,0)+? WHERE id=?" % (column, column), (by, int(cid)))
 
@@ -257,6 +261,10 @@ def events(cid):
         except ValueError:
             r["detail"] = {}
     return rows
+
+
+def has_event(cid, kind):
+    return q1("SELECT 1 AS x FROM aqd_events WHERE contract_id=? AND kind=? LIMIT 1", (int(cid), kind)) is not None
 
 
 def last_event_at(cid):

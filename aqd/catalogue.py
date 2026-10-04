@@ -101,6 +101,17 @@ VAT = [
     {"key": "vat_number", "type": "text", "label_ar": "الرقم الضريبي", "label_en": "VAT number",
      "required": True, "norm": "digits", "re": "^3[0-9]{13}3$",
      "msg_ar": "١٥ رقم، يبدأ بـ3 وينتهي بـ3", "show_if": {"vat_registered": ["yes"]}},
+    # R1 (owner rule 28/09/2026): a VAT-registered owner ALWAYS operates on his own account, so the
+    # platform issues his tax statements in his name. The question is hidden for him and validate()
+    # forces "owner" whatever was sent — the server is the authority, never the browser.
+    {"key": "account_model", "type": "choice",
+     "label_ar": "الوحدات تشتغل على حساب مين في المنصات؟", "label_en": "Whose platform account?",
+     "required": True, "show_if": {"vat_registered": ["no"]},
+     "options": [opt("owner", "حساب المالك (المالك مضيف رئيسي، وعوجا مضيف مشارك)", "Owner's account"),
+                 opt("ouja", "حساب عوجا", "Ouja's account")],
+     "help_ar": "إذا كان المالك مسجّل في الضريبة، لازم تشتغل الوحدات على حسابه هو، والمنصة تصدر له الكشوفات الضريبية باسمه"},
+    {"key": "account_model_note", "type": "note", "label_ar": "تشتغل على حساب المالك (مسجّل في الضريبة)",
+     "label_en": "Runs on the owner's account (VAT-registered)", "show_if": {"vat_registered": ["yes"]}},
 ]
 
 # ------------------------------------------------------------------ step 3 — الوحدات
@@ -115,9 +126,6 @@ UNITS = [
     {"key": "same_property", "type": "choice", "label_ar": "هل الوحدات في نفس العقار؟",
      "label_en": "Same building?", "required": True,
      "options": [opt("yes", "نعم", "Yes"), opt("no", "لا", "No")]},
-    {"key": "same_property_ack", "type": "check", "label_ar": "تم التنبيه", "label_en": "Noted",
-     "required": True, "cond": "many_same",
-     "help_ar": "اللائحة تسمح بـ3 تراخيص كحد أقصى للمرخَّص له في العقار المشترك الواحد (المادة 4/2)"},
 ]
 
 UNIT_FIELDS = [
@@ -143,7 +151,8 @@ UNIT_FIELDS = [
      "options": [opt("issued", "صادر", "Issued"), opt("pending", "قيد الإصدار", "Pending"),
                  opt("not_applied", "لم يُقدَّم بعد", "Not applied yet")]},
     {"key": "licence_no", "type": "text", "label_ar": "رقم الترخيص", "label_en": "Licence number",
-     "required": True, "norm": "digits", "show_if": {"licence_status": ["issued"]}},
+     "required": True, "norm": "upper", "re": "^[A-Z0-9/-]{3,30}$",
+     "msg_ar": "حروف إنجليزية وأرقام و - أو / (من ٣ إلى ٣٠)", "show_if": {"licence_status": ["issued"]}},
     {"key": "licence_expiry", "type": "date", "label_ar": "تاريخ انتهاء الترخيص",
      "label_en": "Licence expiry", "required": True, "show_if": {"licence_status": ["issued"]}},
     {"key": "monthly_fee", "type": "choice", "label_ar": "رسوم التشغيل الشهرية",
@@ -179,7 +188,7 @@ PROPERTY = [
      "options": [opt("ready", "مؤثثة وجاهزة", "Furnished"), opt("partial", "تحتاج استكمال", "Partly"),
                  opt("none", "غير مؤثثة", "Unfurnished")]},
     {"key": "airbnb_account", "type": "choice", "label_ar": "حساب Airbnb", "label_en": "Airbnb account",
-     "required": True,
+     "required": True, "show_if": {"account_model": ["owner"]},
      "options": [opt("owner_has", "للمالك حساب باسمه", "Owner has one"),
                  opt("we_create", "ننشئه معه", "We create it together")]},
 ]
@@ -211,13 +220,26 @@ STEPS = [
 MAX_UNITS = 20
 SAME_PROPERTY_CAP = 3
 
+# Rule texts — one source for the server refusals, the tab cards and the tests.
+MANY_SAME_BLOCK = ("اللائحة تسمح بـ3 تراخيص كحد أقصى للمرخَّص له في العقار المشترك الواحد (المادة 4/2) — "
+                   "قسّم الوحدات على أكثر من مرخَّص له أو أكثر من عقد")
+COMPANY_REASON = "عقود الشركات تحتاج نموذج معتمد من المكتب — ترخيص وحدة الضيافة الخاصة يصدر لشخص طبيعي فقط"
+OUJA_REASON = "حساب عوجا يحتاج نموذج عقد ثاني معتمد من المكتب — احفظه كمسودة"
+MODEL_MISSING_REASON = "حدّد الوحدات تشتغل على حساب مين — بعدها يتحدد نموذج العقد"
+COMPANY_CARD = ("ترخيص وحدة الضيافة الخاصة يصدر لشخص طبيعي فقط (تعريف المرخَّص له في اللائحة). نقدر نحفظ "
+                "العقد كمسودة، لكن ما يطلع له رابط توقيع إلا بعد اعتماد نموذج الشركات من المكتب")
+UNROUTED_PREVIEW = "معاينة فقط — هذا النوع من العقود يحتاج نموذج معتمد"
+WE_CREATE_TASK = "إنشاء حساب المالك وإضافة عوجا مضيف مشارك قبل التشغيل"
+
 CITY_AR = {o["v"]: o["ar"] for o in UNIT_FIELDS[0]["options"]}
 UNIT_TYPE_AR = {o["v"]: o["ar"] for o in UNIT_FIELDS[3]["options"]}
 ID_KEYS = ("id_number", "agent_id", "cr_number")       # never stored whole in the DB
 
 
 def schema():
-    return {"steps": STEPS, "max_units": MAX_UNITS, "same_property_cap": SAME_PROPERTY_CAP}
+    return {"steps": STEPS, "max_units": MAX_UNITS, "same_property_cap": SAME_PROPERTY_CAP,
+            "texts": {"many_same": MANY_SAME_BLOCK, "company_card": COMPANY_CARD, "ouja": OUJA_REASON,
+                      "we_create": WE_CREATE_TASK}}
 
 
 # ------------------------------------------------------------------ normalisation
@@ -279,6 +301,8 @@ def _blank(v):
 def _check_field(f, raw, a, today):
     """-> (clean_value, error_ar or None)."""
     t = f["type"]
+    if t == "note":
+        return None, None
     if t == "check":
         ok = raw in (True, 1, "1", "true", "on", "yes")
         if f.get("required") and not ok:
@@ -345,15 +369,23 @@ def validate(answers, today=None):
     """-> (clean answers, {key: Arabic error}). Hidden fields are dropped; unit errors are keyed
     'units.<i>.<key>'. Never raises on junk input."""
     a = dict(answers or {}) if isinstance(answers, dict) else {}
+    vat_yes = normalize("trim", a.get("vat_registered")) == "yes"
+    if vat_yes:
+        a["account_model"] = "owner"          # R1: decided here, whatever the browser sent
     clean, errors = {}, {}
     for step in STEPS:
         for f in step["fields"]:
             if not visible(f, dict(a, **clean)):
                 continue
+            if f["type"] == "note":
+                continue
             v, err = _check_field(f, a.get(f["key"]), dict(a, **clean), today)
             clean[f["key"]] = v
             if err:
                 errors[f["key"]] = err
+    if vat_yes:
+        clean["account_model"] = "owner"
+        errors.pop("account_model", None)
     n = unit_count(clean)
     if n < 1 or n > MAX_UNITS:
         errors.setdefault("units_count", "عدد الوحدات غير صحيح")
@@ -378,7 +410,13 @@ def validate(answers, today=None):
 
 def send_blockers(clean):
     """Answers that may be SAVED but can never be SENT to a client."""
+    from . import engine                      # local: engine imports this module at load
     out = []
+    _name, why = engine.template_for(clean)
+    if why:
+        out.append(why)
+    if cond("many_same", clean):
+        out.append(MANY_SAME_BLOCK)           # R3: المادة 4(2) is a block, not a tick
     if clean.get("jamiya") == "unknown":
         out.append("لازم نتأكد من جمعية الملاك قبل إرسال العقد")
     return out
@@ -386,8 +424,6 @@ def send_blockers(clean):
 
 def warnings(clean):
     w = []
-    if cond("many_same", clean):
-        w.append("اللائحة تسمح بـ3 تراخيص كحد أقصى للمرخَّص له في العقار المشترك الواحد (المادة 4/2)")
     for u in clean.get("units") or []:
         if u.get("licence_status") in ("pending", "not_applied"):
             w.append("الوحدة %s: الترخيص %s — لا يبدأ التشغيل قبل صدوره"

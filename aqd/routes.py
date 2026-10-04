@@ -21,6 +21,7 @@ import collections
 import datetime
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -262,6 +263,22 @@ def approval(template_name=None):
             "version": config.template_version(template_name)}
 
 
+OPERATOR_FIELDS = (("op_rep_name", "اسم ممثل المشغّل"), ("op_wakala_no", "رقم الوكالة"),
+                   ("op_wakala_date", "تاريخ الوكالة"), ("op_cr_expiry", "تاريخ انتهاء السجل التجاري"))
+DATE_SETTINGS = ("op_wakala_date", "op_cr_expiry")
+
+
+def operator_missing():
+    """R4: the operator block is frozen into the document at send time, so a send (and the
+    template approval) waits until every one of these is filled."""
+    v = settings_values()
+    return [label for key, label in OPERATOR_FIELDS if str(v.get(key) or "").strip() in ("", "—")]
+
+
+def operator_refusal(missing):
+    return "أكمل بيانات المشغّل في الإعدادات أول: " + "، ".join(missing)
+
+
 def is_approved(template_name=None):
     return approval(template_name)["approved"]
 
@@ -354,20 +371,29 @@ def _artifact(c, kind):
     else:
         answers = files.read_json(cid, "draft_answers.json", {}) or {}
         clean, _e = catalogue.validate(answers, _today())
-        html = _render_preview(clean, c.get("ref"), frozen=False)
+        html = _preview_for(clean, c.get("ref"))
     ok = pdf.to_pdf(html, files.path(cid, name + ".pdf"))
     if ok:
         return files.path(cid, name + ".pdf"), "application/pdf", "%s-draft.pdf" % c.get("ref")
     return files.path(cid, name + ".html"), "text/html; charset=utf-8", "%s-draft.html" % c.get("ref")
 
 
-def _render_preview(clean, ref, frozen, created=None, template_name=None):
+def _render_preview(clean, ref, frozen, created=None, template_name=None, routed=True):
+    """routed=False: there is no approved template for this kind of contract — render v2.1 for
+    reading only, under a red «معاينة فقط» banner (never frozen, never sent)."""
     tname = template_name or config.template_name()
+    banner = None if routed else '<div class="ver draft">%s</div>' % catalogue.UNROUTED_PREVIEW
     ctx = engine.build_context(
         clean, ref=ref or "OUJA-CT-%04d-____" % _today().year, created=created or _now_riyadh(),
         settings=settings_values(), font_css=files.font_css_embedded(), contract_css=files.contract_css(),
-        template_version=config.template_version(tname), approved=is_approved(tname), frozen=frozen)
+        template_version=config.template_version(tname), approved=is_approved(tname), frozen=frozen,
+        banner=banner)
     return engine.render(files.template_text(tname), ctx)
+
+
+def _preview_for(clean, ref):
+    name, _why = engine.template_for(clean)
+    return _render_preview(clean, ref, frozen=False, template_name=name, routed=bool(name))
 
 
 def _row_view(c):
@@ -414,7 +440,8 @@ def core_list(status=None, query=None, role="viewer"):
     ap = approval()
     return 200, {"ok": True, "rows": rows, "counts": dict(counts), "awaiting_countersign": awaiting,
                  "approval": ap, "can_edit": role in EDIT_ROLES, "is_admin": role in ADMIN_ROLES,
-                 "status_ar": engine.STATUS_AR, "total": sum(counts.values())}
+                 "status_ar": engine.STATUS_AR, "total": sum(counts.values()),
+                 "operator_missing": operator_missing()}
 
 
 def core_get(cid, role, actor, edit=False):
@@ -449,6 +476,7 @@ def core_get(cid, role, actor, edit=False):
         "resend": role in EDIT_ROLES and st == "expired",
         "countersign": role in ADMIN_ROLES and st == "signed_owner",
     }
+    out["needs_reissue"] = db.has_event(c["id"], "needs_reissue") and st not in ("void", "completed")
     if edit and out["can"]["edit"]:
         out["draft_answers"] = files.read_json(c["id"], "draft_answers.json", {}) or {}
     return 200, out
@@ -472,7 +500,7 @@ def core_preview(body):
     if body.get("id"):
         c = db.get(body.get("id"))
         ref = c.get("ref") if c else None
-    html = files.for_screen(_render_preview(clean, ref, frozen=False))
+    html = files.for_screen(_preview_for(clean, ref))
     return 200, {"ok": True, "html": html, "errors": errors, "warnings": catalogue.warnings(clean),
                  "blockers": catalogue.send_blockers(clean)}
 
@@ -508,7 +536,7 @@ def core_save(body, actor):
         files.write_json(c["id"], "draft_answers.json", answers)
         db.add_event(c["id"], actor, "saved", {})
     else:
-        tname = config.template_name()
+        tname = engine.template_for(clean)[0] or config.template_name()
         fields.update({"created_by": actor, "template_name": tname,
                        "template_version": config.template_version(tname)})
         new_id = db.create(fields)
@@ -537,7 +565,12 @@ def core_send(body, actor):
     blockers = catalogue.send_blockers(clean)
     if blockers:
         return _refuse(blockers[0], blockers=blockers)
-    tname = config.template_name()
+    missing = operator_missing()
+    if missing:
+        return _refuse(operator_refusal(missing), operator_missing=missing)
+    tname, why = engine.template_for(clean)
+    if not tname:                                   # unreachable after send_blockers; defence in depth
+        return _refuse(why)
     frozen = _render_preview(clean, c["ref"], frozen=True, template_name=tname)
     files.write_text(c["id"], "frozen.html", frozen)
     sha = engine.doc_hash(frozen.encode("utf-8"))
@@ -592,7 +625,7 @@ def core_resend(body, actor):
     token = secrets.token_urlsafe(32)
     if not db.transition(c["id"], ("expired",), "sent", token=token, token_created_at=_iso(now),
                          expires_at=_iso(now + datetime.timedelta(days=ttl_days())), view_key=None,
-                         view_key_until=None, verify_fails=0, locked_until=None):
+                         view_key_until=None, verify_fails=0, verify_fails_total=0, locked_until=None):
         return _refuse("تغيّرت حالة العقد — حدّث الصفحة")
     db.add_event(c["id"], actor, "resent", {})
     c = db.get(c["id"])
@@ -636,7 +669,7 @@ def core_settings_get(admin):
     out = {"ok": True, "values": settings_values(), "approval": approval(),
            "confirm_word": config.CONFIRM_WORD, "template": config.template_name(),
            "template_version": config.template_version(), "env_ttl_days": config.env_ttl_days(),
-           "channel": config.channel(), "is_admin": admin}
+           "channel": config.channel(), "is_admin": admin, "operator_missing": operator_missing()}
     sig, stamp = files.settings_png_b64("op_sig.png"), files.settings_png_b64("op_stamp.png")
     out["has_sig"], out["has_stamp"] = bool(sig), bool(stamp)
     if admin:
@@ -654,7 +687,10 @@ def core_settings_save(body, actor):
                         raise ValueError
                 except ValueError:
                     return _refuse("مدة الرابط بين 1 و 90 يوم")
-            db.set_setting(k, str(v).strip()[:500], actor)
+            val = str(v).strip()[:500]
+            if k in DATE_SETTINGS and re.fullmatch(r"\d{4}-\d{2}-\d{2}", val):
+                val = engine.date_g(val)          # stored as the text the contract prints
+            db.set_setting(k, val, actor)
     for field, name in (("op_sig_png", "op_sig.png"), ("op_stamp_png", "op_stamp.png")):
         if body.get(field):
             data = files.decode_png_b64(body.get(field))
@@ -668,6 +704,9 @@ def core_settings_save(body, actor):
         if body.get("approve"):
             if str(body.get("confirm") or "").strip() != config.CONFIRM_WORD:
                 return _refuse("للاعتماد اكتب «%s» بالضبط" % config.CONFIRM_WORD)
+            missing = operator_missing()
+            if missing:
+                return _refuse(operator_refusal(missing), operator_missing=missing)
             db.set_setting(key, "1", actor)
         else:
             db.set_setting(key, "0", actor)
@@ -744,7 +783,17 @@ def core_public_verify(token, last4, ip):
     want = str(c.get("id_last4") or "").upper()
     if not want or len(given) != 4 or not secrets.compare_digest(given, want):
         db.bump(c["id"], "verify_fails")
+        db.bump(c["id"], "verify_fails_total")
         c2 = db.get(c["id"])
+        if int(c2.get("verify_fails_total") or 0) >= config.VERIFY_MAX_TOTAL:
+            # R5: the link stops for good. The phone sees the ordinary expired card (no reason
+            # leaks); the team gets ONE line and sends a fresh link (resend resets the counter).
+            db.update(c["id"], expires_at=_iso(_now_utc() - datetime.timedelta(seconds=1)), view_key=None)
+            c2 = touch(db.get(c["id"]))
+            if not db.has_event(c["id"], "attempts_cap"):
+                db.add_event(c["id"], "النظام", "attempts_cap", {"ip": ip})
+                notify.attempts_cap(c2)
+            return _refuse(GENERIC_VERIFY_FAIL)
         if int(c2.get("verify_fails") or 0) >= config.VERIFY_MAX_FAILS:
             db.update(c["id"], verify_fails=0,
                       locked_until=_iso(_now_utc() + datetime.timedelta(minutes=config.LOCK_MINUTES)))
@@ -791,6 +840,10 @@ def core_public_sign(body, ip, ua):
         return _refuse("العقد موقّع مسبقاً", state=st)
     if not _view_ok(c, body.get("view_key")) or st != "verified":
         return _refuse("انتهت جلسة التحقق — اكتب آخر 4 أرقام مرة ثانية", reverify=True)
+    if not engine.template_for(db.answers(c))[0]:
+        # R2 defence in depth: sent before the routing rule (a company / Ouja-account contract
+        # on v2.1). It can never be signed, even after v2.1 is approved.
+        return _refuse("هذا العقد يحتاج إعادة إصدار — تواصل مع مدير حسابك")
     if not is_approved(c.get("template_name")):
         return _refuse("التوقيع غير متاح — النموذج قيد المراجعة القانونية")
     if body.get("consent") is not True:

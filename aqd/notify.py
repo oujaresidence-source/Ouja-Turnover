@@ -37,6 +37,19 @@ def completed_text(row):
     return "✅ اكتمل العقد %s" % (row.get("ref") or "")
 
 
+def attempts_cap_text(row):
+    """R5. No name, no ID, no phone — the ref is the only number in it."""
+    return "🔒 رابط العقد %s توقف بعد محاولات تحقق خاطئة كثيرة — أرسل للعميل رابط جديد من التبويب" % (row.get("ref") or "")
+
+
+def attempts_cap(row):
+    try:
+        return _send("attempts_cap", attempts_cap_text(row), row)
+    except Exception as e:
+        print("[aqd] attempts_cap notify failed (non-fatal):", e)
+        return False
+
+
 def _send(kind, text, row):
     if not HOST.notify:
         return False

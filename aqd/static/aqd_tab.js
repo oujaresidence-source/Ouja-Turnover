@@ -78,6 +78,7 @@
       '.aq-err{background:var(--red-soft);color:var(--red);border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:10px}',
       '.aq-warn{background:var(--yellow-soft);color:var(--text);border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:8px}',
       '.aq-ok{background:var(--green-soft);color:var(--green);border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:8px}',
+      '.aq-f + .aq-warn,.aq-f + .aq-err,.aq-f + .aq-ok{margin:-4px 0 16px}',
       '#drawer.aq-wide{width:min(880px,100vw)}',
       '.aq-steps{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:16px;list-style:none;padding:0}',
       '.aq-steps li{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--mut);text-align:center}',
@@ -215,10 +216,18 @@
     renderTop(d); renderChips(d); renderBody(d);
   }
 
+  function opBanner(missing, isAdmin) {
+    if (!arr(missing).length) return '';
+    return '<div class="aq-banner" role="status"><div class="t">' + esc(T('ما ينرسل أي عقد قبل ما تكتمل بيانات المشغّل', 'No contract can be sent until the operator details are complete')) + '</div>'
+      + '<div class="s">' + esc(T('ناقص: ', 'Missing: ') + arr(missing).join('، ')) + '</div>'
+      + (isAdmin ? '<button class="btn ghost sm" data-aq="settings">' + esc(T('أكملها من الإعدادات', 'Complete in Settings')) + '</button>' : '') + '</div>';
+  }
+
   function renderTop(d) {
     var ap = d.approval || {};
-    if (ap.approved) { putHtml('aqTop', ''); return; }
-    putHtml('aqTop', '<div class="aq-banner" role="status"><div class="t">' + esc(T('النموذج ' + (ap.version || '') + ' غير معتمد للتوقيع بعد — اعتمده من الإعدادات بعد موافقة المكتب',
+    var op = opBanner(d.operator_missing, d.is_admin);
+    if (ap.approved) { putHtml('aqTop', op); return; }
+    putHtml('aqTop', op + '<div class="aq-banner" role="status"><div class="t">' + esc(T('النموذج ' + (ap.version || '') + ' غير معتمد للتوقيع بعد — اعتمده من الإعدادات بعد موافقة المكتب',
       'Template ' + (ap.version || '') + ' is not approved for signing yet — approve it in Settings after the law firm signs off')) + '</div>'
       + '<div class="s">' + esc(T('الروابط تنرسل والعميل يقرأ العقد، لكن زر التوقيع مقفل لين الاعتماد.', 'Links work and clients can read; signing stays locked until approval.')) + '</div>'
       + (d.is_admin ? '<button class="btn ghost sm" data-aq="settings">' + esc(T('الإعدادات', 'Settings')) + '</button>' : '') + '</div>');
@@ -314,6 +323,8 @@
       + (c.doc_sha256 ? kv(T('بصمة المستند', 'Document hash'), '<span class="aq-n">' + esc(String(c.doc_sha256).slice(0, 16)) + '…</span>', true) : '')
       + '</div>';
     if (a.internal_note) h += '<div class="aq-sec">' + esc(T('ملاحظة داخلية', 'Internal note')) + '</div><div class="aq-warn">' + esc(a.internal_note) + '</div>';
+    if (r.needs_reissue) h += '<div class="aq-err" role="alert">' + esc(T('أُرسل قبل قاعدة الشركات/الحساب — ألغه وأعد إصداره بعد اعتماد النموذج', 'Sent before the company/account rule — void it and re-issue once the template is approved')) + '</div>';
+    if (a.airbnb_account === 'we_create' && a.account_model === 'owner') h += '<div class="aq-warn"><b>' + esc(T('قبل التشغيل', 'Before go-live')) + ':</b> ☐ ' + esc(((S.schema && S.schema.texts) || {}).we_create || 'إنشاء حساب المالك وإضافة عوجا مضيف مشارك قبل التشغيل') + '</div>';
     arr(r.warnings).forEach(function (w) { h += '<div class="aq-warn">' + esc(w) + '</div>'; });
     if (r.link) {
       h += '<div class="aq-sec">' + esc(T('رابط التوقيع', 'Signing link')) + '</div><div class="aq-link">' + esc(r.link) + '</div>'
@@ -375,7 +386,21 @@
     if (f.cond && !cond(f.cond, a)) return false;
     return true;
   }
+  function derive(a) {
+    /* R1 mirror: VAT-registered = always the owner's account (the server forces the same) */
+    if (a.vat_registered === 'yes') a.account_model = 'owner';
+  }
+
+  function ruleCards(st, a) {
+    var t = (S.schema && S.schema.texts) || {}, h = '';
+    if (st.id === 'client' && a.client_kind === 'company') h += '<div class="aq-warn" role="note"><b>' + esc(T('عقد شركة', 'Company contract')) + ':</b> ' + esc(t.company_card || '') + '</div>';
+    if (st.id === 'vat' && a.account_model === 'ouja' && a.client_kind !== 'company') h += '<div class="aq-warn" role="note">' + esc(t.ouja || '') + '</div>';
+    if (st.id === 'units' && cond('many_same', a)) h += '<div class="aq-err" role="alert">' + esc(t.many_same || '') + '</div>';
+    return h;
+  }
+
   function fieldError(f, raw, a) {
+    if (f.type === 'note') return '';
     if (f.type === 'check') return (f.required && !raw) ? 'لازم تأكيد «' + f.label_ar + '»' : '';
     var v = f.type === 'choice' || f.type === 'picker' ? (raw === undefined || raw === null ? '' : String(raw)) : normv(f.norm || (f.type === 'number' ? 'digits' : 'trim'), raw);
     if (v === '') return (f.required && !(f.type === 'choice' && f.default !== undefined)) ? 'مطلوب' : '';
@@ -416,6 +441,7 @@
 
   function stepErrors(i) {
     var st = S.schema.steps[i], a = S.wz.a, errs = {};
+    derive(a);
     stepFields(st).forEach(function (f) {
       if (!visible(f, a)) return;
       var e = fieldError(f, a[f.key], a); if (e) errs[f.key] = e;
@@ -467,6 +493,9 @@
     var id = 'aqf_' + key.replace(/[^a-z0-9_]/gi, '_');
     var u = prefix ? ' data-u="' + S.wz.u + '"' : '';
     var h = '<div class="aq-f' + (err ? ' bad' : '') + '">';
+    if (f.type === 'note') {
+      return '<div class="aq-ok" role="note">' + esc(T(f.label_ar, f.label_en)) + '</div>';
+    }
     if (f.type === 'check') {
       h += '<label class="aq-check"><input type="checkbox" id="' + id + '" data-k="' + esc(f.key) + '"' + u + (val ? ' checked' : '') + '><span><b>' + esc(f.label_ar) + '</b>' + (f.help_ar ? ' — ' + esc(f.help_ar) : '') + '</span></label>';
     } else {
@@ -502,12 +531,17 @@
   function wz() {
     var w = S.wz, st = S.schema.steps[w.i], a = w.a;
     if (w.result) return wzResult();
+    derive(a);
     applyDefaults(stepFields(st), a);
     if (st.unit_fields) { ensureUnits(); a.units.forEach(function (u) { applyDefaults(st.unit_fields, u); }); }
     var errs = stepErrors(w.i);
     var h = stepBar() + '<div id="aqFormErr"></div>';
     if (st.id === 'review') { h += reviewHtml(); setDrawerBody(h); wzFoot(errs); loadPreview(); return; }
-    stepFields(st).forEach(function (f) { h += fieldHtml(f, a, '', errs); });
+    stepFields(st).forEach(function (f) {
+      h += fieldHtml(f, a, '', errs);
+      if (f.key === 'client_kind') h += ruleCards(st, a);   /* the company card sits right under the choice */
+    });
+    if (st.id !== 'client') h += ruleCards(st, a);
     if (st.unit_fields) {
       ensureUnits();
       var cnt = a.units.length;
@@ -662,6 +696,13 @@
     ['link_ttl_days', 'مدة صلاحية الرابط (أيام) — فاضي = الافتراضي', 'Link lifetime (days) — blank = default']
   ];
 
+  var DATE_KEYS = ['op_wakala_date', 'op_cr_expiry'];
+  /* stored as the contract text «dd/mm/yyyyم»; the date input needs yyyy-mm-dd */
+  function toIso(txt) {
+    var m = String(txt || '').replace(/[٠-٩]/g, function (c) { return String(c.charCodeAt(0) - 1632); }).match(/^([0-9]{2})[/]([0-9]{2})[/]([0-9]{4})/);
+    return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
+  }
+
   async function openSettings() {
     S.wz = null; S.item = null; wide(false);
     openDrawer(T('إعدادات العقود', 'Contract settings'), T('بيانات المشغّل، التوقيع والختم، واعتماد النموذج', 'Operator details, signature & stamp, template approval'));
@@ -687,8 +728,10 @@
         + '<span id="aqImg_' + x[0] + '">' + (r[x[1]] ? '<img class="aq-img" alt="' + esc(T(x[2], x[3])) + '" src="data:image/png;base64,' + r[x[1]] + '">' : '') + '</span></div>';
     });
     h += '<div class="aq-sec">' + esc(T('بيانات المشغّل في العقد', 'Operator details printed in the contract')) + '</div>';
+    if (arr(r.operator_missing).length) h += '<div class="aq-warn">' + esc(T('ناقص قبل أي إرسال أو اعتماد: ', 'Missing before any send or approval: ') + arr(r.operator_missing).join('، ')) + '</div>';
     SETTING_LABELS.forEach(function (x) {
-      h += '<div class="aq-f"><span class="l" id="aqS_' + x[0] + '_l">' + esc(T(x[1], x[2])) + '</span><input type="text" id="aqS_' + x[0] + '" value="' + esc((r.values || {})[x[0]] || '') + '" aria-labelledby="aqS_' + x[0] + '_l"'
+      var isDate = DATE_KEYS.indexOf(x[0]) >= 0, raw = (r.values || {})[x[0]] || '';
+      h += '<div class="aq-f"><span class="l" id="aqS_' + x[0] + '_l">' + esc(T(x[1], x[2])) + '</span><input type="' + (isDate ? 'date' : 'text') + '" id="aqS_' + x[0] + '" value="' + esc(isDate ? toIso(raw) : raw) + '" aria-labelledby="aqS_' + x[0] + '_l"'
         + (x[0] === 'link_ttl_days' ? ' inputmode="numeric" placeholder="' + esc(String(r.env_ttl_days)) + '"' : '') + '></div>';
     });
     h += '<p class="aq-sub">' + esc(T('التنبيهات تنزل في روم «' + r.channel + '» بديسكورد.', 'Notifications post in the «' + r.channel + '» Discord room.')) + '</p>';
@@ -819,7 +862,18 @@
     }
     /* typing: never re-render under the caret — patch this field's message + the footer */
     if (S.wz.touched[key]) fieldMsg(el);
-    wzFoot(stepErrors(S.wz.i));
+    syncNext();
+  }
+
+  /* Update the existing «التالي» in place. Re-rendering the footer here replaced the button
+     between mousedown and mouseup (the field's change event fires on that same mousedown),
+     so the first click after typing was silently lost. */
+  function syncNext() {
+    var b = document.querySelector('#drwFoot [data-aq="next"]');
+    if (!b) return;
+    var bad = Object.keys(stepErrors(S.wz.i)).length > 0;
+    b.disabled = bad;
+    if (bad) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
   }
 
   function fieldDef(el) {

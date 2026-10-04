@@ -38,7 +38,7 @@ def individual(**over):
     a = {"client_kind": "individual", "gender": "m", "id_type": "nid",
          "full_name": "عبدالله بن محمد بن سعد الشمري", "id_number": NID, "signer": "self",
          "mobile": "0555123456", "email": "", "nat_address": "",
-         "vat_registered": "no", "units_count": "1", "same_property": "no", "units": [unit()],
+         "vat_registered": "no", "account_model": "owner", "units_count": "1", "same_property": "no", "units": [unit()],
          "jamiya": "none", "furnishing": "ready", "airbnb_account": "owner_has",
          "op_pct": "23", "send_via": "whatsapp"}
     a.update(over)
@@ -146,15 +146,22 @@ class TestCatalogueRules(unittest.TestCase):
         _c, errs = catalogue.validate(individual(op_pct="other", op_pct_other=45), TODAY)
         self.assertIn("op_pct_other", errs)
 
-    def test_more_than_three_in_one_property_needs_the_tick_and_warns(self):
-        four = individual(units_count="4", same_property="yes", units=[unit() for _ in range(4)])
-        _c, errs = catalogue.validate(four, TODAY)
-        self.assertIn("same_property_ack", errs)
-        c = ok(dict(four, same_property_ack=True))
-        self.assertTrue(any("المادة 4/2" in w for w in catalogue.warnings(c)))
-        # three units in one property: no tick, no warning
+    def test_more_than_three_in_one_property_is_a_hard_block(self):
+        def blk(c):
+            return [b for b in catalogue.send_blockers(c) if "المادة 4/2" in b]
         three = ok(individual(units_count="3", same_property="yes", units=[unit() for _ in range(3)]))
-        self.assertFalse(any("المادة 4/2" in w for w in catalogue.warnings(three)))
+        self.assertEqual(blk(three), [])
+        four = ok(individual(units_count="4", same_property="yes", units=[unit() for _ in range(4)]))
+        self.assertEqual(len(blk(four)), 1)
+        self.assertIn("قسّم الوحدات", blk(four)[0])
+        self.assertFalse(any("المادة 4/2" in w for w in catalogue.warnings(four)), "it is a block, not a warning")
+        seven = ok(individual(units_count="more", units_more=7, same_property="no", units=[unit() for _ in range(7)]))
+        self.assertEqual(blk(seven), [])
+
+    def test_an_old_draft_with_the_removed_tick_still_validates(self):
+        c = ok(individual(units_count="4", same_property="yes", same_property_ack=True,
+                          units=[unit() for _ in range(4)]))
+        self.assertNotIn("same_property_ack", c)
 
     def test_jamiya_unknown_saves_but_blocks_send(self):
         c = ok(individual(jamiya="unknown"))
@@ -164,6 +171,52 @@ class TestCatalogueRules(unittest.TestCase):
     def test_junk_input_never_raises(self):
         for junk in (None, [], "x", {"units": "nope"}, {"units_count": "more", "units_more": "abc"}):
             catalogue.validate(junk, TODAY)
+
+
+class TestAccountModelAndRouting(unittest.TestCase):
+
+    def test_vat_registered_is_always_on_the_owners_account(self):
+        c = ok(individual(vat_registered="yes", vat_number="3" + "0" * 13 + "3", account_model="ouja"))
+        self.assertEqual(c["account_model"], "owner")
+        c = ok(individual(vat_registered="yes", vat_number="3" + "0" * 13 + "3", account_model=None))
+        self.assertEqual(c["account_model"], "owner")
+
+    def test_not_registered_must_choose(self):
+        _c, errs = catalogue.validate(individual(account_model=None), TODAY)
+        self.assertEqual(errs.get("account_model"), "مطلوب")
+
+    def test_airbnb_account_question_only_for_the_owner_account(self):
+        self.assertIn("airbnb_account", ok(individual()))
+        self.assertNotIn("airbnb_account", ok(individual(account_model="ouja")))
+
+    def test_template_for(self):
+        self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_1", None))
+        name, why = engine.template_for(ok(individual(account_model="ouja")))
+        self.assertIsNone(name)
+        self.assertEqual(why, "حساب عوجا يحتاج نموذج عقد ثاني معتمد من المكتب — احفظه كمسودة")
+        for model in ("owner", "ouja"):
+            name, why = engine.template_for(ok(company(account_model=model)))
+            self.assertIsNone(name)
+            self.assertEqual(why, "عقود الشركات تحتاج نموذج معتمد من المكتب — ترخيص وحدة الضيافة الخاصة يصدر لشخص طبيعي فقط")
+
+    def test_template_override_only_touches_the_individual_owner_route(self):
+        os.environ["AQD_TEMPLATE"] = "operating_v2_2"
+        try:
+            self.assertEqual(engine.template_for(ok(individual()))[0], "operating_v2_2")
+            self.assertIsNone(engine.template_for(ok(company()))[0])
+        finally:
+            os.environ.pop("AQD_TEMPLATE", None)
+
+    def test_unrouted_contracts_cannot_be_sent(self):
+        self.assertTrue(any("عقود الشركات" in b for b in catalogue.send_blockers(ok(company()))))
+        self.assertTrue(any("حساب عوجا" in b for b in catalogue.send_blockers(ok(individual(account_model="ouja")))))
+        self.assertEqual(catalogue.send_blockers(ok(individual())), [])
+
+    def test_licence_number_keeps_letters_dash_and_slash(self):
+        c = ok(individual(units=[unit(licence_no="lic-77/b")]))
+        self.assertEqual(c["units"][0]["licence_no"], "LIC-77/B")
+        _c, errs = catalogue.validate(individual(units=[unit(licence_no="ab")]), TODAY)
+        self.assertIn("units.0.licence_no", errs)
 
 
 class TestOwnerGrammar(unittest.TestCase):

@@ -544,6 +544,14 @@ link `/sign/{token}` → client last-4 check, read, typed name + drawn signature
   `notified_signed_at` latch only stamps after Discord took it; `/api/aqd/list` retries pending ones.
 - **PDF:** shared Chromium (`ouja_render._pw_pool`/`_pw_print`), needs Python ≥3.12 (Railway 3.13);
   any failure falls back to HTML and NEVER blocks signing. Local 3.9 skips the real-PDF test.
+- **Routing (R2):** `config.TEMPLATES` maps (client_kind, account_model) → a firm-approved template;
+  only (individual, owner) → v2.1 today. Company / Ouja-account = draft only, never a link; sign
+  re-checks the route (a pre-release company link can never be signed; boot flags it «needs_reissue»).
+  VAT-registered ⇒ `account_model` forced to "owner" by the server (R1).
+- **Hard blocks at send:** >3 units in one shared property (المادة 4/2, no tick any more) and
+  `operator_missing()` (rep, وكالة no/date, CR expiry) — the operator block is frozen into the
+  document. Approval is refused on the same list. 15 wrong last-4 tries over a link's life expire
+  it (one Discord line); resend resets the count.
 - Env: `AQD_ENABLED`(1), `AQD_LINK_TTL_DAYS`(14), `AQD_CHANNEL`(العقود, created under «ضم الوحدات»),
   `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_1). Non-admins see the tab only after the
   owner ticks «العقود» in الصلاحيات.
