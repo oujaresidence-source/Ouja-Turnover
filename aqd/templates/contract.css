@@ -1,0 +1,100 @@
+/* Ouja operating contract — print CSS for the aqd template. Fonts are injected by the renderer (OujaSans = fonts/ThmanyahSans-*.woff2). */
+
+:root{--ink:#1d2320;--muted:#5f6a64;--line:#d9dfdb;--soft:#f3f5f3;--brand:#1f4d3a;--hi:#9b2c2c;--mid:#9a6a12;--lo:#55606a;--ok:#2f6b3f}
+@page{size:A4;margin:18mm 16mm 20mm 16mm}
+*{box-sizing:border-box}
+html{direction:rtl}
+body{font-family:"OujaSans",sans-serif;color:var(--ink);font-size:10.3pt;line-height:1.75;margin:0;background:#fff}
+.meta{display:flex;justify-content:space-between;align-items:flex-start;font-size:8.8pt;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:14px}
+.meta b{color:var(--ink);font-weight:600}
+.banner{border:1px solid var(--hi);color:var(--hi);background:#fbf3f3;padding:6px 10px;font-size:9pt;margin:0 0 14px}
+.note-top{border-right:3px solid var(--mid);background:#fbf7ee;padding:6px 10px;font-size:9.3pt;margin:0 0 14px}
+h1{font-size:17pt;font-weight:700;margin:6px 0 2px;color:var(--brand);line-height:1.4}
+h1+.sub{font-size:10.5pt;color:var(--muted);margin:0 0 14px}
+h2{font-size:12.2pt;font-weight:700;color:#fff;background:var(--brand);padding:5px 10px;margin:22px 0 10px;break-after:avoid;page-break-after:avoid}
+h3{font-size:10.8pt;font-weight:700;margin:14px 0 4px;color:var(--brand);break-after:avoid}
+p{margin:0 0 8px;text-align:justify}
+.purpose{border:1px solid var(--line);background:var(--soft);padding:8px 12px;margin:0 0 12px}
+.purpose .t{font-weight:600;font-size:9.3pt;color:var(--muted);display:block;margin-bottom:2px}
+table{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:8.9pt;line-height:1.6}
+th{background:var(--soft);font-weight:600;text-align:right;border:1px solid var(--line);padding:4px 6px;vertical-align:bottom}
+td{border:1px solid var(--line);padding:4px 6px;vertical-align:top}
+tr{break-inside:avoid;page-break-inside:avoid}
+thead{display:table-header-group}
+.n{white-space:nowrap;text-align:center;width:1%}
+.st{white-space:nowrap;font-weight:600}
+.s-ok{color:var(--ok)}.s-part{color:var(--mid)}.s-no{color:var(--hi)}.s-doc{color:#6b3fa0}.s-biz{color:var(--lo)}
+.obs{border:1px solid var(--line);border-right:3px solid var(--brand);padding:7px 11px 5px;margin:0 0 10px;break-inside:avoid;page-break-inside:avoid}
+.obs .h{font-weight:700;margin-bottom:3px}
+.obs .h .g{font-weight:600;font-size:8.5pt;padding:0 5px;border-radius:2px;margin-inline-start:6px;vertical-align:1px}
+.g-h{background:#f6e3e3;color:var(--hi)}.g-m{background:#f7eedb;color:var(--mid)}.g-s{background:#e9edf0;color:var(--lo)}
+.obs .r{margin:0 0 3px}
+.obs .k{font-weight:600;color:var(--muted)}
+.q{font-weight:500}
+.tag{font-size:8.3pt;color:var(--muted);border:1px solid var(--line);padding:0 4px;border-radius:2px;white-space:nowrap}
+.verify{font-size:8.5pt;color:#6b3fa0;white-space:nowrap}
+ul,ol{margin:0 0 8px;padding-inline-start:20px}
+li{margin:0 0 3px}
+.opinion{border:2px solid var(--hi);padding:8px 12px;font-weight:700;font-size:11pt;margin:10px 0}
+.closing{text-align:center;margin-top:18px;font-weight:600}
+.src{font-size:8.2pt;color:var(--muted);margin-top:-6px;margin-bottom:10px}
+.pb{break-before:page;page-break-before:always}
+/* amendment cards */
+.am{border:1px solid var(--line);margin:0 0 11px}
+.am .row{break-inside:avoid;page-break-inside:avoid}
+.am .hd{break-after:avoid;page-break-after:avoid}
+.am .hd{display:flex;gap:10px;align-items:baseline;background:var(--soft);padding:4px 9px;border-bottom:1px solid var(--line);font-size:9pt}
+.am .hd .no{font-weight:700;color:var(--brand)}
+.am .hd .t{font-weight:700;flex:1}
+.am .hd .d{font-weight:600}
+.am .row{display:grid;break-inside:avoid;grid-template-columns:70px 1fr;border-bottom:1px solid var(--line)}
+.am .row:last-child{border-bottom:0}
+.am .row .l{font-size:8.4pt;color:var(--muted);padding:5px 8px;border-left:1px solid var(--line);background:#fafbfa;font-weight:600}
+.am .row .v{padding:5px 9px;font-size:9.3pt;line-height:1.7}
+.am .old .v{color:#5a605c}
+.am .new .v{font-weight:500}
+.am .new .l{color:var(--brand)}
+.am .inner{width:100%;border-collapse:collapse;margin:4px 0;font-size:8.5pt}
+.letter p{font-size:10.8pt;line-height:1.95}
+.sig{margin-top:22px;display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10pt}
+.gate td:last-child{text-align:center;font-weight:700;font-size:11pt;width:52px}
+.yes{color:var(--ok)}.no{color:var(--hi)}
+.final{border:2px solid var(--hi);color:var(--hi);font-weight:700;font-size:12pt;padding:8px 12px;margin-top:10px;text-align:center}
+.small{font-size:8.6pt;color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:4px 0 14px}
+.kpi{border:1px solid var(--line);padding:6px 8px;text-align:center}
+.kpi .v{font-size:18pt;font-weight:700;line-height:1.2}
+.kpi .l{font-size:8.4pt;color:var(--muted)}
+.am .row:has(table.inner){break-inside:auto;page-break-inside:auto}
+:root{--brand:#1f4a37}
+body{font-size:10.6pt;line-height:1.85}
+.chead{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px;font-size:8.5pt;color:var(--muted)}
+.chead b{color:var(--ink);font-size:10pt}
+.ver{background:#fbf3e4;color:#8a5a00;text-align:center;font-size:9pt;padding:4px;margin:0 60px 10px;font-weight:600}
+.ctitle{text-align:center;font-size:20pt;font-weight:700;margin:6px 0 0}
+.csub{text-align:center;color:var(--muted);margin:0 0 14px}
+table.kv{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:9.8pt}
+table.kv td{border:1px solid var(--line);padding:6px 9px}
+table.kv td.k{width:28%;background:#f6f7f6;font-weight:600}
+table.grid th{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600;font-size:8.8pt}
+h2.art{font-size:12pt;background:var(--brand);color:#fff;padding:7px 12px;margin:20px 0 10px}
+h3.party{font-size:11pt;color:var(--brand);margin:10px 0 4px}
+ol.p{padding-inline-start:22px;margin:0 0 6px}
+ol.p>li{margin:0 0 6px;text-align:justify}
+ul.b{margin:2px 0 4px;padding-inline-start:18px}
+ul.b li{margin:0 0 2px}
+.def b{color:var(--ink)}
+.def p{margin:0 0 6px}
+.sigbox{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
+.sigbox>div{border:1px solid var(--line);padding:12px 14px;line-height:2.2}
+.sigbox h4{margin:0 0 4px;color:var(--brand);font-size:11pt}
+.chk{font-family:sans-serif}
+.fill{color:#8a5a00}
+
+/* signing additions — used by sig_owner / sig_operator / version_banner / evidence page */
+.sigimg{display:block;height:64px;max-width:220px;object-fit:contain;margin:4px 0}
+.ver.draft{background:#f8e6e6;color:#8b2a2a}
+.evidence{page-break-before:always;break-before:page}
+.evidence h2{font-size:13pt;margin:0 0 8px}
+.evidence table td{font-size:9pt;word-break:break-all}

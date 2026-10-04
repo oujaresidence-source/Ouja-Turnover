@@ -522,6 +522,32 @@ pages, error) and purge progress — read it instead of asking the owner for a H
   https://www.airbnb.com/trips), `REVIEWASK_RAMADAN`(empty), `REVIEWASK_OPEN_AT`(20:00, the evening before),
   `REVIEWASK_LEAD_ROLES`(Managment), `REVIEWASK_REPORT_MIN`(30).
 
+## «العقود» contracts — the `aqd/` package
+Survey (tab `aqd`, under «عروض الملاك / المبيعات») → the owner's FROZEN legal template
+(`aqd/templates/operating_v2_1.html`, 22 `{{placeholders}}` — never edit the legal text) → a token
+link `/sign/{token}` → client last-4 check, read, typed name + drawn signature + consent → admin
+«توقيع المشغّل» → `final.pdf` with a «سجل التوقيع الإلكتروني» evidence page. Spec:
+`docs/superpowers/specs/2026-10-04-aqd-contract-signing-design.md`; gates: `aqd/GATES.md`.
+- **Template approval is THE safety switch.** Ships unapproved: links work read-only, signing is
+  refused, until an admin types «اعتماد» in the tab's settings (stored per template file name).
+  Swapping in v2.2: add `operating_v2_2.html` with the same 22 keys, set `AQD_TEMPLATE`, re-approve.
+- **Freeze = immutability.** On send the render is written to `$STATE_DIR/aqd/<id>/frozen.html` and
+  hashed (`doc_sha256`). Only three HTML-comment slots stay open (watermark + two signatures). A change
+  after sending means void + a new contract. User values are HTML- AND brace-escaped.
+- **PDPL:** full ID/iqama/CR numbers live ONLY in the contract files; DB `answers_json` holds
+  `••••••1234`; Discord/logs never carry an ID or a phone. Tests build fake IDs by concatenation.
+- **Public doors:** the read is `/api/aqd-t/{token}` (OUTSIDE `/api/aqd/` so the role rule never
+  403s a phone); writes `/api/aqd-t/open|verify|sign` are exact paths in `_ROLE_EXEMPT_WRITES`.
+  No body before the last-4 check; verify mints a 30-min `view_key` that body, PDF and sign require;
+  5 wrong tries = 60-min lock; wrong token and wrong digits answer identically.
+- **Notify:** `_aqd_notify` runs on the web pool and WAITS on the bot loop (raises on failure) so the
+  `notified_signed_at` latch only stamps after Discord took it; `/api/aqd/list` retries pending ones.
+- **PDF:** shared Chromium (`ouja_render._pw_pool`/`_pw_print`), needs Python ≥3.12 (Railway 3.13);
+  any failure falls back to HTML and NEVER blocks signing. Local 3.9 skips the real-PDF test.
+- Env: `AQD_ENABLED`(1), `AQD_LINK_TTL_DAYS`(14), `AQD_CHANNEL`(العقود, created under «ضم الوحدات»),
+  `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_1). Non-admins see the tab only after the
+  owner ticks «العقود» in الصلاحيات.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log

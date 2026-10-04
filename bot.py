@@ -89,6 +89,16 @@ except Exception as _onb_err:     # pragma: no cover
     _onb = None
     _HAS_ONB = False
 
+# «العقود» contracts — survey → filled contract → e-sign link → countersign. Additive, isolated:
+# an import failure (or AQD_ENABLED=0) hides the tab and never touches the rest of the bot.
+try:
+    import aqd as _aqd
+    _HAS_AQD = os.environ.get("AQD_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+except Exception as _aqd_err:            # pragma: no cover
+    print("[aqd] import failed (contracts tab disabled, bot unaffected):", _aqd_err)
+    _aqd = None
+    _HAS_AQD = False
+
 # Promise Keeper (متتبع الوعود) — durable ledger + accountability for promises made to guests.
 try:
     import promises as _pk
@@ -7364,6 +7374,50 @@ async def _onb_deliver(payload):
         await ch.send(text)
     except Exception as e:
         print("[onboarding] post failed (non-fatal):", e)
+
+# ===================== «العقود» — «وقّع العميل» / «اكتمل العقد» in Discord =====================
+# The aqd handlers run on the WEB POOL (web_thread), not on the event loop, so create_task would
+# raise "no running event loop" there (the _ops_notify lesson). From a worker thread we hand the
+# post to the bot loop and WAIT for it: a raise reaches aqd.notify, which leaves the latch NULL
+# and the next /api/aqd/list retries — so a Discord outage can never swallow «وقّع العميل».
+
+def _aqd_notify(payload):
+    """HOST.notify hook for «العقود». Raises on failure ON PURPOSE (see the block comment)."""
+    if not (_HAS_AQD and _aqd is not None):
+        return
+    loop = getattr(bot, "loop", None)
+    on_loop = False
+    try:
+        on_loop = asyncio.get_running_loop() is loop
+    except RuntimeError:
+        on_loop = False
+    if on_loop:
+        asyncio.create_task(_aqd_deliver(payload))
+        return
+    if loop is None or not loop.is_running():
+        raise RuntimeError("discord loop not running")
+    asyncio.run_coroutine_threadsafe(_aqd_deliver(payload), loop).result(timeout=25)
+
+async def _aqd_channel(guild):
+    """The AQD_CHANNEL text room — found by name anywhere, else created under «ضم الوحدات»."""
+    name = _aqd.config.channel()
+    want = _tk_cat_norm(name)
+    for ch in guild.text_channels:
+        if _tk_cat_norm(ch.name) == want:
+            return ch
+    cat = await _onb_category(guild)
+    return await guild.create_text_channel(name, category=cat, reason="«العقود» notifications")
+
+async def _aqd_deliver(payload):
+    text = payload.get("text") or ""
+    if _aqd.config.notify_dryrun():
+        print("[aqd] DRYRUN %s:%s%s" % (payload.get("kind"), chr(10), text))
+        return
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        raise RuntimeError("discord guild not ready")
+    ch = await _aqd_channel(guild)
+    await ch.send(text, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
 
 # ===================== «تنسيق الحفلات» — the whole workflow, inside Discord =====================
 # The owner wanted the team to never need the dashboard. So every action the dashboard tab
@@ -23647,6 +23701,36 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="pmBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «العقود» contracts (survey → filled contract → e-sign link → countersign) ============ -->
+      <section class="view" id="view_aqd">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📝 العقود</div>
+            <div class="page-sub">استبيان قصير → عقد معبّى → رابط توقيع للعميل</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" data-aq="settings" data-admin="1" hidden>⚙ الإعدادات</button>
+            <button class="btn ghost sm" onclick="loadAqd(1)">↻ تحديث</button>
+            <button class="btn primary sm" data-aq="new" data-edit="1" hidden>+ عقد جديد</button>
+          </div>
+        </div>
+
+        <div class="page-help" id="ph_aqd" data-help-key="aqd">
+          <button class="ph-x" onclick="dismissHelp('aqd')" title="إخفاء">×</button>
+          <div class="ph-t">من الاستبيان إلى عقد موقّع — ٤ خطوات</div>
+          <div class="ph-b">
+            <b>١.</b> اضغط «+ عقد جديد» وعبّي الاستبيان (أغلبه اختيارات، ياخذ ٣ دقايق).
+            <b>٢.</b> راجع العقد المعبّى واضغط «إنشاء رابط التوقيع» وأرسله للعميل بالواتساب.
+            <b>٣.</b> العميل يتحقق بآخر ٤ أرقام من هويته، يقرأ ويوقّع من جواله — ويوصلكم تنبيه هنا وفي ديسكورد.
+            <b>٤.</b> المدير يضغط «توقيع المشغّل» فيتختم العقد ويتحفظ، والعميل يحمّل نسخته النهائية من نفس الرابط.
+          </div>
+        </div>
+
+        <div id="aqTop"></div>
+        <div id="aqChips"></div>
+        <div id="aqBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ «رفع التقييم» Review Push (weak apartments · one room per checkout · WhatsApp + call) ============ -->
       <section class="view" id="view_rvpush">
         <div class="page-head">
@@ -26821,6 +26905,7 @@ function badgeCount(key){
   if(key==='listings') return ((D.listings && D.listings.summary) || {}).needs_setup || 0;
   if(key==='promises') return ((D.promises && D.promises.counts) || {}).overdue || 0;
   if(key==='permits') return ((D.permits && D.permits.counts) || {}).alert || 0;
+  if(key==='aqd') return (D.aqd || {}).awaiting || 0;
   return 0;
 }
 function badgeInfo(key){
@@ -27119,6 +27204,7 @@ function go(id){
   if(id==='coverage') loadCoverage();
   if(id==='wifi') loadWifi();
   if(id==='permits') loadPermits();
+  if(id==='aqd') loadAqd();
   if(id==='rvpush') loadRvpush();
   if(id==='oncall') loadOncall();
   if(id==='guests') loadGuests();
@@ -27392,6 +27478,7 @@ async function loadSlow(){
 async function loadAll(){
   await Promise.all([loadMed(), loadFast(), loadSlow()]);
   try{ permitsBadgeRefresh(); }catch(_){ }   /* PERMITS: non-blocking, swallows errors */
+  try{ aqdBadgeRefresh(); }catch(_){ }       /* «العقود»: signed contracts waiting for the operator */
 }
 var _pePanel = null;
 var _PE_STRAT_META={'last-minute':{ic:'⏱️',ar:'اللحظة الأخيرة',en:'Last-minute'},'strategy':{ic:'⚡',ar:'ديناميكية',en:'Dynamic'},'weekend':{ic:'▦',ar:'نهاية الأسبوع',en:'Weekend'},'event':{ic:'✺',ar:'مناسبة',en:'Event'}};
@@ -37178,6 +37265,22 @@ var _drawerReturnEl = null;
    ============================================================ */
 var WIFI = {data:null, team:null, loading:false, unit:null, form:null, blocked:null, mode:''};
 
+/* AQD-STUB-START */
+/* «العقود» — the tab's code is the real file /aqd/static/aqd_tab.js (no backslash trap here) */
+function loadAqd(force){
+  if(window.__aqdJs){ return window.AqdTab.load(force); }
+  if(window.__aqdLoading){ return; }
+  window.__aqdLoading=1;
+  var s=document.createElement('script');
+  s.src='/aqd/static/aqd_tab.js?v=__AQD_JS_V__';
+  s.onload=function(){ window.__aqdJs=1; window.AqdTab.load(force); };
+  s.onerror=function(){ window.__aqdLoading=0; putHtml('aqBody', errorState('loadAqd(1)')); };
+  document.head.appendChild(s);
+}
+var __aqdBadgeAt=0;
+function aqdBadgeRefresh(){ if(Date.now()-__aqdBadgeAt<60000 || !canRead('aqd')) return; __aqdBadgeAt=Date.now();
+  api('/api/aqd/list').then(function(r){ if(r && r.ok){ D.aqd={awaiting:r.awaiting_countersign||0}; buildSideNav(); } }).catch(function(){}); }
+/* AQD-STUB-END */
 /* «المناوبة» — the tab's code is the real file /oncall/static/oncall_tab.js (no backslash trap here) */
 function loadOncall(force){
   if(window.__ocJs){ return window.OncallTab.load(force); }
@@ -45987,7 +46090,7 @@ NAV_DEF = {
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
                                   "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
-        {"tk": "cat_owner_sales", "ids": ["quote"]},
+        {"tk": "cat_owner_sales", "ids": ["quote", "aqd"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
         {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "cp", "guide", "reviews"]},
@@ -46022,6 +46125,7 @@ NAV_DEF = {
         {"id": "kb", "ic": "learn", "tk": "kb"},
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
+        {"id": "aqd", "ic": "quote", "tk": "aqd", "badge": "aqd"},                # «العقود»
         {"id": "studio", "ic": "design", "tk": "studio"},
         {"id": "digest", "ic": "design", "tk": "digest", "href": "/digest"},
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
@@ -46058,7 +46162,7 @@ NAV_DEF = {
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح", "rvpush": "رفع التقييم",
             "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة",
-            "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار",
+            "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار", "aqd": "العقود",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
             "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
@@ -46082,7 +46186,7 @@ NAV_DEF = {
             "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits", "rvpush": "Review Push",
             "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call",
-            "reviews": "Reviews", "users": "Users", "quote": "Quotations",
+            "reviews": "Reviews", "users": "Users", "quote": "Quotations", "aqd": "Contracts",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "onb": "Unit onboarding", "mot": "Tourism compliance",
             "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
@@ -46102,6 +46206,11 @@ NAV_DEF = {
     "erp_targets": {"erp": "today", "expenses": "exp", "finance": "owners"},
 }
 
+# «العقود»: AQD_ENABLED=0 (or a failed import) removes the tab from the sidebar at boot.
+if not _HAS_AQD:
+    for _c in NAV_DEF["cats"]:
+        _c["ids"] = [i for i in _c["ids"] if i != "aqd"]
+
 # SINGLE SOURCE OF TRUTH: every sidebar page must be a permission key, or it can't be
 # restricted and leaks into every user's nav. Reconcile _USER_TABS with NAV_DEF so any
 # nav id (present or future) is always covered by the per-page permission matrix.
@@ -46116,6 +46225,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
 # PERMITS «التصاريح»: the tab script lives in permits/static/; the ?v= cache-buster is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__PERMITS_JS_V__", (_permits.routes.js_version() if _permits is not None else "0"), 1)
+# «العقود»: same pattern — the tab script lives in aqd/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__AQD_JS_V__", (_aqd.routes.js_version() if _aqd is not None else "0"), 1)
 # «رفع التقييم»: same pattern — the tab script lives in reviewask/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__REVIEWASK_JS_V__", (_reviewask.routes.js_version() if _reviewask is not None else "0"), 1)
@@ -64401,6 +64513,9 @@ _ROLE_EXEMPT_WRITES = {
     "/api/cp/lead",                          # public /cp meeting request — validated + rate-limited in cp/routes.py
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
     "/api/onb/t/submit",                     # assigned employee updates a task — link token in body
+    "/api/aqd-t/open",                       # «العقود» client link — token in body (rate-limited)
+    "/api/aqd-t/verify",                     # «العقود» client last-4 check — 5 tries then a 60-min lock
+    "/api/aqd-t/sign",                       # «العقود» client signature — needs the verify view key
     "/api/wifi/fill-save",                   # public /wifi-fill backfill — ADD-ONLY (see wifi/routes.py)
     "/api/mot/check-result",                 # inspector phone link — writes ONE result into its open round
     "/api/mot/check-photo",                  # inspector phone link — attaches a photo to that round
@@ -64424,6 +64539,7 @@ _ROLE_CREATE_RULES = [
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
     ("/api/onb/", "onb"),                    # /api/onb/t/submit is exempt above (employee link)
+    ("/api/aqd/", "aqd"),                    # «العقود» — the client link lives at /api/aqd-t/ (exempt above)
     ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
     ("/api/directpay/", "dpay"),             # «التحصيل» notes — login + «dpay» tab (the close is Discord-only)
     ("/api/digest/", "digest"),              # weekend digest actions — login + «digest» tab
@@ -64482,6 +64598,9 @@ _ROLE_READ_RULES = [
     # NOTE: the assigned employee's phone link reads /api/onb-t/{token} — deliberately OUTSIDE
     # this prefix, because it is anonymous and this rule would 403 it. Its token is its auth.
     ("/api/onb/", "onb"),
+    # «العقود»: owner names, units, terms. The client's phone reads /api/aqd-t/{token} — OUTSIDE
+    # this prefix on purpose (anonymous; its token + last-4 are its auth).
+    ("/api/aqd/", "aqd"),
     ("/api/mot/", "mot"),                    # the inspector link reads /api/mot-t/{token}, outside this prefix
     ("/api/directpay/", "dpay"),             # «التحصيل» board — the outstanding SAR total is sensitive
     ("/api/revenue", "rev"),
@@ -65071,6 +65190,25 @@ async def start_web_server():
                       % ONB_NOTIFY_DRYRUN)
             except Exception as _oe:
                 print("[onboarding] wiring failed (onboarding disabled, bot unaffected):", _oe)
+
+        # ---- «العقود» contracts — survey → contract → e-sign link → countersign. Routes stay
+        # registered even when AQD_ENABLED=0 so they answer "invalid / disabled" (the env is read live).
+        if _aqd is not None:
+            try:
+                _aqd.wire({
+                    "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                    "json_response": _json, "web": web, "state_dir": STATE_DIR,
+                    "tz": TZ, "now": now_riyadh, "web_thread": web_thread,
+                    "listings": _schedule_hostaway_listings,
+                    "notify": _aqd_notify,
+                    "log_event": log_event,
+                    "public_base": _dispatch_base_url,
+                    "discord_ids": (lambda: dict(ASSIGNMENTS.get("discord_ids", {}) or {})),
+                })
+                _aqd.register_routes(app)
+                print("[aqd] wired + routes registered (/api/aqd/*, /api/aqd-t/*, /sign/{token})")
+            except Exception as _ae:
+                print("[aqd] wiring failed (aqd disabled, bot unaffected):", _ae)
 
         # ---- B2B company profile «/business» — public data room; renders from nightly snapshot ----
         if _HAS_BUSINESS:
