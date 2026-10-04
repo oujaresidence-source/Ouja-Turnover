@@ -45,11 +45,23 @@ from . import purchases as TP
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.14"  # الملاك: وحدات هوست أوي الجديدة بدون مالك تظهر وتُربط (ومالك جديد) من نفس الشاشة
+ERP_VERSION = "2.7.15"  # المركز المالي على مسار طلبات الناس — ما يعلق ورا شغل البوت
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
 _KSA = timezone(timedelta(hours=3))
+
+
+async def _wt(fn, *args, **kwargs):
+    """Run blocking ERP work on bot.py's WEB lane, never the default pool.
+    asyncio.to_thread shares one pool with ~50 bot loops (Hostaway pulls, digest
+    builds, PDFs); a request queued behind them never starts, the browser gives up
+    at 30s and the accountant sees «تعذّر تحميل البيانات» (2026-09-03, 2026-10-03).
+    web_thread copies contextvars, so the "user" priority still reaches the throttle."""
+    wt = getattr(getattr(api, "B", None), "web_thread", None)
+    if wt is None:                  # tests / a bot without the lane: old behaviour
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    return await wt(fn, *args, **kwargs)
 
 
 def _detect_commit():
@@ -268,7 +280,7 @@ def _guarded(handler, write=False):
         if not api.can_finance(request):
             return api.jres({"error": "forbidden", "detail": "finance role required"}, 403)
         # Whoever is waiting on a page outranks housekeeping. contextvars are
-        # propagated into asyncio.to_thread workers, so the Hostaway throttle sees
+        # propagated into _wt (web lane) workers, so the Hostaway throttle sees
         # this without a signature change across hundreds of call sites.
         try:
             api.B.set_priority("user")
@@ -415,7 +427,7 @@ async def _h_api_accounts_refresh(request):
                          "message_en": "An import is already running."}, 409)
     _refresh_lock["busy"] = True
     try:
-        res = await asyncio.to_thread(api.B._daftra_import_all, api.actor(request))
+        res = await _wt(api.B._daftra_import_all, api.actor(request))
         return api.jres({"ok": True, "result": {
             "imported": res.get("imported"), "updated": res.get("updated"),
             "failed": res.get("failed"),
@@ -464,7 +476,7 @@ async def _h_api_rules_precision(request):
 async def _h_api_match(request):
     # candidate scoring scans stores and may touch the Hostaway reservation
     # cache (cold cache = one HTTP pull) — keep it off the event loop.
-    data = await asyncio.to_thread(api.match_queue, dict(request.query))
+    data = await _wt(api.match_queue, dict(request.query))
     return api.jres(data)
 
 
@@ -555,12 +567,12 @@ async def _h_api_custody(request):
 
 
 async def _h_api_stmts(request):
-    data = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    data = await _wt(api.stmts_payload, dict(request.query))
     return api.jres(data)
 
 
 async def _h_api_stmts_account(request):
-    data = await asyncio.to_thread(api.stmts_account_lines, dict(request.query))
+    data = await _wt(api.stmts_account_lines, dict(request.query))
     return api.jres(data)
 
 
@@ -569,8 +581,8 @@ async def _h_api_stmts_probe(request):
 
 
 async def _h_api_stmts_xlsx(request):
-    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
-    data = await asyncio.to_thread(api.stmts_xlsx, payload)
+    payload = await _wt(api.stmts_payload, dict(request.query))
+    data = await _wt(api.stmts_xlsx, payload)
     return web.Response(body=data,
                         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         headers={"Content-Disposition":
@@ -578,9 +590,9 @@ async def _h_api_stmts_xlsx(request):
 
 
 async def _h_api_stmts_pdf(request):
-    payload = await asyncio.to_thread(api.stmts_payload, dict(request.query))
+    payload = await _wt(api.stmts_payload, dict(request.query))
     try:
-        data = await asyncio.to_thread(api.stmts_pdf, payload)
+        data = await _wt(api.stmts_pdf, payload)
     except api.B.PdfFontError:
         return api.jres({"error": "pdf_font_unavailable",
                          "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
@@ -591,29 +603,29 @@ async def _h_api_stmts_pdf(request):
 
 
 async def _h_api_close_get(request):
-    data = await asyncio.to_thread(api.close_get, dict(request.query))
+    data = await _wt(api.close_get, dict(request.query))
     return api.jres(data)
 
 
 async def _h_api_close_do(request):
     body = await _json_body(request)
-    data, status = await asyncio.to_thread(api.close_do, request, body)
+    data, status = await _wt(api.close_do, request, body)
     return api.jres(data, status)
 
 
 async def _h_api_migrate_preview(request):
-    data = await asyncio.to_thread(api.migrate_preview, dict(request.query))
+    data = await _wt(api.migrate_preview, dict(request.query))
     return api.jres(data)
 
 
 async def _h_api_migrate_run(request):
     body = await _json_body(request)
-    data, status = await asyncio.to_thread(api.migrate_run, request, body)
+    data, status = await _wt(api.migrate_run, request, body)
     return api.jres(data, status)
 
 
 async def _h_api_budget_get(request):
-    data = await asyncio.to_thread(api.budget_get, dict(request.query))
+    data = await _wt(api.budget_get, dict(request.query))
     return api.jres(data)
 
 
@@ -633,7 +645,7 @@ async def _h_api_owners_diagnose(request):
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.diagnose, owner, mkey)
+    data = await _wt(OW.diagnose, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
@@ -643,7 +655,7 @@ async def _h_api_owner_detail(request):
         return api.jres({"error": "owner_required"}, 400)
     # owner_detail reads the registry and the terms store and can touch the
     # listings map — it belongs off the event loop like every neighbour here.
-    return api.jres(await asyncio.to_thread(OW.owner_detail, owner))
+    return api.jres(await _wt(OW.owner_detail, owner))
 
 
 async def _h_api_owner_profile(request):
@@ -651,7 +663,7 @@ async def _h_api_owner_profile(request):
     owner = (request.query.get("owner") or "").strip()
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
-    data = await asyncio.to_thread(OW.owner_profile, owner)
+    data = await _wt(OW.owner_profile, owner)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
@@ -717,7 +729,7 @@ def _range_items(request):
 
 async def _h_api_owners_range_report(request):
     """On-screen numbers preview for an arbitrary date range (JSON, fast/mobile-safe)."""
-    items, err = await asyncio.to_thread(_range_items, request)
+    items, err = await _wt(_range_items, request)
     if err:
         return api.jres({"error": err[0]}, err[1])
     return api.jres({"ok": True, "items": [
@@ -728,11 +740,11 @@ async def _h_api_owners_range_report(request):
 async def _h_api_owners_range_report_pdf(request):
     """The exact PDF for an arbitrary date range — inline preview, or attachment with ?dl=1.
     Same loud PdfFontError guard as the statements PDF (owner never gets broken-Arabic PDFs)."""
-    items, err = await asyncio.to_thread(_range_items, request)
+    items, err = await _wt(_range_items, request)
     if err:
         return api.jres({"error": err[0]}, err[1])
     try:
-        data, _fn, ctype = await asyncio.to_thread(api.B._finance_pdf_payload, items)
+        data, _fn, ctype = await _wt(api.B._finance_pdf_payload, items)
     except api.B.PdfFontError:
         return api.jres({"error": "pdf_font_unavailable",
                          "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
@@ -816,7 +828,7 @@ async def _h_api_nofee_zip(request):
     mkey = api._month_key_or_prev(request.query.get("m"))
     owner_filter = (request.query.get("owner") or "").strip() or None
     try:
-        data, built, skipped = await asyncio.to_thread(_nofee_pack, mkey, owner_filter)
+        data, built, skipped = await _wt(_nofee_pack, mkey, owner_filter)
     except api.B.PdfFontError:
         return api.jres({"error": "pdf_font_unavailable",
                          "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
@@ -845,7 +857,7 @@ async def _h_api_stmt_get(request):
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.statement_payload, owner, mkey,
+    data = await _wt(OW.statement_payload, owner, mkey,
                                    _nofee_asked(request.query))
     if data.get("reason") == "still_computing":
         # Accepted, not finished. 404 would be a lie the screen renders as
@@ -856,19 +868,19 @@ async def _h_api_stmt_get(request):
 
 
 async def _h_api_stmt_edit(request):
-    data, status = await asyncio.to_thread(OW.statement_edit, request, await _json_body(request))
+    data, status = await _wt(OW.statement_edit, request, await _json_body(request))
     return api.jres(data, status)
 
 
 async def _h_api_stmt_publish(request):
-    data, status = await asyncio.to_thread(OW.statement_publish, request, await _json_body(request))
+    data, status = await _wt(OW.statement_publish, request, await _json_body(request))
     return api.jres(data, status)
 
 
 async def _h_api_stmt_diff(request):
     owner = (request.query.get("owner") or "").strip()
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.statement_recompute_diff, owner, mkey)
+    data = await _wt(OW.statement_recompute_diff, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
@@ -879,7 +891,7 @@ async def _h_api_stmt_audit(request):
     copy). One call answers «هل فيه كشف ثاني فيه نفس المشكلة؟» for the whole book."""
     months = [m.strip() for m in (request.query.get("months") or "").split(",") if m.strip()]
     owner = (request.query.get("owner") or "").strip() or None
-    data = await asyncio.to_thread(OW.audit_all, months, owner)
+    data = await _wt(OW.audit_all, months, owner)
     return api.jres(data, 200)
 
 
@@ -889,13 +901,13 @@ async def _h_api_stmt_tieout(request):
     if not owner:
         return api.jres({"error": "owner_required"}, 400)
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.statement_tieout, owner, mkey)
+    data = await _wt(OW.statement_tieout, owner, mkey)
     return api.jres(data, 200 if data.get("ok") else 404)
 
 
 async def _h_api_cycle(request):
     mkey = api._month_key_or_prev(request.query.get("m"))
-    data = await asyncio.to_thread(OW.cycle_board, mkey)
+    data = await _wt(OW.cycle_board, mkey)
     return api.jres(data)
 
 
@@ -981,7 +993,7 @@ async def _h_receipt_proxy(request):
         return buf.getvalue(), (meta.get("mimeType") or "application/octet-stream")
 
     try:
-        data, mime = await asyncio.to_thread(_download)
+        data, mime = await _wt(_download)
     except Exception:
         data, mime = None, None
     if not data:

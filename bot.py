@@ -1176,9 +1176,12 @@ _web_pool = ThreadPoolExecutor(max_workers=WEB_POOL_WORKERS,
                                thread_name_prefix="ouja-web")
 
 async def web_thread(fn, *args, **kwargs):
-    """asyncio.to_thread, but on the web pool. Use in REQUEST handlers only."""
+    """asyncio.to_thread, but on the web pool. Use in REQUEST handlers only.
+    Copies contextvars like to_thread does — run_in_executor alone drops them, and
+    the Hostaway throttle reads the "user" priority from one."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_web_pool, lambda: fn(*args, **kwargs))
+    ctx = contextvars.copy_context()
+    return await loop.run_in_executor(_web_pool, lambda: ctx.run(fn, *args, **kwargs))
 
 
 def _pool_snapshot(pool):
