@@ -119,7 +119,7 @@ class PerUnitManualExpenseTest(unittest.TestCase):
     def test_delete_never_touches_income_lines(self):
         OW.statement_edit(_Req(), {"owner": OWNER, "m": JUNE, "op": "inc_manual_add",
                                    "lid": 31, "amount": 500.0, "label": "إيراد",
-                                   "reason": "اختبار"})
+                                   "fee": False, "reason": "اختبار"})
         data, code = OW.statement_edit(_Req(), {
             "owner": OWNER, "m": JUNE, "op": "exp_manual_del",
             "id": "exp-adj-0", "lid": 31})

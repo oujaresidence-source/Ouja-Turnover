@@ -486,8 +486,17 @@ def unit_statement(rec, mkey, force_rederive=False, settings=None):
             continue
         exp_kept.append(e)
         exp_total += _D(e.get("amount"))
-    # manual income lines (slice-2 edits) ride through untouched
+    # manual income lines (slice-2 edits) ride through untouched — except a line the
+    # accountant marked «عليه رسوم الإدارة»: it carries the unit's contract rate. Lines
+    # without the mark stay fee-exempt (the rule before the choice existed).
     manual = _D(rep.get("manual_income") or 0)
+    pct_now = _D(terms_on(apt, win_s if win_e >= win_s else start, rec).get("mgmt_pct") or 0)
+    manual_lines = []
+    for m in rep.get("manual_income_lines") or []:
+        if m.get("fee_applies"):
+            m = {**m, "mgmt_pct_applied": float(pct_now)}
+            fee += _D(m.get("amount")) * pct_now / Decimal(100)
+        manual_lines.append(m)
     # cleaning: monthly amount pro-rated to the covered days (footnoted)
     days_in_month = (end - start).days + 1
     covered = max(0, (win_e - win_s).days + 1) if win_e >= win_s else 0
@@ -514,6 +523,7 @@ def unit_statement(rec, mkey, force_rederive=False, settings=None):
             stamped.append(fl)
         out[fk] = stamped
     out["resv_lines"] = kept
+    out["manual_income_lines"] = manual_lines
     out["contract_excluded_lines"] = excluded
     out["exp_lines"] = exp_kept
     out["contract_excluded_expenses"] = exp_excluded
@@ -902,6 +912,13 @@ def _apply_stmt_edits(agg, edits):
                 continue
             remaining.append(l)
         new_footers[fk] = remaining
+    # manual income marked «عليه رسوم الإدارة» is fee-bearing at its stamped rate —
+    # re-deriving the fee from bookings alone silently dropped it (B03, 2026-10-04)
+    for m in agg.get("manual_income_lines") or []:
+        if m.get("fee_applies"):
+            pct = _D(m.get("mgmt_pct_applied") if m.get("mgmt_pct_applied") is not None
+                     else (agg.get("management_pct") or 0))
+            fee += _D(m.get("amount")) * pct / Decimal(100)
     exp_e = edits.get("exp_overrides") or {}
     exps, deleted_exps = [], []
     exp_total = Decimal(0)
@@ -953,6 +970,10 @@ def _apply_stmt_edits(agg, edits):
                                       if (l.get("channel") or "") != "airbnb"), Decimal(0)))
     agg["extras"] = _fnum(sum((_D(l.get("extras") or 0) for l in paid_kept), Decimal(0)))
     agg["ouja_fee"] = _fnum(fee)
+    # the printed % follows the edited lines, over fee-bearing income only
+    _fm = sum((_D(m.get("amount")) for m in (agg.get("manual_income_lines") or [])
+               if m.get("fee_applies")), Decimal(0))
+    agg["management_pct"] = _B()._finance_effective_pct(fee, income + _fm, [agg.get("management_pct")])
     agg["adjustments_total"] = _fnum(adj_total)
     agg["owner_net"] = _fnum(income + manual_income - fee - exp_total - cleaning + adj_total)
     agg["has_manual_edits"] = bool(resv_e or exp_e or edits.get("exp_manual") or adjustments)
@@ -998,10 +1019,13 @@ def _rebuild_unit_parts(agg):
         pct = _D(l.get("mgmt_pct_applied")) if l.get("mgmt_pct_applied") is not None else default_pct
         q["total_income"] += money
         q["ouja_fee"] += money * pct / Decimal(100)
-    for m in agg.get("manual_income_lines") or []:      # fee-exempt by design
+    for m in agg.get("manual_income_lines") or []:      # fee-exempt unless marked «عليه رسوم الإدارة»
         q = idx.get(str(m.get("lid")))
         if q is not None:
             q["total_income"] += _D(m.get("amount"))
+            if m.get("fee_applies"):
+                pct = _D(m.get("mgmt_pct_applied")) if m.get("mgmt_pct_applied") is not None else default_pct
+                q["ouja_fee"] += _D(m.get("amount")) * pct / Decimal(100)
     for x in agg.get("exp_lines") or []:
         q = idx.get(str(x.get("lid")))
         if q is not None:
@@ -1032,10 +1056,18 @@ def unit_slice(rep, lid):
     paid = [l for l in resv if l.get("income") is not None]
     mil = [m for m in (rep.get("manual_income_lines") or []) if same(m)]
     cl = rep.get("cleaning") or {}
+    # this apartment's own rate — the owner-level % is a blend when units differ
+    rates = {l.get("mgmt_pct_applied") for l in paid if l.get("mgmt_pct_applied") is not None}
+    rates |= {m.get("mgmt_pct_applied") for m in mil
+              if m.get("fee_applies") and m.get("mgmt_pct_applied") is not None}
+    fee_base = (_D(part.get("total_income") or 0)
+                - sum((_D(m.get("amount")) for m in mil if not m.get("fee_applies")), Decimal(0)))
+    unit_pct = _B()._finance_effective_pct(part.get("ouja_fee"), fee_base,
+                                           rates or [rep.get("management_pct")])
     return {
         "currency": "SAR", "owner": rep.get("owner"),
         "apartment": part.get("apartment"), "lid": part.get("lid"),
-        "management_pct": rep.get("management_pct"),
+        "management_pct": unit_pct,
         "income_airbnb": _fnum(sum((_D(l["income"]) for l in paid
                                     if (l.get("channel") or "") == "airbnb"), Decimal(0))),
         "income_direct": _fnum(sum((_D(l["income"]) for l in paid
@@ -1189,6 +1221,11 @@ def _build_explain(agg):
         p = l.get("pct") if l.get("pct") is not None else agg.get("management_pct")
         g = fee_groups.setdefault(str(p), {"pct": p, "base": Decimal(0)})
         g["base"] += _D(l["amount"])
+    for m in agg.get("manual_income_lines") or []:      # «عليه رسوم الإدارة» lines
+        if m.get("fee_applies"):
+            p = m.get("mgmt_pct_applied") if m.get("mgmt_pct_applied") is not None else agg.get("management_pct")
+            g = fee_groups.setdefault(str(p), {"pct": p, "base": Decimal(0)})
+            g["base"] += _D(m.get("amount"))
     fees = [{"pct": g["pct"], "base": _fnum(g["base"]),
              "fee": _fnum(g["base"] * _D(g["pct"] or 0) / Decimal(100))}
             for g in fee_groups.values()]
@@ -1199,8 +1236,8 @@ def _build_explain(agg):
                    "rule_ar": "مجموع المبالغ المستلمة فعليًا للحجوزات المحسوبة (الأساس النقدي) + الإيراد اليدوي",
                    "rule_en": "Sum of money actually received for included bookings (paid basis) + manual income"},
         "fees": {"groups": fees, "total": agg.get("ouja_fee"),
-                 "rule_ar": "لكل حجز: (الدخل + الإضافات) × نسبة الإدارة السارية بتاريخ دخوله",
-                 "rule_en": "Per booking: (income + extras) × the management % effective on its check-in date"},
+                 "rule_ar": "لكل حجز: (الدخل + الإضافات) × نسبة الإدارة السارية بتاريخ دخوله — والإيراد اليدوي المعلَّم «عليه رسوم الإدارة» بنسبة الشقة",
+                 "rule_en": "Per booking: (income + extras) × the management % effective on its check-in date — plus manual income marked fee-bearing, at the unit's rate"},
         "expenses": {"lines": [{"id": x.get("id"), "date": x.get("date"), "amount": x.get("amount"),
                                 "description": x.get("description") or x.get("category") or "",
                                 "manual": bool(x.get("manual")), "edited": bool(x.get("edited"))}
@@ -1359,7 +1396,9 @@ def _aggregate_period(reports, owner, start, end):
     _cl_amts = {round(float((r.get("cleaning") or {}).get("amount") or 0), 2) for r in reports}
     cl_amount = _cl_amts.pop() if len(_cl_amts) == 1 else None
     out = {"currency": "SAR", "owner": owner,
-           "management_pct": (round(fee / ti * 100, 1) if ti else None),
+           "management_pct": _B()._finance_effective_pct(
+               fee, sum(_B()._finance_fee_base(r) for r in reports),
+               [r.get("management_pct") for r in reports]),
            "period": {"start": start.isoformat(), "end": end.isoformat(), "basis": "checkin"},
            "income_airbnb": tot("income_airbnb"), "income_direct": tot("income_direct"),
            "extras": tot("extras"), "manual_income": tot("manual_income"),
@@ -1684,7 +1723,7 @@ def _statement_payload_compute(owner, mkey, settings=None):
 
 _EDIT_OPS = ("resv_exclude", "resv_include", "exp_override", "exp_delete",
              "exp_manual_add", "exp_manual_edit", "exp_manual_del", "adj_add", "adj_del",
-             "inc_manual_add", "inc_manual_del")
+             "inc_manual_add", "inc_manual_del", "inc_manual_fee")
 
 # Ids minted by the editor itself — an expense, a manual income line or an
 # adjustment. `resv_exclude`/`resv_include` used to accept ANY id and write it
@@ -1940,13 +1979,20 @@ def statement_edit(request, body):
         before = next((x for x in e["adjustments"] if x.get("id") == target), None)
         e["adjustments"] = [x for x in e["adjustments"] if x.get("id") != target]
     elif op == "inc_manual_add":
-        # v2.2 slice 3: per-apartment MANUAL INCOME — fee-exempt. Lands in the
-        # legacy per-lid adjust store so the unit PDF and the owner aggregate
-        # read the SAME line (exactly May's «سلطان عبدالله 2,844» pattern).
+        # v2.2 slice 3: per-apartment MANUAL INCOME. Lands in the legacy per-lid
+        # adjust store so the unit PDF and the owner aggregate read the SAME line
+        # (exactly May's «سلطان عبدالله 2,844» pattern).
+        # Owner ruling 2026-10-05: the fee is an explicit choice with NO default.
+        # It used to be exempt by design, so a whole monthly tenant typed in here
+        # (الغدير B03, 25,850) printed «رسوم الإدارة 0».
         try:
             amt = round(float(body.get("amount")), 2)
         except (TypeError, ValueError):
             return {"error": "bad_amount"}, 400
+        if body.get("fee") not in (True, False):
+            return {"error": "fee_choice_required",
+                    "message_ar": "اختر: عليه رسوم الإدارة أو بدون رسوم.",
+                    "message_en": "Choose: management fee applies, or no fee."}, 400
         try:
             lid = int(body.get("lid"))
         except (TypeError, ValueError):
@@ -1960,12 +2006,37 @@ def statement_edit(request, body):
             adj.setdefault(kdef, vdef)
         line = {"kind": "income",
                 "label": (str(body.get("label") or "").strip() or "إيراد يدوي")[:120],
-                "amount": amt}
+                "amount": amt, "fee": body.get("fee")}
         adj["extra_lines"] = list(adj.get("extra_lines") or []) + [line]
         B._finance_adjust[ak] = adj
         B.persist_state()
         target = ak + " inc[" + str(len(adj["extra_lines"]) - 1) + "]"
         after = line
+    elif op == "inc_manual_fee":
+        # flip an EXISTING manual income line between «عليه رسوم الإدارة» and
+        # «بدون رسوم» — lines typed before the choice existed are all exempt, and
+        # deleting + retyping them would lose their history
+        if body.get("fee") not in (True, False):
+            return {"error": "fee_choice_required",
+                    "message_ar": "اختر: عليه رسوم الإدارة أو بدون رسوم.",
+                    "message_en": "Choose: management fee applies, or no fee."}, 400
+        try:
+            lid = int(body.get("lid"))
+            idx = int(str(body.get("id") or "").replace("inc-", ""))
+        except (TypeError, ValueError):
+            return {"error": "bad_target"}, 400
+        start, end = B._month_bounds(mkey)
+        ak = B._finance_adjust_key(lid, start.isoformat(), end.isoformat())
+        adj = B._finance_adjust.get(ak)
+        lines = list((adj or {}).get("extra_lines") or [])
+        if not (0 <= idx < len(lines)) or (lines[idx] or {}).get("kind") != "income":
+            return {"error": "income_line_not_found"}, 404
+        before = dict(lines[idx])
+        lines[idx] = {**lines[idx], "fee": body.get("fee")}
+        adj["extra_lines"] = lines
+        B.persist_state()
+        target = ak + " inc[" + str(idx) + "]"
+        after = lines[idx]
     elif op == "inc_manual_del":
         try:
             lid = int(body.get("lid"))

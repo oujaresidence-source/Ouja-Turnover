@@ -40579,10 +40579,12 @@ def _finance_apply_adjust(rep, adjust):
     """Apply owner/admin edits to a computed report: per-line overrides (amount/date/description/
     investor note) on RESERVATIONS + EXPENSES, edit/delete expense lines, add manual income/
     expense lines, attach a comment. Totals are RECOMPUTED from the displayed values (the mgmt
-    fee re-applies to booking income; manual income stays post-fee). Raw Hostaway data is never
-    mutated — originals are preserved per line for audit."""
+    fee re-applies to booking income, and to manual income ONLY where the line says `fee: true`
+    — the accountant's explicit «عليه رسوم الإدارة»; lines without it stay post-fee). Raw
+    Hostaway data is never mutated — originals are preserved per line for audit."""
     if not adjust:
         return rep
+    mgmt = float(rep.get("management_pct") or 0)
     lov = adjust.get("line_overrides") or {}
     eov = adjust.get("expense_overrides") or {}
     # ---- reservations: per-line overrides (preserve originals) ----
@@ -40612,6 +40614,7 @@ def _finance_apply_adjust(rep, adjust):
         lines.append(e)
     # ---- manual income / expense lines ----
     extra_income = 0.0
+    fee_income = 0.0                           # manual income marked «عليه رسوم الإدارة»
     income_lines = []
     for i, x in enumerate(adjust.get("extra_lines") or []):
         try:
@@ -40621,8 +40624,13 @@ def _finance_apply_adjust(rep, adjust):
         label = (x.get("label") or "").strip()
         if x.get("kind") == "income":          # MANUAL INCOME → visible line + counts in totals
             extra_income += amt
+            fee_applies = x.get("fee") is True     # no key = entered before the choice existed → exempt
+            if fee_applies:
+                fee_income += amt
             income_lines.append({"id": "inc-%d" % i, "label": label, "amount": amt,
                                  "manual": True, "kind": "income", "source": "manual",
+                                 "fee_applies": fee_applies,
+                                 "mgmt_pct_applied": (mgmt if fee_applies else None),
                                  # v2.2 slice 3: the editor's per-apartment tabs need the unit
                                  "apartment": rep.get("apartment"), "lid": rep.get("lid")})
         else:                                  # manual expense (now labelled)
@@ -40634,11 +40642,10 @@ def _finance_apply_adjust(rep, adjust):
                           # per-apartment manual expenses (the inc-lines pattern): the
                           # statement editor's unit tabs + delete-by-lid need the unit
                           "apartment": rep.get("apartment"), "lid": rep.get("lid")})
-    # ---- recompute totals from DISPLAYED values (mgmt fee on booking income only) ----
+    # ---- recompute totals from DISPLAYED values (mgmt fee on booking income + fee-bearing manual) ----
     booking_income = sum(float(l["income"]) for l in new_resv if l.get("income") is not None) \
         + float(rep.get("extras") or 0)
-    mgmt = float(rep.get("management_pct") or 0)
-    ouja_fee = round(mgmt / 100.0 * booking_income, 2)
+    ouja_fee = round(mgmt / 100.0 * (booking_income + fee_income), 2)
     cleaning_total = float((rep.get("cleaning") or {}).get("total") or 0)
     rep["exp_lines"] = lines
     rep["expenses"] = round(exp_total, 2)
@@ -41042,7 +41049,10 @@ def _pdf_statement_bytes(rep, label):
         for l in mil:
             y = pdf.get_y(); pdf.set_text_color(*INK)
             pdf.set_xy(M, y); pdf.cell(usable * 0.35, 6, money(l.get("amount")), align="L")
-            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(str(l.get("label") or "إيراد مضاف يدويًا")), align="R"); pdf.ln(6)
+            _ml = str(l.get("label") or "إيراد مضاف يدويًا")
+            if l.get("fee_applies"):       # the reader must see why this line moved «رسوم عوجا»
+                _ml += " · عليه رسوم الإدارة"
+            pdf.set_xy(M + usable * 0.35, y); pdf.cell(usable * 0.65, 6, shape(_ml), align="R"); pdf.ln(6)
     # ---- expenses table ----
     el = rep.get("exp_lines") or []
     section("المصاريف (%d)" % len(el)); pdf.set_font(FONT, size=10)
@@ -41436,7 +41446,7 @@ def _month_bounds(mkey):
 # DROPPED at boot — the April bug: after the v2.2.3 policy change the owner page
 # kept serving pre-policy numbers from the persisted cache while the editor
 # computed fresh ones. A deploy with a rules bump = a full clean rebuild.
-_MONEY_RULES_VERSION = 4        # 4 = honest cleaning type/amount through aggregation (was always "mixed")
+_MONEY_RULES_VERSION = 5        # 5 = manual income may carry the fee («عليه رسوم الإدارة») + contract-rate label
                                 # 3 = cancelled reservations never auto-count (v2.2.3)
 
 _owner_partial_cache_boot = {}
@@ -50900,6 +50910,29 @@ async def _api_finance_report(request):
     rep = await asyncio.to_thread(build_owner_report, lid, start, end, mgmt, settings, None, cleaning)
     return _json(rep)
 
+def _finance_fee_base(rep):
+    """The income the management fee was actually charged on: everything except manual
+    income left fee-exempt (a line without «عليه رسوم الإدارة»)."""
+    fee_manual = sum(float(m.get("amount") or 0) for m in (rep.get("manual_income_lines") or [])
+                     if m.get("fee_applies"))
+    exempt = float(rep.get("manual_income") or 0) - fee_manual
+    return float(rep.get("total_income") or 0) - exempt
+
+def _finance_effective_pct(fee, fee_base, rates):
+    """The % printed beside «رسوم عوجا». It used to be fee ÷ ALL income, so a fee-exempt
+    manual line printed «21.1%» on a 22% contract (owner-reported 2026-10-04: 4101 —
+    2,098.71 ÷ 9,947.61) and an all-manual month printed «0.0%». One contracted rate
+    across the reports → that rate exactly; otherwise (rates really differ) the fee over
+    the money it was charged on."""
+    fee_base = float(fee_base or 0)
+    eff = round(float(fee or 0) / fee_base * 100, 1) if fee_base > 0.005 else None
+    uniq = {round(float(r), 2) for r in rates if r is not None}
+    if len(uniq) == 1:
+        p = uniq.pop()
+        if eff is None or abs(eff - p) < 0.05:
+            return p
+    return eff
+
 def _finance_aggregate(reps, owner, start, end):
     """Combine several apartment reports into ONE owner statement (sum the money, keep a
     per-apartment breakdown). Used for the per-owner bulk PDF."""
@@ -50919,8 +50952,10 @@ def _finance_aggregate(reps, owner, start, end):
     _cl_amts = {round(float((r.get("cleaning") or {}).get("amount") or 0), 2) for r in reps}
     cl_amount = (_cl_amts.pop() if len(_cl_amts) == 1 else None)
     balanced = all((r.get("reconciliation") or {}).get("balanced") for r in reps) if reps else True
-    ti = tot("total_income"); fee = tot("ouja_fee")
-    blended = round(fee / ti * 100, 1) if ti else None     # owners can differ per apartment → blended effective %
+    fee = tot("ouja_fee")
+    # owners can differ per apartment → blended effective %, over fee-bearing income only
+    blended = _finance_effective_pct(fee, sum(_finance_fee_base(r) for r in reps),
+                                     [r.get("management_pct") for r in reps])
     mil = []
     for r in reps:
         mil.extend(r.get("manual_income_lines") or [])

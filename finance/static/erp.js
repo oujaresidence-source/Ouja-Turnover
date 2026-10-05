@@ -348,10 +348,13 @@
       pr_unit_terms: 'إعدادات الشقة', pr_net_of: 'صافي', pr_open_month: 'افتح الشهر في المحرر',
       pr_active: 'نشط', pr_paused: 'موقوف', pr_phone_missing: 'أضف جوال المالك من الحقل فوق',
       se_units_all: 'الكل', se_unit_pdf: 'أرقام كشف الشقة (مثل الـ PDF)',
-      se_inc_title: 'الإيرادات اليدوية (معفاة من الرسوم)',
+      se_inc_title: 'الإيرادات اليدوية',
       se_inc_add: 'أضف إيراد يدوي', se_inc_label: 'الوصف / المصدر', se_inc_unit: 'الشقة',
-      se_inc_hint: 'يدخل كشف الشقة والـ PDF وما تنحسب عليه رسوم إدارة — مثل سطر «سلطان عبدالله 2,844» في مايو',
+      se_inc_hint: 'يدخل كشف الشقة والـ PDF. اختر هل تنحسب عليه رسوم الإدارة: حجز أو مستأجر مدخّل يدويًا = عليه رسوم، ومبلغ مثل «سلطان عبدالله 2,844» في مايو = بدون رسوم.',
       se_inc_pick_unit: 'اختر الشقة أول',
+      se_inc_fee: 'رسوم الإدارة', se_inc_fee_pick: 'اختر…',
+      se_inc_fee_yes: 'عليه رسوم الإدارة', se_inc_fee_no: 'بدون رسوم',
+      se_inc_fee_on: 'احسب عليه الرسوم', se_inc_fee_off: 'شيل الرسوم',
       se_man_unit: 'الشقة', se_man_owner_level: 'بدون شقة — الكشف الإجمالي فقط',
       se_man_hint: 'اختر الشقة عشان المصروف يظهر في كشف الشقة والـ PDF حقها — بدونها يظهر في الكشف الإجمالي للمالك فقط.',
       /* --- today: budget group --- */
@@ -720,10 +723,13 @@
       pr_unit_terms: 'Unit settings', pr_net_of: 'Net', pr_open_month: 'Open month in editor',
       pr_active: 'Active', pr_paused: 'Paused', pr_phone_missing: 'Add the owner phone above',
       se_units_all: 'All', se_unit_pdf: 'Unit statement numbers (PDF layout)',
-      se_inc_title: 'Manual income (fee-exempt)',
+      se_inc_title: 'Manual income',
       se_inc_add: 'Add manual income', se_inc_label: 'Description / source', se_inc_unit: 'Apartment',
-      se_inc_hint: 'Shows on the unit statement + PDF with no management fee — like May’s Sultan Abdullah 2,844 line',
+      se_inc_hint: 'Shows on the unit statement + PDF. Choose whether the management fee applies: a booking or tenant typed in by hand = fee applies; an amount like May’s Sultan Abdullah 2,844 = no fee.',
       se_inc_pick_unit: 'Pick the apartment first',
+      se_inc_fee: 'Management fee', se_inc_fee_pick: 'Choose…',
+      se_inc_fee_yes: 'Management fee applies', se_inc_fee_no: 'No fee',
+      se_inc_fee_on: 'Charge the fee', se_inc_fee_off: 'Remove the fee',
       se_man_unit: 'Apartment', se_man_owner_level: 'No apartment — owner total only',
       se_man_hint: 'Pick the apartment so the expense shows on that unit statement + PDF — without one it only shows on the owner total.',
       g_budget: 'Budget alerts', g_budget_hint: 'Accounts at 90%+ or over this month’s budget',
@@ -2271,9 +2277,20 @@
       var incReason = $('#seIncReason').value.trim();
       if (!incLid) { $('#seIncLid').classList.add('need'); return; }
       if (!(Number($('#seIncAmt').value) > 0)) { $('#seIncAmt').classList.add('need'); return; }
+      var incFee = $('#seIncFee').value;
+      if (incFee !== '1' && incFee !== '0') { $('#seIncFee').classList.add('need'); return; }
       if (!incReason) { $('#seIncReason').classList.add('need'); return; }
       seEdit({ op: 'inc_manual_add', lid: incLid, amount: Number($('#seIncAmt').value),
-               label: $('#seIncLabel').value, reason: incReason }, el);
+               label: $('#seIncLabel').value, fee: incFee === '1', reason: incReason }, el);
+    }
+    else if (act === 'se-if-go') {
+      // flip an existing line between «عليه رسوم الإدارة» and «بدون رسوم»
+      var rowF = el.closest('.wq-row');
+      var rF = rowF.querySelector('.se-inline[data-need="se-if"] .se-reason');
+      if (!rF.value.trim()) { rF.classList.add('need'); return; }
+      seEdit({ op: 'inc_manual_fee', id: rowF.getAttribute('data-incid'),
+               lid: rowF.getAttribute('data-inclid'),
+               fee: rowF.getAttribute('data-fee') !== '1', reason: rF.value.trim() }, el);
     }
     else if (act === 'se-inc-del') {
       var rowInc = el.closest('.wq-row');
@@ -2285,9 +2302,9 @@
       seUI.explain = (seUI.explain === wk ? '' : wk);
       seRerender(store.D.stmtEd);
     }
-    else if (act === 'se-x-open' || act === 'se-i-open' || act === 'se-xe-open' || act === 'se-xd-open') {
+    else if (act === 'se-x-open' || act === 'se-i-open' || act === 'se-xe-open' || act === 'se-xd-open' || act === 'se-if-open') {
       var rowS = el.closest('.wq-row');
-      var formKey = { 'se-x-open': 'se-x', 'se-i-open': 'se-i', 'se-xe-open': 'se-xe', 'se-xd-open': 'se-xd' }[act];
+      var formKey = { 'se-x-open': 'se-x', 'se-i-open': 'se-i', 'se-xe-open': 'se-xe', 'se-xd-open': 'se-xd', 'se-if-open': 'se-if' }[act];
       rowS.querySelectorAll('.se-inline').forEach(function (f) { f.hidden = f.getAttribute('data-need') !== formKey || !f.hidden; });
       if (act === 'se-i-open') {
         var amtF = rowS.querySelector('.se-amt');
@@ -4812,7 +4829,8 @@
       '<span class="tag soft" style="flex:none;font-weight:700">' + esc(t('to_net')) + ' <code>' + fmtAmt(p.owner_net) + '</code></span></div>';
   }
 
-  /* v2.2 slice 3: manual income (fee-exempt, per apartment — the May pattern) */
+  /* v2.2 slice 3: manual income (per apartment — the May pattern). Since 2026-10-05
+     each line says whether the management fee applies; old lines are fee-exempt. */
   function seIncBlock(s, unitName) {
     var parts = s.apartments || [];
     var lines = s.manual_income_lines || [];
@@ -4825,12 +4843,16 @@
       });
     }
     var rows = lines.map(function (l) {
-      return '<div class="wq-row" data-incid="' + esc(String(l.id)) + '" data-inclid="' + esc(String(l.lid != null ? l.lid : '')) + '">' +
+      var feeTag = l.fee_applies
+        ? '<span class="tag soft">' + esc(t('se_inc_fee_yes')) + (l.mgmt_pct_applied != null ? ' ' + l.mgmt_pct_applied + '%' : '') + '</span>'
+        : '<span class="tag">' + esc(t('se_inc_fee_no')) + '</span>';
+      return '<div class="wq-row" data-incid="' + esc(String(l.id)) + '" data-inclid="' + esc(String(l.lid != null ? l.lid : '')) + '" data-fee="' + (l.fee_applies ? '1' : '0') + '">' +
         '<div class="wq-main"><div class="wq-top"><b>' + esc(l.label || '—') + '</b>' +
         (l.apartment ? '<span class="tag soft">' + esc(shortApt(l.apartment)) + '</span>' : '') +
-        '<span class="tag">' + esc(t('se_inc_title')) + '</span></div></div>' +
+        feeTag + '</div>' + (l.lid != null ? seReasonRow('se-if') : '') + '</div>' +
         '<div class="wq-actions"><span class="c-amt"><b>+' + fmtAmt(l.amount) + '</b></span>' +
-        (l.lid != null ? '<button class="btn danger-ghost xs" data-act="se-inc-del">' + esc(t('se_exp_del')) + '</button>' : '') +
+        (l.lid != null ? '<button class="btn ghost xs" data-act="se-if-open">' + esc(t(l.fee_applies ? 'se_inc_fee_off' : 'se_inc_fee_on')) + '</button>' +
+          '<button class="btn danger-ghost xs" data-act="se-inc-del">' + esc(t('se_exp_del')) + '</button>' : '') +
         '</div></div>';
     }).join('');
     var act = seActivePart(s);
@@ -4846,6 +4868,10 @@
       '<label>' + esc(t('se_inc_unit')) + '<select class="in" id="seIncLid">' + unitOpts + '</select></label>' +
       '<label>' + esc(t('se_amount')) + '<input type="number" step="0.01" class="in" id="seIncAmt"></label>' +
       '<label>' + esc(t('se_inc_label')) + '<input class="in" id="seIncLabel"></label>' +
+      '<label>' + esc(t('se_inc_fee')) + '<select class="in" id="seIncFee">' +
+        '<option value="" selected>' + esc(t('se_inc_fee_pick')) + '</option>' +
+        '<option value="1">' + esc(t('se_inc_fee_yes')) + '</option>' +
+        '<option value="0">' + esc(t('se_inc_fee_no')) + '</option></select></label>' +
       '</div><input class="in" id="seIncReason" placeholder="' + esc(t('se_reason_req')) + '" style="margin-top:6px">' +
       '<button class="btn ghost sm" data-act="se-inc-add" style="margin-top:6px">' + esc(t('se_inc_add')) + '</button></div>';
   }

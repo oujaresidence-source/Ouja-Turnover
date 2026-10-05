@@ -162,7 +162,7 @@ class ManualExpenseEditTest(unittest.TestCase):
     def test_an_income_line_is_never_edited_as_an_expense(self):
         OW.statement_edit(_Req(), {"owner": OWNER, "m": JUL, "op": "inc_manual_add",
                                    "amount": 500, "lid": str(LID), "label": "إيراد",
-                                   "reason": "إيراد"})
+                                   "fee": False, "reason": "إيراد"})
         r = self._edit("exp-adj-0", amount=1)
         self.assertEqual(r[1], 404)
 
