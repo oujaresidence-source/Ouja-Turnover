@@ -4385,6 +4385,7 @@
     var y = window.scrollY;
     $('#view').innerHTML =
       (cy ? cycleBoardHtml(cy) : (cyUI.loading ? cycleLoadingHtml() : '')) +
+      obEntryCardHtml() +
       rangeReportCardHtml(d) +
       newUnitsCardHtml(d) +
       '<section class="card grp">' +
@@ -4437,6 +4438,451 @@
       .then(function (c) { cyUI.loading = false; store.D.cycle = c; cyUI.m = c.month; renderOwners(null); })
       .catch(function () { cyUI.loading = false; renderOwners(null); });
   }
+
+  /* ===================== «حساب المالك» owner-account billing =====================
+     The owner collects from Airbnb on HIS account; Ouja bills him. Server:
+     finance/ownerbill.py (+ ownerbill_pdf.py). Month board → month detail →
+     approve (needs the Daftra number) → PDF + WhatsApp → sent → paid. */
+  var OB_LIST = [{ id: 'nuzha', ar: 'عمارة النزهة', en: 'Al-Nuzha building', owner: 'أبو فهد عبدالرحمن الخطيب', units: 8 }];
+  var obUI = { b: '', m: '', data: null, view: null, busy: false, showSet: false };
+  var OBT = {
+    ar: {
+      entry_t: 'حسابات على حساب المالك', entry_h: 'المالك يستلم فلوسه من Airbnb مباشرة، وعوجا تطالبه برسومها وضريبتها والمصاريف — كل شهر كشف حساب ومطالبة.',
+      open: 'فتح', back: '← الملاك', units: 'شقق على حساب المالك', deal: 'الرسوم {p}% من اللي حوّله Airbnb · ضريبة {v}% على رسوم عوجا · النظافة على عوجا · المصاريف بتكلفتها',
+      outstanding: 'مطلوب وما انسدد', months: 'المطالبات بالشهر', month: 'الشهر', bookings: 'حجوزات', airbnb: 'حوّله Airbnb',
+      due_amt: 'المطلوب', status: 'الحالة', claim: 'مطالبة', loading: 'جاري حساب الشهر…',
+      st_running: 'الشهر ما خلص', st_needs_review: 'يحتاج مراجعة', st_ready: 'جاهز للاعتماد', st_approved: 'معتمد',
+      st_sent: 'انرسل', st_overdue: 'متأخر', st_paid: 'انسدد ✓',
+      running_note: 'الشهر ما خلص — الأرقام حتى الآن، والاعتماد يفتح بعد نهاية الشهر.',
+      fee: 'رسوم عوجا', vat: 'ضريبة القيمة المضافة', exps: 'المصاريف', credits: 'خصومات لصالحه', total_due: 'المطلوب من المالك',
+      owed_to: 'مستحق للمالك', unit: 'الشقة', nights: 'ليالي', checkin: 'الدخول', checkout: 'الخروج', guest: 'الضيف',
+      amount: 'المبلغ', resv_no: 'رقم الحجز', reason: 'السبب', date: 'التاريخ', item: 'البند', kind: 'النوع',
+      per_unit: 'ملخص الشقق', resv_of: 'حجوزات', excluded: 'حجوزات ما دخلت في الحساب', ledger_exp: 'المصاريف من السجل',
+      no_exp: 'ما فيه مصاريف على الشقق هالشهر بعد تاريخ التحويل.',
+      manual: 'بنود يدوية', no_manual: 'ما فيه بنود يدوية.', add_line: '＋ إضافة بند', del: 'حذف',
+      k_income: 'دخل مضاف (عليه الرسوم)', k_expense: 'مصروف', k_credit: 'خصم لصالح المالك',
+      unit_any: 'العمارة كلها', label_ph: 'وصف البند…', reason_ph: 'السبب (إلزامي)…', amt_ph: 'المبلغ',
+      daftra: 'رقم الفاتورة الضريبية في دفترة', daftra_ph: 'مثال: INV-1042', save: 'حفظ',
+      daftra_hint: 'أصدر الفاتورة في دفترة أول، واكتب رقمها هنا. بدونه ما ينفع الاعتماد.',
+      pdf_view: 'معاينة PDF', pdf_dl: 'تنزيل PDF', approve: 'اعتماد وإنشاء النسخة', wa: 'إرسال واتساب',
+      mark_sent: 'تم الإرسال ✓', mark_paid: 'تم السداد', reopen: 'إعادة فتح (مدير)', unpaid: 'تراجع عن السداد (مدير)',
+      approve_confirm: 'اعتماد مطالبة {m}؟\nالمطلوب: {t} ر.س\nبعد الاعتماد تتقفل النسخة وما تتغير حتى لو تغيّر حجز في Hostaway.',
+      reopen_q: 'ليش تبي تفتح الشهر من جديد؟ (النسخة المعتمدة تبقى محفوظة)', unpaid_q: 'سبب التراجع عن السداد؟',
+      paid_ref_q: 'مرجع التحويل (اختياري):', del_q: 'سبب حذف البند؟', sent_confirm: 'تأكد إنك أرسلت الكشف للمالك — يبدأ عدّ الـ10 أيام من اليوم.',
+      cant_approve: 'ما ينفع الاعتماد الحين:', p_already_locked: 'الشهر معتمد من قبل', p_month_not_over: 'الشهر ما خلص',
+      p_blockers: 'فيه حجوزات تحتاج مراجعة (تحت)', p_daftra_missing: 'رقم فاتورة دفترة ناقص',
+      blockers: 'لازم تنحل قبل الاعتماد', b_missing_payout: 'Airbnb ما أعطى مبلغ هالحجز', b_needs_channel_rule: 'حجز مو من Airbnb — ما نعرف فلوسه راحت لمين',
+      b_missing_base: 'حجز بدون مبلغ', b_non_airbnb: 'حجز مو من Airbnb', b_needs_review: 'يحتاج مراجعة', b_degraded: 'سحب البيانات من Hostaway ما اكتمل — حدّث بعد شوي',
+      w_cancel: 'حجز ملغي فيه إشارة دفع — إذا استلم المالك شي منه، أضفه كبند «دخل مضاف».',
+      x_cancelled_no_money: 'ملغي', x_cancelled_money_signal: 'ملغي — فيه إشارة دفع',
+      version: 'نسخة', approved_by: 'اعتمدها', sent_on: 'انرسل', due_on: 'يستحق', paid_on: 'انسدد',
+      switch_t: 'تواريخ التحويل لكل شقة', switch_h: 'تاريخ التحويل = أول دخول على إعلانها الجديد «-O». المصاريف قبله تروح كشفه القديم، وبعده تروح هالمطالبة.',
+      old_l: 'الإعلان القديم', new_l: 'الإعلان الجديد', sw_date: 'تاريخ التحويل', sw_src: 'المصدر', sw_auto: 'تلقائي', sw_manual: 'يدوي', sw_none: 'ما فيه حجز للحين',
+      edit: 'تعديل', sw_date_q: 'تاريخ التحويل الجديد (YYYY-MM-DD):', sw_reason_q: 'سبب التعديل؟',
+      settings: 'إعدادات المطالبة', set_name: 'اسم المالك في الكشف', set_phone: 'جوال المالك (واتساب)', set_bank: 'بيانات التحويل اللي تنطبع في الكشف',
+      set_bank_ph: 'مثال: عوجا للضيافة · مصرف الراجحي · SA..', set_wa: 'رسالة الواتساب', set_wa_h: 'المتغيرات: {owner} {building} {month} {total} {due} {daftra}',
+      g_title: 'تنبيهات', g_old_unit_not_pinned: 'الشقة {u} في الكشف القديم مو مثبتة على إعلانها القديم',
+      g_new_listing_in_statement: 'إعلان {u}-O دخل في كشف عادي! راجع قائمة الملاك فوراً', g_old_unit_missing: 'الشقة {u} مو موجودة في قائمة الملاك',
+      g_new_listing_missing: 'إعلان {u}-O مو موجود في Hostaway', audit: 'سجل التغييرات', saved: 'تم الحفظ ✓', err: 'صار خطأ',
+      need_fields: 'عبّ الوصف والمبلغ والسبب', total: 'المجموع', none_unit: 'ما فيه حجوزات على إعلانها الجديد هالشهر', bk_word: 'حجز', night_word: 'ليلة'
+    },
+    en: {
+      entry_t: 'Owner-account billing', entry_h: 'The owner collects from Airbnb directly; Ouja bills him its fee, VAT and expenses — one statement & claim per month.',
+      open: 'Open', back: '← Owners', units: 'units on the owner account', deal: 'Fee {p}% of the Airbnb payout · VAT {v}% on Ouja\'s fee · cleaning on Ouja · expenses at cost',
+      outstanding: 'Billed, unpaid', months: 'Monthly claims', month: 'Month', bookings: 'Bookings', airbnb: 'Airbnb paid',
+      due_amt: 'Due', status: 'Status', claim: 'Claim', loading: 'Computing the month…',
+      st_running: 'Month running', st_needs_review: 'Needs review', st_ready: 'Ready to approve', st_approved: 'Approved',
+      st_sent: 'Sent', st_overdue: 'Overdue', st_paid: 'Paid ✓',
+      running_note: 'The month is still running — figures so far; approval opens after month end.',
+      fee: 'Ouja fee', vat: 'VAT', exps: 'Expenses', credits: 'Credits to owner', total_due: 'Due from owner',
+      owed_to: 'Owed to owner', unit: 'Unit', nights: 'Nights', checkin: 'Check-in', checkout: 'Check-out', guest: 'Guest',
+      amount: 'Amount', resv_no: 'Booking #', reason: 'Reason', date: 'Date', item: 'Item', kind: 'Kind',
+      per_unit: 'Per unit', resv_of: 'Bookings', excluded: 'Bookings not counted', ledger_exp: 'Ledger expenses',
+      no_exp: 'No expenses on these units after their switch dates this month.',
+      manual: 'Manual lines', no_manual: 'No manual lines.', add_line: '＋ Add line', del: 'Delete',
+      k_income: 'Extra income (fee applies)', k_expense: 'Expense', k_credit: 'Credit to owner',
+      unit_any: 'Whole building', label_ph: 'Describe the line…', reason_ph: 'Reason (required)…', amt_ph: 'Amount',
+      daftra: 'Daftra tax-invoice number', daftra_ph: 'e.g. INV-1042', save: 'Save',
+      daftra_hint: 'Issue the invoice in Daftra first, then type its number here. Approval needs it.',
+      pdf_view: 'Preview PDF', pdf_dl: 'Download PDF', approve: 'Approve & freeze', wa: 'Send on WhatsApp',
+      mark_sent: 'Mark sent ✓', mark_paid: 'Mark paid', reopen: 'Reopen (admin)', unpaid: 'Undo paid (admin)',
+      approve_confirm: 'Approve the {m} claim?\nDue: {t} SAR\nThe version is frozen and will not change even if Hostaway does.',
+      reopen_q: 'Why reopen this month? (the approved version is kept)', unpaid_q: 'Why undo the payment?',
+      paid_ref_q: 'Transfer reference (optional):', del_q: 'Why delete this line?', sent_confirm: 'Confirm you sent the statement — the 10-day clock starts today.',
+      cant_approve: 'Cannot approve yet:', p_already_locked: 'already approved', p_month_not_over: 'month not over',
+      p_blockers: 'bookings need review (below)', p_daftra_missing: 'Daftra invoice number missing',
+      blockers: 'Must be resolved before approval', b_missing_payout: 'Airbnb gave no payout for this booking', b_needs_channel_rule: 'Non-Airbnb booking — unknown who got the money',
+      b_missing_base: 'Booking without an amount', b_non_airbnb: 'Non-Airbnb booking', b_needs_review: 'Needs review', b_degraded: 'The Hostaway pull was incomplete — refresh shortly',
+      w_cancel: 'Cancelled booking with a payment signal — if the owner kept money from it, add it as «extra income».',
+      x_cancelled_no_money: 'Cancelled', x_cancelled_money_signal: 'Cancelled — payment signal',
+      version: 'Version', approved_by: 'Approved by', sent_on: 'Sent', due_on: 'Due', paid_on: 'Paid',
+      switch_t: 'Switch date per unit', switch_h: 'Switch date = first check-in on its «-O» listing. Expenses before it stay on the old statement; after it, on this claim.',
+      old_l: 'Old listing', new_l: 'New listing', sw_date: 'Switch date', sw_src: 'Source', sw_auto: 'auto', sw_manual: 'manual', sw_none: 'no booking yet',
+      edit: 'Edit', sw_date_q: 'New switch date (YYYY-MM-DD):', sw_reason_q: 'Reason for the change?',
+      settings: 'Claim settings', set_name: 'Owner name on the PDF', set_phone: 'Owner phone (WhatsApp)', set_bank: 'Payment details printed on the PDF',
+      set_bank_ph: 'e.g. Ouja · Al Rajhi · SA..', set_wa: 'WhatsApp message', set_wa_h: 'Variables: {owner} {building} {month} {total} {due} {daftra}',
+      g_title: 'Alerts', g_old_unit_not_pinned: 'Old unit {u} is not pinned to its old listing',
+      g_new_listing_in_statement: 'Listing {u}-O is inside a normal statement! Check the owners list now', g_old_unit_missing: 'Unit {u} is missing from the owners list',
+      g_new_listing_missing: 'Listing {u}-O is not in Hostaway', audit: 'Change log', saved: 'Saved ✓', err: 'Something went wrong',
+      need_fields: 'Fill description, amount and reason', total: 'Total', none_unit: 'no bookings on its new listing this month', bk_word: 'bookings', night_word: 'nights'
+    }
+  };
+  function obt(k) { var d = OBT[store.lang] || OBT.ar; return d[k] !== undefined ? d[k] : (OBT.ar[k] !== undefined ? OBT.ar[k] : k); }
+  function obName(b) { var x = null; OB_LIST.forEach(function (it) { if (it.id === b) x = it; }); return x; }
+  var OB_ST_CLS = { running: '', needs_review: 'bad', ready: 'warnt', approved: 'soft', sent: 'soft', overdue: 'bad', paid: 'srcsheet' };
+  function obChip(st) { return '<span class="tag ' + (OB_ST_CLS[st] || '') + '">' + esc(obt('st_' + st)) + '</span>'; }
+
+  function obEntryCardHtml() {
+    return '<section class="card grp">' +
+      '<header class="grp-h"><span class="grp-ico">🏢</span><h2>' + esc(obt('entry_t')) + '</h2>' +
+      '<span class="cnt">' + OB_LIST.length + '</span></header>' +
+      '<div class="grp-hint">' + esc(obt('entry_h')) + '</div>' +
+      '<div class="grp-list">' + OB_LIST.map(function (it) {
+        return '<div class="wq-row"><div class="wq-main"><div class="wq-top"><b>' + esc(store.lang === 'ar' ? it.ar : it.en) + '</b></div>' +
+          '<div class="wq-sub">' + esc(it.owner) + ' · ' + it.units + ' ' + esc(obt('units')) + '</div></div>' +
+          '<div class="wq-actions"><a class="btn primary sm" href="#owners?bill=' + encodeURIComponent(it.id) + '">' + esc(obt('open')) + '</a></div></div>';
+      }).join('') + '</div></section>';
+  }
+
+  function loadBill(b, m) {
+    obUI.b = b; obUI.m = m || ''; obUI.view = null;
+    $('#view').innerHTML = skeleton(6);
+    api('/erp/api/ownerbill?b=' + encodeURIComponent(b), { timeout: 120000 }).then(function (d) {
+      obUI.data = d;
+      if (!obUI.m) {
+        var pick = null;
+        (d.months || []).forEach(function (r) { if (!pick && r.status !== 'running') pick = r.month; });
+        obUI.m = pick || ((d.months || [])[0] || {}).month || '';
+      }
+      renderBill();
+      if (obUI.m) loadBillMonth(obUI.m);
+    }).catch(function (e) { $('#view').innerHTML = errorCard('retry_owners', srvMsg(e)); });
+  }
+
+  function loadBillMonth(m, fresh) {
+    obUI.m = m; obUI.view = null;
+    try { history.replaceState(null, '', '#owners?bill=' + encodeURIComponent(obUI.b) + '&m=' + encodeURIComponent(m)); } catch (e) { /* old browsers */ }
+    renderBill();
+    api('/erp/api/ownerbill/month?b=' + encodeURIComponent(obUI.b) + '&m=' + encodeURIComponent(m) + (fresh ? '&fresh=1' : ''), { timeout: 120000 })
+      .then(function (r) { if (obUI.m === m) { obUI.view = r.view; renderBill(); } })
+      .catch(function (e) { toast(srvMsg(e) || obt('err'), 'err'); });
+  }
+
+  function obRefreshBoard() {
+    return api('/erp/api/ownerbill?b=' + encodeURIComponent(obUI.b), { timeout: 120000 })
+      .then(function (d) { obUI.data = d; renderBill(); }).catch(function () { /* board refresh is best-effort */ });
+  }
+
+  function obPost(path, body) {
+    obUI.busy = true; renderBill();
+    body.b = obUI.b;
+    return api('/erp/api/ownerbill/' + path, { method: 'POST', body: body, timeout: 120000 }).then(function (r) {
+      obUI.busy = false;
+      if (r.view) obUI.view = r.view;
+      renderBill(); obRefreshBoard();
+      return r;
+    }).catch(function (e) {
+      obUI.busy = false; renderBill();
+      var b2 = e && e.body;
+      toast(srvMsg(e) || (b2 && b2.error) || obt('err'), 'err');
+      throw e;
+    });
+  }
+
+  function obGuardsHtml(d) {
+    var g = d.guards || [];
+    if (!g.length) return '';
+    return '<section class="card grp"><header class="grp-h"><span class="grp-ico">⚑</span><h2>' + esc(obt('g_title')) + '</h2></header>' +
+      '<div style="padding:4px 16px 14px;display:flex;flex-direction:column;gap:6px">' + g.map(function (x) {
+        return '<div><span class="tag ' + (x.level === 'bad' ? 'bad' : 'warnt') + '">' + esc(obt('g_' + x.code).replace('{u}', x.unit || '')) + '</span></div>';
+      }).join('') + '</div></section>';
+  }
+
+  function obBoardHtml(d) {
+    var rows = (d.months || []).map(function (r) {
+      var sel = r.month === obUI.m;
+      return '<tr style="' + (sel ? 'background:var(--accent-soft)' : '') + '">' +
+        '<td><b>' + esc(mName(r.month)) + '</b>' + (r.version ? ' <span class="tag">' + esc(obt('version')) + ' ' + r.version + '</span>' : '') + '</td>' +
+        '<td>' + (r.bookings || 0) + '</td>' +
+        '<td><code>' + fmtAmt(r.income) + '</code></td>' +
+        '<td><b><code>' + fmtAmt(r.due) + '</code></b></td>' +
+        '<td>' + obChip(r.status) + (r.due_date && r.status !== 'paid' ? ' <span class="wq-sub">' + esc(obt('due_on')) + ' ' + esc(r.due_date) + '</span>' : '') + '</td>' +
+        '<td>' + (sel ? '' : '<button class="btn ghost xs" data-oba="month" data-m="' + esc(r.month) + '">' + esc(obt('open')) + '</button>') + '</td></tr>';
+    }).join('');
+    return '<section class="card grp"><header class="grp-h"><span class="grp-ico">📆</span><h2>' + esc(obt('months')) + '</h2></header>' +
+      '<div class="table-card" style="border:none;box-shadow:none"><table class="btable mini"><thead><tr>' +
+      '<th>' + esc(obt('month')) + '</th><th>' + esc(obt('bookings')) + '</th><th>' + esc(obt('airbnb')) + '</th><th>' + esc(obt('due_amt')) +
+      '</th><th>' + esc(obt('status')) + '</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+  }
+
+  function obTable(head, rows, foot) {
+    return '<div class="table-card" style="border:none;box-shadow:none"><table class="btable mini"><thead><tr>' +
+      head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      rows.join('') + (foot ? '<tr style="background:var(--surface-2);font-weight:700">' + foot + '</tr>' : '') + '</tbody></table></div>';
+  }
+
+  function obMonthHtml(v) {
+    if (!v) return '<section class="card grp"><div class="grp-hint">' + esc(obt('loading')) + '</div>' + skeleton(4) + '</section>';
+    var c = v.comp || {}, t2 = v.totals || {}, locked = !!v.frozen, h = '';
+    var head = '<header class="grp-h"><span class="grp-ico">🧾</span><h2>' + esc(obt('claim') + ' ' + mName(v.month)) + '</h2> ' + obChip(v.status) +
+      (v.version ? ' <span class="tag">' + esc(obt('version')) + ' ' + v.version + '</span>' : '') + '</header>';
+    h += '<div class="grp-hint">' + esc(v.claim_no) +
+      (v.approved_at ? ' · ' + esc(obt('approved_by')) + ' ' + esc(v.approved_by || '') + ' ' + esc(String(v.approved_at).slice(0, 10)) : '') +
+      (v.sent_at ? ' · ' + esc(obt('sent_on')) + ' ' + esc(v.sent_at) : '') +
+      (v.due && v.status !== 'paid' ? ' · ' + esc(obt('due_on')) + ' ' + esc(v.due) : '') +
+      (v.paid_at ? ' · ' + esc(obt('paid_on')) + ' ' + esc(v.paid_at) + (v.paid_ref ? ' (' + esc(v.paid_ref) + ')' : '') : '') + '</div>';
+    if (v.status === 'running') h += '<div style="padding:0 16px 8px"><span class="tag warnt">⏳ ' + esc(obt('running_note')) + '</span></div>';
+    var bl = c.blockers || [];
+    if (bl.length) {
+      h += '<div style="padding:0 16px 10px"><div class="wq-sub" style="font-weight:700;color:var(--red)">' + esc(obt('blockers')) + '</div>' +
+        bl.map(function (b) {
+          return '<div><span class="tag bad">' + esc(b.unit || '') + '</span> ' + esc(obt('b_' + b.code)) + (b.id ? ' · <code>' + esc(b.id) + '</code>' : '') + '</div>';
+        }).join('') + '</div>';
+    }
+    (c.warnings || []).forEach(function (w) {
+      h += '<div style="padding:0 16px 6px"><span class="tag warnt">' + esc(w.unit) + ' · <code>' + esc(w.id) + '</code></span> <span class="wq-sub">' + esc(obt('w_cancel')) + '</span></div>';
+    });
+    var due = Number(t2.due || 0);
+    h += '<div class="stat-row">' +
+      '<div class="stat"><span>' + esc(obt('airbnb')) + ' · ' + (t2.bookings || 0) + ' ' + esc(obt('bk_word')) + ' · ' + (t2.nights || 0) + ' ' + esc(obt('night_word')) + '</span><b>' + fmtAmt(t2.income) + '</b></div>' +
+      '<div class="stat"><span>' + esc(obt('fee')) + ' ' + esc(v.building.mgmt_pct) + '%</span><b>' + fmtAmt(t2.fee) + '</b></div>' +
+      '<div class="stat"><span>' + esc(obt('vat')) + ' ' + esc(v.building.vat_pct) + '%</span><b>' + fmtAmt(t2.vat) + '</b></div>' +
+      '<div class="stat"><span>' + esc(obt('exps')) + '</span><b>' + fmtAmt(t2.expenses) + '</b></div>' +
+      (t2.credits ? '<div class="stat"><span>' + esc(obt('credits')) + '</span><b>− ' + fmtAmt(t2.credits) + '</b></div>' : '') +
+      '<div class="stat ' + (due >= 0 ? 'ok' : 'bad') + '"><span>' + esc(due >= 0 ? obt('total_due') : obt('owed_to')) + '</span><b>' + fmtAmt(Math.abs(due)) + '</b></div></div>';
+    /* per-unit table */
+    var units = c.units || [];
+    h += '<div class="grp-hint" style="font-weight:700">' + esc(obt('per_unit')) + '</div>';
+    h += obTable([obt('unit'), obt('bookings'), obt('nights'), obt('airbnb'), obt('fee'), obt('vat'), obt('exps'), obt('due_amt')],
+      units.map(function (u) {
+        return '<tr' + (u.n_bookings ? '' : ' class="off"') + '><td><b>' + esc(u.code) + '</b>' + (u.n_bookings ? '' : ' <span class="wq-sub">' + esc(obt('none_unit')) + '</span>') + '</td><td>' + u.n_bookings + '</td><td>' + u.nights +
+          '</td><td><code>' + fmtAmt(u.income) + '</code></td><td><code>' + fmtAmt(u.fee) + '</code></td><td><code>' + fmtAmt(u.vat) +
+          '</code></td><td><code>' + fmtAmt(u.expenses_total) + '</code></td><td><b><code>' + fmtAmt(u.due) + '</code></b></td></tr>';
+      }), '<td>' + esc(obt('total')) + '</td><td>' + ((c.base || {}).bookings || 0) + '</td><td>' + ((c.base || {}).nights || 0) + '</td><td><code>' + fmtAmt((c.base || {}).income) +
+        '</code></td><td><code>' + fmtAmt((c.base || {}).fee) + '</code></td><td><code>' + fmtAmt((c.base || {}).vat) + '</code></td><td><code>' + fmtAmt((c.base || {}).expenses) +
+        '</code></td><td><code>' + fmtAmt(Number((c.base || {}).fee || 0) + Number((c.base || {}).vat || 0) + Number((c.base || {}).expenses || 0)) + '</code></td>');
+    /* bookings per unit */
+    units.forEach(function (u) {
+      if (!u.bookings.length) return;
+      h += '<details style="padding:2px 16px"><summary class="wq-sub" style="cursor:pointer">' + esc(obt('resv_of') + ' ' + u.code + ' · ' + u.n_bookings) + '</summary>' +
+        obTable([obt('checkin'), obt('checkout'), obt('nights'), obt('guest'), obt('resv_no'), obt('amount')], u.bookings.map(function (b) {
+          return '<tr><td>' + esc(b.checkin) + '</td><td>' + esc(b.checkout) + '</td><td>' + b.nights + '</td><td>' + esc(b.guest) + '</td><td><code>' + esc(b.id) + '</code></td><td><code>' + fmtAmt(b.amount) + '</code></td></tr>';
+        })) + '</details>';
+    });
+    var excl = [];
+    units.forEach(function (u) { u.excluded.forEach(function (x) { excl.push([u.code, x]); }); });
+    if (excl.length) {
+      h += '<details style="padding:2px 16px"><summary class="wq-sub" style="cursor:pointer">' + esc(obt('excluded') + ' · ' + excl.length) + '</summary>' +
+        obTable([obt('unit'), obt('checkin'), obt('reason'), obt('resv_no')], excl.map(function (p) {
+          var x = p[1], why = OBT[store.lang]['x_' + x.reason] || OBT[store.lang]['b_' + x.reason] || x.reason;
+          return '<tr><td>' + esc(p[0]) + '</td><td>' + esc(x.checkin) + '</td><td>' + esc(why) + '</td><td><code>' + esc(x.id) + '</code></td></tr>';
+        })) + '</details>';
+    }
+    /* ledger expenses */
+    var exps = [];
+    units.forEach(function (u) { u.expenses.forEach(function (e) { exps.push(e); }); });
+    h += '<div class="grp-hint" style="font-weight:700;margin-top:8px">' + esc(obt('ledger_exp')) + '</div>';
+    h += exps.length ? obTable([obt('date'), obt('unit'), obt('item'), obt('amount')], exps.map(function (e) {
+      return '<tr><td>' + esc(e.date) + '</td><td>' + esc(e.unit) + '</td><td>' + esc((e.category || '') + (e.description ? ' — ' + e.description : '')) +
+        (e.receipt_url ? ' <a href="' + esc(e.receipt_url) + '" target="_blank" rel="noopener">🧾</a>' : '') + '</td><td><code>' + fmtAmt(e.amount) + '</code></td></tr>';
+    })) : '<div class="grp-hint">' + esc(obt('no_exp')) + '</div>';
+    /* manual lines */
+    var lines = v.lines || [];
+    h += '<div class="grp-hint" style="font-weight:700;margin-top:8px">' + esc(obt('manual')) + '</div>';
+    h += lines.length ? obTable([obt('kind'), obt('unit'), obt('item'), obt('reason'), obt('amount'), ''], lines.map(function (l) {
+      return '<tr><td>' + esc(obt('k_' + l.kind)) + '</td><td>' + esc(l.unit || '—') + '</td><td>' + esc(l.label) + '</td><td class="wq-sub">' + esc(l.reason) + ' · ' + esc(l.by || '') +
+        '</td><td><code>' + (l.kind === 'credit' ? '− ' : '') + fmtAmt(l.amount) + '</code></td><td>' +
+        (locked ? '' : '<button class="btn danger-ghost xs" data-oba="del" data-id="' + esc(l.id) + '">' + esc(obt('del')) + '</button>') + '</td></tr>';
+    })) : '<div class="grp-hint">' + esc(obt('no_manual')) + '</div>';
+    if (!locked) {
+      h += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 16px 12px">' +
+        '<select class="in" id="obKind">' + ['expense', 'income', 'credit'].map(function (k) { return '<option value="' + k + '">' + esc(obt('k_' + k)) + '</option>'; }).join('') + '</select>' +
+        '<select class="in" id="obUnit"><option value="">' + esc(obt('unit_any')) + '</option>' + units.map(function (u) { return '<option value="' + esc(u.code) + '">' + esc(u.code) + '</option>'; }).join('') + '</select>' +
+        '<input class="in" id="obLabel" placeholder="' + esc(obt('label_ph')) + '" style="flex:1;min-width:160px">' +
+        '<input class="in" id="obAmt" type="number" min="0" step="0.01" placeholder="' + esc(obt('amt_ph')) + '" style="width:110px">' +
+        '<input class="in" id="obReason" placeholder="' + esc(obt('reason_ph')) + '" style="flex:1;min-width:160px">' +
+        '<button class="btn ghost sm" data-oba="add"' + (obUI.busy ? ' disabled' : '') + '>' + esc(obt('add_line')) + '</button></div>';
+    }
+    /* Daftra number */
+    h += '<div class="grp-hint" style="font-weight:700;margin-top:4px">' + esc(obt('daftra')) + '</div>';
+    if (locked) {
+      h += '<div style="padding:0 16px 10px"><code>' + esc(v.daftra_no || '—') + '</code></div>';
+    } else {
+      h += '<div style="display:flex;gap:6px;padding:0 16px 4px"><input class="in" id="obDaftra" value="' + esc(v.daftra_no || '') + '" placeholder="' + esc(obt('daftra_ph')) + '" style="max-width:220px">' +
+        '<button class="btn ghost sm" data-oba="daftra">' + esc(obt('save')) + '</button></div>' +
+        '<div class="grp-hint">' + esc(obt('daftra_hint')) + '</div>';
+    }
+    /* actions */
+    var probs = v.approve_problems || [];
+    var acts = '<button class="btn ghost sm" data-oba="pdf">' + esc(obt('pdf_view')) + '</button>' +
+      '<button class="btn ghost sm" data-oba="pdfdl">' + esc(obt('pdf_dl')) + '</button>';
+    if (!locked) {
+      acts += '<button class="btn primary sm" data-oba="approve"' + ((probs.length || obUI.busy) ? ' disabled' : '') + '>' + esc(obt('approve')) + '</button>';
+    } else {
+      if (v.status !== 'paid') acts += '<button class="btn primary sm" data-oba="wa">' + esc(obt('wa')) + '</button>';
+      if (v.status === 'approved') acts += '<button class="btn ghost sm" data-oba="sent">' + esc(obt('mark_sent')) + '</button>';
+      if (v.status !== 'paid') acts += '<button class="btn ghost sm" data-oba="paid">' + esc(obt('mark_paid')) + '</button>';
+      if (v.status === 'paid') acts += '<button class="btn danger-ghost sm" data-oba="unpaid">' + esc(obt('unpaid')) + '</button>';
+      acts += '<button class="btn danger-ghost sm" data-oba="reopen">' + esc(obt('reopen')) + '</button>';
+    }
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 6px;border-top:1px solid var(--line);margin-top:8px">' + acts + '</div>';
+    if (!locked && probs.length) {
+      h += '<div class="grp-hint">' + esc(obt('cant_approve')) + ' ' + probs.map(function (p) { return esc(obt('p_' + p)); }).join('، ') + '</div>';
+    }
+    if ((v.audit || []).length) {
+      h += '<details style="padding:2px 16px 12px"><summary class="wq-sub" style="cursor:pointer">' + esc(obt('audit')) + '</summary>' +
+        v.audit.slice().reverse().map(function (a) {
+          return '<div class="wq-sub">' + esc(String(a.at).replace('T', ' ').slice(0, 16)) + ' · ' + esc(a.by) + ' · ' + esc(a.action) + (a.detail ? ' · ' + esc(a.detail) : '') + (a.reason ? ' — ' + esc(a.reason) : '') + '</div>';
+        }).join('') + '</details>';
+    }
+    return '<section class="card grp">' + head + h + '</section>';
+  }
+
+  function obSwitchHtml(d) {
+    var b = d.building || {};
+    return '<section class="card grp"><details><summary class="grp-h" style="cursor:pointer;list-style:none"><span class="grp-ico">🔁</span><h2>' + esc(obt('switch_t')) + '</h2></summary>' +
+      '<div class="grp-hint">' + esc(obt('switch_h')) + '</div>' +
+      obTable([obt('unit'), obt('old_l'), obt('new_l'), obt('sw_date'), obt('sw_src'), ''], (b.units || []).map(function (u) {
+        return '<tr><td><b>' + esc(u.code) + '</b></td><td><code>' + u.old_lid + '</code></td><td><code>' + u.new_lid + '</code></td><td>' +
+          (u.switch_date ? esc(u.switch_date) : '<span class="wq-sub">' + esc(obt('sw_none')) + '</span>') + '</td><td class="wq-sub">' +
+          (u.switch_source ? esc(obt(u.switch_source === 'manual' ? 'sw_manual' : 'sw_auto')) + (u.switch_reason ? ' — ' + esc(u.switch_reason) : '') : '') + '</td><td>' +
+          '<button class="btn ghost xs" data-oba="switch" data-u="' + esc(u.code) + '">' + esc(obt('edit')) + '</button></td></tr>';
+      })) + '</details></section>';
+  }
+
+  function obSettingsHtml(d) {
+    var s = d.settings || {};
+    if (!obUI.showSet) return '';
+    function row(lbl, inner) { return '<label style="display:flex;flex-direction:column;gap:4px;padding:4px 16px"><span class="wq-sub">' + esc(lbl) + '</span>' + inner + '</label>'; }
+    return '<section class="card grp"><header class="grp-h"><span class="grp-ico">⚙</span><h2>' + esc(obt('settings')) + '</h2></header>' +
+      row(obt('set_name'), '<input class="in" id="obSetName" value="' + esc(s.display_owner || '') + '">') +
+      row(obt('set_phone'), '<input class="in" id="obSetPhone" value="' + esc(s.phone || '') + '" dir="ltr">') +
+      row(obt('set_bank'), '<input class="in" id="obSetBank" value="' + esc(s.bank_text || '') + '" placeholder="' + esc(obt('set_bank_ph')) + '">') +
+      row(obt('set_wa') + ' — ' + obt('set_wa_h'), '<textarea class="in" id="obSetWa" rows="5">' + esc(s.wa_template || '') + '</textarea>') +
+      '<div style="padding:6px 16px 14px"><button class="btn primary sm" data-oba="setsave">' + esc(obt('save')) + '</button></div></section>';
+  }
+
+  function renderBill() {
+    var d = obUI.data;
+    if (!d) return;
+    var b = d.building || {}, nm = obName(b.id) || {};
+    var y = window.scrollY;
+    var head = '<section class="card grp"><header class="grp-h"><span class="grp-ico">🏢</span><h2>' + esc(store.lang === 'ar' ? b.name_ar : b.name_en) + '</h2>' +
+      '<span class="cnt">' + (b.units || []).length + '</span>' +
+      '<span style="margin-inline-start:auto;display:flex;gap:6px"><button class="btn ghost xs" data-oba="settings">⚙ ' + esc(obt('settings')) + '</button>' +
+      '<a class="btn ghost xs" href="#owners">' + esc(obt('back')) + '</a></span></header>' +
+      '<div class="grp-hint">' + esc((d.settings && d.settings.display_owner) || nm.owner || b.owner) + ' · ' + (b.units || []).length + ' ' + esc(obt('units')) + '<br>' +
+      esc(obt('deal').replace('{p}', b.mgmt_pct).replace('{v}', b.vat_pct)) + '</div>' +
+      '<div class="stat-row"><div class="stat ' + (d.outstanding ? 'bad' : '') + '"><span>' + esc(obt('outstanding')) + '</span><b>' + fmtAmt(d.outstanding || 0) + '</b></div></div></section>';
+    $('#view').innerHTML = head + obSettingsHtml(d) + obGuardsHtml(d) + obBoardHtml(d) + obMonthHtml(obUI.view) + obSwitchHtml(d);
+    window.scrollTo(0, y);
+  }
+
+  function obPdfQs() {
+    return 'b=' + encodeURIComponent(obUI.b) + '&m=' + encodeURIComponent(obUI.m) + '&token=' + encodeURIComponent(store.token);
+  }
+
+  function obWaLink(v) {
+    var s = (obUI.data && obUI.data.settings) || {};
+    var tpl = s.wa_template || '';
+    var b = v.building || {};
+    var msg = tpl.replace(/\{owner\}/g, s.display_owner || b.owner || '')
+      .replace(/\{building\}/g, store.lang === 'ar' ? b.name_ar : b.name_en)
+      .replace(/\{month\}/g, mName(v.month))
+      .replace(/\{total\}/g, fmtAmt((v.totals || {}).due))
+      .replace(/\{due\}/g, v.due || obt('due_on'))
+      .replace(/\{daftra\}/g, v.daftra_no || '—');
+    var ph = String(s.phone || '').replace(/[^0-9]/g, '');
+    if (ph.indexOf('05') === 0) ph = '966' + ph.slice(1);
+    else if (ph.indexOf('5') === 0 && ph.length === 9) ph = '966' + ph;
+    return 'https://wa.me/' + ph + '?text=' + encodeURIComponent(msg);
+  }
+
+  document.addEventListener('click', function (ev) {
+    var el = ev.target.closest && ev.target.closest('[data-oba]');
+    if (!el) return;
+    var act = el.getAttribute('data-oba');
+    var v = obUI.view;
+    if (act === 'month') { loadBillMonth(el.getAttribute('data-m')); return; }
+    if (act === 'settings') { obUI.showSet = !obUI.showSet; renderBill(); return; }
+    if (act === 'setsave') {
+      obPost('settings', { display_owner: ($('#obSetName') || {}).value || '', phone: ($('#obSetPhone') || {}).value || '',
+        bank_text: ($('#obSetBank') || {}).value || '', wa_template: ($('#obSetWa') || {}).value || '' })
+        .then(function (r) { if (r.settings && obUI.data) obUI.data.settings = r.settings; obUI.showSet = false; renderBill(); toast(obt('saved')); })
+        .catch(function () {});
+      return;
+    }
+    if (act === 'switch') {
+      var u = el.getAttribute('data-u');
+      var d = window.prompt(obt('sw_date_q'), '');
+      if (!d) return;
+      var why = window.prompt(obt('sw_reason_q'), '');
+      if (!why) return;
+      obPost('switch', { unit: u, date: d.trim(), reason: why }).then(function (r) {
+        if (r.building && obUI.data) obUI.data.building = r.building;
+        toast(obt('saved')); loadBillMonth(obUI.m, true);
+      }).catch(function () {});
+      return;
+    }
+    if (!v) return;
+    var mm = v.month;
+    if (act === 'pdf') { window.open('/erp/api/ownerbill/pdf?' + obPdfQs(), '_blank', 'noopener'); return; }
+    if (act === 'pdfdl') {
+      el.disabled = true;
+      fetch('/erp/api/ownerbill/pdf?' + obPdfQs() + '&dl=1', { headers: { 'X-Token': store.token } })
+        .then(function (r) {
+          if (!r.ok) return r.json().catch(function () { return null; }).then(function (j) { throw { status: r.status, body: j }; });
+          return r.blob();
+        }).then(function (blob) {
+          el.disabled = false;
+          var url = URL.createObjectURL(blob), a = document.createElement('a');
+          a.href = url; a.download = v.claim_no + (v.frozen ? '' : '-draft') + '.pdf';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        }).catch(function (e) { el.disabled = false; toast(srvMsg(e) || obt('err'), 'err'); });
+      return;
+    }
+    if (act === 'add') {
+      var lbl = (($('#obLabel') || {}).value || '').trim(), amt = Number(($('#obAmt') || {}).value || 0), rsn = (($('#obReason') || {}).value || '').trim();
+      if (!lbl || !(amt > 0) || rsn.length < 3) { toast(obt('need_fields'), 'warn'); return; }
+      obPost('line', { op: 'add', m: mm, kind: ($('#obKind') || {}).value, unit: ($('#obUnit') || {}).value || '', label: lbl, amount: amt, reason: rsn })
+        .then(function () { toast(obt('saved')); }).catch(function () {});
+      return;
+    }
+    if (act === 'del') {
+      var r2 = window.prompt(obt('del_q'), '');
+      if (!r2) return;
+      obPost('line', { op: 'del', m: mm, id: el.getAttribute('data-id'), reason: r2 }).catch(function () {});
+      return;
+    }
+    if (act === 'daftra') {
+      obPost('daftra', { m: mm, number: (($('#obDaftra') || {}).value || '').trim() }).then(function () { toast(obt('saved')); }).catch(function () {});
+      return;
+    }
+    if (act === 'approve') {
+      var q = obt('approve_confirm').replace('{m}', mName(mm)).replace('{t}', fmtAmt((v.totals || {}).due));
+      if (!window.confirm(q)) return;
+      obPost('approve', { m: mm }).then(function () { toast(obt('saved')); }).catch(function () {});
+      return;
+    }
+    if (act === 'wa') { window.open(obWaLink(v), '_blank', 'noopener'); return; }
+    if (act === 'sent') {
+      if (!window.confirm(obt('sent_confirm'))) return;
+      obPost('status', { m: mm, action: 'sent' }).catch(function () {});
+      return;
+    }
+    if (act === 'paid') {
+      var ref = window.prompt(obt('paid_ref_q'), '');
+      if (ref === null) return;
+      obPost('status', { m: mm, action: 'paid', ref: ref }).catch(function () {});
+      return;
+    }
+    if (act === 'reopen' || act === 'unpaid') {
+      var why2 = window.prompt(obt(act === 'reopen' ? 'reopen_q' : 'unpaid_q'), '');
+      if (!why2) return;
+      obPost('status', { m: mm, action: act, reason: why2 }).catch(function () {});
+    }
+  });
 
   function loadOwners() {
     $('#view').innerHTML = skeleton(5);
@@ -5627,7 +6073,9 @@
         var profile = params && params.get('profile');
         var manage = params && params.get('manage');
         var stmt = params && params.get('stmt');
-        if (diag) loadDiag(diag, params.get('m') || '');
+        var bill = params && params.get('bill');
+        if (bill) loadBill(bill, params.get('m') || '');
+        else if (diag) loadDiag(diag, params.get('m') || '');
         else if (profile) loadProfile(profile, params.get('unit') || '');
         else if (manage) loadManage(manage);
         // seUI.nofee resets on every fresh navigation: the alternate view must never

@@ -40660,6 +40660,22 @@ def _finance_apply_adjust(rep, adjust):
     rep["line_overrides"] = lov
     return rep
 
+# «حساب المالك» (finance/ownerbill.py): once a unit runs on the OWNER's own Airbnb
+# account, its expenses dated on/after the switch date are billed on the owner-account
+# claim — the old statement must not deduct them as well. finance.mount() installs the
+# hook; unset (tests, ERP not mounted) or failing → nothing moves (the old behaviour).
+_ownerbill_moved_hook = None
+
+def _ownerbill_expense_moved(e):
+    fn = _ownerbill_moved_hook
+    if fn is None:
+        return False
+    try:
+        return bool(fn(e.get("listing_id"), e.get("expense_date")))
+    except Exception as _err:
+        print("ownerbill expense hook error:", _err)
+        return False
+
 def build_owner_report(lid, start, end, management_pct, settings=None, expenses=None, cleaning=None, adjust=None):
     """Stage 3 wiring: pull this unit's Hostaway reservations + matched expenses and run the
     verified math. lid=None → portfolio-wide. Never invents a number. Pulls the owner /
@@ -40690,7 +40706,8 @@ def build_owner_report(lid, start, end, management_pct, settings=None, expenses=
             # with a genuine Hostaway expense id. (Was 'verified'-only, which silently
             # dropped expenses the owner posted to Hostaway when the fragile re-verify
             # step never confirmed them: the 'المصاريف 0' owner-statement bug.)
-            if _exp_posted_to_hostaway(e) and (lid is None or e.get("listing_id") == lid):
+            if (_exp_posted_to_hostaway(e) and (lid is None or e.get("listing_id") == lid)
+                    and (lid is None or not _ownerbill_expense_moved(e))):
                 expenses.append({"id": e.get("id"), "apartment": e.get("apartment"),
                                  "lid": e.get("listing_id"), "amount": e.get("amount"),
                                  "date": e.get("expense_date"), "matched": True,

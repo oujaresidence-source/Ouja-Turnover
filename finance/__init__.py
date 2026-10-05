@@ -42,10 +42,12 @@ from aiohttp import web
 from . import api
 from . import owners as OW
 from . import purchases as TP
+from . import ownerbill as OB
+from . import ownerbill_pdf as OBPDF
 
 # Bumped on EVERY shipped slice — this string + commit + build time is the
 # owner's 5-second proof that a deploy actually reached production.
-ERP_VERSION = "2.7.16"  # الإيراد اليدوي: «عليه رسوم الإدارة» أو «بدون رسوم» + النسبة المطبوعة = نسبة العقد
+ERP_VERSION = "2.8.0"  # «حساب المالك»: عمارة النزهة — المالك يستلم من Airbnb وعوجا تطالبه (كشف حساب ومطالبة)
 
 _DIR = pathlib.Path(__file__).resolve().parent
 _BOOT = time.time()
@@ -1315,6 +1317,86 @@ async def _h_tp_receipt(request):
     return web.FileResponse(path, headers={"Content-Type": ctype, "Cache-Control": "private, max-age=3600"})
 
 
+
+# ---------------- «حساب المالك» owner-account billing (finance/ownerbill.py) ----------------
+# The owner collects from Airbnb on his own account; Ouja BILLS him. Reads Hostaway
+# only; never writes to Hostaway/Airbnb/Daftra and never sends anything by itself.
+
+def _ob_args(request):
+    bid = (request.query.get("b") or "").strip()
+    if not OB.building(bid):
+        return None, None, api.jres({"error": "unknown_building"}, 400)
+    m = (request.query.get("m") or "").strip()
+    if m and not OB.valid_month(m):
+        return None, None, api.jres({"error": "bad_month"}, 400)
+    return bid, m, None
+
+
+async def _h_api_ob_board(request):
+    bid = (request.query.get("b") or "").strip()
+    if not bid:
+        return api.jres({"ok": True, "buildings": OB.buildings_list()})
+    bid, _m, err = _ob_args(request)
+    if err:
+        return err
+    return api.jres(await _wt(OB.board, bid))
+
+
+async def _h_api_ob_month(request):
+    bid, m, err = _ob_args(request)
+    if err:
+        return err
+    if not m:
+        return api.jres({"error": "bad_month"}, 400)
+    fresh = str(request.query.get("fresh") or "") in ("1", "true")
+    return api.jres({"ok": True, "view": await _wt(OB.month_view, bid, m, fresh)})
+
+
+def _ob_post(fn):
+    async def h(request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        data, status = await _wt(fn, request, body)
+        return api.jres(data, status)
+    return h
+
+
+async def _h_api_ob_line(request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    fn = OB.line_del if body.get("op") == "del" else OB.line_add
+    data, status = await _wt(fn, request, body)
+    return api.jres(data, status)
+
+
+async def _h_api_ob_pdf(request):
+    bid, m, err = _ob_args(request)
+    if err:
+        return err
+    if not m:
+        return api.jres({"error": "bad_month"}, 400)
+    view = await _wt(OB.month_view, bid, m)
+    try:
+        data = await _wt(OBPDF.render, view)
+    except api.B.PdfFontError:
+        return api.jres({"error": "pdf_font_unavailable",
+                         "message_ar": "خط الـ PDF العربي غير متاح — جرّب بعد دقيقة.",
+                         "message_en": "Arabic PDF font unavailable — try again shortly."}, 503)
+    dispo = "attachment" if (request.query.get("dl") not in (None, "", "0")) else "inline"
+    fn = "%s%s.pdf" % (view["claim_no"], "" if view.get("frozen") else "-draft")
+    return web.Response(body=data, content_type="application/pdf",
+                        headers={"Content-Disposition": '%s; filename="%s"' % (dispo, fn),
+                                 "Cache-Control": "private, no-store"})
+
+
 def mount(app, botmod):
     """Attach ERP v2 to the running aiohttp app. Called once from bot.py."""
     api.attach(botmod)
@@ -1330,6 +1412,14 @@ def mount(app, botmod):
         OW.backfill_expense_mirrors()
     except Exception as _e:
         print("expense mirror backfill skipped:", _e)
+    # «حساب المالك»: the old statement stops deducting a switched unit's expenses
+    # dated on/after its switch date (they belong to the owner-account claim now),
+    # and the old units are pinned to their OLD listings once.
+    botmod._ownerbill_moved_hook = OB.expense_moved
+    try:
+        OB.ensure_pinned()
+    except Exception as _e:
+        print("ownerbill pin skipped:", _e)
     app.router.add_get("/erp", _h_erp)
     app.router.add_get("/erp/version", _h_version)
     app.router.add_get("/erp/api/work-queue", _h_api_work_queue)
@@ -1400,6 +1490,15 @@ def mount(app, botmod):
     app.router.add_get("/erp/api/owners/range-report", _guarded(_h_api_owners_range_report))
     app.router.add_get("/erp/api/owners/range-report.pdf", _guarded(_h_api_owners_range_report_pdf))
     app.router.add_get("/erp/api/owners/no-direct-fee.zip", _guarded(_h_api_nofee_zip))
+    app.router.add_get("/erp/api/ownerbill", _guarded(_h_api_ob_board))
+    app.router.add_get("/erp/api/ownerbill/month", _guarded(_h_api_ob_month))
+    app.router.add_get("/erp/api/ownerbill/pdf", _guarded(_h_api_ob_pdf))
+    app.router.add_post("/erp/api/ownerbill/line", _guarded(_h_api_ob_line, write=True))
+    app.router.add_post("/erp/api/ownerbill/daftra", _guarded(_ob_post(OB.daftra_set), write=True))
+    app.router.add_post("/erp/api/ownerbill/approve", _guarded(_ob_post(OB.approve), write=True))
+    app.router.add_post("/erp/api/ownerbill/status", _guarded(_ob_post(OB.status_set), write=True))
+    app.router.add_post("/erp/api/ownerbill/switch", _guarded(_ob_post(OB.switch_set), write=True))
+    app.router.add_post("/erp/api/ownerbill/settings", _guarded(_ob_post(OB.settings_set), write=True))
     app.router.add_get("/erp/api/stmts", _guarded(_h_api_stmts))
     app.router.add_get("/erp/api/stmts/account", _guarded(_h_api_stmts_account))
     app.router.add_get("/erp/api/stmts/type-probe", _guarded(_h_api_stmts_probe))

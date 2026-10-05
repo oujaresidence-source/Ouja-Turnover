@@ -556,6 +556,26 @@ link `/sign/{token}` → client last-4 check, read, typed name + drawn signature
   `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_1). Non-admins see the tab only after the
   owner ticks «العقود» in الصلاحيات.
 
+## Owner-account billing «حساب المالك» — `finance/ownerbill.py` (+ `ownerbill_pdf.py`)
+A VAT-registered owner runs his units on HIS OWN Airbnb account, so Airbnb pays HIM and Ouja
+**bills** him (the reverse of every other owner). First building: عمارة النزهة (أبو فهد, 8 units;
+his «-O» listings went live 2026-09-13…19). Spec: `docs/superpowers/specs/2026-10-05-owner-account-billing-design.md`.
+- **Owner's rules:** 18% of the Airbnb payout + 15% VAT on Ouja's fee ONLY, cleaning on Ouja,
+  expenses at cost. Fee/VAT rounded PER UNIT (Decimal half-up) — totals are sums.
+- **Two documents:** the old statement keeps the OLD listings; the claim covers the «-O» listings.
+  The LISTING decides whose money a booking was — never filter bookings by the switch date.
+- **Expenses go by DATE:** old-listing expenses on/after a unit's switch date move to the claim;
+  `bot.build_owner_report` skips them through `_ownerbill_expense_moved` (hook installed at
+  `finance.mount`; unset/failing = old behaviour). Switch date = first check-in on the «-O» listing,
+  STORED once found (102B fills itself); manual edits need a reason.
+- **Never add an «-O» listing to the owner registry** — the board shows a red guard if one resolves.
+  The 8 old rows were pinned to their old lids by the marked `pin-old-lids-v1` migration («101b»
+  name-matches «101B-O»).
+- **Our PDF is «كشف حساب ومطالبة مالية», never «فاتورة ضريبية»** — the e-invoice is issued in
+  Daftra; approval is refused without its number, before month end, or with a blocker (missing
+  payout / non-Airbnb booking / degraded pull). Approved = frozen snapshot vN; reopen = admin + reason.
+- PDF dates are written in Arabic words: an ISO date inside Arabic text is reordered by bidi.
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
