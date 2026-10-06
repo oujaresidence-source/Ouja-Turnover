@@ -19,7 +19,7 @@ from decimal import Decimal
 from . import abnb, config, db, engine, money, ops, periods, privacy, redact, texts
 from .host import HOST
 
-MONTH_WORKERS = 4                     # same ceiling _owner_portal_data uses for cold months
+MONTH_WORKERS = 2                     # gentle on a Hostaway budget the whole bot shares (live jam 2026-10-06)
 
 
 def _f(x):
