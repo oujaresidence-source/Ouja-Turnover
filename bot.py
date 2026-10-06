@@ -74757,6 +74757,9 @@ def _om_ticket_status(ref):
 
 def _owner_meet_caps():
     return {"owner_phone": _om_owner_phone, "ticket_status": _om_ticket_status,
+            # a meeting build has Faisal watching its progress bar: it is a USER call on the
+            # Hostaway throttle, not housekeeping (the 2026-08-24 «humans outrank» reserve)
+            "user_priority": lambda: set_priority("user"),
             "airbnb_room_ids": _om_airbnb_room_ids, "listing_titles": _om_listing_titles,
             "min_price": lambda lid: (_pe_floor_overrides.get(int(lid)) or _pe_floor_overrides.get(str(lid)) or None),
             "maint_tickets": lambda lids: _om_dtk("maint", lids),

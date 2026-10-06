@@ -76,6 +76,11 @@ def collect_money(owner, scope_lids, months, partial, progress=None):
     def one(mk):
         # One month that cannot be computed becomes a RED readiness line for that month (missing),
         # never a dead build: the other eleven months are still worth seeing before the meeting.
+        if HOST.user_priority:                      # a new thread does not inherit the job's priority
+            try:
+                HOST.user_priority()
+            except Exception:
+                pass
         try:
             rep = HOST.month_report(owner, mk)
             units = {lid: HOST.unit_month(owner, mk, lid) for lid in scope_lids}

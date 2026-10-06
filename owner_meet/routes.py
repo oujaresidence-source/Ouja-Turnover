@@ -30,6 +30,7 @@ executor (the guest-site starvation lesson). Nothing here sends anything to an o
 import collections
 import copy
 import datetime
+import json
 import os
 import secrets
 import threading
@@ -183,6 +184,15 @@ def core_create(body, actor):
     except ValueError as e:
         return 400, {"ok": False, "error_ar": str(e)}
     scope = [] if set(lids) == set(all_lids) else lids
+    # A second press of «تجهيز» (or a double-click) must not queue a second identical build behind
+    # the first — that is how the queue fills up. Same owner + units + period + day = the same meeting.
+    same = db.q1("SELECT * FROM meet_meetings WHERE owner=? AND lids=? AND period_from=? AND period_to=? "
+                 "AND meeting_date=? AND state IN ('building','ready','presented') ORDER BY id DESC LIMIT 1",
+                 (owner, json.dumps([int(x) for x in lids]), period["start"], period["end"], today.isoformat()))
+    if same:
+        if same["state"] == "building" and not jobs.running(same["id"]):
+            jobs.start(same["id"], {"owner": owner, "lids": scope, "period": period, "meeting_date": today.isoformat()})
+        return 200, {"ok": True, "id": same["id"], "existing": True}
     mid = db.create_meeting(owner, lids, period, today.isoformat(), actor)
     db.log_event(mid, "created", {"kind": period["kind"], "months": period["months"]}, actor)
     jobs.start(mid, {"owner": owner, "lids": scope, "period": period, "meeting_date": today.isoformat()})
@@ -193,8 +203,18 @@ def core_status(mid):
     m = db.meeting(mid)
     if not m:
         return 404, {"ok": False, "error_ar": "الاجتماع غير موجود"}
+    if m["state"] == "building" and not jobs.running(mid):
+        # «building» with no live job = a build this process never owned (a restart) or one that died
+        # silently: start it again instead of leaving the bar at «في الطابور» forever.
+        cur = periods.mkey(_today())
+        jobs.start(mid, {"owner": m["owner"], "lids": [] if len(m["lids"]) == len(HOST.owner_lids(m["owner"]) or [])
+                         else m["lids"], "period": {"kind": m["period_kind"], "start": m["period_from"], "end": m["period_to"],
+                                                    "months": m["months"], "partial": cur if cur in m["months"] else None},
+                         "meeting_date": m["meeting_date"]})
+        m = db.meeting(mid)
     snap = db.snapshot(mid) if m["state"] != "building" else None
-    out = {"ok": True, "meeting": _row(m), "version": None, "readiness": [], "can_send": False}
+    out = {"ok": True, "meeting": _row(m), "version": None, "readiness": [], "can_send": False,
+           "queue": jobs.queue_info(mid) if m["state"] == "building" else None}
     if snap:
         data = snap["data"]
         ok, why = money.can_send(data)

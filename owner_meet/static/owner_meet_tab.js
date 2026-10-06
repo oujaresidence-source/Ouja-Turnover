@@ -106,7 +106,8 @@
       '<div class="om-step">الفترة من ' + esc(d(mt.period_from)) + ' إلى ' + esc(d(mt.period_to)) + '</div>';
     if (mt.state === 'building') {
       h += '<div class="om-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + (mt.build_progress || 0) +
-        '"><i style="transform:scaleX(' + ((mt.build_progress || 0) / 100) + ')"></i></div><div class="om-step">' + esc(mt.build_step || '') + '</div>';
+        '"><i style="transform:scaleX(' + ((mt.build_progress || 0) / 100) + ')"></i></div><div class="om-step">' + esc(mt.build_step || '') +
+        (m.queue ? (m.queue.waiting_ahead ? ' · قبله في الطابور ' + m.queue.waiting_ahead : '') + ' · ' + m.queue.elapsed_s + ' ثانية' : '') + '</div>';
     } else if (mt.state === 'error') {
       h += '<p class="om-err">' + esc(mt.build_error || 'تعذّر التجهيز') + '</p>' +
         '<div class="om-acts"><button class="btn sm" data-om="rebuild">أعد التجهيز</button></div>';
@@ -274,15 +275,18 @@
   }
 
   function build(id) {
+    if (S.posting) return;                       // a double-click must not queue a second build
+    S.posting = true;
     var body = id ? { rebuild: id } : { owner: S.owner, lids: S.lids, kind: S.kind, first: S.first, last: S.last };
     post('/api/meet/meetings', body).then(function (d) {
+      S.posting = false;
       if (!d || !d.ok) {
         var el = document.getElementById('omStatus');
         if (el) el.innerHTML = '<p class="om-err">' + esc((d && (d.error_ar || d.message)) || 'تعذّر بدء التجهيز') + '</p>';
         return;
       }
       poll(d.id);
-    });
+    }).catch(function () { S.posting = false; });
   }
 
   function onEvent(e) {

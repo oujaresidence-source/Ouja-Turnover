@@ -67,6 +67,7 @@ class _Host:
     # ---- the meeting record + sending (S5) ----
     owner_phone = None          # (owner) -> '9665…' | ''      only for a wa.me link Faisal taps
     ticket_status = None        # (ticket ref) -> {found, closed, closed_at}
+    user_priority = None        # () -> None   mark THIS thread's Hostaway calls as «a person is waiting»
 
     def require(self, attr):
         v = getattr(self, attr, None)
