@@ -182,6 +182,17 @@ except Exception as _permits_err:       # pragma: no cover
     _permits = None
     _HAS_PERMITS = False
 
+# Owner Meeting Room «اجتماع المالك» — a frozen per-apartment snapshot Faisal presents to an owner,
+# then sends (only by his own tap) as a read-only link + PDF. READ-ONLY over the money path.
+# OWNER_MEET_ENABLED=0 unloads it.
+try:
+    import owner_meet as _owner_meet
+    _HAS_OWNER_MEET = _owner_meet.enabled()
+except Exception as _owner_meet_err:     # pragma: no cover
+    print("[owner_meet] import failed (owner meeting tab disabled, bot unaffected):", _owner_meet_err)
+    _owner_meet = None
+    _HAS_OWNER_MEET = False
+
 # Ministry of Tourism compliance «مطابقة وزارة السياحة» — dated inspection rounds per unit
 # against the 47 standards; gaps become an owner quote + tickets + a re-check date.
 try:
@@ -21509,6 +21520,13 @@ _USER_TABS = [
     "quality", "rev", "learn", "log", "cp",
 ]
 
+# Tabs a non-admin NEVER receives from a role default — only when the owner ticks the box for that
+# person in الصلاحيات. «اجتماع المالك» shows other owners' context and Ouja's talking points
+# (Faisal 2026-10-06: «التبويب لي بس»).
+_GRANT_ONLY_TABS = ("meet",)
+_NO_GRANT = {"read": False, "write": False, "create": False}
+
+
 def _default_perms(role):
     """Build the starting permission matrix for a role."""
     if role == "admin":
@@ -21518,7 +21536,8 @@ def _default_perms(role):
         # read elsewhere; never the users admin tab. Profitability/bank detail allowed.
         fin = ("fb", "finance", "expenses", "weekly", "rev")
         return {
-            tab: {"read": tab != "users", "write": tab in fin, "create": tab in fin}
+            tab: ({"read": tab != "users", "write": tab in fin, "create": tab in fin}
+                  if tab not in _GRANT_ONLY_TABS else dict(_NO_GRANT))
             for tab in _USER_TABS
         }
     if role == "ops":
@@ -21529,11 +21548,12 @@ def _default_perms(role):
                 "read":   tab != "users",
                 "write":  tab not in ("users", "rev", "log", "fb", "finance"),
                 "create": tab in ("tickets", "quote", "weekly", "design"),
-            } for tab in _USER_TABS
+            } if tab not in _GRANT_ONLY_TABS else dict(_NO_GRANT) for tab in _USER_TABS
         }
     # viewer: read-only on everything except admin tabs
     return {
-        tab: {"read": tab not in ("users",), "write": False, "create": False}
+        tab: ({"read": tab not in ("users",), "write": False, "create": False}
+              if tab not in _GRANT_ONLY_TABS else dict(_NO_GRANT))
         for tab in _USER_TABS
     }
 
@@ -23699,6 +23719,20 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="pmTop"></div>
         <div class="kpis" id="pmKpis"></div>
         <div id="pmBody"><div class="empty sk">—</div></div>
+      </section>
+
+      <!-- ============ «اجتماع المالك» owner meeting room (owner_meet/ — tab code in /meet/static/owner_meet_tab.js) ============ -->
+      <section class="view" id="view_meet">
+        <div class="page-head">
+          <div>
+            <div class="page-title">اجتماع المالك</div>
+            <div class="page-sub">لقطة ثابتة لكل شقة تعرضها على المالك · لا يُرسل شيء إلا بضغطتك</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadMeet(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="omBody"><div class="empty sk">—</div></div>
       </section>
 
       <!-- ============ «العقود» contracts (survey → filled contract → e-sign link → countersign) ============ -->
@@ -27204,6 +27238,7 @@ function go(id){
   if(id==='coverage') loadCoverage();
   if(id==='wifi') loadWifi();
   if(id==='permits') loadPermits();
+  if(id==='meet') loadMeet();
   if(id==='aqd') loadAqd();
   if(id==='rvpush') loadRvpush();
   if(id==='oncall') loadOncall();
@@ -37292,6 +37327,17 @@ function loadOncall(force){
   s.onerror=function(){ window.__ocLoading=0; putHtml('ocBody', errorState('loadOncall(1)')); };
   document.head.appendChild(s);
 }
+/* OWNER MEETING «اجتماع المالك» — the tab's code is the real file /meet/static/owner_meet_tab.js (no backslash trap here) */
+function loadMeet(force){
+  if(window.__meetJs){ return window.MeetTab.load(force); }
+  if(window.__meetLoading){ return; }
+  window.__meetLoading=1;
+  var s=document.createElement('script');
+  s.src='/meet/static/owner_meet_tab.js?v=__OWNER_MEET_JS_V__';
+  s.onload=function(){ window.__meetJs=1; window.MeetTab.load(force); };
+  s.onerror=function(){ window.__meetLoading=0; putHtml('omBody', errorState('loadMeet(1)')); };
+  document.head.appendChild(s);
+}
 /* «رفع التقييم» — the tab's code is the real file /reviewask/static/reviewask_tab.js (no backslash trap here) */
 function loadRvpush(force){
   if(window.__rvJs){ return window.RvTab.load(force); }
@@ -46119,7 +46165,7 @@ NAV_DEF = {
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote", "aqd"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
-        {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep"]},
+        {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep", "meet"]},
         {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "cp", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["kb", "users", "learn", "train", "log"]},
     ],
@@ -46157,6 +46203,7 @@ NAV_DEF = {
         {"id": "digest", "ic": "design", "tk": "digest", "href": "/digest"},
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
         {"id": "ownrep", "ic": "finance", "tk": "ownrep"},
+        {"id": "meet", "ic": "finance", "tk": "meet"},          # «اجتماع المالك» (owner_meet/)
         {"id": "design", "ic": "design", "tk": "design"},
         {"id": "onb", "ic": "cleanteams", "tk": "onb"},
         {"id": "mot", "ic": "tickets", "tk": "mot"},
@@ -46192,7 +46239,7 @@ NAV_DEF = {
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار", "aqd": "العقود",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
-            "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك",
+            "expenses": "المصاريف", "finance": "كشوفات الملاك", "erp": "المركز المالي", "ownrep": "تقرير المالك", "meet": "اجتماع المالك",
             "guests": "الضيوف", "rec": "استرداد التجربة", "gw": "موقع الضيوف", "guide": "دليل الشقق", "quality": "جودة النظافة",
             "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
@@ -46216,7 +46263,7 @@ NAV_DEF = {
             "reviews": "Reviews", "users": "Users", "quote": "Quotations", "aqd": "Contracts",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "onb": "Unit onboarding", "mot": "Tourism compliance",
-            "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report",
+            "expenses": "Expenses", "finance": "Owner statements", "erp": "Finance Center", "ownrep": "Owner Report", "meet": "Owner meeting",
             "guests": "Guests", "rec": "Guest Recovery", "gw": "Guest Website", "guide": "Apartment Guide", "quality": "Cleaning quality",
             "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
@@ -46246,12 +46293,21 @@ for _nav_it in NAV_DEF.get("items", []):
     if _nid and _nid not in _USER_TABS:
         _USER_TABS.append(_nid)
 
+# «اجتماع المالك» switched off (OWNER_MEET_ENABLED=0): its routes are not registered, so the menu must
+# not offer a tab that would only show an error.
+if not _HAS_OWNER_MEET:
+    NAV_DEF["items"] = [i for i in NAV_DEF["items"] if i.get("id") != "meet"]
+    for _c in NAV_DEF.get("cats") or []:
+        _c["ids"] = [x for x in (_c.get("ids") or []) if x != "meet"]
 _NAV_DEF_JSON = json.dumps(NAV_DEF, ensure_ascii=False)
 # One-time bake at import: the dashboard's `const NAVD = __NAV_DEF_JSON__;` becomes real JS.
 DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
 # PERMITS «التصاريح»: the tab script lives in permits/static/; the ?v= cache-buster is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__PERMITS_JS_V__", (_permits.routes.js_version() if _permits is not None else "0"), 1)
+# «اجتماع المالك»: same pattern — the tab script lives in owner_meet/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__OWNER_MEET_JS_V__", (_owner_meet.routes.js_version() if _owner_meet is not None else "0"), 1)
 # «العقود»: same pattern — the tab script lives in aqd/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__AQD_JS_V__", (_aqd.routes.js_version() if _aqd is not None else "0"), 1)
@@ -64638,6 +64694,7 @@ _ROLE_WRITE_RULES = [
     ("/api/mot/", "mot"),                    # /api/mot/check-* are exempt above (inspector link)
     ("/api/kb/", "kb"),                      # knowledge base — no public door at all
     ("/api/permits/", "permits"),            # PERMITS «التصاريح» — no public door (admin/ops re-checked inside)
+    ("/api/meet/", "meet"),                  # «اجتماع المالك» — no public door; owner links live outside /api/meet/
     ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
     ("/api/oncall/", "oncall"),              # «المناوبة» — writes re-check admin/ops inside
 ]
@@ -64694,6 +64751,7 @@ _ROLE_READ_RULES = [
     # PERMITS «التصاريح»: owners' names + permit numbers. No public read; the tab script is
     # served at /permits/static/ — outside /api/ — so this broad prefix cannot lock it out.
     ("/api/permits/", "permits"),
+    ("/api/meet/", "meet"),
     # «تدريب مساعد»: full guest transcripts + who wrote each reply. Private by definition.
     ("/api/train/", "train"),
     # «رفع التقييم»: guest names, phones in transcripts, per-person numbers. The public door is
@@ -65676,6 +65734,17 @@ async def start_web_server():
                       % (_seeded, _permits.service.effective_mode()))
             except Exception as _pe:
                 print("[permits] wiring failed (permits tab disabled, bot unaffected):", _pe)
+
+        # ---- OWNER MEETING «اجتماع المالك» — READ-ONLY caps over the statement path; the
+        # snapshot builds on the package's own pool, never on this request lane.
+        if _HAS_OWNER_MEET:
+            try:
+                _owner_meet.wire(_owner_meet_caps())
+                _owner_meet.bootstrap()
+                _owner_meet.register_routes(app)
+                print("[owner_meet] wired")
+            except Exception as _ome:
+                print("[owner_meet] wiring failed (owner meeting tab disabled, bot unaffected):", _ome)
 
         if _HAS_MOT:
             try:
@@ -74421,6 +74490,297 @@ def _permits_caps():
 def _permits_ensure_wired():
     if _permits is not None and _permits.HOST.listings is None:
         _permits.wire(_permits_caps())
+
+
+# ---- OWNER MEETING «اجتماع المالك» caps. Every cap wraps an EXISTING read-only function: the
+# package re-implements no money, never calls Hostaway, and never sees get_reservations_cached().
+def _om_owners():
+    listings = get_listings_map()
+    out = {}
+    for rec in list(_owner_registry.values()):
+        o = (rec.get("owner") or "").strip()
+        if o:
+            out.setdefault(o, []).append({"apartment": rec.get("apartment"),
+                                          "lid": _owner_resolve_lid(rec, listings)})
+    return [{"owner": o, "units": u} for o, u in sorted(out.items())]
+
+
+def _om_listings_meta():
+    out = {}
+    for k, v in ((_ls_get() or {}).get("listings") or {}).items():
+        try:
+            lid = int(k)
+        except (TypeError, ValueError):
+            continue
+        out[lid] = {"name": v.get("internal_name") or v.get("public_name") or "",
+                    "bedrooms": v.get("bedrooms"), "active": bool(v.get("active", True))}
+    return out
+
+
+def _om_unit_info(lid):
+    lid = int(lid)
+    rec = _owner_info_by_lid(lid) or {}
+    ls = ((_ls_get() or {}).get("listings") or {}).get(str(lid)) or {}
+    return {"lid": lid, "name": get_listings_map().get(lid) or ls.get("internal_name") or str(lid),
+            "bedrooms": ls.get("bedrooms"), "owner": rec.get("owner"), "apartment": rec.get("apartment")}
+
+
+def _om_terms_on(lid, d):
+    """Effective {mgmt_pct, cleaning} for one unit on one date — finance.owners.terms_on with the
+    unit's registry record (terms_on reads the base values FROM that record; without it, None)."""
+    from finance import owners as _fo
+    rec = _owner_info_by_lid(lid)
+    if not rec:
+        return None
+    return _fo.terms_on(rec.get("apartment"), d, rec)
+
+
+def _om_unit_month(owner, mkey, lid):
+    """One apartment's view of the SAME edited statement the owner portal shows (unit_slice)."""
+    from finance import owners as _fo
+    return _fo.unit_slice(_owner_month_report(owner, mkey), lid)
+
+
+def _om_cached_unit_nets(mkeys):
+    """{lid: {mkey: owner_net}} from statements ALREADY in _owner_portal_cache. Never computes —
+    peers' net per night must not cost 60 statement builds."""
+    want, out = set(mkeys), {}
+    for key, val in list(_owner_portal_cache.items()):
+        if not (isinstance(key, tuple) and len(key) == 2 and key[1] in want):
+            continue
+        rep = val[0] if isinstance(val, (tuple, list)) else val
+        for p in (rep or {}).get("apartments") or []:
+            try:
+                lid = int(p.get("lid"))
+            except (TypeError, ValueError):
+                continue
+            out.setdefault(lid, {})[key[1]] = p.get("owner_net")
+    return out
+
+
+def _om_season_windows(start, end):
+    s, e = start.isoformat(), end.isoformat()
+    return [{"kind": t, "start": a, "end": b} for t, a, b in _DNA_SEASONS if a <= e and b >= s]
+
+
+def _om_portal_token(owner):
+    rec = _owner_links.get(owner) or {}
+    return rec.get("token") if rec.get("active") else None
+
+
+def _om_dtk(kind, lids, unit_names=()):
+    """_dtk ticket records of one kind for these listings (RR has no lid until enriched → unit name)."""
+    lids = {int(x) for x in lids}
+    names = {str(n).strip() for n in unit_names if n}
+    out = []
+    for ch_id, rec in list(((_dtk or {}).get("tickets") or {}).items()):
+        if rec.get("kind") != kind:
+            continue
+        lid = rec.get("lid")
+        hit = False
+        try:
+            hit = lid is not None and int(lid) in lids
+        except (TypeError, ValueError):
+            hit = False
+        if not hit and kind == "proc":
+            hit = any(str(u) in {str(x) for x in lids} for u in (rec.get("unit_ids") or []))
+        if not hit and kind == "rr" and lid in (None, "") and str(rec.get("unit") or "").strip() in names:
+            hit = True
+        if hit:
+            r = dict(rec)
+            r["_channel"] = ch_id
+            out.append(r)
+    return out
+
+
+def _om_dash_tickets(lids):
+    lids = {int(x) for x in lids}
+    out = []
+    for t in list(_tickets):
+        try:
+            if t.get("lid") is not None and int(t["lid"]) in lids:
+                out.append(dict(t))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _om_price_actions(lids, start, end):
+    """Non-dry price changes for these listings on nights inside [start, end]."""
+    lids = {str(int(x)) for x in lids}
+    s, e = start.isoformat(), end.isoformat()
+    out = []
+    for key, entries in list(_price_log.items()):
+        lid, _sep, day = key.partition("|")
+        if lid not in lids or not (s <= day <= e):
+            continue
+        for en in entries or []:
+            if not en.get("dry"):
+                out.append({"lid": int(lid), "night": day, "ts": en.get("ts"), "old": en.get("old"),
+                            "new": en.get("new"), "source": en.get("source")})
+    return out
+
+
+def _om_review_followups(reservation_ids):
+    if not (_HAS_REVIEWASK and reservation_ids):
+        return []
+    ids = [str(x) for x in reservation_ids if x]
+    marks = ",".join("?" * len(ids))
+    return _reviewask.db.q("SELECT reservation_id, lid, state, mode, closed_at FROM rv_tickets "
+                           "WHERE reservation_id IN (%s)" % marks, tuple(ids))
+
+
+def _om_recovery(lids, start, end):
+    if not (_HAS_RECOVERY and lids):
+        return []
+    marks = ",".join("?" * len(lids))
+    return _recovery.db.q("SELECT listing_id, status, created_at, contacted_at, contact_outcome, resolved_at, "
+                          "maintenance_ticket_id, compensation_sar FROM recovery_tickets WHERE listing_id IN (%s) "
+                          "AND substr(created_at,1,10) BETWEEN ? AND ?" % marks,
+                          tuple(int(x) for x in lids) + (start.isoformat(), end.isoformat()))
+
+
+def _om_directpay(lids, start, end):
+    if not (_HAS_DIRECTPAY and lids):
+        return []
+    marks = ",".join("?" * len(lids))
+    return _directpay.db.q("SELECT listing_id, arrival, status, received_sar FROM directpay_tickets WHERE listing_id IN (%s) "
+                           "AND arrival BETWEEN ? AND ?" % marks,
+                           tuple(int(x) for x in lids) + (start.isoformat(), end.isoformat()))
+
+
+def _om_permit(lid):
+    """The unit's live MoT permit, described (days_left / band) + its live renewal ticket state. None = unknown."""
+    if not _HAS_PERMITS:
+        return None
+    try:
+        _permits_ensure_wired()
+        c = _permits.engine.cfg()
+        today = now_riyadh().date()
+        rows = [p for p in _permits.db.permits("active") if str(p.get("listing_id")) == str(lid)]
+        if not rows:
+            return None
+        p = _permits.engine.describe(rows[0], today, c)
+        t = _permits.db.live_ticket(p.get("id")) if p.get("id") else None
+        return {"end_date": p.get("end_date"), "days_left": p.get("days_left"), "band": p.get("band"),
+                "renewal_open": bool(t), "permit_type": p.get("permit_type")}
+    except Exception as e:
+        print("[owner_meet] permit read failed:", e)
+        return None
+
+
+def _om_cleaning_feedback(lids, start, end):
+    lids = {int(x) for x in lids}
+    s, e = start.isoformat(), end.isoformat()
+    out = []
+    for v in list(_cleaning_feedback.values()):
+        try:
+            lid = int(v.get("lid"))
+        except (TypeError, ValueError):
+            continue
+        day = str(v.get("ts_done") or "")[:10]
+        if lid in lids and v.get("score") and s <= day <= e:
+            out.append({"lid": lid, "score": v.get("score"), "day": day})
+    return out
+
+
+def _om_staff_names():
+    """Every staff display name we know — the privacy scan's forbidden list (never rendered)."""
+    names = set()
+    for u in list(_users.values()):
+        for k in ("name", "display_name", "username"):
+            if u.get(k):
+                names.add(str(u[k]))
+    try:
+        if _schedule is not None:
+            for emp in _schedule.db.employees() or []:
+                if emp.get("name"):
+                    names.add(str(emp["name"]))
+    except Exception:
+        pass
+    return sorted(n for n in names if len(n.strip()) >= 3)
+
+
+def _om_airbnb_room_ids():
+    """{lid: airbnb room id} from the guest-website snapshot (Hostaway's own channel data, the same
+    `_airbnb_link` the guest site already uses) + the owner's manual Airbnb-URL override."""
+    out = {}
+    for snap in (_gw_cache.get("listings") or []):
+        try:
+            lid = int(snap.get("id"))
+        except (TypeError, ValueError):
+            continue
+        url, _src = _gw_airbnb_url(snap, _gw_overrides.get(str(lid), {}) or {})
+        m = re.search(r"/rooms/(\d{6,})", url or "")
+        if m:
+            out[lid] = m.group(1)
+    return out
+
+
+def _om_listing_titles():
+    """{lid: public title} — for suggesting which Airbnb row is which unit (an admin confirms)."""
+    out = {}
+    for k, v in ((_ls_get() or {}).get("listings") or {}).items():
+        try:
+            out[int(k)] = v.get("public_name") or v.get("internal_name") or ""
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _om_owner_phone(owner):
+    """The owner's phone from his finance profile (المركز المالي → الملاك). Only ever used to build a
+    wa.me link that Faisal taps himself."""
+    from finance import owners as _fo
+    try:
+        return ((_fo._terms_store().get("owners") or {}).get(owner) or {}).get("phone") or ""
+    except Exception:
+        return ""
+
+
+def _om_ticket_status(ref):
+    """A commitment's linked ticket: a Discord ticket channel id or a dashboard ticket id ->
+    {found, closed, closed_at}. Read-only; chapter 0 turns «closed» into evidence."""
+    ref = str(ref or "").strip()
+    if not ref:
+        return {"found": False}
+    rec = ((_dtk or {}).get("tickets") or {}).get(ref)
+    if rec:
+        return {"found": True, "closed": rec.get("status") == "closed", "closed_at": rec.get("closed_at")}
+    t = _dash_ticket(ref)
+    if t:
+        log = [x for x in (t.get("log") or []) if isinstance(x, dict) and x.get("ts")]
+        done = t.get("status") in ("fixed", "cancelled")
+        return {"found": True, "closed": done, "closed_at": (log[-1]["ts"] if (done and log) else None)}
+    return {"found": False}
+
+
+def _owner_meet_caps():
+    return {"owner_phone": _om_owner_phone, "ticket_status": _om_ticket_status,
+            "airbnb_room_ids": _om_airbnb_room_ids, "listing_titles": _om_listing_titles,
+            "min_price": lambda lid: (_pe_floor_overrides.get(int(lid)) or _pe_floor_overrides.get(str(lid)) or None),
+            "maint_tickets": lambda lids: _om_dtk("maint", lids),
+            "proc_tickets": lambda lids: _om_dtk("proc", lids),
+            "rr_tickets": lambda lids, names: _om_dtk("rr", lids, names),
+            "dash_tickets": _om_dash_tickets,
+            "rr_outcome": _rr_outcome, "rr_item_lines": _rr_item_lines,
+            "rr_ar_texts": lambda rec: _rr_ar_texts(rec, rec.get("closeout") or {}),
+            "rr_types": lambda: {k: ar for k, ar, _en in _RR_TYPES},
+            "price_actions": _om_price_actions, "review_followups": _om_review_followups,
+            "recovery_for": _om_recovery, "directpay_for": _om_directpay, "permit_for": _om_permit,
+            "cleaning_feedback": _om_cleaning_feedback, "staff_names": _om_staff_names,
+            "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+            "tab_allowed": lambda request, tab: _user_can(request, tab, "read"),
+            "json_response": _json, "web": web, "web_thread": web_thread, "tz": TZ, "now": now_riyadh,
+            "state_dir": STATE_DIR, "link_base": _dispatch_base_url,
+            "owners": _om_owners, "owner_lids": lambda owner: _owner_lids(owner, get_listings_map()),
+            "unit_info": _om_unit_info, "listings_meta": _om_listings_meta, "terms_on": _om_terms_on,
+            "owner_portal_token": _om_portal_token,
+            "month_report": _owner_month_report, "unit_month": _om_unit_month,
+            "cached_unit_nets": _om_cached_unit_nets,
+            "reservations_window": lambda start, end: fetch_reservations_window_checked(start, end),
+            "explode_nights": _explode_nights, "season_windows": _om_season_windows,
+            "reviews_all": lambda: list(_reviews.values())}
 
 
 def _permits_embed(card):

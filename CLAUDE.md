@@ -732,3 +732,32 @@ All live in `.claude/skills/` (gitignored — re-clone if missing; see the brief
 - `claude-mem` — persists rulings (palette, tone, rejected candidates) across sessions.
 - `vercel-labs/skills` — skill discovery plumbing, once at setup.
 The earlier "Design skills are INSTALLED" blocks above still apply (impeccable, emil-design-eng, superpowers).
+
+## Owner Meeting Room «اجتماع المالك» — the `owner_meet/` package
+Spec `docs/superpowers/specs/2026-10-06-owner-meet-design.md`, plan `docs/superpowers/plans/2026-10-06-owner-meet.md`,
+gates `owner_meet/GATES.md`. A frozen per-apartment snapshot Faisal presents (16:9 stage `/meet/{id}` + presenter
+window `/meet/{id}/notes`), records decisions on, and — ONLY by his own tap — sends as a read-only link `/m/{token}`
++ PDF `/m/{token}.pdf` with a prepared WhatsApp message (`/api/meet/meetings/{id}/wa` → wa.me).
+- **Money is READ, never computed:** owner level = Σ `_owner_month_report().owner_net`, one unit = Σ
+  `finance.owners.unit_slice(...)`. `test_owner_meet_money` proves it to the halala against the real statement path.
+  The waterfall starts at «صافي الحجوزات» (Faisal 2026-10-06) — no VAT/host-fee rows, no ÷1.15 / ×0.822.
+- **Two halves:** `snapshot["owner"]` (the only thing any owner surface renders) and `snapshot["presenter"]`
+  (peer counts, private reviews, forbidden-name lists, lever decisions). Peers leave `engine.peer_bands` only as bands —
+  never a count, rank, dot or other unit's name (R1/R2).
+- **Privacy fails closed:** `redact.py` strips guest names / staff names / phones / HM-codes at build (script-aware
+  word boundaries — «وKhalid», «ولنورة» bit us); `privacy.scan` re-checks the rendered page at build AND at send; a hit
+  is a red readiness line and «إرسال» refuses. The fixture PLANTS leaks (`tests/owner_meet_fixture_build.py`).
+- **Sent = frozen in SQL:** triggers refuse UPDATE/DELETE on a frozen `meet_snapshots` row. Reopen = admin + reason →
+  version+1; old links keep their version.
+- **Package rules:** never `import bot`; every handler on `HOST.web_thread`; ZERO backslashes in every `owner_meet`
+  .py/.js (`test_owner_meet_structure`); tab JS is `owner_meet/static/owner_meet_tab.js` (loader stub sits before the
+  «رفع التقييم» stub — reviewask's test measures the region after it).
+- **«meet» is in `_GRANT_ONLY_TABS`:** no role default ever grants it; Faisal ticks it per person.
+- **Chart/data colour is Diriyah mud brown `#8B5A3C` (soft `#EBDCCB`)** — Faisal replaced blue, 2026-10-06.
+- **PDF** prints on the shared Chromium (`ouja_render._pw_pool` + `_pw_browser`, its own 1280×720 print fn); that module
+  needs Python ≥ 3.12, so locally `pdf.py` falls back to a private playwright launch. `owner_meet/tools_layout_audit.py`
+  is the G18/G19 audit (overflow per chapter, 390 px phone, PDF pages/ratio/ISO dates/privacy).
+- **Airbnb report:** import from the tab (TSV/CSV/XLSX, parsed by header NAME); every import is a dated snapshot; a unit
+  maps by Hostaway's own Airbnb id first, else an admin-confirmed row. Test group A (21 listings, plan PDF p.11) is in
+  `owner_meet/rules.seed.json`, confirmed by Faisal 2026-10-06; group B is never shown to an owner.
+- Env: `OWNER_MEET_ENABLED` (1; 0 = no routes AND no menu item), `OWNER_MEET_PDF_DISABLED`, `OWNER_MEET_PDF_TIMEOUT_S`.

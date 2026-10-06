@@ -1,0 +1,84 @@
+{
+ "_note": "Owner-editable thresholds for «اجتماع المالك». Override any top-level key in $STATE_DIR/owner_meet_rules.json (it wins key-by-key). Spec 2026-10-06 §8.",
+ "peer_min": 6,
+ "percentile_top_at": 60,
+ "percentile_low_at": 30,
+ "fx_sar_per_usd": 3.75,
+ "rating_target": 4.75,
+ "thresholds": {
+  "rate_below": 4.75,
+  "new_bookings_365_below": 25,
+  "ctr_quartile": 0.25,
+  "page_quartile": 0.25,
+  "pace_open_of_14": 13,
+  "permit_days": 90
+ },
+ "uplifts_pct": {
+  "rate": 3,
+  "ctr": 4,
+  "page": 3,
+  "pace": 2,
+  "test": 3,
+  "season": 2
+ },
+ "uplift_total_cap_pct": 15,
+ "discount_ceiling_pct": 30,
+ "levers": {
+  "weekly": {
+   "decision": "test",
+   "pct": 10
+  },
+  "early_bird": {
+   "decision": "test",
+   "pct": 10,
+   "days": 60
+  },
+  "monthly": {
+   "decision": "no"
+  },
+  "non_refundable": {
+   "decision": "no",
+   "unless_cancel_share_over": 0.08,
+   "window_days": 90
+  },
+  "last_minute": {
+   "decision": "remove"
+  },
+  "new_listing": {
+   "decision": "yes"
+  }
+ },
+ "promo_test_group_a": {
+  "source": "Airbnb Host Opportunity Report v5, data as of 2026-10-04",
+  "method": "bedroom groups ascending; inside each, Gross Booking Value YTD high to low, alternate; the starting letter flips each group (plan PDF p.11)",
+  "starts": "2026-11-05",
+  "airbnb_ids": [
+   "1422775590402451762",
+   "1715532343231814812",
+   "1568130053324504716",
+   "1561800347873790999",
+   "1570535166842558551",
+   "1641599592684738355",
+   "1620336947383321106",
+   "1530766911627548314",
+   "1616962809132400499",
+   "1610106546826625147",
+   "1684909890937211091",
+   "1745307877324854411",
+   "1727500249174818887",
+   "1769664657811048817",
+   "1603109661302757359",
+   "1561912599339934514",
+   "1602410150308658235",
+   "1653008840826050856",
+   "1660995856019679505",
+   "1683443819720027679",
+   "1682750718815832059"
+  ],
+  "confirmed_by": "Faisal",
+  "confirmed_at": "2026-10-06"
+ },
+ "trg_pct": 15,
+ "nonref_pct": 10,
+ "next_meeting_days": 91
+}

@@ -1,0 +1,1197 @@
+{
+ "meta": {
+  "built_at": "2026-10-06T19:22:51+03:00",
+  "data_as_of": "2026-10-06T19:22:51+03:00",
+  "degraded": false,
+  "meeting_date": "2026-10-06",
+  "period": {
+   "end": "2026-09-30",
+   "kind": "custom",
+   "months": [
+    "2026-07",
+    "2026-08",
+    "2026-09"
+   ],
+   "partial": null,
+   "start": "2026-07-01"
+  },
+  "schema_version": 1,
+  "whole_owner": true
+ },
+ "owner": {
+  "annotations": [
+   {
+    "end": "2026-09-16",
+    "start": "2026-09-01",
+    "text_ar": "توقّف التشغيل حتى 16 سبتمبر"
+   }
+  ],
+  "market": {
+   "airdna": {
+    "adr_sar": 341,
+    "as_of": "July 2026",
+    "occupancy_pct": 38,
+    "source": "AirDNA Riyadh market snapshot"
+   },
+   "mot_adr": {
+    "as_of": "2026-03-31",
+    "source": "وزارة السياحة · الشقق المخدومة، المملكة",
+    "value": "206"
+   },
+   "mot_occupancy": {
+    "as_of": "2026-03-31",
+    "source": "وزارة السياحة · الربع الأول 2026",
+    "value": "59.3"
+   }
+  },
+  "owner_name": "مالك الاجتماع",
+  "period": {
+   "end": "2026-09-30",
+   "kind": "custom",
+   "months": [
+    "2026-07",
+    "2026-08",
+    "2026-09"
+   ],
+   "partial": null,
+   "start": "2026-07-01"
+  },
+  "promises": null,
+  "scope": {
+   "lids": [
+    77,
+    78
+   ],
+   "money": {
+    "months": [
+     {
+      "adjustments": 0.0,
+      "cleaning": 300.0,
+      "degraded": false,
+      "expenses": 0.0,
+      "m": "2026-07",
+      "missing": false,
+      "ouja_fee": 660.0,
+      "owner_net": 2340.0,
+      "partial": false,
+      "total_income": 3300.0
+     },
+     {
+      "adjustments": 0.0,
+      "cleaning": 300.0,
+      "degraded": false,
+      "expenses": 0.0,
+      "m": "2026-08",
+      "missing": false,
+      "ouja_fee": 660.0,
+      "owner_net": 2340.0,
+      "partial": false,
+      "total_income": 3300.0
+     },
+     {
+      "adjustments": 0.0,
+      "cleaning": 300.0,
+      "degraded": false,
+      "expenses": 0.0,
+      "m": "2026-09",
+      "missing": false,
+      "ouja_fee": 660.0,
+      "owner_net": 2340.0,
+      "partial": false,
+      "total_income": 3300.0
+     }
+    ],
+    "per100": {
+     "cleaning": 9,
+     "expenses": 0,
+     "fee": 20,
+     "owner": 71
+    },
+    "total": {
+     "adjustments": 0.0,
+     "cleaning": 900.0,
+     "degraded_months": [],
+     "expenses": 0.0,
+     "missing_months": [],
+     "ouja_fee": 1980.0,
+     "owner_net": 7020.0,
+     "total_income": 9900.0
+    },
+    "waterfall": {
+     "reconciled": true,
+     "residual": 0.0,
+     "rows": [
+      {
+       "amount": 9900.0,
+       "key": "income",
+       "sign": 1
+      },
+      {
+       "amount": 1980.0,
+       "key": "fee",
+       "sign": -1
+      },
+      {
+       "amount": 900.0,
+       "key": "cleaning",
+       "sign": -1
+      },
+      {
+       "amount": 0.0,
+       "key": "expenses",
+       "sign": -1
+      },
+      {
+       "amount": 7020.0,
+       "key": "net",
+       "sign": 0
+      }
+     ]
+    }
+   },
+   "trend": [
+    {
+     "m": "2026-07",
+     "net": 2340.0,
+     "partial": false
+    },
+    {
+     "m": "2026-08",
+     "net": 2340.0,
+     "partial": false
+    },
+    {
+     "m": "2026-09",
+     "net": 2340.0,
+     "partial": false
+    }
+   ]
+  },
+  "seasons": [
+   {
+    "end": "2026-09-23",
+    "kind": "national_day",
+    "start": "2026-09-23"
+   }
+  ],
+  "units": [
+   {
+    "actions": [
+     {
+      "due": "2026-11-05",
+      "evidence": "التقييم 4.70 والهدف أعلى من 4.75",
+      "key": "rate",
+      "owner_text": "نرفع تقييم الشقة: نتواصل مع كل ضيف عند مغادرته، ونعالج سبب آخر التقييمات الأقل من خمس نجوم.",
+      "role": "مدير الحساب",
+      "side": "ouja"
+     },
+     {
+      "due": "2026-10-13",
+      "evidence": "1 تذكرة مفتوحة الآن",
+      "key": "maint_open",
+      "owner_text": "نغلق تذاكر الصيانة المفتوحة ونرسل لك صورة بعد الإصلاح.",
+      "role": "العمليات",
+      "side": "ouja"
+     },
+     {
+      "due": "2026-10-11",
+      "evidence": "1 طلب قيد المراجعة",
+      "key": "rr_open",
+      "owner_text": "نتابع طلب التعويض حتى يصل رد Airbnb.",
+      "role": "التعويضات",
+      "side": "ouja"
+     },
+     {
+      "due": "2026-10-20",
+      "evidence": "التصريح غير مسجّل لدينا",
+      "key": "permit",
+      "owner_text": "تصريح وزارة السياحة للشقة باسمك: نحتاج صورة التصريح الحالي لنسجّله ونتابع تجديده.",
+      "role": "العمليات",
+      "side": "owner"
+     },
+     {
+      "due": "2026-10-13",
+      "evidence": "لا يوجد حد أدنى مسجّل لسعر الشقة",
+      "key": "floor",
+      "owner_text": "نضع حداً أدنى لسعر الليلة يحمي الشقة من تراكم خصومات المنصة.",
+      "role": "المنصة",
+      "side": "ouja"
+     },
+     {
+      "due": "2026-11-05",
+      "evidence": "الشقة ضمن تجربة الخصومات المدروسة",
+      "key": "test",
+      "owner_text": "تجربة خصم مدروسة لمدة 45 يوماً، نقيس أثرها ونوقفها في اليوم الحادي والعشرين إذا لم ترفع دخل الشقة.",
+      "role": "المنصة",
+      "side": "ouja"
+     }
+    ],
+    "airbnb": {
+     "bookings_365": 117,
+     "data_as_of": "2026-10-04",
+     "funnel": {
+      "appear": 10000,
+      "bookings": 30.0,
+      "conv": 1.79,
+      "ctr100": 16.8,
+      "views": 1676
+     },
+     "fx": 3.75,
+     "gbv_sar": 80209,
+     "guest_favorite": false,
+     "new_listing_eligible": null,
+     "occ_n3m": 0.1,
+     "peer": {
+      "bookings": 16.0,
+      "conv": 1.47,
+      "ctr100": 11.5,
+      "scope": "peers",
+      "views": 1145
+     },
+     "promos": [
+      "خصم الأسبوع 1٪",
+      "خصم الشهر 1٪",
+      "خصم الحجز المبكر غير مفعّل",
+      "خصم اللحظة الأخيرة 1٪"
+     ],
+     "rating": 4.73
+    },
+    "bedrooms": 2,
+    "bookings": 6,
+    "claims": {
+     "ring": {
+      "claimed": 750.0,
+      "claimed_all": 870.0,
+      "closed": 1,
+      "open": 1,
+      "rate": 0.6,
+      "received": 450.0
+     },
+     "rows": [
+      {
+       "answer_ar": null,
+       "chip": "open",
+       "chip_ar": "قيد المراجعة",
+       "claimed": 120.0,
+       "closed": false,
+       "date": "2026-09-28",
+       "deadline": {
+        "date": "2026-10-11",
+        "days_left": 5
+       },
+       "items": [
+        "مناشف 120"
+       ],
+       "items_hidden": 0,
+       "payer_ar": null,
+       "received": null,
+       "type_ar": "غرض مفقود"
+      },
+      {
+       "answer_ar": "دفعت Airbnb جزءاً لأنها اعتبرت بعض الضرر استهلاكاً طبيعياً.",
+       "chip": "partial",
+       "chip_ar": "استُلم جزئياً",
+       "claimed": 750.0,
+       "closed": true,
+       "date": "2026-08-05",
+       "deadline": null,
+       "items": [
+        "كنب متسخ 300",
+        "طاولة مكسورة 450"
+       ],
+       "items_hidden": 0,
+       "payer_ar": "الإصلاح على حساب المالك",
+       "received": 450.0,
+       "type_ar": "تلفيات بالشقة أو الأثاث"
+      }
+     ]
+    },
+    "cleaning_type": "ours",
+    "expenses": [],
+    "fair_share": 258,
+    "forecast": {
+     "base": 6000.0,
+     "capped": false,
+     "method": "seasonal",
+     "months": [
+      "2026-10",
+      "2026-11",
+      "2026-12"
+     ],
+     "target": 6480.0,
+     "total_pct": 8.0,
+     "trailing": [
+      "2026-07",
+      "2026-08",
+      "2026-09"
+     ],
+     "uplifts": [
+      {
+       "key": "rate",
+       "pct": 3.0
+      },
+      {
+       "key": "test",
+       "pct": 3.0
+      },
+      {
+       "key": "season",
+       "pct": 2.0
+      }
+     ]
+    },
+    "headline": [
+     [
+      "دخل شقتك ",
+      false
+     ],
+     [
+      "أعلى من 90٪",
+      true
+     ],
+     [
+      " من الشقق المشابهة",
+      false
+     ],
+     [
+      "، والتقييم أول ما نعمل عليه.",
+      false
+     ]
+    ],
+    "lid": 77,
+    "log": {
+     "counters": {
+      "cleaning_count": 1,
+      "cleaning_score": 5.0,
+      "direct": 0,
+      "direct_collected": 0,
+      "maint": 3,
+      "price_nights": 1,
+      "recovery": 0,
+      "reviews": 2,
+      "rr": 2
+     },
+     "events": [
+      {
+       "date": "2026-09-28",
+       "kind": "rr",
+       "text": "طلب تعويض · غرض مفقود · قيد المراجعة"
+      },
+      {
+       "date": "2026-09-20",
+       "kind": "maint",
+       "text": "صيانة · سباكة، من مكالمة تقييم: ضغط الدش ضعيف"
+      },
+      {
+       "date": "2026-09-07",
+       "kind": "price",
+       "text": "مراجعة سعر 1 ليلة"
+      },
+      {
+       "date": "2026-09-02",
+       "kind": "review",
+       "text": "تقييم 4 من 5"
+      },
+      {
+       "date": "2026-08-12",
+       "kind": "review",
+       "text": "تقييم 5 من 5"
+      },
+      {
+       "date": "2026-08-05",
+       "kind": "rr",
+       "text": "طلب تعويض · تلفيات بالشقة أو الأثاث · استُلم جزئياً"
+      },
+      {
+       "date": "2026-08-03",
+       "kind": "maint",
+       "text": "صيانة · تكييف، الضيف يقول المكيف ما يبرد، رقمه"
+      },
+      {
+       "date": "2026-07-22",
+       "kind": "proc",
+       "text": "شراء للشقة · ستائر غرفة النوم"
+      },
+      {
+       "date": "2026-07-15",
+       "kind": "maint",
+       "text": "صيانة · صيانة، تسريب مغسلة — بلاغ من الضيف"
+      }
+     ]
+    },
+    "maint": {
+     "rows": [
+      {
+       "category": "سباكة",
+       "cost": null,
+       "date": "2026-09-20",
+       "hours": null,
+       "open": true,
+       "source": "review",
+       "source_ar": "مكالمة تقييم",
+       "summary": "من مكالمة تقييم: ضغط الدش ضعيف"
+      },
+      {
+       "category": "تكييف",
+       "cost": 350.0,
+       "date": "2026-08-03",
+       "hours": 6.5,
+       "open": false,
+       "source": "team",
+       "source_ar": "فريق عوجا",
+       "summary": "الضيف يقول المكيف ما يبرد، رقمه"
+      },
+      {
+       "category": "صيانة",
+       "cost": 120.0,
+       "date": "2026-07-15",
+       "hours": 24.0,
+       "open": false,
+       "source": "guest",
+       "source_ar": "الضيف",
+       "summary": "تسريب مغسلة — بلاغ من الضيف"
+      }
+     ],
+     "stats": {
+      "count": 3,
+      "median_hours": 15.25,
+      "open_now": 1,
+      "team_share": 33,
+      "total_cost": 470.0
+     }
+    },
+    "mgmt_pct": 20.0,
+    "money": {
+     "months": [
+      {
+       "adjustments": 0.0,
+       "cleaning": 0.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-07",
+       "missing": false,
+       "ouja_fee": 500.0,
+       "owner_net": 2000.0,
+       "partial": false,
+       "total_income": 2500.0
+      },
+      {
+       "adjustments": 0.0,
+       "cleaning": 0.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-08",
+       "missing": false,
+       "ouja_fee": 500.0,
+       "owner_net": 2000.0,
+       "partial": false,
+       "total_income": 2500.0
+      },
+      {
+       "adjustments": 0.0,
+       "cleaning": 0.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-09",
+       "missing": false,
+       "ouja_fee": 500.0,
+       "owner_net": 2000.0,
+       "partial": false,
+       "total_income": 2500.0
+      }
+     ],
+     "per100": {
+      "expenses": 0,
+      "fee": 20,
+      "owner": 80
+     },
+     "total": {
+      "adjustments": 0.0,
+      "cleaning": 0.0,
+      "degraded_months": [],
+      "expenses": 0.0,
+      "missing_months": [],
+      "ouja_fee": 1500.0,
+      "owner_net": 6000.0,
+      "total_income": 7500.0
+     },
+     "waterfall": {
+      "reconciled": true,
+      "residual": 0.0,
+      "rows": [
+       {
+        "amount": 7500.0,
+        "key": "income",
+        "sign": 1
+       },
+       {
+        "amount": 1500.0,
+        "key": "fee",
+        "sign": -1
+       },
+       {
+        "amount": 0.0,
+        "key": "expenses",
+        "sign": -1
+       },
+       {
+        "amount": 6000.0,
+        "key": "net",
+        "sign": 0
+       }
+      ]
+     }
+    },
+    "name": "Ouja | M1",
+    "next14": {
+     "band": {
+      "label": "أعلى من 90٪ من الشقق المشابهة",
+      "p25": 0.0536,
+      "p50": 0.1429,
+      "p75": 0.1429,
+      "pct10": 100,
+      "scope": "peers",
+      "tone": "top",
+      "value": 0.2143
+     },
+     "from": "2026-10-06",
+     "share": 0.2143
+    },
+    "nights": 12,
+    "peers": {
+     "adr": {
+      "label": "أعلى من 80٪ من الشقق المشابهة",
+      "p25": 431.25,
+      "p50": 562.5,
+      "p75": 693.75,
+      "pct10": 80,
+      "scope": "peers",
+      "tone": "top",
+      "value": 725.0
+     },
+     "income": {
+      "label": "أعلى من 90٪ من الشقق المشابهة",
+      "p25": 2587.5,
+      "p50": 3375.0,
+      "p75": 4162.5,
+      "pct10": 100,
+      "scope": "peers",
+      "tone": "top",
+      "value": 8700.0
+     },
+     "occupancy": {
+      "label": "أعلى من 90٪ من الشقق المشابهة",
+      "p25": 0.0652,
+      "p50": 0.0652,
+      "p75": 0.0652,
+      "pct10": 100,
+      "scope": "peers",
+      "tone": "top",
+      "value": 0.1304
+     },
+     "rating": {
+      "label": "أعلى من 60٪ من الشقق المشابهة",
+      "p25": 4.6,
+      "p50": 4.7,
+      "p75": 4.72,
+      "pct10": 60,
+      "scope": "peers",
+      "tone": "top",
+      "value": 4.7
+     }
+    },
+    "permit": null,
+    "rating": {
+     "reviews": 10,
+     "value": 4.7
+    },
+    "reviews": {
+     "rows": [
+      {
+       "date": "2026-09-02",
+       "first_name": "Omar",
+       "followed": null,
+       "stars": 4.0,
+       "text": "الموقع ممتاز لكن الدش ضعيف."
+      },
+      {
+       "date": "2026-08-12",
+       "first_name": "Sara",
+       "followed": null,
+       "stars": 5.0,
+       "text": "شقة نظيفة والتواصل ممتاز، وفريق عوجا ساعدنا بسرعة."
+      }
+     ],
+     "summary": {
+      "count": 2,
+      "mean": 4.5,
+      "subscores": [
+       {
+        "key": "cleanliness",
+        "label": "النظافة",
+        "value": 4.5
+       },
+       {
+        "key": "communication",
+        "label": "التواصل",
+        "value": 5.0
+       },
+       {
+        "key": "value",
+        "label": "القيمة",
+        "value": 4.0
+       }
+      ],
+      "target": 4.75
+     }
+    },
+    "stats": {
+     "adr": 725.0,
+     "days": 92,
+     "income": 8700.0,
+     "nights": 12,
+     "occupancy": 0.1304
+    },
+    "trend": [
+     {
+      "m": "2026-07",
+      "net": 2000.0,
+      "occupancy": 0.129,
+      "partial": false
+     },
+     {
+      "m": "2026-08",
+      "net": 2000.0,
+      "occupancy": 0.129,
+      "partial": false
+     },
+     {
+      "m": "2026-09",
+      "net": 2000.0,
+      "occupancy": 0.1333,
+      "partial": false
+     }
+    ]
+   },
+   {
+    "actions": [
+     {
+      "due": "2026-10-20",
+      "evidence": "التصريح غير مسجّل لدينا",
+      "key": "permit",
+      "owner_text": "تصريح وزارة السياحة للشقة باسمك: نحتاج صورة التصريح الحالي لنسجّله ونتابع تجديده.",
+      "role": "العمليات",
+      "side": "owner"
+     },
+     {
+      "due": "2026-10-13",
+      "evidence": "لا يوجد حد أدنى مسجّل لسعر الشقة",
+      "key": "floor",
+      "owner_text": "نضع حداً أدنى لسعر الليلة يحمي الشقة من تراكم خصومات المنصة.",
+      "role": "المنصة",
+      "side": "ouja"
+     },
+     {
+      "due": "2026-11-05",
+      "evidence": "الشقة ضمن تجربة الخصومات المدروسة",
+      "key": "test",
+      "owner_text": "تجربة خصم مدروسة لمدة 45 يوماً، نقيس أثرها ونوقفها في اليوم الحادي والعشرين إذا لم ترفع دخل الشقة.",
+      "role": "المنصة",
+      "side": "ouja"
+     }
+    ],
+    "airbnb": {
+     "bookings_365": 158,
+     "data_as_of": "2026-10-04",
+     "funnel": {
+      "appear": 10000,
+      "bookings": 16.0,
+      "conv": 1.63,
+      "ctr100": 9.8,
+      "views": 982
+     },
+     "fx": 3.75,
+     "gbv_sar": 70849,
+     "guest_favorite": false,
+     "new_listing_eligible": null,
+     "occ_n3m": 0.13,
+     "peer": {
+      "bookings": 15.0,
+      "conv": 1.57,
+      "ctr100": 10.7,
+      "scope": "portfolio",
+      "views": 1066
+     },
+     "promos": [
+      "خصم الأسبوع غير مفعّل",
+      "خصم الشهر غير مفعّل",
+      "خصم الحجز المبكر غير مفعّل",
+      "خصم اللحظة الأخيرة 1٪"
+     ],
+     "rating": 4.78
+    },
+    "bedrooms": 1,
+    "bookings": 3,
+    "claims": {
+     "ring": {
+      "claimed": 0,
+      "claimed_all": 0,
+      "closed": 0,
+      "open": 0,
+      "rate": null,
+      "received": 0
+     },
+     "rows": []
+    },
+    "cleaning_type": "owner",
+    "expenses": [],
+    "fair_share": 83,
+    "forecast": {
+     "base": 1020.0,
+     "capped": false,
+     "method": "seasonal",
+     "months": [
+      "2026-10",
+      "2026-11",
+      "2026-12"
+     ],
+     "target": 1071.0,
+     "total_pct": 5.0,
+     "trailing": [
+      "2026-07",
+      "2026-08",
+      "2026-09"
+     ],
+     "uplifts": [
+      {
+       "key": "test",
+       "pct": 3.0
+      },
+      {
+       "key": "season",
+       "pct": 2.0
+      }
+     ]
+    },
+    "headline": [
+     [
+      "دخل شقتك ",
+      false
+     ],
+     [
+      "أقل من أغلب شققنا",
+      true
+     ],
+     [
+      "، ونبدأ من سعر الليلة.",
+      false
+     ]
+    ],
+    "lid": 78,
+    "log": {
+     "counters": {
+      "cleaning_count": 0,
+      "cleaning_score": null,
+      "direct": 0,
+      "direct_collected": 0,
+      "maint": 0,
+      "price_nights": 0,
+      "recovery": 0,
+      "reviews": 0,
+      "rr": 0
+     },
+     "events": []
+    },
+    "maint": {
+     "rows": [],
+     "stats": {
+      "count": 0,
+      "median_hours": null,
+      "open_now": 0,
+      "team_share": null,
+      "total_cost": 0
+     }
+    },
+    "mgmt_pct": 20.0,
+    "money": {
+     "months": [
+      {
+       "adjustments": 0.0,
+       "cleaning": 300.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-07",
+       "missing": false,
+       "ouja_fee": 160.0,
+       "owner_net": 340.0,
+       "partial": false,
+       "total_income": 800.0
+      },
+      {
+       "adjustments": 0.0,
+       "cleaning": 300.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-08",
+       "missing": false,
+       "ouja_fee": 160.0,
+       "owner_net": 340.0,
+       "partial": false,
+       "total_income": 800.0
+      },
+      {
+       "adjustments": 0.0,
+       "cleaning": 300.0,
+       "degraded": false,
+       "expenses": 0.0,
+       "m": "2026-09",
+       "missing": false,
+       "ouja_fee": 160.0,
+       "owner_net": 340.0,
+       "partial": false,
+       "total_income": 800.0
+      }
+     ],
+     "per100": {
+      "cleaning": 38,
+      "expenses": 0,
+      "fee": 20,
+      "owner": 42
+     },
+     "total": {
+      "adjustments": 0.0,
+      "cleaning": 900.0,
+      "degraded_months": [],
+      "expenses": 0.0,
+      "missing_months": [],
+      "ouja_fee": 480.0,
+      "owner_net": 1020.0,
+      "total_income": 2400.0
+     },
+     "waterfall": {
+      "reconciled": true,
+      "residual": 0.0,
+      "rows": [
+       {
+        "amount": 2400.0,
+        "key": "income",
+        "sign": 1
+       },
+       {
+        "amount": 480.0,
+        "key": "fee",
+        "sign": -1
+       },
+       {
+        "amount": 900.0,
+        "key": "cleaning",
+        "sign": -1
+       },
+       {
+        "amount": 0.0,
+        "key": "expenses",
+        "sign": -1
+       },
+       {
+        "amount": 1020.0,
+        "key": "net",
+        "sign": 0
+       }
+      ]
+     }
+    },
+    "name": "Ouja | M2",
+    "next14": {
+     "band": {
+      "label": "أعلى من 60٪ من شققنا",
+      "p25": 0.0714,
+      "p50": 0.1429,
+      "p75": 0.1429,
+      "pct10": 60,
+      "scope": "portfolio",
+      "tone": "top",
+      "value": 0.1429
+     },
+     "from": "2026-10-06",
+     "share": 0.1429
+    },
+    "nights": 6,
+    "peers": {
+     "adr": {
+      "label": "أقل من أغلب شققنا",
+      "p25": 450.0,
+      "p50": 600.0,
+      "p75": 725.0,
+      "pct10": null,
+      "scope": "portfolio",
+      "tone": "low",
+      "value": 500.0
+     },
+     "income": {
+      "label": "أقل من أغلب شققنا",
+      "p25": 2700.0,
+      "p50": 3600.0,
+      "p75": 4500.0,
+      "pct10": null,
+      "scope": "portfolio",
+      "tone": "low",
+      "value": 3000.0
+     },
+     "occupancy": {
+      "label": "ضمن النصف الأوسط من شققنا",
+      "p25": 0.0652,
+      "p50": 0.0652,
+      "p75": 0.0652,
+      "pct10": null,
+      "scope": "portfolio",
+      "tone": "mid",
+      "value": 0.0652
+     },
+     "rating": {
+      "label": "أعلى من 90٪ من شققنا",
+      "p25": 4.6,
+      "p50": 4.7,
+      "p75": 4.7,
+      "pct10": 100,
+      "scope": "portfolio",
+      "tone": "top",
+      "value": 4.83
+     }
+    },
+    "permit": null,
+    "rating": {
+     "reviews": 3,
+     "value": 4.83
+    },
+    "reviews": {
+     "rows": [],
+     "summary": {
+      "count": 0,
+      "mean": null,
+      "subscores": [],
+      "target": 4.75
+     }
+    },
+    "stats": {
+     "adr": 500.0,
+     "days": 92,
+     "income": 3000.0,
+     "nights": 6,
+     "occupancy": 0.0652
+    },
+    "trend": [
+     {
+      "m": "2026-07",
+      "net": 340.0,
+      "occupancy": 0.0645,
+      "partial": false
+     },
+     {
+      "m": "2026-08",
+      "net": 340.0,
+      "occupancy": 0.0645,
+      "partial": false
+     },
+     {
+      "m": "2026-09",
+      "net": 340.0,
+      "occupancy": 0.0667,
+      "partial": false
+     }
+    ]
+   }
+  ]
+ },
+ "presenter": {
+  "forbidden": {
+   "guest_full_names": [
+    "Fahad Alqahtani",
+    "Noura Alharbi",
+    "Sara Almutairi"
+   ],
+   "other_owners": [],
+   "other_units": [
+    "Peer Unit 901",
+    "Peer Unit 902",
+    "Peer Unit 903",
+    "Peer Unit 904",
+    "Peer Unit 905",
+    "Peer Unit 906",
+    "Peer Unit 907",
+    "Peer Unit 908"
+   ],
+   "staff": [
+    "Majed Ops",
+    "Reem RR",
+    "khalid.ops"
+   ],
+   "staff_tokens": [
+    "Majed",
+    "Reem",
+    "khalid"
+   ]
+  },
+  "levers": {
+   "early_bird": {
+    "days": 60,
+    "decision": "test",
+    "pct": 10
+   },
+   "last_minute": {
+    "decision": "remove"
+   },
+   "monthly": {
+    "decision": "no"
+   },
+   "new_listing": {
+    "decision": "yes"
+   },
+   "non_refundable": {
+    "decision": "no",
+    "unless_cancel_share_over": 0.08,
+    "window_days": 90
+   },
+   "weekly": {
+    "decision": "test",
+    "pct": 10
+   }
+  },
+  "notes": [
+   {
+    "key": "abnb_unmapped_rows",
+    "text_ar": "40 سطراً في تقرير Airbnb بلا شقة مربوطة"
+   }
+  ],
+  "peer_internal": {
+   "77": {
+    "adr": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    },
+    "funnel": {
+     "n": 23,
+     "scope": "peers"
+    },
+    "income": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    },
+    "net_per_night": {
+     "n": 1,
+     "reason": "too_few",
+     "scope": "portfolio"
+    },
+    "next14": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    },
+    "occupancy": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    },
+    "rating": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    },
+    "revpar": {
+     "n": 8,
+     "reason": null,
+     "scope": "peers"
+    }
+   },
+   "78": {
+    "adr": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    },
+    "funnel": {
+     "n": 41,
+     "scope": "portfolio"
+    },
+    "income": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    },
+    "net_per_night": {
+     "n": 1,
+     "reason": "too_few",
+     "scope": "portfolio"
+    },
+    "next14": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    },
+    "occupancy": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    },
+    "rating": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    },
+    "revpar": {
+     "n": 9,
+     "reason": null,
+     "scope": "portfolio"
+    }
+   }
+  },
+  "plan": {
+   "77": {
+    "in_test_group": true,
+    "notes": [
+     "المجموعة A — لا تذكر المجموعة B للمالك"
+    ],
+    "stack": {
+     "ceiling": 0.3,
+     "combined": 0.109,
+     "nonref": 0.1,
+     "one_of": 0.01,
+     "trg": 0.0,
+     "warn": false
+    }
+   },
+   "78": {
+    "in_test_group": true,
+    "notes": [
+     "المجموعة A — لا تذكر المجموعة B للمالك"
+    ],
+    "stack": {
+     "ceiling": 0.3,
+     "combined": 0.109,
+     "nonref": 0.1,
+     "one_of": 0.01,
+     "trg": 0.0,
+     "warn": false
+    }
+   }
+  },
+  "private_reviews": {
+   "77": [
+    {
+     "date": "2026-08-12",
+     "stars": 5.0,
+     "text": "المخدة قاسية شوي"
+    }
+   ],
+   "78": []
+  },
+  "readiness": [
+   {
+    "key": "portal_token",
+    "level": "yellow",
+    "text_ar": "رابط بوابة المالك غير مفعّل — الإيصالات لن تظهر"
+   }
+  ]
+ }
+}
