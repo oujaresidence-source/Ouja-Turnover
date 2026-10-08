@@ -356,6 +356,9 @@
   /* ---------- the survey (wizard) ---------- */
   var DEFAULTS_DONE = {};
 
+  // mirrors catalogue.UNSET_WORDS (owner ruling 2026-10-08)
+  var UNSET_WORDS = ['-', '—', '–', 'غير محدد'];
+
   function normv(kind, v) {
     var s = (v === null || v === undefined) ? '' : String(v);
     s = s.replace(/[٠-٩۰-۹]/g, function (ch) { return String(DIG.indexOf(ch) % 10); }).trim();
@@ -402,6 +405,7 @@
   function fieldError(f, raw, a) {
     if (f.type === 'note') return '';
     if (f.type === 'check') return (f.required && !raw) ? 'لازم تأكيد «' + f.label_ar + '»' : '';
+    if (f.unset_ok && UNSET_WORDS.indexOf(String(raw === undefined || raw === null ? '' : raw).trim()) >= 0) return '';
     var v = f.type === 'choice' || f.type === 'picker' ? (raw === undefined || raw === null ? '' : String(raw)) : normv(f.norm || (f.type === 'number' ? 'digits' : 'trim'), raw);
     if (v === '') return (f.required && !(f.type === 'choice' && f.default !== undefined)) ? 'مطلوب' : '';
     if (f.type === 'choice') return arr(f.options).some(function (o) { return o.v === v; }) ? '' : 'اختر من الخيارات';
@@ -515,8 +519,9 @@
       } else if (f.type === 'textarea') {
         h += '<textarea id="' + id + '" data-k="' + esc(f.key) + '"' + u + ' aria-labelledby="' + id + '_l">' + esc(val || '') + '</textarea>';
       } else {
-        var t = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
-        var im = f.inputmode || (f.norm === 'digits' ? 'numeric' : (f.type === 'number' ? 'decimal' : ''));
+        // unset_ok takes «غير محدد», which a type=number box (and a numeric keypad) can't hold
+        var t = f.type === 'number' && !f.unset_ok ? 'number' : (f.type === 'date' ? 'date' : 'text');
+        var im = f.inputmode || (f.unset_ok ? '' : (f.norm === 'digits' ? 'numeric' : (f.type === 'number' ? 'decimal' : '')));
         h += '<input type="' + t + '" id="' + id + '" data-k="' + esc(f.key) + '"' + u + ' value="' + esc(val === undefined || val === null ? '' : val) + '"'
           + (im ? ' inputmode="' + im + '"' : '') + (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : '')
           + (f.min !== undefined ? ' min="' + f.min + '"' : '') + (f.max !== undefined ? ' max="' + f.max + '"' : '') + (f.step ? ' step="' + f.step + '"' : '')

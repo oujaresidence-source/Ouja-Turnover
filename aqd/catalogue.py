@@ -13,7 +13,7 @@ A field is a plain dict:
   cond      named condition evaluated identically in Python and JS ('many_same')
   norm      'digits' | 'mobile' | 'upper' | 'trim'
   re / re_by {field, map{value: re}}   msg_ar   — pattern rule (patterns avoid backslashes)
-  min, max, step, min_words, not_past, help_ar, placeholder
+  min, max, step, min_words, not_past, unset_ok, help_ar, placeholder
 
 Unit fields live under step 'units' -> 'unit_fields' and are answered once per unit
 (answers['units'] is a list of dicts, one per unit, labelled A1, A2, … automatically).
@@ -22,6 +22,9 @@ Unit fields live under step 'units' -> 'unit_fields' and are answered once per u
 import datetime
 import re
 
+# a number field flagged unset_ok also takes «-» / «غير محدد» (owner ruling 2026-10-08)
+UNSET_AR = "غير محدد"
+UNSET_WORDS = ("-", "—", "–", UNSET_AR)
 DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 
@@ -162,7 +165,8 @@ UNIT_FIELDS = [
     {"key": "monthly_fee_other", "type": "number", "label_ar": "المبلغ (ريال)", "label_en": "Amount (SAR)",
      "required": True, "min": 300, "max": 5000, "step": 1, "show_if": {"monthly_fee": ["other"]}},
     {"key": "min_price", "type": "number", "label_ar": "الحد الأدنى لسعر الليلة (ريال)",
-     "label_en": "Minimum nightly price (SAR)", "required": True, "min": 100, "max": 5000, "step": 1},
+     "label_en": "Minimum nightly price (SAR)", "required": True, "min": 1, "max": 5000, "step": 1,
+     "unset_ok": True, "placeholder": "مثل: 450 — أو اكتب غير محدد"},
     {"key": "blocked", "type": "choice", "label_ar": "أيام الحجب", "label_en": "Blocked days",
      "required": True, "default": "none",
      "options": [opt("none", "لا يوجد", "None"), opt("set", "تحديد", "Specify")]},
@@ -170,8 +174,7 @@ UNIT_FIELDS = [
      "required": True, "norm": "trim", "placeholder": "مثل: 1–10 ذو الحجة سنوياً",
      "show_if": {"blocked": ["set"]}},
     {"key": "delivery_date", "type": "date", "label_ar": "تاريخ تسليم الوحدة",
-     "label_en": "Handover date", "required": True, "not_past": True,
-     "msg_ar": "التاريخ لازم يكون اليوم أو بعده"},
+     "label_en": "Handover date", "required": True},
     {"key": "listing_id", "type": "picker", "label_ar": "ربط بشقة في Hostaway (اختياري — داخلي)",
      "label_en": "Link to a Hostaway listing (optional, internal)", "required": False},
 ]
@@ -308,6 +311,8 @@ def _check_field(f, raw, a, today):
         if f.get("required") and not ok:
             return False, "لازم تأكيد «%s»" % f["label_ar"]
         return ok, None
+    if f.get("unset_ok") and str(raw if raw is not None else "").strip() in UNSET_WORDS:
+        return UNSET_AR, None
     if t == "number" and isinstance(raw, (int, float)) and not isinstance(raw, bool):
         v = raw
     else:

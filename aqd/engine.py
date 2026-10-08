@@ -261,7 +261,8 @@ def unit_rows(a):
             h(u.get("deed_no") or "—"),
             _licence(u),
             ("%s ريال" % num(fee)) if fee is not None else "—",
-            ("%s ريال" % num(minp)) if isinstance(minp, (int, float)) else "—",
+            ("%s ريال" % num(minp)) if isinstance(minp, (int, float)) else (
+                catalogue.UNSET_AR if minp == catalogue.UNSET_AR else "—"),
             h(u.get("blocked_text")) if u.get("blocked") == "set" else "لا يوجد",
             h(date_g(u.get("delivery_date"))),
         ]

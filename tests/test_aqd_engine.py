@@ -130,10 +130,19 @@ class TestCatalogueRules(unittest.TestCase):
             self.assertIn(k, errs)
 
     def test_unit_rules(self):
-        _c, errs = catalogue.validate(individual(units=[unit(delivery_date="2026-10-01")]), TODAY)
-        self.assertIn("units.0.delivery_date", errs)
-        _c, errs = catalogue.validate(individual(units=[unit(min_price=50)]), TODAY)
-        self.assertIn("units.0.min_price", errs)
+        # owner ruling 2026-10-08: a unit already handed over may carry a past handover date
+        c, errs = catalogue.validate(individual(units=[unit(delivery_date="2020-01-01")]), TODAY)
+        self.assertNotIn("units.0.delivery_date", errs)
+        self.assertEqual(c["units"][0]["delivery_date"], "2020-01-01")
+        # owner ruling 2026-10-08: no 100 SAR floor, and «-» / «غير محدد» mean "not set"
+        for raw, want in ((50, 50), ("١", 1), ("-", catalogue.UNSET_AR), ("غير محدد", catalogue.UNSET_AR)):
+            c, errs = catalogue.validate(individual(units=[unit(min_price=raw)]), TODAY)
+            self.assertNotIn("units.0.min_price", errs, raw)
+            self.assertEqual(c["units"][0]["min_price"], want)
+        for raw in ("abc", 0, 6000, ""):
+            _c, errs = catalogue.validate(individual(units=[unit(min_price=raw)]), TODAY)
+            self.assertIn("units.0.min_price", errs, raw)
+        self.assertIn(catalogue.UNSET_AR, engine.unit_rows({"units": [unit(min_price=catalogue.UNSET_AR)]}))
         _c, errs = catalogue.validate(individual(units=[unit(monthly_fee="other", monthly_fee_other=200)]), TODAY)
         self.assertIn("units.0.monthly_fee_other", errs)
         _c, errs = catalogue.validate(individual(units_count="2", units=[unit()]), TODAY)
