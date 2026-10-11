@@ -10017,6 +10017,17 @@ def _rv_has_recovery(res_id):
 
 
 def _rv_cover(lid, day):
+    """Owner 2026-10-12 «كل واحد يغطي شققه»: a review room follows the apartment's PERMANENT
+    owner, even on their off day. Unassigned / no Discord id → the day's coverer, never nobody."""
+    if SCHEDULE_ENABLED and _HAS_SCHEDULE and _HAS_OPS:
+        try:
+            name = _schedule.owners.owner_for(listing_id=lid) or ""
+        except Exception as e:
+            print("[reviewask] permanent owner lookup failed:", e)
+            name = ""
+        did = _ops_did_for(name) if name else ""
+        if did:
+            return {"name": name, "did": str(did), "role_id": ""}
     c = _cw_cover(lid, day) or {}
     return {"name": c.get("name") or "", "did": c.get("did") or "", "role_id": c.get("role_id") or ""}
 

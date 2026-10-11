@@ -414,6 +414,44 @@ class TestReservationShape(unittest.TestCase):
         self.assertEqual(rooms, {"11": "1", "12": "2", "13": "3"})
 
 
+class TestPermanentOwner(unittest.TestCase):
+    """Owner 2026-10-12: «كل واحد يغطي شققه» — a review room follows the apartment's PERMANENT
+    owner, even on their off day. Unassigned or no Discord id → the day's coverer, never nobody."""
+
+    def run_cover(self, owner, dids):
+        calls = []
+        saved = {k: getattr(bot, k) for k in ("_cw_cover", "_ops_did_for", "SCHEDULE_ENABLED",
+                                              "_HAS_SCHEDULE", "_HAS_OPS")}
+        saved_owner = bot._schedule.owners.owner_for
+        try:
+            bot._cw_cover = lambda lid, day: (calls.append((lid, day)) or
+                                             {"name": "ناصر", "did": "999", "role_id": ""})
+            bot._ops_did_for = lambda name: dids.get(name, "")
+            bot.SCHEDULE_ENABLED = bot._HAS_SCHEDULE = bot._HAS_OPS = True
+            bot._schedule.owners.owner_for = lambda listing_id=None, name=None, pm=None: owner
+            return bot._rv_cover(553753, "2026-10-12"), calls
+        finally:
+            for k, v in saved.items():
+                setattr(bot, k, v)
+            bot._schedule.owners.owner_for = saved_owner
+
+    def test_off_day_still_goes_to_the_permanent_owner(self):
+        cov, calls = self.run_cover("مآثر", {"مآثر": "111"})
+        self.assertEqual(cov, {"name": "مآثر", "did": "111", "role_id": ""})
+        self.assertEqual(calls, [])
+
+    def test_unassigned_unit_falls_back_to_the_days_coverer(self):
+        cov, calls = self.run_cover(None, {})
+        self.assertEqual(cov["name"], "ناصر")
+        self.assertEqual(cov["did"], "999")
+        self.assertEqual(len(calls), 1)
+
+    def test_owner_without_discord_id_falls_back_to_the_days_coverer(self):
+        cov, calls = self.run_cover("عهود", {})
+        self.assertEqual(cov["did"], "999")
+        self.assertEqual(len(calls), 1)
+
+
 # The package logs with print(); the gate reads the LAST line of the combined output, so the
 # logs are captured here (unittest reports on stderr, untouched).
 _REAL_STDOUT = sys.stdout
