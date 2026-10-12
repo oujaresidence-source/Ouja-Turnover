@@ -403,6 +403,16 @@ except Exception as _business_err:      # pragma: no cover
     _business = None
     _HAS_BUSINESS = False
 
+# oujares.com company homepage + privacy/terms/contact (business.sa e-commerce verification).
+# Pure static rendering from site_home.identity.SITE_IDENTITY — no Hostaway, no DB.
+try:
+    import site_home as _site_home
+    _HAS_SITE_HOME = True
+except Exception as _site_home_err:     # pragma: no cover
+    print("[site_home] import failed (homepage falls back to the health text):", _site_home_err)
+    _site_home = None
+    _HAS_SITE_HOME = False
+
 # Company profile «/cp» — the public profile that supersedes /business. Arabic first;
 # copy ported byte-for-byte from the approved edition, figures source-stamped, and every
 # rendered page passes a disclosure guard before it is served.
@@ -60051,8 +60061,12 @@ def _biz_links(base, wa):
 async def _handle_robots(request):
     """robots.txt: public funnel pages crawlable, operational surfaces not."""
     base = str(request.url.origin())
+    # The company homepage + legal pages (site_home/) are always crawlable.
+    site = "".join("Allow: %s\n" % p for p in
+                   (["/"] + [p for pair in _site_home.site_paths() for p in pair if p != "/"]
+                    if _HAS_SITE_HOME else []))
     # Paused (STAY_PAUSED=1): the pages answer 404, so stop inviting the crawler in.
-    txt = ("User-agent: *\n"
+    txt = ("User-agent: *\n" + site
            + ("Disallow: /apartments\n" if _stay_paused() else "Allow: /apartments\n") +
            # Ouja Elite is a discreet members site — keep it out of search by default.
            # Flip this to "Allow: /elite\n" (and add it to the sitemap) to make it public.
@@ -60084,9 +60098,22 @@ async def _handle_sitemap(request):
                 urls.append(f"{base}/apartments/{slug}")
     except Exception as e:
         print("sitemap error:", e)
+    # The company homepage + legal pages (site_home/): always listed, even while
+    # /apartments is paused, each with its Arabic/English hreflang pair.
+    site_entries = []
+    if _HAS_SITE_HOME:
+        root = _site_home.SITE_IDENTITY.get("site_url") or base
+        for ar, en in _site_home.site_paths():
+            alts = ('<xhtml:link rel="alternate" hreflang="ar" href="%s"/>'
+                    '<xhtml:link rel="alternate" hreflang="en" href="%s"/>'
+                    '<xhtml:link rel="alternate" hreflang="x-default" href="%s"/>'
+                    % (_gw_he(root + ar), _gw_he(root + en), _gw_he(root + ar)))
+            for p in (ar, en):
+                site_entries.append(f"  <url><loc>{_gw_he(root + p)}</loc>{alts}</url>")
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-            + "\n".join(f"  <url><loc>{_gw_he(u)}</loc></url>" for u in urls)
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+            'xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+            + "\n".join(site_entries + [f"  <url><loc>{_gw_he(u)}</loc></url>" for u in urls])
             + "\n</urlset>\n")
     return web.Response(text=body, content_type="application/xml")
 
@@ -65043,7 +65070,23 @@ async def start_web_server():
     # may send, not who may send it.
     app = web.Application(client_max_size=25 * 1024 * 1024,
                           middlewares=[_security_headers_mw, _role_enforce_mw])
-    app.router.add_get("/", _handle_health)                 # health check / browser test
+    app.router.add_get("/healthz", _handle_health)          # health check (was "/" until 2026-10-12)
+    # "/" is the oujares.com company homepage (site_home/) — business.sa reviews this page.
+    # Registered here, outside DASHBOARD_ENABLED, so the homepage never depends on it.
+    _site_home_ok = False
+    if _HAS_SITE_HOME:
+        try:
+            _site_home.wire({"web": web, "email": OUJA_CONTACT_EMAIL, "whatsapp": STAY_WHATSAPP})
+            _site_home.register_routes(app)
+            _site_home_ok = True
+            print("[site_home] routes registered (/, /en, /privacy, /terms, /contact + /en/*)")
+        except Exception as _she:
+            print("[site_home] wiring failed (homepage falls back to the health text):", _she)
+    if not _site_home_ok:
+        try:
+            app.router.add_route("GET", "/", _handle_health)    # never let "/" 404
+        except Exception as _she2:                               # "/" already taken by a partial wire
+            print("[site_home] root fallback skipped:", _she2)
     app.router.add_post("/hook/{secret}", _handle_hook)     # Hostaway posts here
     app.router.add_get("/hook/{secret}", _handle_health)    # so you can open it in a browser
     # --- PWA (installable app): manifest + root-scoped service worker + icons ---
