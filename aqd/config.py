@@ -7,7 +7,7 @@ plus the defaults of the owner-editable settings stored in aqd_settings.
   AQD_LINK_TTL_DAYS 14   signing-link lifetime (the settings value wins when set)
   AQD_CHANNEL   العقود   Discord text channel for «وقّع العميل» / «اكتمل العقد»
   AQD_NOTIFY_DRYRUN  0   1 = print instead of posting
-  AQD_TEMPLATE  operating_v2_1   active template file in aqd/templates/
+  AQD_TEMPLATE  operating_v2_2   template for the («individual», «owner») route only
 """
 
 import os
@@ -71,16 +71,31 @@ def env_ttl_days():
         return 14
 
 
+DEFAULT_TEMPLATE = "operating_v2_2"
+
+
 def template_name():
-    t = (os.environ.get("AQD_TEMPLATE") or "operating_v2_1").strip()
-    return t if re.fullmatch(r"[A-Za-z0-9_]+", t) else "operating_v2_1"
+    t = (os.environ.get("AQD_TEMPLATE") or DEFAULT_TEMPLATE).strip()
+    return t if re.fullmatch(r"[A-Za-z0-9_]+", t) else DEFAULT_TEMPLATE
 
 
 # R2 — one line per FIRM-APPROVED template, keyed by (client_kind, account_model). A route that is
 # not here has no template: the contract can be saved as a draft but never sent. The regulation
-# defines «المرخَّص له» as a natural person, so v2.1 (owner = licence holder) fits only an
-# individual on his own account. AQD_TEMPLATE overrides the ("individual", "owner") line only.
-TEMPLATES = {("individual", "owner"): "operating_v2_1"}
+# defines «المرخَّص له» as a natural person, so both models fit only an individual: (أ) on his own
+# account, (ب) on Ouja's account (Ouja = primary host as his agent, transfers his net to his IBAN).
+# AQD_TEMPLATE overrides the ("individual", "owner") line only. A contract keeps the template it
+# was SENT on (aqd_contracts.template_name), so the 2.1 contracts already out stay on 2.1.
+TEMPLATES = {
+    ("individual", "owner"): "operating_v2_2",
+    ("individual", "ouja"): "operating_ouja_v1_0",
+}
+
+# The owner reads these names in Settings and on the list banner; each template is approved alone.
+TEMPLATE_LABELS = {
+    "operating_v2_1": "نموذج (أ) — حساب المالك 2.1",
+    "operating_v2_2": "نموذج (أ) — حساب المالك 2.2",
+    "operating_ouja_v1_0": "نموذج (ب) — حساب عوجا 1.0",
+}
 
 
 def template_for_key(kind, model):
@@ -88,6 +103,34 @@ def template_for_key(kind, model):
     if name and (kind, model) == ("individual", "owner") and (os.environ.get("AQD_TEMPLATE") or "").strip():
         return template_name()
     return name
+
+
+def active_templates():
+    """The templates NEW contracts would use, in TEMPLATES order, without duplicates."""
+    out = []
+    for kind, model in TEMPLATES:
+        name = template_for_key(kind, model)
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def known_templates():
+    """Every template file shipped in aqd/templates/ — the only names an approval may target."""
+    try:
+        return sorted(f[:-5] for f in os.listdir(TEMPLATES_DIR)
+                      if f.endswith(".html") and re.fullmatch(r"operating_[A-Za-z0-9_]+[.]html", f))
+    except OSError:
+        return []
+
+
+def template_model(name):
+    """Which account model a template's legal text is written for: 'ouja' or 'owner'."""
+    return "ouja" if str(name or "").startswith("operating_ouja") else "owner"
+
+
+def template_label(name):
+    return TEMPLATE_LABELS.get(name) or "%s %s" % (name, template_version(name))
 
 
 def template_path(name=None):

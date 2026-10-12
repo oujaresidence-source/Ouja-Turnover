@@ -3,7 +3,7 @@
 aqd.engine — PURE rules for «العقود». No I/O: the template text, the CSS and the font block
 arrive as arguments (aqd.files loads them), so every rule here is testable with plain strings.
 
-  build_context()  answers -> the 22 template values (owner grammar, units table, settings)
+  build_context()  answers -> the 22 shared template values + payout_period (Model B only uses it)
   render()         ONE regex pass; a missing key raises KeyError; no '{{' may survive
   fill_slots()     the three overlays a frozen document keeps open (banner, two signatures)
   evidence_html()  «سجل التوقيع الإلكتروني» — the certificate page appended to signed PDFs
@@ -32,6 +32,13 @@ KEYS = ("font_css", "contract_css", "contract_ref", "template_version", "date_g"
         "version_banner", "op_pct", "owner_rows", "owner_refer", "op_rep_full", "op_cr_expiry",
         "op_fal_no", "op_fal_expiry", "unit_rows", "jamiya", "platform_proof", "sig_owner",
         "sig_operator", "brand_name", "brand_reg")
+EXTRA_KEYS = ("payout_period",)        # Model (B) only — a template without the placeholder ignores it
+
+PAYOUT_PERIOD_AR = {
+    "monthly": "شهرية (تنتهي في آخر يوم من كل شهر ميلادي)",
+    "quarterly": "ربع سنوية (تنتهي في 31 مارس، 30 يونيو، 30 سبتمبر، 31 ديسمبر)",
+}
+PAYOUT_TAIL_AR = "، ويُحوَّل صافي المالك خلال (10) أيام من نهايتها"
 
 WEEKDAYS_AR = ("الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد")
 
@@ -125,6 +132,11 @@ def mask(s):
     return ("••••••" + l4) if l4 else ""
 
 
+def mask_iban(s):
+    l4 = last4(s)
+    return ("SA•• •••• … " + l4) if l4 else ""
+
+
 # ------------------------------------------------------------------ the parties
 
 def is_company(a):
@@ -175,10 +187,19 @@ def _mobile(a):
     return '<span dir="ltr">%s</span>' % h(a.get("mobile") or "—")
 
 
+def is_model_b(a):
+    return a.get("account_model") == "ouja"
+
+
 def _vat(a):
     if a.get("vat_registered") == "yes" and a.get("vat_number"):
         return h(a["vat_number"])
-    return "غير مسجلة" if female(a) else "غير مسجل"
+    word = "غير مسجلة" if female(a) else "غير مسجل"
+    return (word + " (شرط لهذا النموذج)") if is_model_b(a) else word
+
+
+def payout_period(a):
+    return PAYOUT_PERIOD_AR.get(a.get("payout_period"), PAYOUT_PERIOD_AR["monthly"]) + PAYOUT_TAIL_AR
 
 
 def owner_rows(a):
@@ -203,6 +224,9 @@ def owner_rows(a):
     rows.append(_row("الجوال", _mobile(a)))
     rows.append(_row("البريد", h(a.get("email") or "—")))
     rows.append(_row("العنوان الوطني", h(a.get("nat_address") or "—")))
+    if is_model_b(a):
+        rows.append(_row("الحساب البنكي (IBAN) لتحويل صافي المالك",
+                         '<span dir="ltr">%s</span>' % h(a.get("owner_iban") or "—")))
     rows.append(_row("الصفة", "مالكة أصلية" if f else "مالك أصلي"))
     if a.get("signer") == "agent":
         rows.append(_row("يمثلها في التوقيع" if f else "يمثله في التوقيع",
@@ -324,7 +348,7 @@ def sig_operator_html(rep_name, sig_b64=None, stamp_b64=None, signed_at=None, op
 
 def build_context(a, *, ref, created, settings, font_css, contract_css, template_version,
                   approved=False, frozen=True, banner=None):
-    """The 22 values. frozen=True leaves the three overlays as markers (the stored document);
+    """The 22 values + payout_period. frozen=True leaves the three overlays as markers (the stored document);
     frozen=False fills them for a one-off preview."""
     s = settings or {}
     ctx = {
@@ -347,6 +371,7 @@ def build_context(a, *, ref, created, settings, font_css, contract_css, template
         "platform_proof": h(s.get("platform_proof") or "—"),
         "brand_name": h(s.get("brand_name") or "—"),
         "brand_reg": h(s.get("brand_reg") or "—"),
+        "payout_period": h(payout_period(a)),
     }
     if frozen:
         ctx.update({k: v for k, v in SLOT.items()})
@@ -424,12 +449,20 @@ def template_for(clean):
         return None, catalogue.COMPANY_REASON
     if kind != "individual":
         return None, "اختر نوع العميل"
-    if model == "ouja":
-        return None, catalogue.OUJA_REASON
-    if model != "owner":
+    if model not in ("owner", "ouja"):
         return None, catalogue.MODEL_MISSING_REASON
     name = config.template_for_key(kind, model)
     return (name, None) if name else (None, catalogue.OUJA_REASON)
+
+
+def template_fits(clean, sent_name):
+    """Sign-time defence: the answers still route to a template written for the SAME account
+    model as the one the contract was frozen on. A v2.1 contract on the owner's account still
+    fits (v2.2 is the same model); an Ouja-account contract frozen on v2.1 (whose text says the
+    units run on the owner's account) never does — it must be re-issued on Model (B)."""
+    from . import config
+    name, _why = template_for(clean)
+    return bool(name) and config.template_model(name) == config.template_model(sent_name or name)
 
 
 # ------------------------------------------------------------------ state machine
@@ -498,10 +531,12 @@ def name_similarity(a, b):
 # ------------------------------------------------------------------ privacy
 
 def masked_answers(clean):
-    """The DB copy: every ID number reduced to ••••••1234 (PDPL). The full values live only in
-    the contract files under $STATE_DIR/aqd/<id>/."""
+    """The DB copy: every ID number reduced to ••••••1234 and the IBAN to SA•• •••• … 1234 (PDPL).
+    The full values live only in the contract files under $STATE_DIR/aqd/<id>/."""
     out = dict(clean)
     for k in catalogue.ID_KEYS:
         if out.get(k):
             out[k] = mask(out[k])
+    if out.get("owner_iban"):
+        out["owner_iban"] = mask_iban(out["owner_iban"])
     return out

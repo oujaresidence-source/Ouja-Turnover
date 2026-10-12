@@ -12,6 +12,7 @@ A field is a plain dict:
   show_if   {other_key: [values...]}  — every listed key must match (AND)
   cond      named condition evaluated identically in Python and JS ('many_same')
   norm      'digits' | 'mobile' | 'upper' | 'trim'
+  iban      True → after the pattern, the ISO 13616 mod-97 check must give 1 (same rule in the tab)
   re / re_by {field, map{value: re}}   msg_ar   — pattern rule (patterns avoid backslashes)
   min, max, step, min_words, not_past, unset_ok, help_ar, placeholder
 
@@ -21,6 +22,8 @@ Unit fields live under step 'units' -> 'unit_fields' and are answered once per u
 
 import datetime
 import re
+
+from . import config
 
 # a number field flagged unset_ok also takes «-» / «غير محدد» (owner ruling 2026-10-08)
 UNSET_AR = "غير محدد"
@@ -111,8 +114,17 @@ VAT = [
      "label_ar": "الوحدات تشتغل على حساب مين في المنصات؟", "label_en": "Whose platform account?",
      "required": True, "show_if": {"vat_registered": ["no"]},
      "options": [opt("owner", "حساب المالك (المالك مضيف رئيسي، وعوجا مضيف مشارك)", "Owner's account"),
-                 opt("ouja", "حساب عوجا", "Ouja's account")],
+                 opt("ouja", "حساب عوجا (عوجا مضيف رئيسي، وتحوّل صافي المالك لحسابه)", "Ouja's account")],
      "help_ar": "إذا كان المالك مسجّل في الضريبة، لازم تشتغل الوحدات على حسابه هو، والمنصة تصدر له الكشوفات الضريبية باسمه"},
+    # Model (B) only: Airbnb pays Ouja, Ouja transfers the owner's net to this IBAN each period.
+    {"key": "payout_period", "type": "choice", "label_ar": "كل كم نحوّل صافي المالك؟",
+     "label_en": "Owner payout period", "required": True, "default": "monthly",
+     "show_if": {"client_kind": ["individual"], "account_model": ["ouja"]},
+     "options": [opt("monthly", "شهري", "Monthly"), opt("quarterly", "ربع سنوي", "Quarterly")]},
+    {"key": "owner_iban", "type": "text", "label_ar": "آيبان المالك (يتحوّل له صافي المالك)",
+     "label_en": "Owner IBAN", "required": True, "norm": "upper", "re": "^SA[0-9]{22}$", "iban": True,
+     "show_if": {"client_kind": ["individual"], "account_model": ["ouja"]}, "msg_ar": "SA + ٢٢ رقم، ولازم يكون باسم المالك",
+     "placeholder": "SA0000000000000000000000"},
     {"key": "account_model_note", "type": "note", "label_ar": "تشتغل على حساب المالك (مسجّل في الضريبة)",
      "label_en": "Runs on the owner's account (VAT-registered)", "show_if": {"vat_registered": ["yes"]}},
 ]
@@ -228,6 +240,10 @@ MANY_SAME_BLOCK = ("اللائحة تسمح بـ3 تراخيص كحد أقصى �
                    "قسّم الوحدات على أكثر من مرخَّص له أو أكثر من عقد")
 COMPANY_REASON = "عقود الشركات تحتاج نموذج معتمد من المكتب — ترخيص وحدة الضيافة الخاصة يصدر لشخص طبيعي فقط"
 OUJA_REASON = "حساب عوجا يحتاج نموذج عقد ثاني معتمد من المكتب — احفظه كمسودة"
+OUJA_CARD = ("في هالنموذج تنحط الوحدة في حساب عوجا، والفلوس توصل لعوجا وتنحوّل للمالك بعد خصم مستحقاتنا "
+             "كل فترة. ينفع بس للمالك غير المسجّل في الضريبة.")
+OUJA_GOLIVE_TASK = "إدراج الوحدة في حساب عوجا وإثبات رقم ترخيصها في الإعلان"
+IBAN_BAD = "رقم الآيبان غير صحيح — راجعه حرف حرف"
 MODEL_MISSING_REASON = "حدّد الوحدات تشتغل على حساب مين — بعدها يتحدد نموذج العقد"
 COMPANY_CARD = ("ترخيص وحدة الضيافة الخاصة يصدر لشخص طبيعي فقط (تعريف المرخَّص له في اللائحة). نقدر نحفظ "
                 "العقد كمسودة، لكن ما يطلع له رابط توقيع إلا بعد اعتماد نموذج الشركات من المكتب")
@@ -236,13 +252,29 @@ WE_CREATE_TASK = "إنشاء حساب المالك وإضافة عوجا مضي�
 
 CITY_AR = {o["v"]: o["ar"] for o in UNIT_FIELDS[0]["options"]}
 UNIT_TYPE_AR = {o["v"]: o["ar"] for o in UNIT_FIELDS[3]["options"]}
-ID_KEYS = ("id_number", "agent_id", "cr_number")       # never stored whole in the DB
+ID_KEYS = ("id_number", "agent_id", "cr_number")       # never stored whole in the DB (nor owner_iban)
+
+
+def ouja_routed():
+    return bool(config.template_for_key("individual", "ouja"))
 
 
 def schema():
+    routed = ouja_routed()
     return {"steps": STEPS, "max_units": MAX_UNITS, "same_property_cap": SAME_PROPERTY_CAP,
-            "texts": {"many_same": MANY_SAME_BLOCK, "company_card": COMPANY_CARD, "ouja": OUJA_REASON,
-                      "we_create": WE_CREATE_TASK}}
+            "texts": {"many_same": MANY_SAME_BLOCK, "company_card": COMPANY_CARD,
+                      # the red «needs a second template» line only exists while Model B has no route
+                      "ouja": "" if routed else OUJA_REASON, "ouja_card": OUJA_CARD if routed else "",
+                      "ouja_golive": OUJA_GOLIVE_TASK, "we_create": WE_CREATE_TASK}}
+
+
+def iban_ok(s):
+    """ISO 13616: move the first four characters to the end, letters → 10..35, mod 97 must be 1."""
+    s = str(s or "")
+    if not re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}", s):
+        return False
+    r = s[4:] + s[:4]
+    return int("".join(str(int(ch, 36)) for ch in r)) % 97 == 1
 
 
 # ------------------------------------------------------------------ normalisation
@@ -361,6 +393,8 @@ def _check_field(f, raw, a, today):
         msg = (f.get("msg_by") or {}).get(sel) or msg
     if pat and not re.fullmatch(pat, s):
         return s, msg or "الصيغة غير صحيحة"
+    if f.get("iban") and not iban_ok(s):
+        return s, IBAN_BAD
     if f.get("min_words") and len(s.split()) < f["min_words"]:
         return s, msg or "ناقص"
     return s, None

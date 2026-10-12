@@ -25,7 +25,7 @@ from aiohttp import web                                               # noqa: E4
 
 from aqd import db, files, host, routes                               # noqa: E402
 from brain import db as bdb                                           # noqa: E402
-from tests.test_aqd_engine import NID, individual, unit, company      # noqa: E402
+from tests.test_aqd_engine import NID, IBAN, individual, unit, company, model_b  # noqa: E402
 
 os.environ["AQD_ENABLED"] = "1"
 
@@ -163,9 +163,10 @@ class Base(unittest.TestCase):
     def token(self, cid):
         return db.get(cid)["token"]
 
-    def approve(self):
-        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد"}))))
-        self.assertTrue(r["approval"]["approved"], r)
+    def approve(self, template="operating_v2_2"):
+        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد", "template": template}))))
+        self.assertTrue(r.get("ok"), r)
+        self.assertTrue(routes.is_approved(template), r)
 
     def verify(self, tok, last4=None, ip="10.0.0.1"):
         return body(run(routes.api_public_verify(_Req({"token": tok, "last4": last4 or NID[-4:]}, ip=ip))))
@@ -204,7 +205,7 @@ class TestRoles(Base):
         self.assertFalse(routes.is_approved())
 
     def test_approval_needs_the_exact_word(self):
-        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتمد"}))))
+        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتمد", "template": "operating_v2_2"}))))
         self.assertFalse(r["ok"])
         self.assertFalse(routes.is_approved())
         self.approve()
@@ -488,11 +489,11 @@ def presend_company_contract(test):
 class TestUpgradeRules(Base):
     """R1–R5 at the HTTP boundary (gate G14)."""
 
-    def test_send_refused_for_an_individual_on_the_ouja_account(self):
-        cid = self.save(answers(account_model="ouja"))
+    def test_send_refused_for_a_company_on_the_ouja_account(self):
+        cid = self.save(company(account_model="ouja", units=[unit(delivery_date=future())]))
         r = body(run(routes.api_send(_Req({"id": cid}))))
         self.assertFalse(r["ok"])
-        self.assertIn("حساب عوجا", r["error"])
+        self.assertIn("عقود الشركات", r["error"])
 
     def test_vat_registered_is_forced_to_the_owner_account_on_save(self):
         cid = self.save(answers(vat_registered="yes", vat_number="3" + "0" * 13 + "3", account_model="ouja"))
@@ -524,7 +525,7 @@ class TestUpgradeRules(Base):
 
     def test_approval_refused_while_operator_data_is_missing(self):
         clear_operator()
-        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد"}))))
+        r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد", "template": "operating_v2_2"}))))
         self.assertFalse(r["ok"])
         self.assertIn("أكمل بيانات المشغّل", r["error"])
         self.assertFalse(routes.is_approved())
@@ -588,6 +589,188 @@ class TestUpgradeRules(Base):
         self.assertTrue(body(run(routes.api_get(_Req(query={"id": cid}))))["needs_reissue"])
 
 
+def mb(**over):
+    a = model_b(units=[unit(delivery_date=future())])
+    a.update(over)
+    return a
+
+
+def presend_legacy_v21(test, a=None):
+    """A contract sent on v2.1 BEFORE this release: forced into the DB as 'sent' on v2.1."""
+    from aqd import catalogue, engine
+    a = a or answers()
+    cid = test.save(a)
+    clean, _e = catalogue.validate(a, datetime.date.today())
+    c = db.get(cid)
+    html_doc = routes._render_preview(clean, c["ref"], frozen=True, template_name="operating_v2_1")
+    files.write_text(cid, "frozen.html", html_doc)
+    tok = "legacy21" + "y" * 40
+    assert db.transition(cid, ("draft",), "sent", token=tok, template_name="operating_v2_1",
+                         template_version="2.1", doc_sha256=engine.doc_hash(html_doc),
+                         sent_at=db.now_iso(), expires_at="2099-01-01T00:00:00")
+    return cid, tok
+
+
+class TestModelB(Base):
+    """Model (B) — the Ouja account — at the HTTP boundary (gate G18)."""
+
+    def settings(self):
+        return body(run(routes.api_settings(_Req())))
+
+    def test_iban_never_leaves_in_the_db_or_the_api(self):
+        cid = self.save(mb())
+        row = db.get(cid)
+        self.assertNotIn(IBAN, row["answers_json"])
+        self.assertNotIn(IBAN[4:20], row["answers_json"])
+        g = body(run(routes.api_get(_Req(query={"id": cid}))))
+        self.assertNotIn(IBAN, json.dumps(g, ensure_ascii=False))
+        self.assertEqual(g["answers"]["owner_iban"], "SA•• •••• … " + IBAN[-4:])
+        self.assertIn(IBAN, json.dumps(files.read_json(cid, "draft_answers.json", {})))
+        self.assertEqual(g["contract"]["template_label"], "نموذج (ب) — حساب عوجا 1.0")
+        self.send(cid)
+        self.assertIn(IBAN, files.read_text(cid, "frozen.html"))
+        g = body(run(routes.api_get(_Req(query={"id": cid}))))
+        self.assertNotIn(IBAN, json.dumps(g, ensure_ascii=False))
+        self.assertEqual(db.get(cid)["template_name"], "operating_ouja_v1_0")
+        self.assertEqual(db.get(cid)["template_version"], "1.0")
+        lst = body(run(routes.api_list(_Req())))
+        self.assertNotIn(IBAN, json.dumps(lst, ensure_ascii=False))
+
+    def test_wrong_check_digits_refuse_the_send(self):
+        cid = self.save(mb(owner_iban=IBAN[:2] + "04" + IBAN[4:]))
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["fields"]["owner_iban"], "رقم الآيبان غير صحيح — راجعه حرف حرف")
+
+    def test_preview_has_the_model_b_text(self):
+        r = body(run(routes.api_preview(_Req({"answers": mb(payout_period="quarterly")}))))
+        self.assertEqual(r["blockers"], [])
+        self.assertIn("حساب المشغّل:", r["html"])
+        self.assertIn("ربع سنوية (تنتهي في 31 مارس", r["html"])
+        self.assertNotIn("معاينة فقط", r["html"])
+
+    def test_each_template_has_its_own_approval(self):
+        s = self.settings()
+        names = [t["name"] for t in s["templates"]]
+        self.assertEqual(names, ["operating_v2_2", "operating_ouja_v1_0"])
+        labels = {t["name"]: t["label_ar"] for t in s["templates"]}
+        self.assertEqual(labels["operating_v2_2"], "نموذج (أ) — حساب المالك 2.2")
+        self.assertEqual(labels["operating_ouja_v1_0"], "نموذج (ب) — حساب عوجا 1.0")
+        self.assertFalse(any(t["approved"] for t in s["templates"]))
+        self.approve("operating_ouja_v1_0")
+        self.assertFalse(routes.is_approved("operating_v2_2"))
+        self.assertFalse(routes.is_approved("operating_v2_1"))
+        r = body(run(routes.api_settings(_Req({"approve": False, "template": "operating_ouja_v1_0"}))))
+        self.assertTrue(r["ok"], r)
+        self.approve("operating_v2_2")
+        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+        t = {x["name"]: x for x in self.settings()["templates"]}
+        self.assertTrue(t["operating_v2_2"]["approved"])
+        self.assertEqual(t["operating_v2_2"]["by"], "فيصل")
+        self.assertFalse(t["operating_ouja_v1_0"]["approved"])
+
+    def test_approval_needs_a_known_template(self):
+        for bad in (None, "", "operating_v9_9", "../operating_v2_2", "contract"):
+            b = {"approve": True, "confirm": "اعتماد"}
+            if bad is not None:
+                b["template"] = bad
+            r = body(run(routes.api_settings(_Req(b))))
+            self.assertFalse(r["ok"], bad)
+        self.assertFalse(routes.is_approved("operating_v2_2"))
+        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+
+    def test_operator_gate_holds_for_every_approval(self):
+        clear_operator()
+        for name in ("operating_v2_2", "operating_ouja_v1_0"):
+            r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد", "template": name}))))
+            self.assertFalse(r["ok"])
+            self.assertIn("أكمل بيانات المشغّل", r["error"])
+            self.assertFalse(routes.is_approved(name))
+
+    def test_list_banner_names_each_unapproved_template(self):
+        lst = body(run(routes.api_list(_Req())))
+        self.assertEqual([t["label_ar"] for t in lst["templates_pending"]],
+                         ["نموذج (أ) — حساب المالك 2.2", "نموذج (ب) — حساب عوجا 1.0"])
+        self.approve("operating_v2_2")
+        lst = body(run(routes.api_list(_Req())))
+        self.assertEqual([t["name"] for t in lst["templates_pending"]], ["operating_ouja_v1_0"])
+
+    def test_model_b_flow_send_read_refuse_approve_sign_countersign(self):
+        self.approve("operating_v2_2")                     # the OTHER template: must not unlock B
+        cid = self.save(mb())
+        r = self.send(cid)
+        self.assertFalse(r["approved"])
+        tok = self.token(cid)
+        v = self.verify(tok)
+        self.assertTrue(v["ok"], v)
+        self.assertFalse(v["can_sign"])
+        self.assertIn("حساب المشغّل", v["html"])
+        self.assertIn("غير معتمد للتوقيع", v["html"])
+        r = self.sign(tok, v["view_key"])
+        self.assertFalse(r["ok"])
+        self.assertIn("قيد المراجعة", r["error"])
+        self.approve("operating_ouja_v1_0")
+        v = self.verify(tok)
+        self.assertTrue(v["can_sign"], v)
+        self.assertNotIn("غير معتمد للتوقيع", v["html"])
+        r = self.sign(tok, v["view_key"])
+        self.assertTrue(r["ok"], r)
+        TestCountersign._upload_operator(self)
+        r = body(run(routes.api_countersign(_Req({"id": cid}))))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(db.get(cid)["status"], "completed")
+
+    def test_a_v21_contract_still_signs_once_v21_is_approved(self):
+        cid, tok = presend_legacy_v21(self)
+        t = {x["name"]: x for x in self.settings()["templates"]}
+        self.assertTrue(t["operating_v2_1"]["legacy"])
+        self.assertFalse(t["operating_v2_2"]["legacy"])
+        v = self.verify(tok)
+        self.assertTrue(v["ok"], v)
+        self.assertFalse(v["can_sign"])
+        self.approve("operating_v2_1")
+        self.assertFalse(routes.is_approved("operating_v2_2"))
+        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+        v = self.verify(tok)
+        self.assertTrue(v["can_sign"], v)
+        r = self.sign(tok, v["view_key"])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(db.get(cid)["template_name"], "operating_v2_1")
+        g = body(run(routes.api_get(_Req(query={"id": cid}))))
+        self.assertEqual(g["contract"]["template_label"], "نموذج (أ) — حساب المالك 2.1")
+
+    def test_an_ouja_contract_frozen_on_v21_can_never_be_signed(self):
+        """Sent on v2.1 before Model B existed: the v2.1 text says «حساب المالك», so approving v2.1
+        must not let it sign — it needs re-issuing on Model B."""
+        import aqd
+        cid, tok = presend_legacy_v21(self, mb())
+        aqd.bootstrap()
+        self.assertTrue(body(run(routes.api_get(_Req(query={"id": cid}))))["needs_reissue"])
+        self.approve("operating_v2_1")
+        self.approve("operating_ouja_v1_0")
+        v = self.verify(tok)
+        self.assertTrue(v["ok"], v)
+        r = self.sign(tok, v["view_key"])
+        self.assertFalse(r["ok"])
+        self.assertIn("هذا العقد يحتاج إعادة إصدار", r["error"])
+
+    def test_the_old_rules_still_hold(self):
+        cid = self.save(company(account_model="ouja", units=[unit(delivery_date=future())]))
+        self.assertFalse(body(run(routes.api_send(_Req({"id": cid}))))["ok"])
+        cid = self.save(mb(vat_registered="yes", vat_number="3" + "0" * 13 + "3", airbnb_account="owner_has"))
+        self.assertEqual(db.answers(db.get(cid))["account_model"], "owner")
+        self.send(cid)
+        self.assertEqual(db.get(cid)["template_name"], "operating_v2_2")
+        cid = self.save(mb(units_count="4", same_property="yes", units=[unit(delivery_date=future())] * 4))
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertFalse(r["ok"])
+        self.assertIn("المادة 4/2", r["error"])
+        clear_operator()
+        cid = self.save(mb())
+        r = body(run(routes.api_send(_Req({"id": cid}))))
+        self.assertTrue(r["error"].startswith("أكمل بيانات المشغّل"))
+
+
 class TestEndToEnd(unittest.TestCase):
     """Synthetic end-to-end in a temp STATE_DIR with the REAL PDF engine."""
 
@@ -622,6 +805,32 @@ class TestEndToEnd(unittest.TestCase):
         for needle in (row["ref"], "الشمري", "سجلالتوقيعالإلكتروني"):
             self.assertIn(needle, compact if " " not in needle else text, needle)
         self.assertEqual([p["kind"] for p in rec.payloads], ["signed", "completed"])
+
+    def test_model_b_real_pdf(self):
+        from aqd import pdf
+        if pdf._renderer() is None:
+            self.skipTest("the shared renderer needs Python 3.12+ (Railway runs 3.13) — gate G9 runs it there")
+        os.environ.pop("AQD_PDF_DISABLED", None)
+        rec, _tmp = boot("aqd_e2e_b_")
+        t = Base("setUp")
+        t.rec = rec
+        cid = t.save(mb())
+        t.send(cid)
+        tok = t.token(cid)
+        t.approve("operating_ouja_v1_0")
+        v = t.verify(tok)
+        self.assertTrue(v["can_sign"], v)
+        self.assertTrue(t.sign(tok, v["view_key"])["ok"])
+        TestCountersign._upload_operator(t)
+        self.assertTrue(body(run(routes.api_countersign(_Req({"id": cid}))))["ok"])
+        self.assertTrue(files.exists(cid, "final.pdf"), "the shared Chromium did not produce final.pdf")
+        import fitz
+        compact = "".join("".join(pg.get_text() for pg in fitz.open(files.path(cid, "final.pdf"))).split())
+        # PyMuPDF drops the «غّ» ligature glyph when EXTRACTING text (the page itself renders
+        # «المشغّل» correctly — checked by rasterising page 1), so accept its extracted form too.
+        self.assertTrue("حسابالمشغّل" in compact or "حسابالمشّل" in compact, "حساب المشغّل")
+        for needle in ("صافيالمالك", "سجلالتوقيعالإلكتروني", "بصفتهوكيل"):
+            self.assertIn(needle, compact, needle)
 
 
 if __name__ == "__main__":

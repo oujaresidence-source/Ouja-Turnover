@@ -48,6 +48,10 @@
       '.aq-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;border-radius:var(--r-md);padding:12px 14px;margin-bottom:14px;background:var(--yellow-soft)}',
       '.aq-banner .t{font-weight:700;color:var(--text);font-size:13.5px}',
       '.aq-banner .s{color:var(--text-2);font-size:12.5px;flex:1 1 260px}',
+      '.aq-bl{display:flex;flex-direction:column;gap:2px;flex:1 1 100%}',
+      '.aq-tpl{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;margin-bottom:10px;background:var(--surface)}',
+      '.aq-tpl .n{font-weight:700;color:var(--text);font-size:13.5px;margin-bottom:8px}',
+      '.aq-tpl .aq-ok,.aq-tpl .aq-warn{margin-bottom:8px}',
       '.aq-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}',
       '.aq-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:transform .12s cubic-bezier(0.23,1,0.32,1)}',
       '.aq-chip:active{transform:scale(.97)}',
@@ -224,12 +228,14 @@
   }
 
   function renderTop(d) {
-    var ap = d.approval || {};
     var op = opBanner(d.operator_missing, d.is_admin);
-    if (ap.approved) { putHtml('aqTop', op); return; }
-    putHtml('aqTop', op + '<div class="aq-banner" role="status"><div class="t">' + esc(T('النموذج ' + (ap.version || '') + ' غير معتمد للتوقيع بعد — اعتمده من الإعدادات بعد موافقة المكتب',
-      'Template ' + (ap.version || '') + ' is not approved for signing yet — approve it in Settings after the law firm signs off')) + '</div>'
-      + '<div class="s">' + esc(T('الروابط تنرسل والعميل يقرأ العقد، لكن زر التوقيع مقفل لين الاعتماد.', 'Links work and clients can read; signing stays locked until approval.')) + '</div>'
+    var pend = arr(d.templates_pending);
+    if (!pend.length) { putHtml('aqTop', op); return; }
+    var lines = pend.map(function (t) {
+      return '<div class="t">' + esc(T(t.label_ar + ' غير معتمد للتوقيع بعد', 'Template ' + t.version + ' is not approved for signing yet')) + '</div>';
+    }).join('');
+    putHtml('aqTop', op + '<div class="aq-banner" role="status"><div class="aq-bl">' + lines + '</div>'
+      + '<div class="s">' + esc(T('الروابط تنرسل والعميل يقرأ العقد، لكن زر التوقيع مقفل لين تعتمد نموذجه من الإعدادات بعد موافقة المكتب.', 'Links work and clients can read; signing stays locked until its template is approved in Settings after the law firm signs off.')) + '</div>'
       + (d.is_admin ? '<button class="btn ghost sm" data-aq="settings">' + esc(T('الإعدادات', 'Settings')) + '</button>' : '') + '</div>');
   }
 
@@ -315,6 +321,7 @@
       + kv(T('الجوال', 'Mobile'), '<span dir="ltr">' + esc(c.mobile || '—') + '</span>', true)
       + kv(T('الوحدات', 'Units'), String(n(c.units_count)))
       + kv(T('نسبة التشغيل', 'Operating share'), pct(c.op_pct))
+      + kv(T('نموذج العقد', 'Contract template'), c.template_label || '—')
       + kv(T('أنشأه', 'Created by'), (c.created_by || '—') + ' · ' + riyadh(c.created_at))
       + (c.expires_at && ['sent', 'opened', 'verified'].indexOf(c.status) >= 0 ? kv(T('ينتهي الرابط', 'Link expires'), riyadh(c.expires_at)) : '')
       + (c.signed_at ? kv(T('وقّع العميل', 'Client signed'), riyadh(c.signed_at) + (c.signer_typed_name ? ' · ' + c.signer_typed_name : '')) : '')
@@ -325,6 +332,7 @@
     if (a.internal_note) h += '<div class="aq-sec">' + esc(T('ملاحظة داخلية', 'Internal note')) + '</div><div class="aq-warn">' + esc(a.internal_note) + '</div>';
     if (r.needs_reissue) h += '<div class="aq-err" role="alert">' + esc(T('أُرسل قبل قاعدة الشركات/الحساب — ألغه وأعد إصداره بعد اعتماد النموذج', 'Sent before the company/account rule — void it and re-issue once the template is approved')) + '</div>';
     if (a.airbnb_account === 'we_create' && a.account_model === 'owner') h += '<div class="aq-warn"><b>' + esc(T('قبل التشغيل', 'Before go-live')) + ':</b> ☐ ' + esc(((S.schema && S.schema.texts) || {}).we_create || 'إنشاء حساب المالك وإضافة عوجا مضيف مشارك قبل التشغيل') + '</div>';
+    if (a.account_model === 'ouja' && a.client_kind !== 'company') h += '<div class="aq-warn"><b>' + esc(T('قبل التشغيل', 'Before go-live')) + ':</b> ☐ ' + esc(((S.schema && S.schema.texts) || {}).ouja_golive || 'إدراج الوحدة في حساب عوجا وإثبات رقم ترخيصها في الإعلان') + '</div>';
     arr(r.warnings).forEach(function (w) { h += '<div class="aq-warn">' + esc(w) + '</div>'; });
     if (r.link) {
       h += '<div class="aq-sec">' + esc(T('رابط التوقيع', 'Signing link')) + '</div><div class="aq-link">' + esc(r.link) + '</div>'
@@ -397,9 +405,24 @@
   function ruleCards(st, a) {
     var t = (S.schema && S.schema.texts) || {}, h = '';
     if (st.id === 'client' && a.client_kind === 'company') h += '<div class="aq-warn" role="note"><b>' + esc(T('عقد شركة', 'Company contract')) + ':</b> ' + esc(t.company_card || '') + '</div>';
-    if (st.id === 'vat' && a.account_model === 'ouja' && a.client_kind !== 'company') h += '<div class="aq-warn" role="note">' + esc(t.ouja || '') + '</div>';
+    if (st.id === 'vat' && a.account_model === 'ouja' && a.client_kind !== 'company') {
+      if (t.ouja_card) h += '<div class="aq-warn" role="note"><b>' + esc(T('نموذج (ب) — حساب عوجا', 'Model (B) — Ouja account')) + ':</b> ' + esc(t.ouja_card) + '</div>';
+      if (t.ouja) h += '<div class="aq-err" role="note">' + esc(t.ouja) + '</div>';
+    }
     if (st.id === 'units' && cond('many_same', a)) h += '<div class="aq-err" role="alert">' + esc(t.many_same || '') + '</div>';
     return h;
+  }
+
+  /* ISO 13616: first four characters to the end, letters -> 10..35, mod 97 must be 1 (catalogue.iban_ok) */
+  function ibanOk(s) {
+    s = String(s || '');
+    if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/.test(s)) return false;
+    var r = s.slice(4) + s.slice(0, 4), m = 0;
+    for (var i = 0; i < r.length; i++) {
+      var d = String(parseInt(r.charAt(i), 36));
+      for (var j = 0; j < d.length; j++) m = (m * 10 + Number(d.charAt(j))) % 97;
+    }
+    return m === 1;
   }
 
   function fieldError(f, raw, a) {
@@ -425,6 +448,7 @@
     var pat = f.re, msg = f.msg_ar;
     if (f.re_by) { var sel = String(a[f.re_by.field] || ''); pat = f.re_by.map[sel]; msg = (f.msg_by || {})[sel] || msg; }
     if (pat && !(new RegExp(pat)).test(v)) return msg || 'الصيغة غير صحيحة';
+    if (f.iban && !ibanOk(v)) return 'رقم الآيبان غير صحيح — راجعه حرف حرف';
     if (f.min_words && v.split(' ').filter(Boolean).length < f.min_words) return msg || 'ناقص';
     return '';
   }
@@ -526,6 +550,7 @@
           + (im ? ' inputmode="' + im + '"' : '') + (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : '')
           + (f.min !== undefined ? ' min="' + f.min + '"' : '') + (f.max !== undefined ? ' max="' + f.max + '"' : '') + (f.step ? ' step="' + f.step + '"' : '')
           + (f.not_past ? ' min="' + todayRiyadh() + '"' : '')
+          + (f.iban ? ' dir="ltr" autocomplete="off" spellcheck="false" autocapitalize="characters"' : '')
           + ' aria-labelledby="' + id + '_l"' + (err ? ' aria-invalid="true" aria-describedby="' + id + '_e"' : '') + '>';
       }
     }
@@ -715,18 +740,22 @@
     var r = await api('/api/aqd/settings').catch(function () { return null; });
     if (!r || !r.ok) { setDrawerBody('<div class="aq-err">' + esc(errText(r)) + '</div>'); return; }
     S.settings = r; S.upload = {};
-    var ap = r.approval || {};
     var h = '<div id="aqFormErr"></div>';
-    h += '<div class="aq-sec">' + esc(T('اعتماد النموذج ' + r.template_version, 'Template ' + r.template_version + ' approval')) + '</div>';
-    if (ap.approved) {
-      h += '<div class="aq-ok">' + esc(T('معتمد للتوقيع — اعتمده ' + (ap.by || '') + ' · ' + riyadh(ap.at), 'Approved by ' + (ap.by || '') + ' · ' + riyadh(ap.at))) + '</div>'
-        + '<div class="aq-actions"><button class="btn ghost sm" data-aq="unapprove">' + esc(T('إيقاف الاعتماد', 'Withdraw approval')) + '</button></div>';
-    } else {
-      h += '<div class="aq-warn">' + esc(T('غير معتمد: العملاء يقرون العقد لكن ما يقدرون يوقّعون. اعتمده بعد موافقة المكتب.', 'Not approved: clients can read but not sign. Approve after the law firm signs off.')) + '</div>'
-        + '<div class="aq-f"><span class="l">' + esc(T('للاعتماد اكتب «' + r.confirm_word + '»', 'To approve, type «' + r.confirm_word + '»')) + '</span>'
-        + '<input type="text" id="aqApprove" aria-label="' + esc(T('كلمة التأكيد', 'Confirm word')) + '"></div>'
-        + '<div class="aq-actions"><button class="btn primary sm" data-aq="approve">' + esc(T('اعتماد النموذج', 'Approve template')) + '</button></div>';
-    }
+    h += '<div class="aq-sec">' + esc(T('اعتماد النماذج — كل نموذج يعتمد لحاله', 'Template approval — each template on its own')) + '</div>';
+    arr(r.templates).forEach(function (tp, i) {
+      h += '<div class="aq-tpl"><div class="n">' + esc(T(tp.label_ar, 'Template ' + tp.version)) + '</div>';
+      if (tp.legacy) h += '<p class="aq-sub">' + esc(T('للعقود اللي انرسلت عليه قبل النموذج الجديد فقط — العقود الجديدة ما تستخدمه.', 'Only for contracts already sent on it — new contracts never use it.')) + '</p>';
+      if (tp.approved) {
+        h += '<div class="aq-ok">' + esc(T('معتمد للتوقيع — اعتمده ' + (tp.by || '') + ' · ' + riyadh(tp.at), 'Approved by ' + (tp.by || '') + ' · ' + riyadh(tp.at))) + '</div>'
+          + '<div class="aq-actions"><button class="btn ghost sm" data-aq="unapprove" data-v="' + esc(tp.name) + '">' + esc(T('إيقاف الاعتماد', 'Withdraw approval')) + '</button></div>';
+      } else {
+        h += '<div class="aq-warn">' + esc(T('غير معتمد: العملاء يقرون عقود هالنموذج لكن ما يقدرون يوقّعون. اعتمده بعد موافقة المكتب.', 'Not approved: clients can read these contracts but not sign. Approve after the law firm signs off.')) + '</div>'
+          + '<div class="aq-f"><span class="l" id="aqApprove_' + i + '_l">' + esc(T('للاعتماد اكتب «' + r.confirm_word + '»', 'To approve, type «' + r.confirm_word + '»')) + '</span>'
+          + '<input type="text" id="aqApprove_' + i + '" aria-labelledby="aqApprove_' + i + '_l"></div>'
+          + '<div class="aq-actions"><button class="btn primary sm" data-aq="approve" data-v="' + esc(tp.name) + '" data-i="' + i + '">' + esc(T('اعتماد النموذج', 'Approve template')) + '</button></div>';
+      }
+      h += '</div>';
+    });
     h += '<div class="aq-sec">' + esc(T('توقيع المشغّل والختم (PNG، حد أقصى 300 KB)', 'Operator signature & stamp (PNG, max 300 KB)')) + '</div>';
     [['op_sig_png', 'sig_png', 'توقيع المشغّل', 'Operator signature'], ['op_stamp_png', 'stamp_png', 'ختم الشركة', 'Company stamp']].forEach(function (x) {
       h += '<div class="aq-f"><span class="l">' + esc(T(x[2], x[3])) + '</span><input type="file" accept="image/png" data-aq-file="' + x[0] + '" aria-label="' + esc(T(x[2], x[3])) + '">'
@@ -819,10 +848,10 @@
     }
     /* settings */
     if (a === 'savesettings') { el.disabled = true; await saveSettings(); el.disabled = false; return; }
-    if (a === 'approve') { el.disabled = true; await saveSettings({ approve: true, confirm: (document.getElementById('aqApprove') || {}).value || '' }); el.disabled = false; return; }
+    if (a === 'approve') { el.disabled = true; await saveSettings({ approve: true, template: v, confirm: (document.getElementById('aqApprove_' + el.getAttribute('data-i')) || {}).value || '' }); el.disabled = false; return; }
     if (a === 'unapprove') {
-      if (!window.confirm(T('إيقاف الاعتماد يقفل التوقيع عند كل العملاء. نكمل؟', 'Withdrawing approval locks signing for every client. Continue?'))) return;
-      el.disabled = true; await saveSettings({ approve: false }); el.disabled = false; return;
+      if (!window.confirm(T('إيقاف الاعتماد يقفل التوقيع عند كل عملاء هالنموذج. نكمل؟', 'Withdrawing approval locks signing for every client on this template. Continue?'))) return;
+      el.disabled = true; await saveSettings({ approve: false, template: v }); el.disabled = false; return;
     }
   }
 

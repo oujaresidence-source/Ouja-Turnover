@@ -524,18 +524,29 @@ pages, error) and purge progress — read it instead of asking the owner for a H
 
 ## «العقود» contracts — the `aqd/` package
 Survey (tab `aqd`, under «عروض الملاك / المبيعات») → the owner's FROZEN legal template
-(`aqd/templates/operating_v2_1.html`, 22 `{{placeholders}}` — never edit the legal text) → a token
+(`aqd/templates/operating_v2_2.html` / `operating_ouja_v1_0.html` — never edit the legal text) → a token
 link `/sign/{token}` → client last-4 check, read, typed name + drawn signature + consent → admin
 «توقيع المشغّل» → `final.pdf` with a «سجل التوقيع الإلكتروني» evidence page. Spec:
 `docs/superpowers/specs/2026-10-04-aqd-contract-signing-design.md`; gates: `aqd/GATES.md`.
 - **Template approval is THE safety switch.** Ships unapproved: links work read-only, signing is
   refused, until an admin types «اعتماد» in the tab's settings (stored per template file name).
-  Swapping in v2.2: add `operating_v2_2.html` with the same 22 keys, set `AQD_TEMPLATE`, re-approve.
+- **Two models (2026-10-12):** (أ) `operating_v2_2` = units on the OWNER's platform account (Ouja
+  co-host); (ب) `operating_ouja_v1_0` = units on OUJA's account (Ouja primary host as his agent,
+  collects, transfers the owner's net to his IBAN monthly/quarterly — 22 keys + `{{payout_period}}`).
+  Model B = individual + VAT «لا» + `account_model="ouja"` only; company still draft-only.
+- **Approval is PER TEMPLATE:** `POST /api/aqd/settings {approve, confirm:"اعتماد", template}` —
+  `template` is required and must be a shipped file; approving one never approves another. Settings
+  shows one card per active template plus any older one a contract still waits to sign on.
+- **v2.1 stays for old contracts:** a contract keeps the `template_name` it was SENT on, so 2.1
+  links still sign once 2.1 is approved. Sign/boot use `engine.template_fits` = same account MODEL
+  as the frozen text: an Ouja-account contract frozen on 2.1 is «needs_reissue», never signable.
 - **Freeze = immutability.** On send the render is written to `$STATE_DIR/aqd/<id>/frozen.html` and
   hashed (`doc_sha256`). Only three HTML-comment slots stay open (watermark + two signatures). A change
   after sending means void + a new contract. User values are HTML- AND brace-escaped.
 - **PDPL:** full ID/iqama/CR numbers live ONLY in the contract files; DB `answers_json` holds
   `••••••1234`; Discord/logs never carry an ID or a phone. Tests build fake IDs by concatenation.
+  **IBAN (Model B) the same way:** DB/API show `SA•• •••• … 1234`; the full IBAN lives only in
+  `draft_answers.json` → `frozen.html`/PDFs. Validated SA + 22 digits + ISO 13616 mod-97 (Python + tab).
 - **Public doors:** the read is `/api/aqd-t/{token}` (OUTSIDE `/api/aqd/` so the role rule never
   403s a phone); writes `/api/aqd-t/open|verify|sign` are exact paths in `_ROLE_EXEMPT_WRITES`.
   No body before the last-4 check; verify mints a 30-min `view_key` that body, PDF and sign require;
@@ -545,15 +556,15 @@ link `/sign/{token}` → client last-4 check, read, typed name + drawn signature
 - **PDF:** shared Chromium (`ouja_render._pw_pool`/`_pw_print`), needs Python ≥3.12 (Railway 3.13);
   any failure falls back to HTML and NEVER blocks signing. Local 3.9 skips the real-PDF test.
 - **Routing (R2):** `config.TEMPLATES` maps (client_kind, account_model) → a firm-approved template;
-  only (individual, owner) → v2.1 today. Company / Ouja-account = draft only, never a link; sign
-  re-checks the route (a pre-release company link can never be signed; boot flags it «needs_reissue»).
+  (individual, owner) → v2.2 and (individual, ouja) → Model B 1.0. Company = draft only, never a link;
+  sign re-checks the route (a pre-release company link can never be signed; boot flags «needs_reissue»).
   VAT-registered ⇒ `account_model` forced to "owner" by the server (R1).
 - **Hard blocks at send:** >3 units in one shared property (المادة 4/2, no tick any more) and
   `operator_missing()` (rep, وكالة no/date, CR expiry) — the operator block is frozen into the
   document. Approval is refused on the same list. 15 wrong last-4 tries over a link's life expire
   it (one Discord line); resend resets the count.
 - Env: `AQD_ENABLED`(1), `AQD_LINK_TTL_DAYS`(14), `AQD_CHANNEL`(العقود, created under «ضم الوحدات»),
-  `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_1). Non-admins see the tab only after the
+  `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_2 — overrides the (أ) route only). Non-admins see the tab only after the
   owner ticks «العقود» in الصلاحيات.
 
 ## Owner-account billing «حساب المالك» — `finance/ownerbill.py` (+ `ownerbill_pdf.py`)

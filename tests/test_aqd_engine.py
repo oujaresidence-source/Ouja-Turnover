@@ -23,6 +23,7 @@ NID = "1" + "23456" + "7890"
 IQAMA = "2" + "23456" + "7891"
 AGENT = "1" + "98765" + "4321"
 CR = "1" + "01012" + "3456"
+IBAN = "SA03" + "8000" + "0000" + "6080" + "1016" + "7519"       # ISO 13616 mod-97 valid
 
 
 def unit(**over):
@@ -50,6 +51,13 @@ def company(**over):
                    rep_name="سعد الدوسري", rep_capacity="manager")
     for k in ("gender", "id_type", "full_name", "id_number", "signer"):
         a.pop(k, None)
+    a.update(over)
+    return a
+
+
+def model_b(**over):
+    a = individual(account_model="ouja", payout_period="monthly", owner_iban=IBAN)
+    a.pop("airbnb_account", None)
     a.update(over)
     return a
 
@@ -196,13 +204,11 @@ class TestAccountModelAndRouting(unittest.TestCase):
 
     def test_airbnb_account_question_only_for_the_owner_account(self):
         self.assertIn("airbnb_account", ok(individual()))
-        self.assertNotIn("airbnb_account", ok(individual(account_model="ouja")))
+        self.assertNotIn("airbnb_account", ok(model_b()))
 
     def test_template_for(self):
-        self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_1", None))
-        name, why = engine.template_for(ok(individual(account_model="ouja")))
-        self.assertIsNone(name)
-        self.assertEqual(why, "حساب عوجا يحتاج نموذج عقد ثاني معتمد من المكتب — احفظه كمسودة")
+        self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_2", None))
+        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v1_0", None))
         for model in ("owner", "ouja"):
             name, why = engine.template_for(ok(company(account_model=model)))
             self.assertIsNone(name)
@@ -218,7 +224,7 @@ class TestAccountModelAndRouting(unittest.TestCase):
 
     def test_unrouted_contracts_cannot_be_sent(self):
         self.assertTrue(any("عقود الشركات" in b for b in catalogue.send_blockers(ok(company()))))
-        self.assertTrue(any("حساب عوجا" in b for b in catalogue.send_blockers(ok(individual(account_model="ouja")))))
+        self.assertEqual(catalogue.send_blockers(ok(model_b())), [])
         self.assertEqual(catalogue.send_blockers(ok(individual())), [])
 
     def test_licence_number_keeps_letters_dash_and_slash(self):
@@ -293,7 +299,7 @@ class TestUnitRows(unittest.TestCase):
 class TestRender(unittest.TestCase):
 
     def test_render_leaves_no_placeholder_and_has_all_22_keys(self):
-        self.assertEqual(sorted(ctx(ok(individual())).keys()), sorted(engine.KEYS))
+        self.assertEqual(sorted(ctx(ok(individual())).keys()), sorted(engine.KEYS + engine.EXTRA_KEYS))
         self.assertEqual(len(engine.KEYS), 22)
         out = render(ok(individual()))
         self.assertNotIn("{{", out)
@@ -400,6 +406,95 @@ class TestNamesAndPrivacy(unittest.TestCase):
         self.assertEqual(m["id_number"], "••••••" + NID[-4:])
         self.assertEqual(m["agent_id"], "••••••" + AGENT[-4:])
         self.assertNotIn(NID, repr(m))
+
+
+class TestModelB(unittest.TestCase):
+    """Model (B): the units run on Ouja's platform account; Ouja transfers the owner's net."""
+
+    def test_routing(self):
+        self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_2", None))
+        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v1_0", None))
+        for model in ("owner", "ouja"):
+            self.assertEqual(engine.template_for(ok(company(account_model=model))),
+                             (None, catalogue.COMPANY_REASON))
+        vat = ok(model_b(vat_registered="yes", vat_number="3" + "0" * 13 + "3", airbnb_account="owner_has"))
+        self.assertEqual(engine.template_for(vat), ("operating_v2_2", None))
+        self.assertNotIn("owner_iban", vat)
+
+    def test_ouja_reason_returns_only_when_the_table_loses_the_entry(self):
+        from aqd import config
+        saved = dict(config.TEMPLATES)
+        try:
+            config.TEMPLATES.pop(("individual", "ouja"))
+            self.assertEqual(engine.template_for(ok(model_b())), (None, catalogue.OUJA_REASON))
+            self.assertEqual(catalogue.schema()["texts"]["ouja"], catalogue.OUJA_REASON)
+        finally:
+            config.TEMPLATES.clear()
+            config.TEMPLATES.update(saved)
+        self.assertEqual(catalogue.schema()["texts"]["ouja"], "")
+        self.assertIn("تنحط الوحدة في حساب عوجا", catalogue.schema()["texts"]["ouja_card"])
+
+    def test_versions(self):
+        from aqd import config
+        self.assertEqual(config.template_version("operating_ouja_v1_0"), "1.0")
+        self.assertEqual(config.template_version("operating_v2_2"), "2.2")
+
+    def test_the_two_questions_show_only_for_model_b(self):
+        self.assertNotIn("owner_iban", ok(individual()))
+        self.assertNotIn("payout_period", ok(individual()))
+        c = ok(model_b())
+        self.assertEqual((c["owner_iban"], c["payout_period"]), (IBAN, "monthly"))
+        _c, errs = catalogue.validate(model_b(owner_iban="", payout_period=None), TODAY)
+        self.assertEqual(errs.get("owner_iban"), "مطلوب")
+        self.assertEqual(_c["payout_period"], "monthly")          # the default
+
+    def test_iban_valid_normalised_and_check_digits(self):
+        spaced = " ".join(IBAN[i:i + 4] for i in range(0, 24, 4)).lower()
+        self.assertEqual(ok(model_b(owner_iban=spaced))["owner_iban"], IBAN)
+        bad = IBAN[:2] + "04" + IBAN[4:]
+        _c, errs = catalogue.validate(model_b(owner_iban=bad), TODAY)
+        self.assertEqual(errs.get("owner_iban"), "رقم الآيبان غير صحيح — راجعه حرف حرف")
+        for junk in ("SA03", "GB" + IBAN[2:], IBAN + "1"):
+            _c, errs = catalogue.validate(model_b(owner_iban=junk), TODAY)
+            self.assertEqual(errs.get("owner_iban"), "SA + ٢٢ رقم، ولازم يكون باسم المالك", junk)
+        self.assertNotIn(chr(92), "".join(f.get("re", "") for f in catalogue.VAT))
+
+    def test_masked_answers_hide_the_iban(self):
+        m = engine.masked_answers(ok(model_b()))
+        self.assertEqual(m["owner_iban"], "SA•• •••• … " + IBAN[-4:])
+        self.assertNotIn(IBAN, repr(m))
+        self.assertNotIn(IBAN[4:20], repr(m))
+
+    def test_model_b_render(self):
+        for period, needle in (("monthly", "شهرية (تنتهي في آخر يوم من كل شهر ميلادي)"),
+                               ("quarterly", "ربع سنوية (تنتهي في 31 مارس، 30 يونيو، 30 سبتمبر، 31 ديسمبر)")):
+            out = engine.render(files.template_text("operating_ouja_v1_0"), ctx(ok(model_b(payout_period=period))))
+            self.assertNotIn("{{", out)
+            self.assertIn("حساب المشغّل:", out)
+            self.assertIn(needle + "، ويُحوَّل صافي المالك خلال (10) أيام من نهايتها", out)
+            self.assertIn("الحساب البنكي (IBAN) لتحويل صافي المالك", out)
+            self.assertIn('<span dir="ltr">%s</span>' % IBAN, out)
+            self.assertIn("غير مسجل (شرط لهذا النموذج)", out)
+        rows = engine.owner_rows(ok(model_b()))
+        self.assertLess(rows.index("العنوان الوطني"), rows.index("الحساب البنكي (IBAN)"))
+        self.assertIn("غير مسجلة (شرط لهذا النموذج)", engine.owner_rows(ok(model_b(gender="f"))))
+
+    def test_owner_model_rows_do_not_change(self):
+        rows = engine.owner_rows(ok(individual()))
+        self.assertNotIn("IBAN", rows)
+        self.assertNotIn("شرط لهذا النموذج", rows)
+
+    def test_v22_render(self):
+        out = engine.render(files.template_text("operating_v2_2"), ctx(ok(individual())))
+        self.assertNotIn("{{", out)
+        self.assertIn("أيام الحجب:", out)
+        self.assertIn("عمّا زاد على (7) أيام متصلة", out)
+
+    def test_placeholders(self):
+        a = set(engine.PLACEHOLDER.findall(files.template_text("operating_v2_2")))
+        b = set(engine.PLACEHOLDER.findall(files.template_text("operating_ouja_v1_0")))
+        self.assertEqual(a, set(engine.KEYS))
+        self.assertEqual(b, a | {"payout_period"})
 
 
 if __name__ == "__main__":

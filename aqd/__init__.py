@@ -2,7 +2,8 @@
 """
 «العقود» (aqd, from عقد) — survey → filled operating contract → e-sign link → countersign.
 
-An employee answers a short survey; the answers fill the owner's frozen legal template (v2.1);
+An employee answers a short survey; the answers fill a frozen legal template — (أ) 2.2 on the
+owner's own platform account, or (ب) 1.0 on Ouja's account (older contracts keep 2.1);
 the client opens a token link on a phone, passes a last-4 identity check, reads, draws a
 signature and signs; Ouja is notified; an admin countersigns and the final PDF is sealed.
 Modelled on DocuSign / Adobe Sign (link per signer, access check, immutable hash, evidence page).
@@ -24,12 +25,12 @@ __all__ = ["wire", "register_routes", "bootstrap", "HOST", "engine", "catalogue"
 
 def flag_unrouted():
     """R2 one-time check: a contract sent before the routing rule whose answers no longer route
-    to an approved template gets ONE «needs_reissue» event (never a second one)."""
+    to a template of the model it was frozen on gets ONE «needs_reissue» event (never a second)."""
     n = 0
     for c in db.contracts():
         if c.get("status") not in ("sent", "opened", "verified"):
             continue
-        if engine.template_for(db.answers(c))[0]:
+        if engine.template_fits(db.answers(c), c.get("template_name")):
             continue
         if not db.has_event(c["id"], "needs_reissue"):
             db.add_event(c["id"], "النظام", "needs_reissue", {})

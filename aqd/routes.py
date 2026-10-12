@@ -256,11 +256,32 @@ def settings_values():
 
 
 def approval(template_name=None):
-    key = config.approval_key(template_name)
-    row = db.settings().get(key) or {}
+    name = template_name or config.template_name()
+    row = db.settings().get(config.approval_key(name)) or {}
     return {"approved": (row.get("value") == "1"), "by": row.get("updated_by"),
-            "at": row.get("updated_at"), "template": template_name or config.template_name(),
-            "version": config.template_version(template_name)}
+            "at": row.get("updated_at"), "template": name,
+            "version": config.template_version(name), "label_ar": config.template_label(name)}
+
+
+# Statuses whose client can still sign — the template they were frozen on still needs approval.
+AWAITING_SIGN = ("sent", "opened", "verified", "expired")
+
+
+def templates_view():
+    """One approval card per template: every template new contracts would use, plus any older
+    template (2.1) that a contract still waiting for the client's signature was frozen on."""
+    active = config.active_templates()
+    names = list(active)
+    for c in db.contracts():
+        n = c.get("template_name")
+        if c.get("status") in AWAITING_SIGN and n and n not in names and n in config.known_templates():
+            names.append(n)
+    out = []
+    for n in names:
+        ap = approval(n)
+        out.append({"name": n, "version": ap["version"], "label_ar": ap["label_ar"], "legacy": n not in active,
+                    "approved": ap["approved"], "by": ap["by"], "at": ap["at"]})
+    return out
 
 
 OPERATOR_FIELDS = (("op_rep_name", "اسم ممثل المشغّل"), ("op_wakala_no", "رقم الوكالة"),
@@ -438,8 +459,11 @@ def core_list(status=None, query=None, role="viewer"):
         ql = query.strip().lower()
         rows = [r for r in rows if ql in ("%s %s %s" % (r["ref"], r["client_name"], r["created_by"])).lower()]
     ap = approval()
+    pending = [{"name": n, "label_ar": config.template_label(n), "version": config.template_version(n)}
+               for n in config.active_templates() if not is_approved(n)]
     return 200, {"ok": True, "rows": rows, "counts": dict(counts), "awaiting_countersign": awaiting,
-                 "approval": ap, "can_edit": role in EDIT_ROLES, "is_admin": role in ADMIN_ROLES,
+                 "approval": ap, "templates_pending": pending,
+                 "can_edit": role in EDIT_ROLES, "is_admin": role in ADMIN_ROLES,
                  "status_ar": engine.STATUS_AR, "total": sum(counts.values()),
                  "operator_missing": operator_missing()}
 
@@ -461,6 +485,11 @@ def core_get(cid, role, actor, edit=False):
         c.get("notified_signed_at") or "").startswith("claim:") else ""
     view["id_masked"] = ("••••••" + c["id_last4"]) if c.get("id_last4") else ""
     view["status_ar"] = engine.STATUS_AR.get(st, st)
+    # a draft shows the template it WOULD be sent on; anything sent shows the one it was frozen on
+    tname = engine.template_for(a)[0] if st == "draft" else c.get("template_name")
+    view["template_name"] = tname or ""
+    view["template_label"] = config.template_label(tname) if tname else "—"
+    view["account_model"] = a.get("account_model") or ""
     out = {"ok": True, "contract": view, "answers": a, "events": db.events(c["id"]),
            "warnings": json.loads(c.get("warnings_json") or "[]")}
     if c.get("token") and st in ("sent", "opened", "verified", "signed_owner", "completed"):
@@ -531,6 +560,9 @@ def core_save(body, actor):
         ok, why = engine.can("edit", c)
         if not ok:
             return _refuse(why)
+        tname = engine.template_for(clean)[0]
+        if tname:
+            fields.update(template_name=tname, template_version=config.template_version(tname))
         if not db.update_where_status(c["id"], ("draft",), **fields):
             return _refuse("العقد ما عاد مسودة")
         files.write_json(c["id"], "draft_answers.json", answers)
@@ -666,7 +698,7 @@ def core_file(cid, kind):
 
 
 def core_settings_get(admin):
-    out = {"ok": True, "values": settings_values(), "approval": approval(),
+    out = {"ok": True, "values": settings_values(), "approval": approval(), "templates": templates_view(),
            "confirm_word": config.CONFIRM_WORD, "template": config.template_name(),
            "template_version": config.template_version(), "env_ttl_days": config.env_ttl_days(),
            "channel": config.channel(), "is_admin": admin, "operator_missing": operator_missing()}
@@ -700,7 +732,11 @@ def core_settings_save(body, actor):
             files.save_settings_png(name, data)
             db.set_setting(name, "1", actor)
     if "approve" in body:
-        key = config.approval_key()
+        # one approval per template: the request names it, and approving one never approves another
+        tname = str(body.get("template") or "").strip()
+        if tname not in config.known_templates():
+            return _refuse("حدّد أي نموذج تعتمد")
+        key = config.approval_key(tname)
         if body.get("approve"):
             if str(body.get("confirm") or "").strip() != config.CONFIRM_WORD:
                 return _refuse("للاعتماد اكتب «%s» بالضبط" % config.CONFIRM_WORD)
@@ -840,9 +876,10 @@ def core_public_sign(body, ip, ua):
         return _refuse("العقد موقّع مسبقاً", state=st)
     if not _view_ok(c, body.get("view_key")) or st != "verified":
         return _refuse("انتهت جلسة التحقق — اكتب آخر 4 أرقام مرة ثانية", reverify=True)
-    if not engine.template_for(db.answers(c))[0]:
-        # R2 defence in depth: sent before the routing rule (a company / Ouja-account contract
-        # on v2.1). It can never be signed, even after v2.1 is approved.
+    if not engine.template_fits(db.answers(c), c.get("template_name")):
+        # R2 defence in depth: sent before the routing rule (a company contract, or an Ouja-account
+        # contract frozen on the owner-account text 2.1). It can never be signed, even after its
+        # template is approved — it is voided and re-issued on the right model.
         return _refuse("هذا العقد يحتاج إعادة إصدار — تواصل مع مدير حسابك")
     if not is_approved(c.get("template_name")):
         return _refuse("التوقيع غير متاح — النموذج قيد المراجعة القانونية")
