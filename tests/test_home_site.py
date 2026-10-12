@@ -349,6 +349,13 @@ class StaysFastAndStatic(unittest.TestCase):
             for src in re.findall(r'(?:src|href)="(https?://[^"]+)"', _main_part(html)):
                 self.assertTrue(src.startswith("https://oujares.com"), path + " " + src)
 
+    def test_phone_breakpoint_keeps_the_top_spacing(self):
+        # A ".wrap{padding:0 16px}" override under 420px once zeroed the page's top
+        # padding, gluing the headline to the header on phones (seen live 2026-10-12).
+        from site_home import render
+        phone = render._CSS.split("@media (max-width:420px)", 1)[1].split("@media", 1)[0]
+        self.assertNotRegex(phone, r"\.wrap\{padding:\s*0")
+
     def test_embedded_scripts_parse(self):
         try:
             import esprima

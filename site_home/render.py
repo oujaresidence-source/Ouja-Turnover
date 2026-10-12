@@ -259,7 +259,7 @@ h2{font-family:var(--display);font-weight:700;font-size:1.55rem;line-height:1.3;
 }
 @media (max-width:420px){
   body{font-size:16px}
-  .wrap{padding:0 16px}
+  .wrap{padding-inline:16px}
   .brand b{font-size:1rem}
   .nav a{padding:0 10px}
   .official header,.official dl,.official .lic,.official h3{padding-inline:18px}
