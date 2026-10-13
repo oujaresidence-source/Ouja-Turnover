@@ -307,10 +307,9 @@ def jamiya(a):
 # ------------------------------------------------------------------ operator + overlays
 
 def op_rep_full(s):
-    return ("%s، وكيلاً عن الشركة بموجب الوكالة رقم %s وتاريخ %s الصادرة عبر منصة ناجز، "
-            "والمتضمنة إبرام العقود وتوقيعها عن الشركة"
-            % (h(s.get("op_rep_name") or "—"), h(s.get("op_wakala_no") or "—"),
-               h(s.get("op_wakala_date") or "—")))
+    """Owner ruling 2026-10-13: the operator's representative is printed by name only — the
+    contract mentions no وكالة (number or date), whether or not one is filled in Settings."""
+    return h(s.get("op_rep_name") or "—")
 
 
 def banner_html(approved):

@@ -512,16 +512,24 @@ class TestUpgradeRules(Base):
         r = body(run(routes.api_send(_Req({"id": cid}))))
         self.assertFalse(r["ok"])
         self.assertTrue(r["error"].startswith("أكمل بيانات المشغّل في الإعدادات أول"))
-        for label in ("اسم ممثل المشغّل", "رقم الوكالة", "تاريخ الوكالة", "تاريخ انتهاء السجل التجاري"):
-            self.assertIn(label, r["error"])
+        self.assertIn("اسم ممثل المشغّل", r["error"])
+        self.assertNotIn("الوكالة", r["error"])
         lst = body(run(routes.api_list(_Req())))
-        self.assertEqual(len(lst["operator_missing"]), 4)
+        self.assertEqual(lst["operator_missing"], ["اسم ممثل المشغّل"])
         fill_operator()
         self.assertTrue(body(run(routes.api_send(_Req({"id": cid}))))["ok"])
 
-    def test_cr_expiry_dash_counts_as_missing(self):
-        fill_operator({"op_cr_expiry": "—"})
-        self.assertEqual(routes.operator_missing(), ["تاريخ انتهاء السجل التجاري"])
+    def test_wakala_and_cr_expiry_are_not_required(self):
+        """Owner ruling 2026-10-13: approve and send with the rep's name only — no وكالة, no CR expiry."""
+        fill_operator({"op_wakala_no": "", "op_wakala_date": "", "op_cr_expiry": "—"})
+        self.assertEqual(routes.operator_missing(), [])
+        self.approve("operating_v2_2")
+        self.approve("operating_ouja_v2_2")
+        cid = self.save()
+        self.send(cid)
+        frozen = files.read_text(cid, "frozen.html")
+        row = frozen[frozen.index("الممثل وصفته"):]
+        self.assertNotIn("وكال", row[:row.index("</tr>")])
 
     def test_approval_refused_while_operator_data_is_missing(self):
         clear_operator()
@@ -626,13 +634,13 @@ class TestModelB(Base):
         self.assertNotIn(IBAN, json.dumps(g, ensure_ascii=False))
         self.assertEqual(g["answers"]["owner_iban"], "SA•• •••• … " + IBAN[-4:])
         self.assertIn(IBAN, json.dumps(files.read_json(cid, "draft_answers.json", {})))
-        self.assertEqual(g["contract"]["template_label"], "نموذج (ب) — حساب عوجا 1.0")
+        self.assertEqual(g["contract"]["template_label"], "نموذج (ب) — حساب عوجا 2.2")
         self.send(cid)
         self.assertIn(IBAN, files.read_text(cid, "frozen.html"))
         g = body(run(routes.api_get(_Req(query={"id": cid}))))
         self.assertNotIn(IBAN, json.dumps(g, ensure_ascii=False))
-        self.assertEqual(db.get(cid)["template_name"], "operating_ouja_v1_0")
-        self.assertEqual(db.get(cid)["template_version"], "1.0")
+        self.assertEqual(db.get(cid)["template_name"], "operating_ouja_v2_2")
+        self.assertEqual(db.get(cid)["template_version"], "2.2")
         lst = body(run(routes.api_list(_Req())))
         self.assertNotIn(IBAN, json.dumps(lst, ensure_ascii=False))
 
@@ -652,22 +660,22 @@ class TestModelB(Base):
     def test_each_template_has_its_own_approval(self):
         s = self.settings()
         names = [t["name"] for t in s["templates"]]
-        self.assertEqual(names, ["operating_v2_2", "operating_ouja_v1_0"])
+        self.assertEqual(names, ["operating_v2_2", "operating_ouja_v2_2"])
         labels = {t["name"]: t["label_ar"] for t in s["templates"]}
         self.assertEqual(labels["operating_v2_2"], "نموذج (أ) — حساب المالك 2.2")
-        self.assertEqual(labels["operating_ouja_v1_0"], "نموذج (ب) — حساب عوجا 1.0")
+        self.assertEqual(labels["operating_ouja_v2_2"], "نموذج (ب) — حساب عوجا 2.2")
         self.assertFalse(any(t["approved"] for t in s["templates"]))
-        self.approve("operating_ouja_v1_0")
+        self.approve("operating_ouja_v2_2")
         self.assertFalse(routes.is_approved("operating_v2_2"))
         self.assertFalse(routes.is_approved("operating_v2_1"))
-        r = body(run(routes.api_settings(_Req({"approve": False, "template": "operating_ouja_v1_0"}))))
+        r = body(run(routes.api_settings(_Req({"approve": False, "template": "operating_ouja_v2_2"}))))
         self.assertTrue(r["ok"], r)
         self.approve("operating_v2_2")
-        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+        self.assertFalse(routes.is_approved("operating_ouja_v2_2"))
         t = {x["name"]: x for x in self.settings()["templates"]}
         self.assertTrue(t["operating_v2_2"]["approved"])
         self.assertEqual(t["operating_v2_2"]["by"], "فيصل")
-        self.assertFalse(t["operating_ouja_v1_0"]["approved"])
+        self.assertFalse(t["operating_ouja_v2_2"]["approved"])
 
     def test_approval_needs_a_known_template(self):
         for bad in (None, "", "operating_v9_9", "../operating_v2_2", "contract"):
@@ -677,11 +685,11 @@ class TestModelB(Base):
             r = body(run(routes.api_settings(_Req(b))))
             self.assertFalse(r["ok"], bad)
         self.assertFalse(routes.is_approved("operating_v2_2"))
-        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+        self.assertFalse(routes.is_approved("operating_ouja_v2_2"))
 
     def test_operator_gate_holds_for_every_approval(self):
         clear_operator()
-        for name in ("operating_v2_2", "operating_ouja_v1_0"):
+        for name in ("operating_v2_2", "operating_ouja_v2_2"):
             r = body(run(routes.api_settings(_Req({"approve": True, "confirm": "اعتماد", "template": name}))))
             self.assertFalse(r["ok"])
             self.assertIn("أكمل بيانات المشغّل", r["error"])
@@ -690,10 +698,10 @@ class TestModelB(Base):
     def test_list_banner_names_each_unapproved_template(self):
         lst = body(run(routes.api_list(_Req())))
         self.assertEqual([t["label_ar"] for t in lst["templates_pending"]],
-                         ["نموذج (أ) — حساب المالك 2.2", "نموذج (ب) — حساب عوجا 1.0"])
+                         ["نموذج (أ) — حساب المالك 2.2", "نموذج (ب) — حساب عوجا 2.2"])
         self.approve("operating_v2_2")
         lst = body(run(routes.api_list(_Req())))
-        self.assertEqual([t["name"] for t in lst["templates_pending"]], ["operating_ouja_v1_0"])
+        self.assertEqual([t["name"] for t in lst["templates_pending"]], ["operating_ouja_v2_2"])
 
     def test_model_b_flow_send_read_refuse_approve_sign_countersign(self):
         self.approve("operating_v2_2")                     # the OTHER template: must not unlock B
@@ -709,7 +717,7 @@ class TestModelB(Base):
         r = self.sign(tok, v["view_key"])
         self.assertFalse(r["ok"])
         self.assertIn("قيد المراجعة", r["error"])
-        self.approve("operating_ouja_v1_0")
+        self.approve("operating_ouja_v2_2")
         v = self.verify(tok)
         self.assertTrue(v["can_sign"], v)
         self.assertNotIn("غير معتمد للتوقيع", v["html"])
@@ -730,7 +738,7 @@ class TestModelB(Base):
         self.assertFalse(v["can_sign"])
         self.approve("operating_v2_1")
         self.assertFalse(routes.is_approved("operating_v2_2"))
-        self.assertFalse(routes.is_approved("operating_ouja_v1_0"))
+        self.assertFalse(routes.is_approved("operating_ouja_v2_2"))
         v = self.verify(tok)
         self.assertTrue(v["can_sign"], v)
         r = self.sign(tok, v["view_key"])
@@ -747,7 +755,7 @@ class TestModelB(Base):
         aqd.bootstrap()
         self.assertTrue(body(run(routes.api_get(_Req(query={"id": cid}))))["needs_reissue"])
         self.approve("operating_v2_1")
-        self.approve("operating_ouja_v1_0")
+        self.approve("operating_ouja_v2_2")
         v = self.verify(tok)
         self.assertTrue(v["ok"], v)
         r = self.sign(tok, v["view_key"])
@@ -817,7 +825,7 @@ class TestEndToEnd(unittest.TestCase):
         cid = t.save(mb())
         t.send(cid)
         tok = t.token(cid)
-        t.approve("operating_ouja_v1_0")
+        t.approve("operating_ouja_v2_2")
         v = t.verify(tok)
         self.assertTrue(v["can_sign"], v)
         self.assertTrue(t.sign(tok, v["view_key"])["ok"])

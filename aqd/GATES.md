@@ -19,7 +19,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G3: full suite — no NEW failures vs the baseline recorded on untouched origin/main (aqd/.baseline.txt)
   CHECK: python3 -c "import re,subprocess,sys;I=re.compile(r'^(?:FAIL|ERROR): (\S+ \(\S+\))',re.M);k=set(I.findall(open('aqd/.baseline.txt',encoding='utf-8').read()));o=subprocess.run([sys.executable,'-m','unittest','discover','-s','tests','-p','test_*.py'],capture_output=True,text=True);t=o.stdout+o.stderr;r=re.search(r'^Ran (\d+) tests',t,re.M);n=sorted(set(I.findall(t))-k);print('NEW_FAILURES',n) if (n or not r) else print('NO_NEW_FAILURES ran=%s' % r.group(1))"
   EXPECT: /^NO_NEW_FAILURES ran=\d+$/m
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=fa30e0a7b114643982d34ca834ff2e932e387edbd1f813d30d25d088de0558fa; output-bytes=25
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=e4841137520613324f12397078a7b92f433417173512f0ea176d1863c4b063c0; output-bytes=25
 
 - [x] G4: both tab scripts parse under node
   CHECK: node --check aqd/static/aqd_tab.js && node --check aqd/static/sign.js && echo JS_OK
@@ -29,7 +29,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G5: every <script> of the served DASHBOARD_HTML parses (esprima)
   CHECK: python3 -c "import bot,esprima,re;[esprima.parseScript(j) for j in re.findall(r'<script>(.*?)</script>',bot.DASHBOARD_HTML,re.S)];print('ESPRIMA_OK')" 2>/dev/null
   EXPECT: /^ESPRIMA_OK$/m
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=9d86f1b421e1ec14528be121bdb312b570f736634ffee6fe6ab84b9ec6f853f2; output-bytes=956
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=2228c06d2966f53d88ec79de61d3b7d09547468532a7f699a902447a2118747f; output-bytes=956
 
 - [x] G6: no asyncio.to_thread anywhere in aqd/
   CHECK: test -f aqd/routes.py && (grep -rn "to_thread" aqd/ --include=*.py --include=*.js || echo NO_TO_THREAD)
@@ -39,7 +39,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 - [x] G7: no national-ID-shaped number leaves through git
   CHECK: python3 permits/tools_privacy_scan.py
   EXPECT: /PRIVACY_OK/
-  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=5eb919c0bcbb52359f3cff7e94f479cfaf171f575386c066aea1bd44efd84463; output-bytes=80
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=685aeb50c3b01fe0b335fd740c6338515538c1b5b780e5fd143695e9f084defa; output-bytes=80
 
 - [x] G8: zero backslashes in aqd/sign_page.py and in the loadAqd stub inside bot.py
   CHECK: python3 -c "s=open('aqd/sign_page.py',encoding='utf-8').read();b=open('bot.py',encoding='utf-8').read();i=b.find('/* AQD-STUB-START */');j=b.find('/* AQD-STUB-END */');print('BACKSLASH_FREE' if (0<i<j and chr(92) not in s and chr(92) not in b[i:j]) else 'BACKSLASH_FOUND')"
@@ -174,7 +174,7 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
 ## Upgrade 3 — Model (B) «حساب عوجا» + template v2.2 + per-template approval (2026-10-12)
 
 - [x] G17: v2.2 has the 22 shared placeholders; Model (B) has exactly those + payout_period; both carry their defining text
-  CHECK: python3 -c "import re;f=lambda n:open('aqd/templates/'+n+'.html',encoding='utf-8').read();a=f('operating_v2_2');b=f('operating_ouja_v1_0');pa=set(re.findall(r'\{\{(\w+)\}\}',a));pb=set(re.findall(r'\{\{(\w+)\}\}',b));print('TPL_OK' if len(pa)==22 and pb==pa|{'payout_period'} and 'حساب المشغّل:' in b and 'أيام الحجب:' in a else 'TPL_BAD')"
+  CHECK: python3 -c "import re;f=lambda n:open('aqd/templates/'+n+'.html',encoding='utf-8').read();a=f('operating_v2_2');b=f('operating_ouja_v2_2');pa=set(re.findall(r'\{\{(\w+)\}\}',a));pb=set(re.findall(r'\{\{(\w+)\}\}',b));print('TPL_OK' if len(pa)==22 and pb==pa|{'payout_period'} and 'حساب المشغّل:' in b and 'أيام الحجب:' in a else 'TPL_BAD')"
   EXPECT: /^TPL_OK$/m
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/Users/faisalouja/ouja-wt-aqdb; path=985fd6ae610d/17 entries; EXPECT=matched; output-sha256=588d1789e3a18e1b2bd1c1bb0859b0647ce5ea7f328fac4e57eccf6d30ac1bac; output-bytes=7
 
@@ -230,3 +230,12 @@ Run from the repo root: node <unlazy>/scripts/gate-check.mjs --cwd . aqd/GATES.m
     pre-existing date-dependent failures (`test_ops_capture.TestBackfill` ×2, `test_train_export`).
 40. **G2's pattern now allows `skipped=1|2`**: Upgrade 3 adds a second real-PDF test (Model B), and both
     skip on local 3.9 by design. G9 runs both on 3.13 and must print a bare `OK` (any skip fails it).
+
+### Owner rulings 2026-10-13 (follow-up commit)
+41. **Model (B) is version 2.2**, not 1.0: the file is renamed `operating_ouja_v2_2.html` (content
+    byte-identical — still the SHA-256 the build script checked). Safe: live had 2 drafts and 0 sent
+    contracts, and no approval had been stored for the 1.0 name.
+42. **No وكالة in the contract and no operator gate beyond the rep's name**: «الممثل وصفته» prints the
+    name from Settings only (`engine.op_rep_full`); `OPERATOR_FIELDS` = rep name only, so «اعتماد» and
+    «إنشاء رابط التوقيع» no longer wait for the وكالة number/date or the CR expiry (prints «—» if empty).
+    The client's OWN agent row (owner signing through a وكيل) is unchanged.

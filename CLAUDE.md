@@ -524,14 +524,14 @@ pages, error) and purge progress — read it instead of asking the owner for a H
 
 ## «العقود» contracts — the `aqd/` package
 Survey (tab `aqd`, under «عروض الملاك / المبيعات») → the owner's FROZEN legal template
-(`aqd/templates/operating_v2_2.html` / `operating_ouja_v1_0.html` — never edit the legal text) → a token
+(`aqd/templates/operating_v2_2.html` / `operating_ouja_v2_2.html` — never edit the legal text) → a token
 link `/sign/{token}` → client last-4 check, read, typed name + drawn signature + consent → admin
 «توقيع المشغّل» → `final.pdf` with a «سجل التوقيع الإلكتروني» evidence page. Spec:
 `docs/superpowers/specs/2026-10-04-aqd-contract-signing-design.md`; gates: `aqd/GATES.md`.
 - **Template approval is THE safety switch.** Ships unapproved: links work read-only, signing is
   refused, until an admin types «اعتماد» in the tab's settings (stored per template file name).
 - **Two models (2026-10-12):** (أ) `operating_v2_2` = units on the OWNER's platform account (Ouja
-  co-host); (ب) `operating_ouja_v1_0` = units on OUJA's account (Ouja primary host as his agent,
+  co-host); (ب) `operating_ouja_v2_2` = units on OUJA's account (Ouja primary host as his agent,
   collects, transfers the owner's net to his IBAN monthly/quarterly — 22 keys + `{{payout_period}}`).
   Model B = individual + VAT «لا» + `account_model="ouja"` only; company still draft-only.
 - **Approval is PER TEMPLATE:** `POST /api/aqd/settings {approve, confirm:"اعتماد", template}` —
@@ -556,12 +556,12 @@ link `/sign/{token}` → client last-4 check, read, typed name + drawn signature
 - **PDF:** shared Chromium (`ouja_render._pw_pool`/`_pw_print`), needs Python ≥3.12 (Railway 3.13);
   any failure falls back to HTML and NEVER blocks signing. Local 3.9 skips the real-PDF test.
 - **Routing (R2):** `config.TEMPLATES` maps (client_kind, account_model) → a firm-approved template;
-  (individual, owner) → v2.2 and (individual, ouja) → Model B 1.0. Company = draft only, never a link;
+  (individual, owner) → v2.2 and (individual, ouja) → Model B 2.2. Company = draft only, never a link;
   sign re-checks the route (a pre-release company link can never be signed; boot flags «needs_reissue»).
   VAT-registered ⇒ `account_model` forced to "owner" by the server (R1).
 - **Hard blocks at send:** >3 units in one shared property (المادة 4/2, no tick any more) and
-  `operator_missing()` (rep, وكالة no/date, CR expiry) — the operator block is frozen into the
-  document. Approval is refused on the same list. 15 wrong last-4 tries over a link's life expire
+  `operator_missing()` = the rep's NAME only (owner ruling 2026-10-13). «الممثل وصفته» prints the
+  name alone — never a وكالة; CR expiry prints «—» when empty. Approval is refused on the same list. 15 wrong last-4 tries over a link's life expire
   it (one Discord line); resend resets the count.
 - Env: `AQD_ENABLED`(1), `AQD_LINK_TTL_DAYS`(14), `AQD_CHANNEL`(العقود, created under «ضم الوحدات»),
   `AQD_NOTIFY_DRYRUN`(0), `AQD_TEMPLATE`(operating_v2_2 — overrides the (أ) route only). Non-admins see the tab only after the

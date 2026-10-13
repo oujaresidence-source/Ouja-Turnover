@@ -87,14 +87,14 @@ def template_name():
 # was SENT on (aqd_contracts.template_name), so the 2.1 contracts already out stay on 2.1.
 TEMPLATES = {
     ("individual", "owner"): "operating_v2_2",
-    ("individual", "ouja"): "operating_ouja_v1_0",
+    ("individual", "ouja"): "operating_ouja_v2_2",
 }
 
 # The owner reads these names in Settings and on the list banner; each template is approved alone.
 TEMPLATE_LABELS = {
     "operating_v2_1": "نموذج (أ) — حساب المالك 2.1",
     "operating_v2_2": "نموذج (أ) — حساب المالك 2.2",
-    "operating_ouja_v1_0": "نموذج (ب) — حساب عوجا 1.0",
+    "operating_ouja_v2_2": "نموذج (ب) — حساب عوجا 2.2",
 }
 
 

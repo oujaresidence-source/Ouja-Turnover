@@ -3,7 +3,7 @@
 «العقود» (aqd, from عقد) — survey → filled operating contract → e-sign link → countersign.
 
 An employee answers a short survey; the answers fill a frozen legal template — (أ) 2.2 on the
-owner's own platform account, or (ب) 1.0 on Ouja's account (older contracts keep 2.1);
+owner's own platform account, or (ب) 2.2 on Ouja's account (older contracts keep 2.1);
 the client opens a token link on a phone, passes a last-4 identity check, reads, draws a
 signature and signs; Ouja is notified; an admin countersigns and the final PDF is sealed.
 Modelled on DocuSign / Adobe Sign (link per signer, access check, immutable hash, evidence page).

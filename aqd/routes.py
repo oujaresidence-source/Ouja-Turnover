@@ -284,14 +284,16 @@ def templates_view():
     return out
 
 
-OPERATOR_FIELDS = (("op_rep_name", "اسم ممثل المشغّل"), ("op_wakala_no", "رقم الوكالة"),
-                   ("op_wakala_date", "تاريخ الوكالة"), ("op_cr_expiry", "تاريخ انتهاء السجل التجاري"))
+# Owner ruling 2026-10-13: only the representative's NAME is required (it is the one operator value
+# the contract prints by name). The وكالة is never printed and the CR expiry prints «—» when empty,
+# so neither blocks a send or an approval.
+OPERATOR_FIELDS = (("op_rep_name", "اسم ممثل المشغّل"),)
 DATE_SETTINGS = ("op_wakala_date", "op_cr_expiry")
 
 
 def operator_missing():
-    """R4: the operator block is frozen into the document at send time, so a send (and the
-    template approval) waits until every one of these is filled."""
+    """R4: the operator's name is frozen into the document at send time, so a send (and the
+    template approval) waits until it is filled."""
     v = settings_values()
     return [label for key, label in OPERATOR_FIELDS if str(v.get(key) or "").strip() in ("", "—")]
 
@@ -676,7 +678,7 @@ def core_countersign(body, actor):
         return _refuse("ارفع توقيع المشغّل والختم من الإعدادات أول")
     st = settings_values()
     if not (st.get("op_rep_name") or "").strip():
-        return _refuse("اكتب اسم ممثل المشغّل وبيانات الوكالة في الإعدادات أول")
+        return _refuse("اكتب اسم ممثل المشغّل في الإعدادات أول")
     now = _iso(_now_utc())
     if not db.transition(c["id"], ("signed_owner",), "completed", countersigned_by=actor, countersigned_at=now):
         return _refuse("العقد اكتمل مسبقاً أو تغيّرت حالته")

@@ -208,7 +208,7 @@ class TestAccountModelAndRouting(unittest.TestCase):
 
     def test_template_for(self):
         self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_2", None))
-        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v1_0", None))
+        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v2_2", None))
         for model in ("owner", "ouja"):
             name, why = engine.template_for(ok(company(account_model=model)))
             self.assertIsNone(name)
@@ -413,7 +413,7 @@ class TestModelB(unittest.TestCase):
 
     def test_routing(self):
         self.assertEqual(engine.template_for(ok(individual())), ("operating_v2_2", None))
-        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v1_0", None))
+        self.assertEqual(engine.template_for(ok(model_b())), ("operating_ouja_v2_2", None))
         for model in ("owner", "ouja"):
             self.assertEqual(engine.template_for(ok(company(account_model=model))),
                              (None, catalogue.COMPANY_REASON))
@@ -436,7 +436,7 @@ class TestModelB(unittest.TestCase):
 
     def test_versions(self):
         from aqd import config
-        self.assertEqual(config.template_version("operating_ouja_v1_0"), "1.0")
+        self.assertEqual(config.template_version("operating_ouja_v2_2"), "2.2")
         self.assertEqual(config.template_version("operating_v2_2"), "2.2")
 
     def test_the_two_questions_show_only_for_model_b(self):
@@ -468,7 +468,7 @@ class TestModelB(unittest.TestCase):
     def test_model_b_render(self):
         for period, needle in (("monthly", "شهرية (تنتهي في آخر يوم من كل شهر ميلادي)"),
                                ("quarterly", "ربع سنوية (تنتهي في 31 مارس، 30 يونيو، 30 سبتمبر، 31 ديسمبر)")):
-            out = engine.render(files.template_text("operating_ouja_v1_0"), ctx(ok(model_b(payout_period=period))))
+            out = engine.render(files.template_text("operating_ouja_v2_2"), ctx(ok(model_b(payout_period=period))))
             self.assertNotIn("{{", out)
             self.assertIn("حساب المشغّل:", out)
             self.assertIn(needle + "، ويُحوَّل صافي المالك خلال (10) أيام من نهايتها", out)
@@ -490,9 +490,19 @@ class TestModelB(unittest.TestCase):
         self.assertIn("أيام الحجب:", out)
         self.assertIn("عمّا زاد على (7) أيام متصلة", out)
 
+    def test_operator_rep_is_the_name_only(self):
+        """Owner ruling 2026-10-13: «الممثل وصفته» prints the representative's name, nothing about a وكالة."""
+        self.assertEqual(engine.op_rep_full(SETTINGS), "فيصل")
+        self.assertEqual(engine.op_rep_full({}), "—")
+        out = engine.render(files.template_text("operating_ouja_v2_2"), ctx(ok(model_b())))
+        row = out[out.index("الممثل وصفته"):]
+        row = row[:row.index("</tr>")]
+        self.assertNotIn("وكال", row)
+        self.assertIn("فيصل", row)
+
     def test_placeholders(self):
         a = set(engine.PLACEHOLDER.findall(files.template_text("operating_v2_2")))
-        b = set(engine.PLACEHOLDER.findall(files.template_text("operating_ouja_v1_0")))
+        b = set(engine.PLACEHOLDER.findall(files.template_text("operating_ouja_v2_2")))
         self.assertEqual(a, set(engine.KEYS))
         self.assertEqual(b, a | {"payout_period"})
 
