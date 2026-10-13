@@ -51,15 +51,43 @@ def _ident():
     """SITE_IDENTITY plus the resolved contact values."""
     d = dict(SITE_IDENTITY)
     d["email"] = (d.get("email") or _FALLBACK["email"] or "").strip()
-    phone = "".join(c for c in str(d.get("phone") or _FALLBACK["whatsapp"] or "") if c.isdigit())
-    d["phone"] = phone
+    wa = "".join(c for c in _FALLBACK["whatsapp"] if c.isdigit())
+    d["whatsapp_url"] = (d.get("whatsapp_url") or ("https://wa.me/" + wa if wa else "")).strip()
+    for key in ("mobile", "support_phone"):
+        d[key] = "".join(c for c in str(d.get(key) or "") if c.isdigit())
     return d
 
 
-def _phone_display(digits):
-    if digits.startswith("966") and len(digits) == 12:
-        return "+966 %s %s %s" % (digits[3:5], digits[5:8], digits[8:])
-    return "+" + digits
+def _tel(digits):
+    """0505783355 -> tel:+966505783355 (Saudi local form; already-international kept)."""
+    if digits.startswith("0"):
+        digits = "966" + digits[1:]
+    return "tel:+" + digits
+
+
+_SOCIAL = ("tiktok", "instagram", "x", "snapchat", "whatsapp")
+
+
+def _phone_items(d, lang):
+    """[(icon, label, link)] for the numbers that are set — mobile first, then support."""
+    c = content.COMMON[lang]
+    out = []
+    for key, icon, label in (("mobile", "mobile", c["mobile"]), ("support_phone", "phone", c["support"])):
+        if d[key]:
+            out.append((icon, label, '<a class="ltr num" href="%s">%s</a>' % (_tel(d[key]), _e(d[key]))))
+    return out
+
+
+def _social(d, lang):
+    """Small labelled icons; each opens the account in a new tab. "" when none are set."""
+    c = content.COMMON[lang]
+    links = []
+    for key in _SOCIAL:
+        url = (d.get(key + "_url") or "").strip()
+        if url.startswith("https://"):
+            links.append('<a href="%s" target="_blank" rel="noopener" aria-label="%s">%s</a>'
+                         % (_e(url), _e(c[key]), _icon(key)))
+    return ('<div class="social">%s</div>' % "".join(links)) if links else ""
 
 
 def path_for(page, lang):
@@ -73,13 +101,17 @@ def path_for(page, lang):
 _ICON = {
     "arrow": '<path d="M5 12h13M13 6l6 6-6 6"/>',
     "mail": '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/>',
-    "chat": '<path d="M4 19.5l1.4-4.1A8 8 0 1 1 8.6 18.6L4 19.5z"/><path d="M9 10.5h6M9 13.5h4"/>',
+    "mobile": '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/>',
+    "phone": '<path d="M6.6 3.5h2.6l1.5 4-1.9 1.3a10.5 10.5 0 0 0 6.4 6.4l1.3-1.9 4 1.5v2.6a2 2 0 0 1-2.2 2A16.6 16.6 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/>',
     "pin": '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
     "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.2"/>',
     "seal": '<path d="M12 3l2.2 1.6 2.7-.1.8 2.6 2.2 1.6-.9 2.6.9 2.6-2.2 1.6-.8 2.6-2.7-.1L12 21l-2.2-1.6-2.7.1-.8-2.6-2.2-1.6.9-2.6-.9-2.6 2.2-1.6.8-2.6 2.7.1z"/><path d="M9 12.2l2 2 4-4.2"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
     "instagram": '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.2 6.8v.1"/>',
     "tiktok": '<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 4c.4 2.6 2.2 4.4 5 4.6"/>',
+    "x": '<path d="M4.5 4h4.3l10.7 16h-4.3z"/><path d="M19 4l-5.8 6.6M10.8 13.4 5 20"/>',
+    "snapchat": '<path d="M12 3.5c-2.7 0-4.5 2-4.5 4.6v2.3l-1.7.5c-.4.1-.4.6 0 .8l1.5.6c-.6 1.6-1.7 2.8-3.3 3.4.4.7 1.3 1 2.5 1.1l.4 1.3 1.6-.2c1 .2 1.7 1.6 3.5 1.6s2.5-1.4 3.5-1.6l1.6.2.4-1.3c1.2-.1 2.1-.4 2.5-1.1-1.6-.6-2.7-1.8-3.3-3.4l1.5-.6c.4-.2.4-.7 0-.8l-1.7-.5V8.1c0-2.6-1.8-4.6-4.5-4.6z"/>',
+    "whatsapp": '<path d="M4 20l1.2-3.9A8.2 8.2 0 1 1 8.2 19z"/><path d="M9.3 8.3c-.4 2.9 2.6 6.4 5.9 6.2l.9-1.2-1.9-1-.8.7a4.6 4.6 0 0 1-2.1-2.1l.7-.8-1-1.9z"/>',
 }
 
 
@@ -234,6 +266,11 @@ h2{font-family:var(--display);font-weight:700;font-size:1.55rem;line-height:1.3;
 .social a{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:999px;
   border:1px solid var(--foot-line);transition:border-color .2s var(--ease)}
 .social a:hover{border-color:var(--foot-gold)}
+.foot-k{color:var(--foot-mut)}
+.follow{padding:18px 2px 0}
+.follow b{display:block;font-weight:600}
+.follow .social a{border-color:var(--line-2);color:var(--gold-ink)}
+.follow .social a:hover{border-color:var(--gold)}
 .foot-legal{border-top:1px solid var(--foot-line);padding:22px 0;display:grid;gap:14px}
 .licence-travel{margin:0;color:var(--foot-ink)}
 .licence-travel .num{color:var(--foot-gold)}
@@ -338,17 +375,10 @@ def _footer(d, lang):
     if d["email"]:
         contact.append('<li>%s<a class="ltr" href="mailto:%s">%s</a></li>'
                        % (_icon("mail"), _e(d["email"]), _e(d["email"])))
-    if d["phone"]:
-        contact.append('<li>%s<a class="ltr num" href="https://wa.me/%s" rel="noopener">%s</a></li>'
-                       % (_icon("chat"), _e(d["phone"]), _e(_phone_display(d["phone"]))))
+    for icon, label, link in _phone_items(d, lang):
+        contact.append('<li>%s<span class="foot-k">%s</span>%s</li>' % (_icon(icon), _e(label), link))
     contact.append('<li>%s<span>%s</span></li>' % (_icon("pin"), _e(c["riyadh"])))
-    social = []
-    for key in ("tiktok", "instagram"):
-        url = (d.get(key + "_url") or "").strip()
-        if url.startswith("https://"):
-            social.append('<a href="%s" rel="noopener me" aria-label="%s">%s</a>'
-                          % (_e(url), _e(c[key]), _icon(key)))
-    social_html = ('<div class="social">%s</div>' % "".join(social)) if social else ""
+    social_html = _social(d, lang)
     legal_extra = _travel_line(d, lang) + _badge(d, lang)
     year = datetime.date.today().year
     return (
@@ -446,9 +476,7 @@ def _official_card(d, lang):
     ]
     if d["email"]:
         rows.append((h["f_email"], '<a class="ltr" href="mailto:%s">%s</a>' % (_e(d["email"]), _e(d["email"]))))
-    if d["phone"]:
-        rows.append((h["f_phone"], '<a class="ltr num" href="https://wa.me/%s" rel="noopener">%s</a>'
-                     % (_e(d["phone"]), _e(_phone_display(d["phone"])))))
+    rows.extend((label, link) for _icon_name, label, link in _phone_items(d, lang))
     dl = "".join("<div><dt>%s</dt><dd>%s</dd></div>" % (_e(k), v) for k, v in rows)
     lic = [
         (h["lic_fal_mkt"], h["lic_rega"], d["fal_marketing_no"]),
@@ -538,24 +566,25 @@ def render_contact(lang, d=None):
         subj = _pct(p["mail_subject"])
         ch.append('<li>%s<div><b>%s</b><a class="ltr" href="mailto:%s?subject=%s">%s</a></div></li>'
                   % (_icon("mail"), _e(c["email"]), _e(d["email"]), subj, _e(d["email"])))
-    if d["phone"]:
-        ch.append('<li>%s<div><b>%s</b><a class="ltr num" href="https://wa.me/%s" rel="noopener">%s</a></div></li>'
-                  % (_icon("chat"), _e(c["whatsapp"]), _e(d["phone"]), _e(_phone_display(d["phone"]))))
+    for icon, label, link in _phone_items(d, lang):
+        ch.append('<li>%s<div><b>%s</b>%s</div></li>' % (_icon(icon), _e(label), link))
     ch.append('<li>%s<div><b>%s</b><span>%s<br>%s<br>%s <span class="ltr num">%s</span></span></div></li>'
               % (_icon("pin"), _e(p["addr_h"]), _e(d["address_en"] if en else d["address_ar"]),
                  _e(d["address_unit_en"] if en else d["address_unit_ar"]),
                  _e(h["f_na"]), _e(d["national_address_short"])))
+    social = _social(d, lang)
+    follow = ('<div class="follow"><b>%s</b>%s</div>' % (_e(c["follow"]), social)) if social else ""
     fields = "".join("<li>%s</li>" % _e(x) for x in p["complaints_fields"])
     steps = "".join("<li>%s</li>" % _e(x) for x in p["steps"])
     body = (
         '<div class="wrap"><article class="doc"><h1>%s</h1><p class="lead">%s</p>'
-        '<section aria-labelledby="ch-h"><h2 id="ch-h">%s</h2><ul class="channels">%s</ul></section>'
+        '<section aria-labelledby="ch-h"><h2 id="ch-h">%s</h2><ul class="channels">%s</ul>%s</section>'
         '<section id="complaints" aria-labelledby="cp-h"><h2 id="cp-h">%s</h2>'
         '<p class="promise">%s<span>%s</span></p>'
         '<p>%s</p><ul>%s</ul>'
         '<h3>%s</h3><ol>%s</ol><p>%s</p></section>'
         '%s</article></div>'
-    ) % (_e(p["h1"]), _e(p["intro"]), _e(p["channels_h"]), "".join(ch),
+    ) % (_e(p["h1"]), _e(p["intro"]), _e(p["channels_h"]), "".join(ch), follow,
          _e(p["complaints_h"]), _icon("clock"), _e(p["complaints_promise"]),
          _fill(_e(p["complaints_how"]), d, lang), fields,
          _e(p["steps_h"]), steps, _e(p["escalate"]), _notice(lang))

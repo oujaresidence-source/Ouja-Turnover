@@ -11,8 +11,9 @@ pending slots are filled here, in code, when the documents arrive:
   business_sa_cert_url   business.sa e-commerce verification certificate link.
   business_sa_badge_img  its badge image URL (https). Link alone = a text badge.
 
-email / phone empty = fall back to bot.py's OUJA_CONTACT_EMAIL / STAY_WHATSAPP (wired
-in by site_home.wire). Still empty = the field is hidden; a contact is never invented.
+The contact block must match business.sa request EACR110675 exactly (tests lock it).
+email / whatsapp_url empty = fall back to bot.py's OUJA_CONTACT_EMAIL / STAY_WHATSAPP
+(wired in by site_home.wire). Still empty = the field is hidden; a contact is never invented.
 """
 
 SITE_IDENTITY = {
@@ -33,11 +34,16 @@ SITE_IDENTITY = {
                   "Al Maather Al Shamali District, Riyadh 12314",
     "address_unit_en": "Naqwa Building, 2nd Floor, Office 16",
 
-    # ---- contact ----
-    "email": "",            # "" = OUJA_CONTACT_EMAIL
-    "phone": "",            # digits, intl format (9665XXXXXXXX); "" = STAY_WHATSAPP; both empty = hidden
-    "tiktok_url": "",       # contact channels only — rendered as small footer icons
-    "instagram_url": "",
+    # ---- contact (business.sa request EACR110675) ----
+    "email": "info@oujares.com",       # "" = OUJA_CONTACT_EMAIL
+    "mobile": "0505783355",            # shown as written; tel: link gets +966
+    "support_phone": "0115165916",     # customer support landline
+    # social: small icons in the footer and on /contact only, never a main CTA
+    "tiktok_url": "https://www.tiktok.com/@oujares",
+    "instagram_url": "https://www.instagram.com/oujares/",
+    "x_url": "https://x.com/Oujares",
+    "snapchat_url": "https://snapchat.com/t/5OPZpUKY",
+    "whatsapp_url": "https://wa.me/966115165916",   # "" = wa.me/<STAY_WHATSAPP>
 
     # ---- REGA «فال» licences (issued) ----
     "fal_marketing_no": "1200050611",

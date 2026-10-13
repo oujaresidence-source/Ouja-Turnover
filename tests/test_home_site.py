@@ -27,20 +27,31 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 import site_home  # noqa: E402
 from site_home import SITE_IDENTITY  # noqa: E402
 
-EMAIL = "oujaresidence@gmail.com"
+EMAIL = "info@oujares.com"           # business.sa request EACR110675
+OLD_EMAIL = "oujaresidence@gmail.com"  # bot.py's OUJA_CONTACT_EMAIL — must never reach the site
+MOBILE, MOBILE_TEL = "0505783355", "tel:+966505783355"
+SUPPORT, SUPPORT_TEL = "0115165916", "tel:+966115165916"
+SOCIAL = {
+    "tiktok_url": "https://www.tiktok.com/@oujares",
+    "instagram_url": "https://www.instagram.com/oujares/",
+    "x_url": "https://x.com/Oujares",
+    "snapchat_url": "https://snapchat.com/t/5OPZpUKY",
+    "whatsapp_url": "https://wa.me/966115165916",
+}
+NO_SOCIAL = dict.fromkeys(SOCIAL, "")
 LEGAL_AR = "شركة أحمد مساعد بن نصار"
 LEGAL_EN = "AHMED MUSAED NASSAR Company"
 NO_BOOKING_AR = "لا يتم أي حجز أو دفع عبر هذا الموقع"
 NO_BOOKING_EN = "No booking or payment takes place on this website"
 PAGES_AR = ("/", "/privacy", "/terms", "/contact")
 PAGES_EN = ("/en", "/en/privacy", "/en/terms", "/en/contact")
-SOCIAL_HOSTS = ("tiktok.com", "instagram.com", "snapchat.com", "facebook.com", "x.com/", "twitter.com")
+SOCIAL_HOSTS = ("tiktok.com", "instagram.com", "snapchat.com", "facebook.com", "x.com/", "twitter.com", "wa.me/")
 
 
 def _app(with_bot=False):
     """The site's own routes; with_bot=True adds bot.py's security middleware,
     /healthz, robots.txt and sitemap.xml exactly as start_web_server wires them."""
-    site_home.wire({"web": web, "email": EMAIL, "whatsapp": ""})
+    site_home.wire({"web": web, "email": OLD_EMAIL, "whatsapp": ""})
     if not with_bot:
         app = web.Application()
     else:
@@ -255,29 +266,83 @@ class ForbiddenContent(unittest.TestCase):
                 self.assertNotIn(phrase, html, path + " " + phrase)
             self.assertNotRegex(html, r"(?:ر\.س|SAR)\s*[0-9٠-٩]|[0-9٠-٩]\s*(?:ر\.س|SAR)")
 
-    def test_social_links_only_in_the_footer(self):
-        with mock.patch.dict(SITE_IDENTITY, {"tiktok_url": "https://www.tiktok.com/@ouja_test",
-                                             "instagram_url": "https://www.instagram.com/ouja_test"}):
-            for path in PAGES_AR + PAGES_EN:
-                html = fetch(path)[2]
-                for host in SOCIAL_HOSTS:
-                    self.assertNotIn(host, _main_part(html), path + " " + host)
-                self.assertIn("tiktok.com/@ouja_test", html.split("<footer", 1)[1], path)
+    def test_social_links_only_in_the_footer_and_on_contact(self):
+        for path in PAGES_AR + PAGES_EN:
+            html = fetch(path)[2]
+            self.assertIn("tiktok.com/@oujares", html.split("<footer", 1)[1], path)
+            if path.endswith("/contact"):
+                continue
+            for host in SOCIAL_HOSTS:
+                self.assertNotIn(host, _main_part(html), path + " " + host)
 
     def test_social_hidden_when_unset(self):
-        html = fetch("/")[2]
-        for host in SOCIAL_HOSTS:
-            self.assertNotIn(host, html, host)
+        with mock.patch.dict(SITE_IDENTITY, NO_SOCIAL):
+            for path in ("/", "/contact"):
+                html = fetch(path)[2]
+                for host in SOCIAL_HOSTS:
+                    self.assertNotIn(host, html, path + " " + host)
 
-    def test_phone_hidden_when_unset(self):
-        html = fetch("/contact")[2]
-        self.assertNotIn("wa.me/", html)
-        self.assertNotIn("tel:", html)
+    def test_phones_hidden_when_unset(self):
+        with mock.patch.dict(SITE_IDENTITY, {"mobile": "", "support_phone": ""}):
+            for path in ("/", "/contact"):
+                self.assertNotIn("tel:", fetch(path)[2], path)
 
-    def test_phone_shown_when_set(self):
-        with mock.patch.dict(SITE_IDENTITY, {"phone": "966500000000"}):
-            html = fetch("/contact")[2]
-            self.assertIn("wa.me/966500000000", html)
+    def test_whatsapp_falls_back_to_stay_whatsapp(self):
+        from site_home import render
+        with mock.patch.dict(SITE_IDENTITY, {"whatsapp_url": ""}), \
+                mock.patch.dict(render._FALLBACK, {"whatsapp": "966500000000"}):
+            self.assertIn('href="https://wa.me/966500000000"', render.render_contact("ar"))
+
+
+class BusinessSaContactDetails(unittest.TestCase):
+    """business.sa request EACR110675: the site must show exactly what the request lists."""
+
+    def test_identity_holds_the_request_values(self):
+        self.assertEqual(SITE_IDENTITY["email"], EMAIL)
+        self.assertEqual(SITE_IDENTITY["mobile"], MOBILE)
+        self.assertEqual(SITE_IDENTITY["support_phone"], SUPPORT)
+        for key, url in SOCIAL.items():
+            self.assertEqual(SITE_IDENTITY[key], url, key)
+
+    def test_every_value_is_on_home_and_contact(self):
+        for path in ("/", "/contact", "/en", "/en/contact"):
+            html = fetch(path)[2]
+            for needle in (EMAIL, 'href="mailto:' + EMAIL, MOBILE, 'href="%s"' % MOBILE_TEL,
+                           SUPPORT, 'href="%s"' % SUPPORT_TEL):
+                self.assertIn(needle, html, path + " " + needle)
+            for url in SOCIAL.values():
+                self.assertIn('href="%s"' % url, html, path + " " + url)
+
+    def test_phones_are_on_the_identity_card(self):
+        for path in ("/", "/en"):
+            card = _main_part(fetch(path)[2])
+            self.assertIn('href="%s"' % MOBILE_TEL, card, path)
+            self.assertIn('href="%s"' % SUPPORT_TEL, card, path)
+
+    def test_contact_page_body_carries_phones_and_social(self):
+        for path in ("/contact", "/en/contact"):
+            body = _main_part(fetch(path)[2])
+            for needle in (MOBILE_TEL, SUPPORT_TEL) + tuple(SOCIAL.values()):
+                self.assertIn('href="%s"' % needle, body, path + " " + needle)
+
+    def test_social_links_open_a_new_tab_safely_and_are_labelled(self):
+        for path in ("/", "/contact", "/en/contact"):
+            html = fetch(path)[2]
+            for url in SOCIAL.values():
+                tags = re.findall(r'<a [^>]*href="%s"[^>]*>' % re.escape(url), html)
+                self.assertTrue(tags, path + " " + url)
+                for tag in tags:
+                    self.assertIn('target="_blank"', tag, tag)
+                    self.assertRegex(tag, r'rel="[^"]*\bnoopener\b', tag)
+                    self.assertRegex(tag, r'aria-label="[^"]+"', tag)
+
+    def test_the_old_gmail_is_gone_from_every_page(self):
+        for path in PAGES_AR + PAGES_EN:
+            self.assertNotIn(OLD_EMAIL, fetch(path)[2], path)
+
+    def test_html_lang_and_direction(self):
+        self.assertIn('<html lang="ar" dir="rtl">', fetch("/")[2])
+        self.assertIn('<html lang="en" dir="ltr">', fetch("/en")[2])
 
 
 class RobotsAndSitemap(unittest.TestCase):
