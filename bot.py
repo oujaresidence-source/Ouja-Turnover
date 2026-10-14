@@ -11412,6 +11412,7 @@ _catalog_units = []        # structured: [{id, name, beds, area, price, link}]
 _avail_cache = OrderedDict()
 _AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
+STAY_CAL_MAX_AGE_MIN = int(os.environ.get("STAY_CAL_MAX_AGE_MIN", "60"))  # /apartments search trusts the calendar store up to this age
 INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "80"))   # max units to date-check per msg (parallel — covers full portfolio)
 INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "4"))          # concurrent calendar lookups
 # Was 12. Twelve concurrent calendar calls ate ~80% of Hostaway's 15-per-10s budget in
@@ -59110,11 +59111,41 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
     # returned list is unchanged, only faster. One unit's failure never fails the whole
     # request; it just keeps avail=None, which the existing avail_error handling covers.
     avail_map = {}
+    live_needed = survivors
     if not browse and survivors:
+        # ---- read the /monthly calendar store first (NO network). Asking Hostaway
+        # live for ~50 calendars inside the guest's request took 274s on 2026-10-14
+        # (11 calls/10s shared with every bot loop). The store is refreshed every
+        # MONTHLY_CAL_REFRESH_MIN by monthly_calendar_loop; a unit is read from it
+        # only when ITS last good pull is younger than STAY_CAL_MAX_AGE_MIN, so a
+        # stalled loop degrades to the live path below, never to stale answers.
+        live_needed = []
+        _ci_d, _co_d = _parse_date(ci), _parse_date(co)
+        now = datetime.now(TZ)
+        synced = _mcal.get("unit_synced_at") or {}
+        for s, _ov in survivors:
+            q = None
+            try:
+                at = synced.get(str(s.get("id")))
+                fresh = bool(at) and (now - datetime.fromisoformat(at)) <= timedelta(minutes=STAY_CAL_MAX_AGE_MIN)
+                if fresh and _ci_d and _co_d:
+                    q = _mcal_quote(s.get("id"), _ci_d, _co_d)
+            except Exception as e:
+                print(f"stay search store read error ({s.get('id')}):", e)
+                q = None
+            if q is None:
+                live_needed.append((s, _ov))   # not in the store / stale / gap -> ask live
+            else:
+                avail_map[s.get("id")] = q
+    if not browse and live_needed:
+        # ThreadPoolExecutor does NOT copy contextvars, so without ctx.run the guest's
+        # "user" Hostaway priority (set by web_thread) was lost and these calls queued
+        # as background work behind every bot loop.
         try:
             with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
-                futures = {ex.submit(unit_availability_price, s.get("id"), ci, co): s.get("id")
-                           for s, _ov in survivors}
+                futures = {ex.submit(contextvars.copy_context().run, unit_availability_price,
+                                     s.get("id"), ci, co): s.get("id")
+                           for s, _ov in live_needed}
                 for fut in as_completed(futures):
                     lid = futures[fut]
                     try:
