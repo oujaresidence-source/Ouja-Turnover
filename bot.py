@@ -10203,8 +10203,42 @@ async def _rv_delete_room(channel_id):
     """The ONLY channel delete in «رفع التقييم». Called by reviewask.flow.sweep_closed alone,
     after it re-read the topic and saved the transcript (owner ruling R7, 2026-10-03)."""
     ch = await _cw_channel(channel_id)
-    await ch.delete(reason="رفع التقييم: غرفة مقفلة من ٧ أيام — السجل محفوظ في اللوحة")
+    await ch.delete(reason="رفع التقييم: غرفة منتهية — السجل محفوظ في اللوحة")
     return True
+
+
+@bot.command(name="احذف-التقييمات",
+             aliases=["clean-reviews", "احذف-غرف-التقييم", "نظف-التقييمات"])
+async def cmd_clean_review_rooms(ctx):
+    """!ouja احذف-التقييمات — delete every «طلبات التقييم» room the team is FINISHED with (closed,
+    or «وعد يقيّم»), whatever its age, each transcript saved to the dashboard first — the same
+    fence as the daily sweep (reviewask.flow.clean_done). Rooms that still need the team (nobody
+    acted yet, or WhatsApp sent and tomorrow's call still lands there) are never touched.
+    Born 2026-10-14 when the server hit Discord's 500-channel cap. Admins only."""
+    if not _can_delete_channels(ctx.author):
+        await ctx.reply("🚫 هذا الأمر للإدارة فقط.")
+        return
+    if not _HAS_REVIEWASK:
+        await ctx.reply("⚠️ نظام «رفع التقييم» مو شغّال في هالنسخة.")
+        return
+    await ctx.reply("⏳ أحذف غرف التقييم اللي خلص منها الفريق… (أحفظ محادثة كل غرفة في اللوحة قبل الحذف)")
+    try:
+        r = await _reviewask.flow.clean_done(pause=0.5)
+    except Exception as e:
+        print("!ouja احذف-التقييمات error:", e)
+        await ctx.send(f"⚠️ صار خطأ وما كمّلت: {e}")
+        return
+    lines = [f"✅ حذفت **{r['deleted']}** غرفة تقييم · محادثاتها محفوظة في اللوحة",
+             f"🟡 بقي **{r['open']}** غرفة لسه شغالة (الفريق ما خلص منها) — ما لمستها"]
+    if r["kept"]:
+        lines.append(f"⚠️ {r['kept']} غرفة ما قدرت أتأكد منها فتركتها — جرّب الأمر مرة ثانية بعد شوي")
+    if ctx.guild is not None:
+        lines.append(f"📦 السيرفر الآن: {len(ctx.guild.channels)}/500 قناة")
+    log_event("ops", f"حذف غرف تقييم منتهية · {r['deleted']} · بقي {r['open']} شغالة · بواسطة {ctx.author}")
+    try:
+        await ctx.send("\n".join(lines))
+    except Exception:
+        pass
 
 
 async def _rv_board_channel():

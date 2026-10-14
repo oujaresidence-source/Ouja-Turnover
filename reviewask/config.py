@@ -86,7 +86,7 @@ def quiet_to():
 
 
 def delete_after_days():
-    return _int("REVIEWASK_DELETE_AFTER_DAYS", 7, 1)
+    return _int("REVIEWASK_DELETE_AFTER_DAYS", 1, 1)      # was 7 — the server hit 500 channels (2026-10-14)
 
 
 def category():

@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-«رفع التقييم» — the 7-day room sweep (owner ruling R7, spec §13). The REFUSALS come first:
-the only rooms this package may ever delete are review rooms whose ticket closed ≥ 7 days ago,
+«رفع التقييم» — the room sweep (owner ruling R7, spec §13; 7 days → 1 day on 2026-10-14 when the
+server hit Discord's 500-channel cap). The REFUSALS come first:
+the only rooms this package may ever delete are review rooms whose ticket closed ≥ 1 day ago
+(or, by the owner's «احذف-التقييمات» command, any finished room now),
 fetched by the stored id, whose topic carries the SAME reservation, after the transcript is
 saved. "Couldn't check" is never "deleted".
 
@@ -98,8 +100,8 @@ class TestRefusals(Base):
         self.sweep()
         self.assertEqual(self.r.deleted, [])
 
-    def test_closed_less_than_seven_days_is_kept(self):
-        self.make("r1", "c1", closed_days_ago=6)
+    def test_closed_less_than_one_day_is_kept(self):
+        self.make("r1", "c1", closed_days_ago=0)
         self.make("r2", "c2", closed_days_ago=None)
         self.sweep()
         self.assertEqual(self.r.deleted, [])
@@ -255,6 +257,78 @@ class TestMistakePurge(Base):
         self.purge()
         self.assertEqual(len(self.r.deleted), 25)
         self.assertEqual(db.setting("purge_2026_10_03_done"), "1")
+
+
+class TestCleanDone(Base):
+    """!ouja احذف-التقييمات (2026-10-14): every FINISHED room goes now — closed tickets of any age
+    plus «وعد يقيّم» — through the same fence. Rooms the team still needs are never touched."""
+
+    def clean(self):
+        return run(flow.clean_done(NOW, pause=0))
+
+    def test_default_auto_delete_is_one_day(self):
+        self.assertEqual(flow.config.delete_after_days(), 1)
+
+    def test_finished_rooms_go_at_any_age(self):
+        fresh = self.make("d1", "cd1", state=engine.DECLINED, closed_days_ago=0)
+        promised = self.make("d2", "cd2", state=engine.PROMISED, closed_days_ago=None)
+        out = self.clean()
+        self.assertEqual(sorted(self.r.deleted), ["cd1", "cd2"])
+        self.assertEqual(out["deleted"], 2)
+        self.assertEqual(out["kept"], 0)
+        for t in (fresh, promised):
+            row = db.ticket(t["id"])
+            self.assertTrue(row["deleted_at"])
+            self.assertIsNotNone(db.transcript(t["id"]))      # saved BEFORE delete (Rooms asserts)
+        self.assertEqual(db.ticket(promised["id"])["state"], engine.PROMISED)   # still waits for Airbnb
+
+    def test_rooms_the_team_still_needs_are_never_touched(self):
+        for st in engine.OPEN:
+            if st == engine.PROMISED:
+                continue
+            self.make("k-" + st, "ck-" + st, state=st, closed_days_ago=None)
+        out = self.clean()
+        self.assertEqual(self.r.deleted, [])
+        self.assertEqual(out["deleted"], 0)
+        self.assertEqual(out["open"], len(engine.OPEN) - 1)
+
+    def test_whatsapp_sent_room_stays_for_the_call(self):
+        self.make("w1", "cw1", state=engine.WA_SENT, closed_days_ago=None)
+        self.make("w2", "cw2", state=engine.CALL_RETRY, closed_days_ago=None)
+        self.clean()
+        self.assertEqual(self.r.deleted, [])
+
+    def test_open_count_excludes_deleted_promised(self):
+        self.make("p1", "cp1", state=engine.PROMISED, closed_days_ago=None)
+        self.make("p2", "cp2", state=engine.WA_SENT, closed_days_ago=None)
+        out = self.clean()
+        self.assertEqual(out["deleted"], 1)
+        self.assertEqual(out["open"], 1)
+
+    def test_same_fence_wrong_topic_and_unchecked_are_kept(self):
+        bad = self.make("f1", "cf1", topic="ouja-ticket:maint lid:1 seq:3")
+        self.make("f2", "cf2")
+        self.r.fail_info.add("cf2")
+        self.make("f3", "cf3", state=engine.EXPIRED)
+        del self.r.rooms["cf3"]                                # already gone by hand
+        out = self.clean()
+        self.assertEqual(self.r.deleted, [])
+        self.assertEqual(out["kept"], 2)                       # cf1 refused + cf2 unchecked
+        self.assertTrue(db.ticket(bad["id"])["delete_note"].startswith("refused"))
+
+    def test_promised_ticket_still_closes_after_its_room_is_gone(self):
+        t = self.make("g1", "cg1", state=engine.PROMISED, closed_days_ago=None)
+        self.clean()
+
+        async def _gone(*a, **k):
+            raise RuntimeError("Unknown Channel")
+        HOST.post = _gone
+        HOST.edit = _gone
+        ok, row = run(flow.close(db.ticket(t["id"]), engine.PROMISED_EXPIRED, "النظام", "", NOW))
+        self.assertTrue(ok)
+        self.assertEqual(row["state"], engine.PROMISED_EXPIRED)
+        self.clean()                                           # deleted_at set → never re-tried
+        self.assertEqual(self.r.deleted, ["cg1"])
 
 
 # The package logs with print(); the gate reads the LAST line of the combined output, so the

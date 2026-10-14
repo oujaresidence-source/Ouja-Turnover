@@ -248,7 +248,7 @@
         return '<div class="rv-msg"><span class="a">' + esc(m.author) + '</span> <span class="rv-num rv-sub" style="display:inline">' + esc(hm(m.at)) + '</span>' + String.fromCharCode(10) + esc(body) + '</div>';
       }).join('');
     } else {
-      h += '<div class="rv-meta">' + esc(t.deleted_at ? T('ما انحفظت محادثة', 'No transcript saved') : T('الغرفة لسا موجودة في ديسكورد — تنحفظ محادثتها قبل ما تنحذف بعد ٧ أيام من القفل.', 'The room still exists — its transcript is saved before deletion, 7 days after closing.')) + '</div>';
+      h += '<div class="rv-meta">' + esc(t.deleted_at ? T('ما انحفظت محادثة', 'No transcript saved') : T('الغرفة لسا موجودة في ديسكورد — تنحفظ محادثتها قبل ما تنحذف بعد يوم من القفل (أو فوراً بالأمر ‎!ouja احذف-التقييمات).', 'The room still exists — its transcript is saved before deletion, 1 day after closing (or right away with !ouja clean-reviews).')) + '</div>';
     }
     setDrawerBody(h);
   }

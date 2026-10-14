@@ -1009,20 +1009,22 @@ async def maybe_sweep(now_):
     return await sweep_closed(now_)
 
 
-async def sweep_closed(now_=None, pause=1.0, limit=10, rows=None, ignore_age=False):
+async def sweep_closed(now_=None, pause=1.0, limit=10, rows=None, ignore_age=False, states=None):
     """Deletes closed review rooms ≥ DELETE_AFTER_DAYS after closing — and nothing else.
     Order is the safety: fetch by the stored id → the topic must carry THIS reservation → the
-    transcript is saved and read back → only then delete. 'Could not check' is never 'deleted'."""
+    transcript is saved and read back → only then delete. 'Could not check' is never 'deleted'.
+    `states` widens WHICH tickets may lose their room (only clean_done passes it: + PROMISED)."""
+    allowed = tuple(states) if states else engine.TERMINAL
     async with _lock("sweep"):
         now_ = now_ or now()
         cutoff = now_ - datetime.timedelta(days=config.delete_after_days())
         done = []
         rows = db.due_for_sweep(_iso(cutoff), limit) if rows is None else list(rows)[:limit]
         for i, row in enumerate(rows):
-            if row.get("state") not in engine.TERMINAL or row.get("deleted_at"):
+            if row.get("state") not in allowed or row.get("deleted_at"):
                 continue
             closed = engine.parse_dt(row.get("closed_at"))
-            if closed is None or (closed > cutoff and not ignore_age):
+            if not ignore_age and (closed is None or closed > cutoff):
                 continue
             tid, cid = row["id"], str(row.get("channel_id") or "")
             try:
@@ -1065,6 +1067,40 @@ async def sweep_closed(now_=None, pause=1.0, limit=10, rows=None, ignore_age=Fal
             if pause and i < len(rows) - 1:
                 await asyncio.sleep(pause)
         return done
+
+
+# ------------------------------------------------------------------ «احذف-التقييمات» (owner command)
+
+# Rooms the team is FINISHED with: every closed ticket, plus «وعد يقيّم» — after a promise the
+# clock only waits for Airbnb (next_action returns None / expire), it never prompts in the room
+# again. WA_SENT / CALL_RETRY are deliberately NOT here: tomorrow's call buttons land in that
+# same room, so deleting it would silently lose the call (owner ruling 2026-10-14).
+DONE_STATES = engine.TERMINAL + (engine.PROMISED,)
+
+
+def done_rooms():
+    """Tickets whose room may go now (any age). Refused rooms are never retried."""
+    marks = ",".join("?" * len(DONE_STATES))
+    return db.q("SELECT * FROM rv_tickets WHERE state IN (%s) AND deleted_at IS NULL "
+                "AND channel_id IS NOT NULL AND channel_id<>'' "
+                "AND (delete_note IS NULL OR delete_note NOT LIKE 'refused%%') ORDER BY id"
+                % marks, list(DONE_STATES))
+
+
+async def clean_done(now_=None, pause=1.0):
+    """The owner's one command: delete every finished review room NOW, through the SAME fence
+    as the daily sweep (stored id → matching topic → transcript saved and read back → delete).
+    Returns {"deleted": n, "kept": rooms it could not safely delete, "open": rooms still in use}."""
+    now_ = now_ or now()
+    todo = done_rooms()
+    done = await sweep_closed(now_, pause=pause, limit=len(todo), rows=todo,
+                              ignore_age=True, states=DONE_STATES) if todo else []
+    marks = ",".join("?" * len(engine.OPEN))
+    still = db.q1("SELECT COUNT(*) AS n FROM rv_tickets WHERE state IN (%s) AND deleted_at IS NULL "
+                  "AND channel_id IS NOT NULL AND channel_id<>''" % marks,
+                  list(engine.OPEN))["n"]
+    kept = sum(1 for r in todo if not (db.ticket(r["id"]) or {}).get("deleted_at"))
+    return {"deleted": len(done), "kept": kept, "open": still}
 
 
 # ------------------------------------------------------------------ the 2026-10-03 mistake (one-off)
