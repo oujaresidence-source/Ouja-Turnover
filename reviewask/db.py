@@ -280,14 +280,22 @@ def closed_between(start_iso, end_iso):
              (start_iso, end_iso))
 
 
-def due_for_sweep(cutoff_iso, limit=10):
-    """Terminal rows closed on or before `cutoff_iso` whose room is not yet deleted."""
+def due_for_sweep(cutoff_iso, limit=10, promised=False):
+    """Terminal rows closed on or before `cutoff_iso` whose room is not yet deleted.
+    promised=True (WhatsApp-only) adds «بيقيّم» rows promised on or before the cutoff."""
     marks = ",".join("?" * len(engine.TERMINAL))
-    return q("SELECT * FROM rv_tickets WHERE state IN (%s) AND closed_at IS NOT NULL "
+    rows = q("SELECT * FROM rv_tickets WHERE state IN (%s) AND closed_at IS NOT NULL "
              "AND closed_at<=? AND deleted_at IS NULL AND channel_id IS NOT NULL "
              "AND channel_id<>'' AND (delete_note IS NULL OR delete_note NOT LIKE 'refused%%') "
              "ORDER BY closed_at LIMIT ?" % marks,
              list(engine.TERMINAL) + [cutoff_iso, int(limit)])
+    if promised and len(rows) < int(limit):
+        rows += q("SELECT * FROM rv_tickets WHERE state=? AND state_at IS NOT NULL "
+                  "AND state_at<=? AND deleted_at IS NULL AND channel_id IS NOT NULL "
+                  "AND channel_id<>'' AND (delete_note IS NULL OR delete_note NOT LIKE 'refused%%') "
+                  "ORDER BY state_at LIMIT ?",
+                  (engine.PROMISED, cutoff_iso, int(limit) - len(rows)))
+    return rows
 
 
 def archive(limit=200, offset=0):

@@ -250,6 +250,7 @@ class TestOpening(Base):
         self.assertEqual(db.setting("card_buttons_v1"), "1")
 
     def test_pressing_sent_before_five_skips_the_whatsapp_ping(self):
+        os.environ["REVIEWASK_WA_ONLY"] = "0"      # the call flow (switch OFF since 2026-10-19)
         self.open_today()
         res = run(flow.answer(self.t()["id"], "sent", "ناصر", "333", now_=at(2026, 10, 14, 11, 0)))
         self.assertTrue(res["ok"])
@@ -393,6 +394,7 @@ class TestOpening(Base):
 
 class TestClockFlow(Base):
     def test_wa_stage_then_call_next_evening(self):
+        os.environ["REVIEWASK_WA_ONLY"] = "0"      # the call flow (switch OFF since 2026-10-19)
         self.open_today()
         run(flow.tick(at(2026, 10, 14, 17, 0)))
         row = self.t()
@@ -483,6 +485,7 @@ class TestClockFlow(Base):
         self.assertEqual(self.t()["state"], engine.CANCELLED)
 
     def test_staff_miss_is_logged_against_the_responsible_and_attempt_kept(self):
+        os.environ["REVIEWASK_WA_ONLY"] = "0"      # the call flow (switch OFF since 2026-10-19)
         self.open_today()
         tid = self.t()["id"]
         db.update_ticket(tid, {"state": engine.WA_SENT,
@@ -511,6 +514,7 @@ class TestClockFlow(Base):
         self.assertEqual(self.t()["state"], engine.PROMISED_EXPIRED)
 
     def test_satisfied_opens_whatsapp_at_once(self):
+        os.environ["REVIEWASK_WA_ONLY"] = "0"      # the call flow (switch OFF since 2026-10-19)
         self.open_today()
         db.update_ticket(self.t()["id"], {"mode": "care"})     # care rows are no longer opened,
         run(flow.tick(at(2026, 10, 14, 17, 0)))               # but the engine path stays sound
@@ -520,6 +524,7 @@ class TestClockFlow(Base):
         self.assertIn("sent", self.f.room_posts()[-1][3])
 
     def test_no_phone_offers_airbnb_and_call_still_opens(self):
+        os.environ["REVIEWASK_WA_ONLY"] = "0"      # the call flow (switch OFF since 2026-10-19)
         self.open_today()
         run(flow.tick(at(2026, 10, 14, 17, 0)))
         res = run(flow.answer(self.t()["id"], "no_phone", "أصيل", "111",

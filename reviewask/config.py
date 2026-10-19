@@ -73,6 +73,12 @@ def max_calls():
     return _int("REVIEWASK_MAX_CALLS", 2, 1)
 
 
+def wa_only():
+    """Team ruling 2026-10-19 (owner-confirmed): WhatsApp only, no calls, rooms close on day 3.
+    REVIEWASK_WA_ONLY=0 brings the original call flow back unchanged."""
+    return _env("REVIEWASK_WA_ONLY", "1") == "1"
+
+
 def window_days():
     return _int("REVIEWASK_WINDOW_DAYS", 14, 1)
 
@@ -143,6 +149,6 @@ def snapshot():
         "call_at": call_at(), "max_calls": max_calls(), "window_days": window_days(),
         "quiet_from": quiet_from(), "quiet_to": quiet_to(),
         "ramadan": engine.parse_ramadan(_env("REVIEWASK_RAMADAN", "")),
-        "hijri_month": _hijri_month(),
+        "hijri_month": _hijri_month(), "wa_only": wa_only(),
     })
     return c

@@ -54,6 +54,9 @@ STATE_AR = {
     engine.CALL_RETRY: "🔁 نعيد الاتصال بكرة",
     engine.CARE_DUE: "🤝 مكالمة اطمئنان",
     engine.PROMISED: "🙏 وعد يقيّم — ننتظر يوصل التقييم",
+    engine.FOLLOW_DUE: "🔁 تابع مع الضيف — رسالة ثانية",
+    engine.REPLIED: "💬 الضيف رد",
+    engine.NO_REPLY: "📵 ما رد على الواتساب — انقفلت اليوم الثالث",
     engine.REVIEWED: "⭐ وصل التقييم",
     engine.PROMISED_EXPIRED: "⌛ وعد وما وصل تقييم",
     engine.DECLINED: "🚫 ما يبي يقيّم",
@@ -67,11 +70,11 @@ STATE_AR = {
 
 MODE_AR = {"review": "رفع تقييم", "care": "اطمئنان (كان عنده بلاغ)"}
 
-CARE_WARNING = ("الضيف كان عنده بلاغ صيانة أثناء الإقامة: اتصل اطمئنان أول، "
-                "لا تطلب تقييم قبل ما تتأكد إنه راضي")
+CARE_WARNING = ("الضيف كان عنده بلاغ صيانة أثناء الإقامة: تأكد إن مشكلته انحلّت "
+                "قبل ما تطلب منه تقييم")
 
-FOOTER = ("لا تتصل بعد ١٠ مساءً · التقييم في Airbnb يوصلنا بعد ما نقيّم الضيف أو بعد ١٤ يوم — "
-          "إذا قال الضيف إنه قيّم اضغط «قيّم»")
+FOOTER = ("واتساب بس · إذا الضيف رد اضغط «الضيف رد» وتنقفل الغرفة · الغرفة تنقفل لحالها "
+          "اليوم الثالث بعد الخروج")
 
 NOT_FOUND = "ما لقينا هذي التذكرة."
 ADMIN_ONLY = "🚫 هذا الأمر للإدارة فقط."
@@ -164,6 +167,10 @@ def stage_ping(row, call_time_hhmm=""):
     if st == engine.WA_DUE:
         return ("%s 📱 وقت رسالة الواتساب للضيف %s — اضغط «فتح واتساب» (الرسالة مكتوبة باسمك)، "
                 "وبعد ما ترسلها اضغط «أرسلت الرسالة»." % (who(row), row.get("guest") or ""))
+    if st == engine.FOLLOW_DUE:
+        return ("%s 🔁 تابع مع الضيف %s — ما وصلنا منه رد. أرسل له رسالة ثانية من «فتح واتساب»، "
+                "وبعدها اضغط «أرسلت الرسالة». إذا رد اضغط «الضيف رد». الغرفة تنقفل بكرة."
+                % (who(row), row.get("guest") or ""))
     if st == engine.CARE_DUE:
         return ("%s 🤝 اتصل على الضيف %s اطمئنان — كان عنده بلاغ صيانة. لا تطلب تقييم إلا إذا "
                 "كان راضي. لا تتصل بعد ١٠ مساءً." % (who(row), row.get("guest") or ""))
@@ -177,12 +184,17 @@ def stage_ping(row, call_time_hhmm=""):
 def remind(row, n):
     if row.get("state") == engine.WA_DUE:
         return "%s ⏰ تذكير %d: رسالة الواتساب لسا ما انرسلت." % (who(row), n)
+    if row.get("state") == engine.FOLLOW_DUE:
+        return "%s ⏰ تذكير %d: رسالة المتابعة للضيف لسا ما انرسلت." % (who(row), n)
     return "%s ⏰ تذكير %d: المكالمة لسا ما صارت — قبل ١٠ مساءً." % (who(row), n)
 
 
 def miss_line(row):
     if row.get("state") == engine.WA_DUE:
-        return "🔴 فات وقت رسالة الواتساب اليوم — انحسبت على %s. المكالمة بكرة." % (
+        return "🔴 فات وقت رسالة الواتساب اليوم — انحسبت على %s. بكرة يجيك تنبيه متابعة." % (
+            row.get("responsible") or "المسؤول")
+    if row.get("state") == engine.FOLLOW_DUE:
+        return "🔴 فات وقت رسالة المتابعة — انحسبت على %s. الغرفة تنقفل بكرة." % (
             row.get("responsible") or "المسؤول")
     return "🔴 فات وقت المكالمة الليلة — انحسبت على %s، ونفس المحاولة تنعاد بكرة." % (
         row.get("responsible") or "المسؤول")
@@ -205,7 +217,7 @@ def close_post(state):
 def press_saved(kind, row):
     base = {
         "sent": "✅ انحفظ: أرسلت الرسالة.",
-        "no_phone": "✅ انحفظ: ما فيه رقم — استخدم رسالة Airbnb، والمكالمة بكرة.",
+        "no_phone": "✅ انحفظ: ما فيه رقم — استخدم رسالة Airbnb.",
         "replied_will": "✅ انحفظ: الضيف بيقيّم.",
         "replied_no": "✅ انحفظ: الضيف ما يبي يقيّم.",
         "replied_quiet": "✅ انحفظ: رد بس ما قال شي — المكالمة بكرة.",
@@ -218,6 +230,8 @@ def press_saved(kind, row):
         "satisfied": "✅ انحفظ: راضي — الحين أرسل له رسالة الواتساب.",
         "complaint": "✅ انحفظ: عنده ملاحظة — انفتحت تذكرة صيانة.",
     }.get(kind, "✅ انحفظ.")
+    if kind == "replied_quiet" and row.get("state") == engine.REPLIED:
+        base = "✅ انحفظ: الضيف رد — انقفلت التذكرة."
     if kind == "noanswer" and row.get("state") == engine.NO_ANSWER_FINAL:
         base = "✅ انحفظ: ما رد للمرة الثانية — انقفلت التذكرة."
     elif kind == "noanswer":

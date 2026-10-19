@@ -4517,6 +4517,8 @@ ops_audit.setup(bot, _oad_sys.modules[__name__])    # hand over the LIVE module 
 
 import ops_archive, sys as _oa_sys  # Drive archive + guarded purge: !ouja-archive / !ouja-purge
 ops_archive.setup(bot, _oa_sys.modules[__name__])   # hand over the LIVE module (never `import bot`)
+import maint_cleanup  # closed صيانة rooms: saved to Drive, deleted on day 3 (2026-10-19)
+maint_cleanup.setup(bot, _oa_sys.modules[__name__])
 
 import ops_tidy, sys as _ot_sys    # !ouja-tidy plan|run|undo|status + auto-archive on close
 ops_tidy.setup(bot, _ot_sys.modules[__name__])
@@ -68847,6 +68849,9 @@ async def _tk_close(interaction):
         rec["status"] = "closed"
         rec["closed_by"] = str(interaction.user)
         rec["closed_at"] = now.isoformat(timespec="seconds")
+        if rec.get("kind") == "maint":
+            # day 3 (2026-10-19): saved to Drive, then deleted — maint_cleanup does it
+            rec["delete_on"] = maint_cleanup.delete_on(rec["closed_at"])
         _dtk_save()
         if rec.get("kind") == "maint" and _HAS_ONCALL:
             try:
@@ -68899,11 +68904,17 @@ async def _tk_close(interaction):
         note += ("\n⚠️ ملاحظة: أصحاب صلاحية Administrator (" + "، ".join(admins[:4]) +
                  ") يقدرون يكتبون هنا حتى بعد الإغلاق — هذا نظام ديسكورد نفسه، مو خلل عندنا. "
                  "الرجاء عدم استخدام الغرفة المقفلة.")
+    maint_day3 = bool(rec and rec.get("kind") == "maint" and rec.get("delete_on"))
+    if maint_day3:
+        note += (f"\n🗑️ الغرفة **تنحذف يوم {rec['delete_on']}** (اليوم الثالث) — قبلها تنحفظ نسخة كاملة "
+                 "بالصور والفواتير في Drive، ورابطها في تذكرة الداشبورد.")
     msg = await ch.send(note, allowed_mentions=discord.AllowedMentions(users=True))
     try:
         await msg.pin()
     except Exception as e:
         print("ticket close pin error:", e)
+    if maint_day3:
+        return                                           # no archive move: it goes on day 3 instead
     try:
         await ops_tidy.archive_closed_channel(ch)        # «📦 أرشيف N» — only after the first !ouja-tidy run
     except Exception as e:

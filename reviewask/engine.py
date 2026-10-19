@@ -38,6 +38,7 @@ CALL_DUE = "call_due"
 CALL_RETRY = "call_retry"
 CARE_DUE = "care_due"
 PROMISED = "promised"                  # open: waiting for the review to land
+FOLLOW_DUE = "follow_due"              # WhatsApp-only: day 2 «تابع مع الضيف» (2026-10-19)
 
 REVIEWED = "reviewed"
 PROMISED_EXPIRED = "promised_expired"
@@ -48,24 +49,26 @@ COMPLAINT = "complaint"
 EXPIRED = "expired"
 CANCELLED = "cancelled"
 VOID = "void"
+REPLIED = "replied"                    # WhatsApp-only: the guest answered → the room is done
+NO_REPLY = "no_reply"                  # WhatsApp-only: day 3 came with no answer
 
-OPEN = (WAITING, WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE, PROMISED)
+OPEN = (WAITING, WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE, PROMISED, FOLLOW_DUE)
 TERMINAL = (REVIEWED, PROMISED_EXPIRED, DECLINED, WRONG_NUMBER, NO_ANSWER_FINAL, COMPLAINT,
-            EXPIRED, CANCELLED, VOID)
-DUE_STATES = (WA_DUE, CARE_DUE, CALL_DUE)          # a prompt with buttons is live
+            EXPIRED, CANCELLED, VOID, REPLIED, NO_REPLY)
+DUE_STATES = (WA_DUE, CARE_DUE, CALL_DUE, FOLLOW_DUE)          # a prompt with buttons is live
 
 # What a press may move from. Terminal states are never in here (first-final-wins).
 ALLOWED_FROM = {
-    "sent": (WAITING, WA_DUE),
+    "sent": (WAITING, WA_DUE, FOLLOW_DUE),
     "no_phone": (WAITING, WA_DUE),
-    "replied_will": (WAITING, WA_DUE, WA_SENT),
-    "replied_no": (WAITING, WA_DUE, WA_SENT),
-    "replied_quiet": (WAITING, WA_DUE, WA_SENT),
+    "replied_will": (WAITING, WA_DUE, WA_SENT, FOLLOW_DUE),
+    "replied_no": (WAITING, WA_DUE, WA_SENT, FOLLOW_DUE),
+    "replied_quiet": (WAITING, WA_DUE, WA_SENT, FOLLOW_DUE),
     "rated": (CALL_DUE, CALL_RETRY),
     "promise": (CALL_DUE, CALL_RETRY),
     "noanswer": (CALL_DUE, CALL_RETRY, CARE_DUE),
     "later": (CALL_DUE, CALL_RETRY, CARE_DUE),
-    "complaint": (WAITING, WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE),
+    "complaint": (WAITING, WA_DUE, WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE, FOLLOW_DUE),
     "decline": (CALL_DUE, CALL_RETRY),
     "wrong": (CALL_DUE, CALL_RETRY, CARE_DUE),
     "satisfied": (CARE_DUE, CALL_RETRY),
@@ -74,6 +77,7 @@ ALLOWED_FROM = {
 # Buttons per stage, in display order. "wa" is the link button (flow builds its URL).
 WA_BUTTONS = ("wa", "sent", "replied", "no_phone")
 WA_SENT_BUTTONS = ("wa", "replied")
+FOLLOW_BUTTONS = ("wa", "sent", "replied")
 CALL_BUTTONS = ("rated", "promise", "noanswer", "later", "complaint", "decline", "wrong", "wa")
 CARE_BUTTONS = ("satisfied", "complaint", "noanswer", "later", "wrong")
 
@@ -101,6 +105,9 @@ def default_cfg():
         "max_calls": 2, "window_days": 14, "quiet_from": "22:00", "quiet_to": "13:00",
         "ramadan": [], "hijri_month": None, "wa_reminders": ("18:00", "19:30"),
         "call_remind_after_min": 45, "call_last_remind": "21:30",
+        # WhatsApp-only (2026-10-19): no calls; day 2 follow-up; the room closes on day `close_day`
+        # (checkout = day 1) at `close_at`. False = the original call flow, untouched.
+        "wa_only": False, "close_day": 3, "close_at": "13:00",
     }
 
 
@@ -424,7 +431,7 @@ def call_at(day, cfg):
 def _reminder_times(state, stage_due, cfg):
     day = stage_due.date()
     cutoff = at_clock(day, cfg.get("quiet_from") or "22:00")
-    if state == WA_DUE or (state == CARE_DUE and stage_due.strftime("%H:%M") ==
+    if state in (WA_DUE, FOLLOW_DUE) or (state == CARE_DUE and stage_due.strftime("%H:%M") ==
                            str(cfg.get("wa_at") or "17:00")):
         times = [at_clock(day, t) for t in cfg.get("wa_reminders") or ()]
     else:
@@ -439,6 +446,8 @@ def next_action(row, now, cfg):
     st = row.get("state")
     if st not in OPEN:
         return None
+    if cfg.get("wa_only"):
+        return _next_wa_only(row, now, cfg)
     if now >= expires_at(row["day"], cfg):
         return {"act": "expire", "state": PROMISED_EXPIRED if st == PROMISED else EXPIRED,
                 "fields": {}}
@@ -492,6 +501,68 @@ def next_action(row, now, cfg):
     return None
 
 
+def follow_at(day, cfg):
+    """Day 2 (the day after checkout) at the WhatsApp hour: «تابع مع الضيف»."""
+    return at_clock(parse_day(day) + datetime.timedelta(days=1), cfg.get("wa_at") or "17:00")
+
+
+def wa_only_close_at(day, cfg):
+    """Day `close_day` counting checkout as day 1 (default: day 3 at 13:00)."""
+    d = parse_day(day) + datetime.timedelta(days=max(1, int(cfg.get("close_day") or 3)) - 1)
+    return at_clock(d, cfg.get("close_at") or "13:00")
+
+
+def _next_wa_only(row, now, cfg):
+    """The WhatsApp-only clock (team ruling 2026-10-19): WhatsApp on day 1, ONE follow-up on day 2,
+    the room closes on day 3. «بيقيّم» (PROMISED) only waits for Airbnb — no prompt, ever."""
+    st = row["state"]
+    if st == PROMISED:
+        if now >= expires_at(row["day"], cfg):
+            return {"act": "expire", "state": PROMISED_EXPIRED, "fields": {}}
+        return None
+    if now >= wa_only_close_at(row["day"], cfg):
+        return {"act": "expire", "state": NO_REPLY, "fields": {}}
+    quiet = in_quiet(now, cfg.get("quiet_from") or "22:00", cfg.get("quiet_to") or "13:00")
+    follow = follow_at(row["day"], cfg)
+
+    if st == WAITING:                  # care rooms too: the satisfaction CALL is gone
+        due = parse_dt(row.get("next_due_at")) or at_clock(row["day"], cfg.get("wa_at") or "17:00")
+        if now >= due and not quiet:
+            return _stage(row, WA_DUE, now, cfg)
+        return None
+
+    if st in (WA_SENT, CALL_DUE, CALL_RETRY, CARE_DUE):    # call states = rows from before the switch
+        sent = parse_dt(row.get("state_at"))
+        if st == WA_SENT and sent and sent >= follow:
+            return None                # the message went out on day 2 already — nothing to chase
+        if now >= follow and not quiet:
+            return _stage(row, FOLLOW_DUE, now, cfg)
+        return None
+
+    # a live prompt: WA_DUE (day 1) / FOLLOW_DUE (day 2)
+    sd = parse_dt(row.get("stage_due_at"))
+    if sd is None:
+        return _stage(row, st, now, cfg) if not quiet else None
+    pinged = parse_dt(row.get("pinged_at"))
+    if pinged is None or pinged < sd:
+        if now >= sd and not quiet:
+            return {"act": "ping", "fields": {"pinged_at": iso(now)}}
+        return None
+    if now >= at_clock(sd.date(), cfg.get("quiet_from") or "22:00"):
+        if row.get("missed_at") != iso(sd):
+            return {"act": "miss", "fields": {"missed_at": iso(sd)}}
+        if st == WA_DUE and now >= follow and not quiet:
+            return _stage(row, FOLLOW_DUE, now, cfg)
+        return None
+    if quiet:
+        return None
+    times = _reminder_times(st, sd, cfg)
+    n = int(row.get("remind_count") or 0)
+    if n < len(times) and now >= times[n]:
+        return {"act": "remind", "fields": {"remind_count": n + 1}}
+    return None
+
+
 def _stage(row, state, now, cfg):
     fields = {"state": state, "stage_due_at": iso(now), "pinged_at": iso(now),
               "remind_count": 0, "missed_at": None, "next_due_at": None}
@@ -520,6 +591,8 @@ def press(row, kind, now, cfg):
         f = {"state": WA_SENT, "next_due_at": wa_next}
     elif kind == "no_phone":
         f = {"state": WA_SENT, "wa_note": "no_phone", "next_due_at": wa_next}
+    elif kind == "replied_quiet" and cfg.get("wa_only"):
+        f = {"state": REPLIED, "wa_note": "replied_quiet"}     # any reply closes (2026-10-19)
     elif kind == "replied_quiet":
         f = {"state": WA_SENT, "wa_note": "replied_quiet", "next_due_at": wa_next}
     elif kind in ("replied_will", "rated", "promise"):
@@ -553,6 +626,8 @@ def stage_buttons(row):
         return list(WA_BUTTONS)
     if st == WA_SENT:
         return list(WA_SENT_BUTTONS)
+    if st == FOLLOW_DUE:
+        return list(FOLLOW_BUTTONS)
     if st == CARE_DUE or (st == CALL_RETRY and row.get("mode") == "care" and not row.get("care_ok")):
         return list(CARE_BUTTONS)
     if st in (CALL_DUE, CALL_RETRY):

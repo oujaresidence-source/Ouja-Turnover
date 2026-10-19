@@ -512,6 +512,12 @@ async def process(row, now_, c):
         ok, row2 = await close(row, act["state"], "النظام", "", now_)
         if ok:
             await _post(row2, texts.close_post(act["state"]))
+            if act["state"] == engine.NO_REPLY:
+                # day 3 (2026-10-19): the room is finished — it goes now, through the sweep's fence
+                try:
+                    await sweep_closed(now_, pause=0, limit=1, rows=[row2], ignore_age=True)
+                except Exception as e:
+                    print("[reviewask] day-3 delete failed (the daily sweep retries):", row["id"], e)
         return a if ok else None
     fields = dict(act.get("fields") or {})
     if a in ("stage", "ping"):
@@ -756,7 +762,7 @@ def board_chunks(now_, prog=None, names=None):
     for r in opened:
         st = r.get("state")
         nd = engine.parse_dt(r.get("next_due_at"))
-        if st == engine.WA_DUE:
+        if st in (engine.WA_DUE, engine.FOLLOW_DUE):
             buckets["wa"].append(texts.board_line(r))
         elif st in (engine.CALL_DUE, engine.CARE_DUE) or (
                 st in (engine.CALL_RETRY, engine.WA_SENT) and nd and nd.date() == day):
@@ -860,7 +866,7 @@ def _slot(now_, every):
 def overdue_lines(now_):
     lines = []
     what = {engine.WA_DUE: "واتساب ما انرسل", engine.CALL_DUE: "مكالمة ما صارت",
-            engine.CARE_DUE: "مكالمة اطمئنان ما صارت"}
+            engine.CARE_DUE: "مكالمة اطمئنان ما صارت", engine.FOLLOW_DUE: "متابعة ما انرسلت"}
     for r in db.open_tickets():
         if r.get("state") not in engine.DUE_STATES:
             continue
@@ -903,7 +909,7 @@ def day_stats(day):
     for e in evs:
         if e["kind"] == "stage":
             stages.setdefault(e["ticket_id"], set()).add((e.get("detail") or "").split("|")[0])
-    wa_t = {t for t, s in stages.items() if engine.WA_DUE in s}
+    wa_t = {t for t, s in stages.items() if s & {engine.WA_DUE, engine.FOLLOW_DUE}}
     call_t = {t for t, s in stages.items() if s & {engine.CALL_DUE, engine.CARE_DUE}}
     wa_done = {e["ticket_id"] for e in evs if e["kind"] in WA_OUTCOMES} & wa_t
     call_done = {e["ticket_id"] for e in evs if e["kind"] in CALL_OUTCOMES} & call_t
@@ -956,7 +962,7 @@ def report_data(now_, days=7):
     for e in evs:
         k, actor = e["kind"], e.get("actor") or ""
         state = (e.get("detail") or "").split("|")[0]
-        if k == "stage" and state == engine.WA_DUE:
+        if k == "stage" and state in (engine.WA_DUE, engine.FOLLOW_DUE):
             p(actor)["wa_due"] += 1
         elif k == "stage" and state in (engine.CALL_DUE, engine.CARE_DUE):
             p(actor)["calls_due"] += 1
@@ -1014,16 +1020,24 @@ async def sweep_closed(now_=None, pause=1.0, limit=10, rows=None, ignore_age=Fal
     Order is the safety: fetch by the stored id → the topic must carry THIS reservation → the
     transcript is saved and read back → only then delete. 'Could not check' is never 'deleted'.
     `states` widens WHICH tickets may lose their room (only clean_done passes it: + PROMISED)."""
-    allowed = tuple(states) if states else engine.TERMINAL
+    # WhatsApp-only: «بيقيّم» rooms are finished too — the ticket keeps waiting for Airbnb
+    # quietly, its room goes DELETE_AFTER_DAYS after the promise (state_at).
+    promised = config.wa_only()
+    allowed = tuple(states) if states else (
+        engine.TERMINAL + ((engine.PROMISED,) if promised else ()))
     async with _lock("sweep"):
         now_ = now_ or now()
         cutoff = now_ - datetime.timedelta(days=config.delete_after_days())
         done = []
-        rows = db.due_for_sweep(_iso(cutoff), limit) if rows is None else list(rows)[:limit]
+        if rows is None:
+            rows = db.due_for_sweep(_iso(cutoff), limit, promised=promised)
+        else:
+            rows = list(rows)[:limit]
         for i, row in enumerate(rows):
             if row.get("state") not in allowed or row.get("deleted_at"):
                 continue
-            closed = engine.parse_dt(row.get("closed_at"))
+            closed = engine.parse_dt(row.get("state_at") if row.get("state") == engine.PROMISED
+                                     else row.get("closed_at"))
             if not ignore_age and (closed is None or closed > cutoff):
                 continue
             tid, cid = row["id"], str(row.get("channel_id") or "")
