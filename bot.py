@@ -9456,6 +9456,8 @@ def _cg_today_arrivals():
         lid = r.get("listingMapId")
         if not lid:
             continue
+        if not _cg_gated(lid):          # no check-in lookup (a Hostaway call) for ungated units
+            continue
         try:
             default_h = unit_checkin_minutes(lid) // 60
         except Exception:
@@ -9514,16 +9516,19 @@ async def _cg_channel():
     return str(ch.id) if ch is not None else None
 
 
-_CG_LABEL = {"release": ("cg_release", discord.ButtonStyle.success),
-             "undo": ("cg_undo", discord.ButtonStyle.secondary)}
+_CG_CUSTOM_ID = {"release": "cg_release", "undo": "cg_undo"}
 
 
 def _cg_view(buttons):
-    v = discord.ui.View(timeout=None)
-    for b in buttons or []:
-        cid, style = _CG_LABEL[b]
-        label = _codegate.engine.LABEL_RELEASE if b == "release" else _codegate.engine.LABEL_UNDO
-        v.add_item(discord.ui.Button(label=label, style=style, custom_id=cid))
+    """A CodegateView carrying only the wanted buttons. It MUST be the real view with callbacks:
+    discord.py stores any view passed to send()/edit(view=) under that message id and dispatches
+    clicks there BEFORE the bot.add_view() registration, so a bare-Button view would eat every
+    click on a card posted or repainted since the last restart."""
+    wanted = {_CG_CUSTOM_ID[b] for b in buttons or []}
+    v = CodegateView()
+    for child in list(v.children):
+        if child.custom_id not in wanted:
+            v.remove_item(child)
     return v
 
 
@@ -9613,7 +9618,8 @@ class CodegateConfirmView(discord.ui.View):
 
     @discord.ui.button(label="نعم، كتب «أوافق» وأرسلت الرمز", style=discord.ButtonStyle.success)
     async def yes(self, interaction, button):
-        ok, msg = await _codegate.flow.press_release(self.message_id, _cg_presser(interaction))
+        presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
+        ok, msg = await _codegate.flow.press_release(self.message_id, presser)
         await _cw_reply(interaction, msg)
 
     @discord.ui.button(label="لا، رجوع", style=discord.ButtonStyle.secondary)
@@ -9642,11 +9648,20 @@ class CodegateView(discord.ui.View):
     async def undo(self, interaction, button):
         if not _cg_ready():
             return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
-        ok, msg = await _codegate.flow.press_undo(interaction.message.id, _cg_presser(interaction))
+        presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
+        ok, msg = await _codegate.flow.press_undo(interaction.message.id, presser)
         await _cw_reply(interaction, msg)
 
 
-@tasks.loop(minutes=int(os.environ.get("CODEGATE_TICK_MIN", "10")))
+def _cg_tick_minutes():
+    """CODEGATE_TICK_MIN, falling back to 10 on anything garbled (runs at import — must not raise)."""
+    try:
+        return max(1, int(os.environ.get("CODEGATE_TICK_MIN", "10")))
+    except Exception:
+        return 10
+
+
+@tasks.loop(minutes=_cg_tick_minutes())
 async def codegate_loop():
     """Every 10 min: today's gated arrivals → header + cards (from 09:00), reply refresh,
     2-hour / check-in alerts, the honesty check after a press."""
