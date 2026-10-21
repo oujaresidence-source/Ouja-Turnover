@@ -174,14 +174,22 @@ async def _render(it, now_, channel_id, soak=False):
     return None
 
 
-async def _prelive_check(it, now_, rep):
-    """Go-live, ONCE per item: did Hostaway's auto-send already give this guest the code?
-    Returns 'skip' (couldn't ask: no alert this tick, retry next), or None (decided: carry on —
-    either released quietly, or genuinely no code so the normal alerts proceed)."""
+async def _prelive_check(it, now_, rep, msgs):
+    """Go-live, ONCE per item (per go-live): did Hostaway's auto-send already give this guest the
+    code? Uses the chat this same pass just fetched (`msgs`; None = that fetch failed), so it
+    costs no extra Hostaway call. Returns 'skip' (couldn't look: no alert this tick, ask again
+    next tick) or None (decided: carry on, either released quietly or genuinely no code)."""
     rid = it["res_id"]
     try:
-        seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
-    except Exception as e:      # Hostaway down ≠ "no code": say nothing, ask again next tick
+        if not it.get("conversation_id"):
+            seen = False
+        elif msgs is None:
+            raise RuntimeError("chat not fetched this tick")
+        elif HOST.code_in:
+            seen = bool(await run_blocking(HOST.code_in, msgs))
+        else:                       # host without code_in: ask Hostaway again
+            seen = bool(await run_blocking(HOST.code_sent, it.get("conversation_id")))
+    except Exception as e:      # Hostaway down != "no code": say nothing, ask again next tick
         print("[codegate] pre-live check %s failed, retrying next tick: %s" % (rid, e))
         return "skip"
     stamp = now_.isoformat(timespec="seconds")
@@ -193,8 +201,10 @@ async def _prelive_check(it, now_, rep):
     return None
 
 
-async def _process_item(it, now_, channel_id, rep, is_live=True, prelive_until=None):
+async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
+    """`prelive` = (live_since, live_since + 3 h) when a go-live moment is stored."""
     rid = it["res_id"]
+    msgs = None                     # the chat as fetched THIS pass (None = not / failed)
     if not it.get("cancelled") and it.get("conversation_id"):
         try:
             msgs = await run_blocking(HOST.messages, it["conversation_id"]) or []
@@ -216,11 +226,13 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive_until=N
         return
     # GO-LIVE: arrivals inside Doorcodera's window are looked at once before any alert.
     hold_alerts = False
-    if (prelive_until is not None and not it.get("released_at") and not it.get("cancelled")
-            and not it.get("prelive_checked_at")):
+    if prelive and not it.get("released_at") and not it.get("cancelled"):
+        # a check older than the current go-live doesn't count: after a rollback and a second
+        # `رموز-تشغيل`, Doorcodera may have sent the code in between
+        last = _dt(it.get("prelive_checked_at"))
         ci = _dt(it.get("checkin_at"))
-        if ci and ci <= prelive_until:
-            hold_alerts = (await _prelive_check(it, now_, rep)) == "skip"
+        if (last is None or last < prelive[0]) and ci and ci <= prelive[1]:
+            hold_alerts = (await _prelive_check(it, now_, rep, msgs)) == "skip"
             it = await run_blocking(db.get, rid)
     # honesty check: pressed, but is the code really in the chat?
     if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
@@ -269,14 +281,15 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive_until=N
         rep[res] += 1
 
 
-def _prelive_until():
-    """live_since + 3 h, or None when no go-live moment is stored (then nothing is pre-checked)."""
+def _prelive_window():
+    """(live_since, live_since + 3 h), or None when no go-live moment is stored (then nothing
+    is pre-checked)."""
     try:
         ls = _dt(db.get_setting("live_since"))
     except Exception as e:
         print("[codegate] live_since unreadable: %s" % e)
         return None
-    return ls + datetime.timedelta(hours=PRELIVE_WINDOW_H) if ls else None
+    return (ls, ls + datetime.timedelta(hours=PRELIVE_WINDOW_H)) if ls else None
 
 
 async def tick(now_=None, force=False):
@@ -341,11 +354,11 @@ async def tick(now_=None, force=False):
                     rep["headers"] += 1
             except Exception as e:
                 print("[codegate] header %s failed: %s" % (k, e))
-        prelive_until = await run_blocking(_prelive_until) if is_live else None
+        prelive = await run_blocking(_prelive_window) if is_live else None
         for it in items:
             try:
                 await _process_item(it, now_, channel_id, rep, is_live=is_live,
-                                    prelive_until=prelive_until)
+                                    prelive=prelive)
             except Exception as e:
                 print("[codegate] item %s failed: %s" % (it.get("res_id"), e))
         return rep

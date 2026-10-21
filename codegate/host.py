@@ -10,6 +10,7 @@ class _Host:
     today_arrivals = None  # BLOCKING (day_iso) -> [{res_id, lid, day, unit, guest, conversation_id, checkin_at}]
     messages = None        # BLOCKING (conversation_id) -> [{inbound, body, at}]; RAISES on fetch failure
     code_sent = None       # BLOCKING (conversation_id) -> bool; RAISES when Hostaway fails (bot._cg_code_sent)
+    code_in = None         # (messages as returned by `messages`) -> bool; PURE, no Hostaway call (go-live check)
     cover = None           # BLOCKING (lid, day) -> {name, did, role_id, owner_did}
     channel = None         # async () -> channel id of «تسليم-الرموز» (fallback #escalations)
     post = None            # async (channel_id, text, embed=None, buttons=None) -> message id | None

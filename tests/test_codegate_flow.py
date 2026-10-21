@@ -17,6 +17,7 @@ from codegate import db, engine, flow  # noqa: E402
 TZ = engine.tz()
 DAY = "2026-10-21"
 GATED, OPEN = 461328, 999
+CODE_WORD = "كود الدخول 4821"       # what the fake code_in treats as "the code message"
 
 
 def at(hh, mm=0):
@@ -75,6 +76,8 @@ class FlowCase(unittest.TestCase):
             "today_arrivals": self.arrivals_for,
             "messages": lambda cid: list(self.f.msgs.get(cid, [])),
             "code_sent": lambda cid: bool(self.f.code.get(cid)),
+            "code_in": lambda msgs: any(not m["inbound"] and CODE_WORD in m["body"]
+                                        for m in msgs),
             "cover": lambda lid, day: {"name": "نورة", "did": "11", "role_id": "",
                                        "owner_did": "22"},
             "channel": self.f.channel, "post": self.f.post, "edit": self.f.edit,
@@ -508,8 +511,6 @@ class TestTickDay(FlowCase):
         self.assertEqual(self.asked_days, [DAY])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestGoLive(FlowCase):
@@ -521,20 +522,30 @@ class TestGoLive(FlowCase):
         super().setUp()
         self.f.arrivals = [self.mk("r1", "U-past", 13, 0), self.mk("r2", "U-inside", 16, 30),
                            self.mk("r3", "U-outside", 20, 0)]
-        self.calls = []
-        self.code_state = {"c-r1": True, "c-r2": False, "c-r3": True}
+        self.fetches = []                      # every HOST.messages call = one Hostaway fetch
         self.boom = set()
+        self.honesty_calls = []
+        self.give_code("c-r1")
+        self.give_code("c-r3")
 
-        def code_sent(cid):
-            self.calls.append(cid)
+        def messages(cid):
+            self.fetches.append(cid)
             if cid in self.boom:
                 raise RuntimeError("hostaway 500")
-            return self.code_state.get(cid, False)
-        flow.HOST.code_sent = code_sent
+            return list(self.f.msgs.get(cid, []))
+        flow.HOST.messages = messages
+        flow.HOST.code_sent = lambda cid: self.honesty_calls.append(cid) or True
         run(flow.tick())                       # soak morning: cards only
         self.now = at(15, 0)
         flow.set_live(True, "Faisal")          # live_since = 15:00 → window ends 18:00
-        self.calls.clear()
+        self.fetches.clear()
+
+    def give_code(self, cid):
+        self.f.msgs.setdefault(cid, []).append(
+            {"inbound": False, "at": at(12), "body": CODE_WORD})
+
+    def take_code(self, cid):
+        self.f.msgs[cid] = [m for m in self.f.msgs[cid] if m["body"] != CODE_WORD]
 
     def mk(self, rid, unit, hh, mm):
         a = Fake.arr(rid, GATED)
@@ -576,7 +587,6 @@ class TestGoLive(FlowCase):
 
     def test_outside_window_untouched_until_its_own_2h_mark(self):
         run(flow.tick())
-        self.assertNotIn("c-r3", self.calls)
         self.assertIsNone(db.get("r3")["prelive_checked_at"])
         self.now = at(17, 59)
         run(flow.tick())
@@ -584,18 +594,22 @@ class TestGoLive(FlowCase):
         self.now = at(18, 1)
         run(flow.tick())
         self.assertTrue(any("U-outside" in t for t in self.f.escalations))
-        self.assertNotIn("c-r3", self.calls)               # still never looked at
+        self.assertIsNone(db.get("r3")["prelive_checked_at"])      # still never looked at
 
-    def test_each_item_checked_once(self):
+    def test_each_item_checked_once_with_no_extra_hostaway_call(self):
+        called = []
+        real = flow.HOST.code_in
+        flow.HOST.code_in = lambda msgs: called.append(1) or real(msgs)
         for m in (0, 10, 20, 30):
             self.now = at(15, m)
             run(flow.tick())
-        self.assertEqual(self.calls.count("c-r1"), 1)
-        self.assertEqual(self.calls.count("c-r2"), 1)
+        self.assertEqual(len(called), 2)                   # r1 and r2, once each
+        self.assertEqual(self.honesty_calls, [])           # the chat is NOT asked for again
+        self.assertEqual(self.fetches.count("c-r1"), 4)    # one fetch per tick, as always
         self.assertEqual(len(self.f.escalations), 1)       # r2's 2h alert, once
 
     def test_error_means_no_alert_this_tick_and_retry_next(self):
-        self.boom = {"c-r2"}
+        self.boom = {"c-r2"}                 # the message FETCH fails
         rep = run(flow.tick())
         self.assertEqual(rep["alerts"], 0)
         self.assertEqual(self.f.escalations, [])
@@ -605,7 +619,8 @@ class TestGoLive(FlowCase):
         self.assertIsNone(it["alert_late_at"])
         self.now = at(15, 10)
         run(flow.tick())
-        self.assertEqual(self.calls.count("c-r2"), 2)       # retried
+        self.assertEqual(self.fetches.count("c-r2"), 2)     # retried
+        self.assertIsNone(db.get("r2")["prelive_checked_at"])
         self.assertEqual(self.f.escalations, [])
         self.boom = set()
         self.now = at(15, 20)
@@ -614,17 +629,67 @@ class TestGoLive(FlowCase):
         self.assertTrue(db.get("r2")["prelive_checked_at"])
         self.now = at(15, 30)
         run(flow.tick())
-        self.assertEqual(self.calls.count("c-r2"), 3)       # then never again
+        called = []
+        real = flow.HOST.code_in
+        flow.HOST.code_in = lambda msgs: called.append(1) or real(msgs)
+        self.now = at(15, 40)
+        run(flow.tick())
+        self.assertEqual(called, [])                         # then never again
 
     def test_press_before_the_check_wins_and_is_kept(self):
         mid = db.get("r2")["card_message_id"]
         ok, _ = run(flow.press_release(mid, {"name": "نورة", "did": "11",
                                              "is_admin": False, "is_ops": False}))
         self.assertTrue(ok)
-        self.code_state["c-r2"] = True
+        self.give_code("c-r2")
         run(flow.tick())
         self.assertEqual(db.get("r2")["released_by"], "نورة")
         self.assertEqual(self.f.escalations, [])
+
+    def test_press_landing_during_the_check_wins(self):
+        """A staff press lands while the chat is being read: first press wins, the honesty
+        check is still owed to it, nothing alerts, and no prelive_auto event is written."""
+        real = flow.HOST.code_in
+
+        def code_in(msgs):
+            db.release("r1", "نورة", "11", at(15, 0).isoformat(timespec="seconds"))
+            return real(msgs)
+        flow.HOST.code_in = code_in
+        rep = run(flow.tick())
+        it = db.get("r1")
+        self.assertEqual(it["released_by"], "نورة")
+        self.assertEqual(it["released_by_did"], "11")
+        self.assertIsNone(it["code_seen"])              # honesty check still applies
+        self.assertTrue(it["prelive_checked_at"])
+        self.assertEqual(rep["prelive"], 0)
+        self.assertFalse(any("U-past" in t for t in self.f.escalations))
+        self.assertNotIn("prelive_auto", [e["kind"] for e in db._q(
+            "SELECT kind FROM codegate_events WHERE res_id='r1'")])
+
+    def test_rollback_then_go_live_again_rechecks(self):
+        """15:00 live, r2 has no code (checked, 2h alert). Rollback, Doorcodera sends the code,
+        live again at 16:00: the 15:00 check is stale — r2 is looked at again, found, released."""
+        run(flow.tick())
+        first = db.get("r2")["prelive_checked_at"]
+        self.assertTrue(first)
+        self.assertEqual(len(self.f.escalations), 1)
+        flow.set_live(False, "Faisal")
+        self.give_code("c-r2")
+        self.now = at(16, 0)
+        flow.set_live(True, "Faisal")
+        self.now = at(16, 40)
+        run(flow.tick())
+        it = db.get("r2")
+        self.assertEqual(it["released_by"], "Hostaway (قبل التشغيل)")
+        self.assertIsNone(it["alert_late_at"])
+        self.assertEqual(len(self.f.escalations), 1)    # still only the first 2h alert
+        self.assertGreater(it["prelive_checked_at"], first)
+        self.now = at(16, 50)                            # and only once for this go-live
+        called = []
+        real = flow.HOST.code_in
+        flow.HOST.code_in = lambda msgs: called.append(1) or real(msgs)
+        run(flow.tick())
+        self.assertEqual(called, [])
 
     def test_live_since_set_on_off_to_on_and_kept_on_on_to_on(self):
         first = db.get_setting("live_since")
@@ -644,5 +709,9 @@ class TestGoLive(FlowCase):
     def test_no_live_since_means_no_prelive_check(self):
         db.set_setting("live_since", None)
         run(flow.tick())
-        self.assertEqual(self.calls, [])
+        self.assertIsNone(db.get("r1")["prelive_checked_at"])
         self.assertEqual(len(self.f.escalations), 2)        # r1 late + r2 2h, as before
+
+
+if __name__ == "__main__":
+    unittest.main()

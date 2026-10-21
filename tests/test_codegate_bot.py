@@ -317,6 +317,18 @@ class TestGatedBehaviour(_Live, unittest.TestCase):
         self.assertNotIn("شاف", before)
         self.assertIn("اشكره", before)
 
+    def test_code_in_reuses_fetched_chat_with_the_honesty_rule(self):
+        import datetime
+        tz = bot.TZ
+        now = datetime.datetime.now(tz)
+        code = {"inbound": False, "body": "كود الدخول 4821", "at": now - datetime.timedelta(hours=2)}
+        self.assertTrue(bot._cg_code_in([code]))
+        self.assertFalse(bot._cg_code_in([dict(code, inbound=True)]))          # guest's own words
+        self.assertFalse(bot._cg_code_in([dict(code, at=now - datetime.timedelta(hours=30))]))
+        self.assertFalse(bot._cg_code_in([dict(code, body="هلا وسهلا")]))
+        self.assertFalse(bot._cg_code_in([]))
+        self.assertTrue(bot._cg_code_in([dict(code, at=None)]))                # no timestamp ≠ old
+
     def test_musaed_prompt_mentions_agree_rule(self):
         self.assertIn("أوافق", bot.SYSTEM_PROMPT_ANTI_NAG_GATED)
 

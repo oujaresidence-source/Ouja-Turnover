@@ -9574,6 +9574,15 @@ def _cg_code_sent(conversation_id):
     return _code_sent_in(data.get("result") or [], since_hours=24)
 
 
+def _cg_code_in(messages):
+    """Go-live pre-check on a chat already fetched by _cg_messages: same rule as the honesty
+    check (_code_sent_in), no Hostaway call. PURE."""
+    raw = [{"isIncoming": 1 if m.get("inbound") else 0, "body": m.get("body") or "",
+            "date": m["at"].strftime("%Y-%m-%d %H:%M:%S") if m.get("at") else ""}
+           for m in messages or []]
+    return _code_sent_in(raw, since_hours=24)
+
+
 def _cg_cover(lid, day):
     """Today's coverer (Employee Calendar → room topic → assignments → ops role, via _cw_cover)
     plus the permanent owner's Discord id, who may also press the button."""
@@ -9663,6 +9672,7 @@ def _cg_wire():
         "today_arrivals": _cg_today_arrivals,
         "messages": _cg_messages,
         "code_sent": _cg_code_sent,
+        "code_in": _cg_code_in,
         "cover": _cg_cover,
         "channel": _cg_channel,
         "post": _cg_post,
