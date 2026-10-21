@@ -2111,6 +2111,7 @@ In Discord run `!ouja رموز`. Expected reply: `تسليم الرموز · see
 
 **Files:** none.
 
+- [ ] **Step 0:** The bot is in *soak* (the stored live switch is OFF by default): cards and headers only, each card saying «🧪 وضع التجربة», no alerts, no escalations, no honesty check, and every other bot path treats the 35 units as before. `!ouja رموز` shows «الوضع: 🧪 تجربة».
 - [ ] **Step 1:** For 1–2 days, Hostaway still sends the old agreement and auto-code messages. The cards will mostly show «ما لقيت رسالة القواعد» (expected: the new message isn't live yet) and the honesty check will see the auto-sent codes.
 - [ ] **Step 2:** Each morning, check with the owner that every card landed on the right person and that no card is missing compared with Hostaway's arrivals for the 35 units. Fix calendar or `units.json` mismatches before Task 8.
 
@@ -2140,9 +2141,10 @@ Test on one real arriving gated booking with the owner watching: insert the temp
   - Channels unchanged. Screenshot → owner yes → Save.
 - [ ] **Step 3: Turn off 438108** ("arrival is less than an hour away"): toggle on the Automations list → owner yes.
 - [ ] **Step 4: Turn off 427132** ("Doorcodera"): toggle → owner yes. From this moment, codes on these units go out by hand.
+- [ ] **Step 4b: End the soak in Discord.** Right after Step 4, an admin types `!ouja رموز-تشغيل تشغيل` (the word «تشغيل» is the typed confirmation; without it the bot replies with the exact command). Check `!ouja رموز` now says «الوضع: 🟢 مباشر» and the cards lose the «🧪 وضع التجربة» line on the next tick. From now: 2-hour / check-in alerts, the honesty check, no old signing reminders, Musaed asks for «أوافق». Undo in one step: `!ouja رموز-ايقاف`.
 - [ ] **Step 5: House rules field** on each of the 35 listings (Listings → listing → Edit → House rules): replace with the Airbnb-safe text (spec §4.1 step 5 / the Requests text agreed earlier), without the fine or the contract line; also remove the fine sentence from C2 NFL's description. One listing first, owner yes, then the rest. Report the count done.
 - [ ] **Step 6: End-to-end test on one booking:** rules message arrives → the guest replies → the card quotes it → the employee sends the saved reply → presses the button → the card turns green → 15 minutes later there's no warning.
-- [ ] **Step 7: Write the undo note for the owner:** turn 438108 and 427132 back on; restore 288752's old text (saved copy in `docs/superpowers/specs/2026-10-21-house-rules-code-release-design.md` §3 + the screenshots); set `CODEGATE_ENABLED=0` or revert the codegate commits.
+- [ ] **Step 7: Write the undo note for the owner:** `!ouja رموز-ايقاف` (back to soak); turn 438108 and 427132 back on; restore 288752's old text (saved copy in `docs/superpowers/specs/2026-10-21-house-rules-code-release-design.md` §3 + the screenshots); set `CODEGATE_ENABLED=0` or revert the codegate commits.
 
 ---
 

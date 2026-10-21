@@ -172,6 +172,19 @@ IS the key", like decor/directpay), so it keeps working after a restart via `bot
 **Switch.** `CODEGATE_ENABLED` defaults to **1 in code** (the owner does not edit Railway).
 Only staff see what the bot posts, so being on does not change what guests receive.
 
+**Soak switch (live / تجربة), stored in brain.db, default OFF.** The bot ships while Hostaway
+still runs the old e-sign flow, so until the switch is on the package runs in *soak*: it lists
+arrivals, posts headers and cards (each card carries «🧪 وضع التجربة — الرمز يُرسل تلقائياً من
+Hostaway حالياً — لا تحتاج تضغط الزر.»), refreshes the quoted replies and records a press, but
+posts **no alert, no escalation and no honesty check**, and stamps no alert column (so they fire
+normally from the first tick after the switch). Every §4.3 change also waits for it
+(`_cg_live_gated` = gated AND live): during the soak the old signing reminder, Musaed's old
+code wording, `/update`, the urgent list and the watchdog treat these units exactly as today.
+It is a stored setting (`codegate_settings`), toggled by Discord, admin-only:
+`!ouja رموز-تشغيل تشغيل` (typed confirmation) turns it on, `!ouja رموز-ايقاف` turns it off in one
+step, and `!ouja رموز` reports the current mode. It is turned on with `!ouja رموز-تشغيل تشغيل`
+in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is turned off.
+
 ### 4.3 Changes to existing bot behaviour (gated units only; every other unit untouched)
 
 - `_check_agreement_for_one`: returns early for gated units (`codegate` owns them now), so no
@@ -189,11 +202,13 @@ Only staff see what the bot posts, so being on does not change what guests recei
 1. **Bot first, while Hostaway still runs the old flow.** The list and buttons go live. For a
    day or two the team sees real arrivals on the list (with codes still going out
    automatically) and we check that every card lands on the right person.
+   This is the bot's *soak* mode (§4.2): no alerts and no change to what guests are told.
 2. **Then the Hostaway switch in one sitting** (§4.1 steps 1–5), each step shown to the owner
-   before saving. One booking is tested end to end: rules message → "I agree" → card → template
+   before saving. As soon as 427132 is off, an admin types `!ouja رموز-تشغيل تشغيل` in Discord
+   to end the soak (alerts on, gated units leave the old e-sign path). One booking is tested end to end: rules message → "I agree" → card → template
    → code → green card.
-3. **Undo:** turn 288752's old text, 438108 and 427132 back on in Hostaway; set
-   `CODEGATE_ENABLED=0` or revert the commit. Nothing is deleted at any step.
+3. **Undo:** `!ouja رموز-ايقاف` (back to soak, one step); turn 288752's old text, 438108 and
+   427132 back on in Hostaway; set `CODEGATE_ENABLED=0` or revert the commit. Nothing is deleted at any step.
 
 ## 6. Owner decisions (2026-10-21)
 
