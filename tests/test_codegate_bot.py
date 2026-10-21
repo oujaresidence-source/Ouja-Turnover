@@ -140,5 +140,56 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(calls, [461328])
 
 
+class TestGatedBehaviour(unittest.TestCase):
+    def setUp(self):
+        self.sent = []
+        self._send = bot.send_guest_message
+        bot.send_guest_message = lambda cid, body, kind="email": self.sent.append(body)
+        self._req = bot._unit_requires_agreement
+        bot._unit_requires_agreement = lambda lid: True
+        self._url = bot.find_agreement_url
+        bot.find_agreement_url = lambda cid: "https://sign.example/x"
+        self._lm = bot.get_listings_map
+        bot.get_listings_map = lambda: {}
+        if bot.datetime.now(bot.TZ).hour >= 23:
+            self.skipTest("needs a check-in hour later today")
+
+    def tearDown(self):
+        bot.send_guest_message = self._send
+        bot._unit_requires_agreement = self._req
+        bot.find_agreement_url = self._url
+        bot.get_listings_map = self._lm
+
+    def res(self, lid):
+        now = bot.datetime.now(bot.TZ)
+        return {"id": 77, "status": "new", "arrivalDate": now.date().isoformat(),
+                "listingMapId": lid, "guestName": "Sara", "conversationId": 5,
+                "checkInTime": min(now.hour + 1, 23), "reservationAgreement": "not_signed"}
+
+    def test_old_reminder_skips_gated_units(self):
+        bot._agreement_reminded.discard(77)
+        self.assertFalse(bot._check_agreement_for_one(self.res(461328), bot.datetime.now(bot.TZ)))
+        self.assertEqual(self.sent, [])
+
+    def test_old_reminder_unchanged_for_other_units(self):
+        bot._agreement_reminded.discard(77)
+        bot._check_agreement_for_one(self.res(999999), bot.datetime.now(bot.TZ))
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("https://sign.example/x", self.sent[0])
+        bot._agreement_reminded.discard(77)
+
+    def test_musaed_prompt_mentions_agree_rule(self):
+        self.assertIn("أوافق", bot.SYSTEM_PROMPT_ANTI_NAG_GATED)
+
+    def test_musaed_gated_block_wording(self):
+        txt = bot._cg_code_rule(released=False, hrs=3)
+        self.assertIn("أوافق", txt)
+        self.assertNotIn("العقد", txt)
+        self.assertNotIn("توقيع", txt)
+        self.assertIn("action='reply'", txt)
+        done = bot._cg_code_rule(released=True, hrs=3)
+        self.assertIn("أرسل الرمز", done)
+
+
 if __name__ == "__main__":
     unittest.main()

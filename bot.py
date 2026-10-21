@@ -3033,6 +3033,23 @@ async def _post_system_escalation(title, detail, severity="high"):
     except Exception as e:
         print("system escalation error:", e)
 
+SYSTEM_PROMPT_ANTI_NAG_GATED = (
+    "For units where the context says the guest must reply «أوافق» to the house-rules message, "
+    "never mention a contract, a signature or a signing link: ask them (once) to reply «أوافق» "
+    "to the house-rules message in this chat, and say the team sends the code after that.")
+
+
+def _cg_code_rule(released, hrs):
+    """Musaed's code-question rule on a «تسليم الرموز» unit. Never a contract, never a time
+    promise, never a code."""
+    if released:
+        return ("- الفريق سجّل إنه أرسل الرمز ✅. وجّه الضيف يشوف آخر رسائل الفريق في المحادثة؛ "
+                "لو ما لقاه **action='escalate'** عشان الفريق يعيد الإرسال.")
+    return ("- هذي الوحدة: الرمز يرسله الفريق **بعد** ما يرد الضيف على رسالة قواعد الشقة بكلمة "
+            "«أوافق». لو ما رد، اطلب منه بلطف يرد عليها بـ«أوافق على قواعد الشقة» هنا في المحادثة، "
+            "وقل إن الفريق يرسل الرمز بعدها. لا تطلب منه أي شي ثاني ولا تحدد وقت. action='reply'.")
+
+
 def _check_agreement_for_one(r, now):
     """Per-reservation evaluation with the new smart logic:
       1) If THIS LISTING doesn't require an agreement → skip step 2, jump to 3.
@@ -3048,6 +3065,8 @@ def _check_agreement_for_one(r, now):
     res_id = r.get("id")
     if not res_id:
         return False
+    if _cg_gated(r.get("listingMapId")):
+        return False    # «تسليم الرموز» owns gated units: «أوافق» + manual code, its own alerts
     if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
         return False
     arrival = _parse_date(r.get("arrivalDate"))
@@ -3832,7 +3851,8 @@ def compute_arrivals_with_status(window_hours=36, lookback_hours=4):
             "checkin_label": ci_dt.strftime("%a %H:%M"),
             "hours_until": round(hrs, 1),
             "nights": _res_nights(r),
-            "signed": _is_agreement_signed(r),
+            "signed": (_cg_released(r.get("id")) if _cg_gated(lid)
+                       else _is_agreement_signed(r)),
             "conversation_id": r.get("conversationId"),
             "total_price": r.get("totalPrice"),
         })
@@ -11435,6 +11455,7 @@ repeat the same ask you already made earlier in this same thread. The context te
 the rental-agreement status: if it is already SIGNED (or not required for this unit), do \
 NOT ask them to sign — acknowledge it's done and move on. Only ask to sign when the status \
 is genuinely UNSIGNED.
+""" + "- " + SYSTEM_PROMPT_ANTI_NAG_GATED + """
 - NEVER LOOP: do not ask a question the guest already answered, and do not send the same \
 question or the same reassurance/empathy line twice in one conversation. If you already asked \
 once for the dates or the number of guests and it's still unclear, do NOT robotically re-ask \
@@ -13168,6 +13189,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             arrival = _parse_date(r.get("arrivalDate"))
             signed = _is_agreement_signed(r)
             needs_agr = _unit_requires_agreement(listing_id) if listing_id else True
+            gated = _cg_gated(listing_id)
             # Stay-state decides everything here: an in-house / departed guest NEVER gets a
             # "still being cleaned / not ready yet" answer about the code (that was the bug —
             # a guest who checked in yesterday was told the apartment wasn't finished).
@@ -13216,8 +13238,11 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                 code_block = (
                     f"\n\n⚠ الضيف يسأل عن كود الدخول. الواقع المحسوب:\n"
                     f"- {when}.\n"
-                    f"- " + ("هذه الوحدة **لا تتطلّب** عقد توقيع." if not needs_agr
-                            else ("العقد موقّع ✅" if signed else "العقد غير موقّع ❌")) + "\n"
+                    f"- " + (("الضيف لازم يرد «أوافق» على رسالة القواعد؛ "
+                              + ("الفريق أرسل الرمز ✅" if _cg_released(reservation_id)
+                                 else "الفريق ما سجّل إرسال الرمز بعد ⏳")) if gated
+                             else "هذه الوحدة **لا تتطلّب** عقد توقيع." if not needs_agr
+                             else ("العقد موقّع ✅" if signed else "العقد غير موقّع ❌")) + "\n"
                     "- حالة الشقة (داخلي فقط — ممنوع تذكرها للضيف إطلاقاً؛ الإشارة غير موثوقة): "
                     + ("التنظيف يبدو منتهي" if apt_ready
                        else "قناة التنظيف لسه مفتوحة") + "\n"
@@ -13232,7 +13257,9 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
                     "صراحةً عن الجاهزية أو النظافة → action='escalate' بدون ما تجاوب عليها.\n\n"
                     "كيف ترد (حسب الحالة بالضبط):\n"
                 )
-                if needs_agr and not signed:
+                if gated:
+                    code_block += _cg_code_rule(_cg_released(reservation_id), hrs)
+                elif needs_agr and not signed:
                     if hrs < 48:
                         code_block += (
                             "- العقد لازم يُوقَّع قبل ما يُفرَج الكود. اشرح ذلك بلطف، وقل "
