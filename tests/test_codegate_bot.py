@@ -190,6 +190,62 @@ class TestGatedBehaviour(unittest.TestCase):
         done = bot._cg_code_rule(released=True, hrs=3)
         self.assertIn("أرسل الرمز", done)
 
+    def test_rule_covers_guest_who_already_agreed(self):
+        txt = bot._cg_code_rule(released=False, hrs=3)
+        self.assertIn("ولا تطلبها منه مرة ثانية", txt)
+        self.assertNotIn("العقد", txt)
+        self.assertNotIn("توقيع", txt)
+
+
+class TestGatedStatusScreens(unittest.TestCase):
+    def setUp(self):
+        self.saved = {n: getattr(bot, n) for n in (
+            "compute_arrivals_with_status", "_unit_requires_agreement", "_wd_cleaning_ok",
+            "_cg_gated")}
+        bot._unit_requires_agreement = lambda lid: False     # Hostaway flag OFF
+        bot._wd_cleaning_ok = lambda lid, d: True
+        bot._cg_gated = lambda lid: lid == 461328
+
+    def tearDown(self):
+        for n, v in self.saved.items():
+            setattr(bot, n, v)
+
+    def arrivals(self, signed):
+        iso = bot.datetime.now(bot.TZ).date().isoformat() + "T15:00"
+        bot.compute_arrivals_with_status = lambda **k: [
+            {"checkin_iso": iso, "listing_id": 461328, "unit": "G", "guest": "A",
+             "signed": signed, "conversation_id": None},
+            {"checkin_iso": iso, "listing_id": 999999, "unit": "N", "guest": "B",
+             "signed": False, "conversation_id": None}]
+
+    def test_update_rows_gated_beats_not_required(self):
+        self.arrivals(False)
+        rows = {r["unit"]: r["agreement"] for r in bot.build_update_rows()}
+        self.assertEqual(rows["G"], "awaiting_agree")
+        self.assertEqual(rows["N"], "not_required")      # non-gated unchanged
+        self.arrivals(True)
+        rows = {r["unit"]: r["agreement"] for r in bot.build_update_rows()}
+        self.assertEqual(rows["G"], "code_released")
+
+    def test_update_render_labels(self):
+        txt = bot.render_update([
+            {"unit": "G", "agreement": "code_released"},
+            {"unit": "H", "agreement": "awaiting_agree"},
+            {"unit": "N", "agreement": "not_required"}], "d")
+        self.assertIn("الرمز أُرسل ✅", txt)
+        self.assertIn("بانتظار «أوافق» ⏳", txt)
+        self.assertIn("📝 العقد: لا يحتاج", txt)
+
+    def test_urgent_skips_gated_unsigned(self):
+        self.arrivals(False)
+        base = {"guest": "A", "unit": "x", "reservation_id": 1, "hours_until": 1.0,
+                "checkin_label": "t", "signed": False}
+        bot.compute_arrivals_with_status = lambda **k: [
+            dict(base, listing_id=461328, reservation_id=1),
+            dict(base, listing_id=999999, reservation_id=2)]
+        items = [i for i in bot.compute_urgent_now() if i["kind"] == "unsigned_agreement"]
+        self.assertEqual([i["id"] for i in items], ["2"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -412,5 +412,25 @@ class TestScoreboard(unittest.TestCase):
         self.assertIn("نورة", txt)
 
 
+class TestGatedContractLabel(unittest.TestCase):
+    def _desc(self, **kw):
+        a = {"unit": "U", "guest": "G", "listing_id": "1", "arrival_date": "2026-07-05",
+             "code_mode": "manual", "code_found": False, "time_label": "15:00"}
+        a.update(kw)
+        s = {"arrivals": [a], "today": {}, "codes_summary": {}}
+        embeds = E.render_embeds([], s, "10:00 م")
+        return next(e["desc"] for e in embeds if "وصول اليوم" in e["title"])
+
+    def test_gated_labels(self):
+        self.assertIn("🔑 الرمز أُرسل ✅", self._desc(gated=True, signed=True))
+        d = self._desc(gated=True, signed=False)
+        self.assertIn("⏳ بانتظار «أوافق»", d)
+        self.assertNotIn("العقد", d)
+
+    def test_non_gated_labels_unchanged(self):
+        self.assertIn("✅ العقد موقّع", self._desc(signed=True))
+        self.assertIn("❌ العقد غير موقّع", self._desc(signed=False))
+
+
 if __name__ == "__main__":
     unittest.main()

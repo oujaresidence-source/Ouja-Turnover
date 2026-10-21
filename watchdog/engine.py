@@ -372,7 +372,11 @@ def render_embeds(flags, snap, ts_label):
             else:
                 code = "🔁 تلقائي"
             clean = "✅ جاهزة" if a.get("cleaning_ok", True) else "🔴 مو جاهزة"
-            contract = "✅ العقد موقّع" if a.get("signed") else "❌ العقد غير موقّع"
+            if a.get("gated"):
+                # «تسليم الرموز» unit: no contract — show the code-release state
+                contract = "🔑 الرمز أُرسل ✅" if a.get("signed") else "⏳ بانتظار «أوافق»"
+            else:
+                contract = "✅ العقد موقّع" if a.get("signed") else "❌ العقد غير موقّع"
             bits = ["👤 %s" % (a.get("employee") or "غير معروف"),
                     "🔑 %s" % code, "🧹 %s" % clean, contract]
             if a.get("nights"):
