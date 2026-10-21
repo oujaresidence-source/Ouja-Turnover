@@ -339,6 +339,17 @@ except Exception as _cw_err:            # pragma: no cover
     _checkout = None
     _HAS_CHECKOUT = False
 
+# «تسليم الرموز» — on gated listings the guest replies «أوافق» to the house-rules message and
+# the employee covering the unit that day releases the door code BY HAND. The bot lists,
+# records and alerts; it never decides agreement and never sends a code. Additive; brain.db.
+try:
+    import codegate as _codegate
+    _HAS_CODEGATE = True
+except Exception as _cg_err:            # pragma: no cover
+    print("[codegate] import failed (code release list disabled, bot unaffected):", _cg_err)
+    _codegate = None
+    _HAS_CODEGATE = False
+
 # Review Push «رفع التقييم» — one Discord room per checkout from a weak apartment (≤ 4.75 on
 # Airbnb), a WhatsApp step + a next-evening call. Ships OFF until /reviews-start. Additive.
 try:
@@ -9406,6 +9417,260 @@ async def checkout_watch_loop():
             print("[checkout] tick:", {k: rep.get(k) for k in ("posted", "actions")})
     except Exception as e:
         print("[checkout] loop error:", e)
+
+
+# ---------------- «تسليم الرموز» — bot.py side of the codegate package ----------------
+
+def _cg_gated(lid):
+    """True when this listing is on the manual code-release list. Never raises."""
+    if not _HAS_CODEGATE or lid in (None, ""):
+        return False
+    try:
+        return _codegate.flow.is_gated(lid)
+    except Exception:
+        return False
+
+
+def _cg_released(res_id):
+    if not _HAS_CODEGATE or not res_id:
+        return False
+    try:
+        return _codegate.flow.released(res_id)
+    except Exception:
+        return False
+
+
+def _cg_today_arrivals():
+    """Every CONFIRMED arrival today from a targeted arrival-window query (never the truncated
+    cache — CLAUDE.md trap 4). BLOCKING."""
+    today = datetime.now(TZ).date()
+    iso = today.isoformat()
+    listings = get_listings_map() or {}
+    out, seen = [], set()
+    for r in _ha_reservations_window("arrivalStartDate", "arrivalEndDate", iso, iso) or []:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        if str(r.get("arrivalDate") or "")[:10] != iso or r.get("id") in seen:
+            continue
+        seen.add(r.get("id"))
+        lid = r.get("listingMapId")
+        if not lid:
+            continue
+        try:
+            default_h = unit_checkin_minutes(lid) // 60
+        except Exception:
+            default_h = 16
+        hour = parse_hour(r.get("checkInTime"), default_h)
+        ci = datetime(today.year, today.month, today.day, min(hour, 23), 0, tzinfo=TZ)
+        out.append({"res_id": str(r.get("id")), "lid": lid, "day": iso,
+                    "unit": listings.get(lid) or r.get("listingName") or "unit-%s" % lid,
+                    "guest": r.get("guestName") or r.get("guestFirstName") or "ضيف",
+                    "conversation_id": str(r.get("conversationId") or ""),
+                    "checkin_at": ci.isoformat(timespec="seconds")})
+    return out
+
+
+def _cg_messages(conversation_id):
+    """The chat as {inbound, body, at} for codegate.engine.guest_replies. BLOCKING."""
+    if not conversation_id:
+        return []
+    try:
+        data = api_get(f"/conversations/{conversation_id}/messages")
+    except Exception as e:
+        print("[codegate] messages fetch failed:", e)
+        return []
+    return [{"inbound": _msg_is_inbound(m), "body": m.get("body") or "",
+             "at": _parse_msg_dt(_msg_time(m))} for m in (data.get("result") or [])]
+
+
+def _cg_cover(lid, day):
+    """Today's coverer (Employee Calendar → room topic → assignments → ops role, via _cw_cover)
+    plus the permanent owner's Discord id, who may also press the button."""
+    c = _cw_cover(lid, day)
+    owner_did = ""
+    if _HAS_SCHEDULE and _schedule and _HAS_OPS:
+        try:
+            owner = _schedule.owners.owner_for(listing_id=lid)
+            owner_did = _ops_did_for(owner) if owner else ""
+        except Exception as e:
+            print("[codegate] owner lookup failed:", e)
+    return {"name": c.get("name") or "", "did": c.get("did") or "",
+            "role_id": c.get("role_id") or "", "owner_did": owner_did or ""}
+
+
+async def _cg_channel():
+    """«تسليم-الرموز»; #escalations if Discord refuses a new channel (the 500-channel cap)."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return None
+    category = await get_assistant_category(guild)
+    ch = None
+    try:
+        ch = await ensure_channel(guild, "تسليم-الرموز", category)
+    except Exception as e:
+        print("[codegate] channel create refused, falling back to escalations:", e)
+    if ch is None:
+        ch = await ensure_channel(guild, ESCALATION_CHANNEL, category)
+    return str(ch.id) if ch is not None else None
+
+
+_CG_LABEL = {"release": ("cg_release", discord.ButtonStyle.success),
+             "undo": ("cg_undo", discord.ButtonStyle.secondary)}
+
+
+def _cg_view(buttons):
+    v = discord.ui.View(timeout=None)
+    for b in buttons or []:
+        cid, style = _CG_LABEL[b]
+        label = _codegate.engine.LABEL_RELEASE if b == "release" else _codegate.engine.LABEL_UNDO
+        v.add_item(discord.ui.Button(label=label, style=style, custom_id=cid))
+    return v
+
+
+async def _cg_post(channel_id, text, embed=None, buttons=None):
+    if not channel_id:
+        return None
+    ch = await _cw_channel(channel_id)
+    kw = {}
+    if embed:
+        kw["embed"] = _cw_embed(embed)
+    if buttons:
+        kw["view"] = _cg_view(buttons)
+    msg = await ch.send(content=text, allowed_mentions=discord.AllowedMentions(
+        users=True, roles=True, everyone=False), **kw)
+    return str(msg.id)
+
+
+async def _cg_edit(channel_id, message_id, embed=None, buttons=None):
+    try:
+        ch = await _cw_channel(channel_id)
+        kw = {"view": _cg_view(buttons) if buttons else None}
+        if embed is not None:
+            kw["embed"] = _cw_embed(embed)
+        await ch.get_partial_message(int(message_id)).edit(**kw)
+        return True
+    except (discord.NotFound, discord.Forbidden):
+        return False
+    except Exception as e:
+        print("[codegate] edit failed:", e)
+        return False
+
+
+async def _cg_escalate(title, detail):
+    await _post_system_escalation(title=title, detail=detail, severity="high")
+
+
+def _cg_wire():
+    if not _HAS_CODEGATE:
+        return False
+    _codegate.wire({
+        "now": now_riyadh,
+        "state_path": _state_path,
+        "today_arrivals": _cg_today_arrivals,
+        "messages": _cg_messages,
+        "code_sent": (lambda cid: _was_code_sent_recently(cid, since_hours=24)),
+        "cover": _cg_cover,
+        "channel": _cg_channel,
+        "post": _cg_post,
+        "edit": _cg_edit,
+        "escalate": _cg_escalate,
+    })
+    return True
+
+
+def _cg_ready():
+    """Usable the moment Discord is (brain.db folder hand-over — the _cw_ready lesson)."""
+    if not _HAS_CODEGATE:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[codegate] brain path hand-over failed:", e)
+    if _codegate.HOST.today_arrivals is None:
+        _cg_wire()
+    return True
+
+
+def _cg_presser(interaction):
+    user = interaction.user
+    guild = interaction.guild
+    role = find_operation_role(guild) if guild is not None else None
+    roles = getattr(user, "roles", None) or []
+    return {"name": _cw_presser_name(user), "did": str(user.id),
+            "is_admin": _tk_is_admin(user),
+            "is_ops": bool(role is not None and any(r.id == role.id for r in roles))}
+
+
+class CodegateConfirmView(discord.ui.View):
+    """The ask-again step: a written «أوافق» in the chat AND the code sent from Hostaway."""
+
+    def __init__(self, message_id):
+        super().__init__(timeout=120)
+        self.message_id = str(message_id)
+
+    @discord.ui.button(label="نعم، كتب «أوافق» وأرسلت الرمز", style=discord.ButtonStyle.success)
+    async def yes(self, interaction, button):
+        ok, msg = await _codegate.flow.press_release(self.message_id, _cg_presser(interaction))
+        await _cw_reply(interaction, msg)
+
+    @discord.ui.button(label="لا، رجوع", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction, button):
+        await _cw_reply(interaction, "تمام، ما سجّلت شي. لو الضيف رد بالتلفون اطلب منه يكتب "
+                                     "«أوافق» في المحادثة أولاً.")
+
+
+class CodegateView(discord.ui.View):
+    """Persistent card buttons. The card's message id IS the key (looked up in codegate.db),
+    so one registration serves every card across redeploys."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="✅ وافق وأرسلت الرمز", style=discord.ButtonStyle.success,
+                       custom_id="cg_release")
+    async def release(self, interaction, button):
+        if not _cg_ready():
+            return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
+        await _cw_reply(interaction, _codegate.engine.CONFIRM_TEXT,
+                        view=CodegateConfirmView(interaction.message.id))
+
+    @discord.ui.button(label="↩️ تراجع", style=discord.ButtonStyle.secondary,
+                       custom_id="cg_undo")
+    async def undo(self, interaction, button):
+        if not _cg_ready():
+            return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
+        ok, msg = await _codegate.flow.press_undo(interaction.message.id, _cg_presser(interaction))
+        await _cw_reply(interaction, msg)
+
+
+@tasks.loop(minutes=int(os.environ.get("CODEGATE_TICK_MIN", "10")))
+async def codegate_loop():
+    """Every 10 min: today's gated arrivals → header + cards (from 09:00), reply refresh,
+    2-hour / check-in alerts, the honesty check after a press."""
+    if not _HAS_CODEGATE:
+        return
+    await bot.wait_until_ready()
+    try:
+        _cg_ready()
+        rep = await _codegate.flow.tick()
+        if rep.get("posted") or rep.get("alerts") or rep.get("warned"):
+            print("[codegate] tick:", rep)
+    except Exception as e:
+        print("[codegate] loop error:", e)
+
+
+@bot.command(name="رموز", aliases=["codegate"])
+async def codegate_cmd(ctx):
+    """!ouja رموز — admin: run one pass now (ignores the 09:00 start) and report."""
+    if not _tk_is_admin(ctx.author):
+        return await ctx.reply("للمشرفين فقط.")
+    if not _cg_ready():
+        return await ctx.reply("تسليم الرموز مو مفعّل.")
+    rep = await _codegate.flow.tick(force=True)
+    await ctx.reply("تسليم الرموز · " + ", ".join("%s=%s" % kv for kv in rep.items()))
 
 
 # ---------------- «متابعة الخروج» commands (slash + !ouja fallback, admin only) ----------------
@@ -75651,6 +75916,8 @@ async def on_ready():
     bot.add_view(CleaningProofReviewView())  # re-bind cleaning photo approval buttons
     bot.add_view(ReadyNotifyAskView())       # «شقتك جاهزة» send/skip question
     bot.add_view(ReadyNotifyConfirmView())   # ...and its are-you-sure step
+    if _HAS_CODEGATE:
+        bot.add_view(CodegateView())     # «تسليم الرموز» release/undo (message id = key)
     bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR/مشتريات)
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
@@ -75814,6 +76081,8 @@ async def on_ready():
         _pending.append(oncall_loop)            # «المناوبة»: publish/lock/«موجود؟»/ladder, every minute
     if _HAS_CHECKOUT and not checkout_watch_loop.is_running():
         _pending.append(checkout_watch_loop)    # «متابعة الخروج»: returns at once until /checkout-start
+    if _HAS_CODEGATE and not codegate_loop.is_running():
+        _pending.append(codegate_loop)          # «تسليم الرموز»: list from 09:00, alerts
     if _HAS_REVIEWASK:
         for _rvl, _rvn in ((reviewask_loop, "reviewask_loop"), (reviewask_reviews_loop, "reviewask_reviews_loop")):
             if not _rvl.is_running():
