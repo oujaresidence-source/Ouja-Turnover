@@ -1,6 +1,6 @@
 # «تسليم الرموز» — House-rules "I agree" + manual door-code release
 
-Status: DESIGN — owner approved the direction 2026-10-21; this document awaits his review.
+Status: APPROVED by the owner 2026-10-21 (incl. the three decisions in §6).
 Branch: `feat/agree-gate` (worktree `ouja-wt-agree`, cut from `origin/main` 3308eb9).
 
 ## 1. Why
@@ -63,8 +63,8 @@ Bot side (`origin/main`):
 ### 4.1 Guest side (Hostaway, done with the Chrome extension, one approved change at a time)
 
 1. **Rewrite automation 288752** into the house-rules message below. Same 34 listings, all
-   channels. **Trigger changes to "At reservation"** so the guest has the most time to reply
-   (recommended; the owner may keep "1 day before").
+   channels, **plus 103 NRJS**. **Trigger changes to "At reservation"** so the guest has the
+   most time to reply (owner decision §6).
 2. **Turn off 438108** (it re-sends the signing link).
 3. **Turn off 427132 Doorcodera** (the code no longer goes out automatically for these units).
 4. **Create a saved message template «🔑 كود الدخول / Door code»** containing `{{door_code}}`.
@@ -123,7 +123,7 @@ Same shape as the other packages (`decor/`, `checkout/`, `ops/`): `db.py`, a pur
 
 **Which units.** `codegate/units.json` holds the gated listing ids (the 34). A copy in
 `$STATE_DIR/codegate_units.json` wins if present (the `decor_packs.json` pattern), so the list
-can change without a deploy. 103 NRJS is **not** included unless the owner says so (§6).
+can change without a deploy. 103 NRJS is included (§6), making 35 units.
 
 **The daily list.** At **09:00 Riyadh** the bot posts in a dedicated channel
 `#تسليم-الرموز` (fallback: `#escalations` if Discord refuses a new channel, which has
@@ -195,14 +195,15 @@ Only staff see what the bot posts, so being on does not change what guests recei
 3. **Undo:** turn 288752's old text, 438108 and 427132 back on in Hostaway; set
    `CODEGATE_ENABLED=0` or revert the commit. Nothing is deleted at any step.
 
-## 6. Open questions for the owner
+## 6. Owner decisions (2026-10-21)
 
-1. **103 NRJS:** add it to the gated list (it gets the rules message, and staff release its
-   code), or fix it to send its code automatically like the 12 non-agreement units?
-2. **Trigger timing for the rules message:** "At reservation" (recommended) or keep "1 day
-   before check-in"?
-3. **Phone agreement:** if a guest agrees by phone, the design asks staff to have them type it
-   in the chat first, so there is always a written record. OK?
+1. **103 NRJS joins the gated list** (35 units): it gets the house-rules message and staff
+   release its code. It is added to automation 288752's listings; its Doorcodera assignment
+   goes away with 427132 being turned off.
+2. **The rules message goes out "At reservation"** (trigger of 288752 changes from 1 day
+   before check-in).
+3. **Phone agreement must be typed in the chat.** The release button's confirm step asks for
+   a written «أوافق» in the conversation; staff ask a phoning guest to type it first.
 
 ## 7. Testing
 
