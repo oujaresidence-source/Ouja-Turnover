@@ -81,8 +81,18 @@ class FlowCase(unittest.TestCase):
             "escalate": self.f.escalate,
         })
         self.asked_days = []
+        self.addCleanup(self._restore_globals, bdb._DB_PATH_OVERRIDE)
         if self.LIVE:
             flow.set_live(True, "test")
+
+    @staticmethod
+    def _restore_globals(prev_path):
+        """FlowCase turns live ON and points brain.db at a temp file: neither may leak into
+        the test modules that run after this one."""
+        bdb.set_db_path_for_tests(prev_path)
+        db.reset_init_cache()
+        flow._live_cache.update({"v": None, "at": 0.0})
+        flow._units_cache.update({"key": None, "ids": set()})
 
     LIVE = True
 
@@ -500,3 +510,139 @@ class TestTickDay(FlowCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGoLive(FlowCase):
+    """Turning live ON mid-day: arrivals Hostaway's Doorcodera already covers (check-in within
+    live_since + 3 h) are looked at ONCE in the chat; a code there means no false alert."""
+    LIVE = False
+
+    def setUp(self):
+        super().setUp()
+        self.f.arrivals = [self.mk("r1", "U-past", 13, 0), self.mk("r2", "U-inside", 16, 30),
+                           self.mk("r3", "U-outside", 20, 0)]
+        self.calls = []
+        self.code_state = {"c-r1": True, "c-r2": False, "c-r3": True}
+        self.boom = set()
+
+        def code_sent(cid):
+            self.calls.append(cid)
+            if cid in self.boom:
+                raise RuntimeError("hostaway 500")
+            return self.code_state.get(cid, False)
+        flow.HOST.code_sent = code_sent
+        run(flow.tick())                       # soak morning: cards only
+        self.now = at(15, 0)
+        flow.set_live(True, "Faisal")          # live_since = 15:00 → window ends 18:00
+        self.calls.clear()
+
+    def mk(self, rid, unit, hh, mm):
+        a = Fake.arr(rid, GATED)
+        a.update(unit=unit, checkin_at=at(hh, mm).isoformat(timespec="seconds"))
+        return a
+
+    def esc_units(self):
+        return [t for t in self.f.escalations]
+
+    def test_code_found_releases_quietly_and_card_turns_green(self):
+        run(flow.tick())
+        it = db.get("r1")
+        self.assertEqual(it["released_by"], "Hostaway (قبل التشغيل)")
+        self.assertEqual(it["released_by_did"], "")
+        self.assertTrue(it["released_at"])
+        self.assertEqual(it["code_seen"], 1)
+        self.assertTrue(it["prelive_checked_at"])
+        self.assertIsNone(it["alert_late_at"])
+        self.assertIsNone(it["alert_2h_at"])
+        self.assertFalse(any("U-past" in t for t in self.esc_units()))
+        self.assertFalse(any("U-past" in (p["text"] or "") for p in self.f.posts))
+        self.assertIn("prelive_auto", [e["kind"] for e in db._q(
+            "SELECT kind FROM codegate_events WHERE res_id='r1'")])
+        mine = [e for e in self.f.edits if e["id"] == it["card_message_id"]]
+        self.assertEqual(len(mine), 1)
+        self.assertIn("Hostaway (قبل التشغيل)", json.dumps(mine[0]["embed"], ensure_ascii=False))
+        self.assertEqual(mine[0]["buttons"], ["undo"])
+
+    def test_no_code_in_window_alerts_normally_at_the_right_time(self):
+        rep = run(flow.tick())
+        self.assertEqual(rep["alerts"], 1)
+        self.assertEqual(len(self.f.escalations), 1)
+        self.assertIn("U-inside", self.f.escalations[0])
+        self.assertIn("باقي ساعتين", self.f.escalations[0])
+        it = db.get("r2")
+        self.assertTrue(it["alert_2h_at"])
+        self.assertTrue(it["prelive_checked_at"])
+        self.assertIsNone(it["released_at"])
+
+    def test_outside_window_untouched_until_its_own_2h_mark(self):
+        run(flow.tick())
+        self.assertNotIn("c-r3", self.calls)
+        self.assertIsNone(db.get("r3")["prelive_checked_at"])
+        self.now = at(17, 59)
+        run(flow.tick())
+        self.assertFalse(any("U-outside" in t for t in self.f.escalations))
+        self.now = at(18, 1)
+        run(flow.tick())
+        self.assertTrue(any("U-outside" in t for t in self.f.escalations))
+        self.assertNotIn("c-r3", self.calls)               # still never looked at
+
+    def test_each_item_checked_once(self):
+        for m in (0, 10, 20, 30):
+            self.now = at(15, m)
+            run(flow.tick())
+        self.assertEqual(self.calls.count("c-r1"), 1)
+        self.assertEqual(self.calls.count("c-r2"), 1)
+        self.assertEqual(len(self.f.escalations), 1)       # r2's 2h alert, once
+
+    def test_error_means_no_alert_this_tick_and_retry_next(self):
+        self.boom = {"c-r2"}
+        rep = run(flow.tick())
+        self.assertEqual(rep["alerts"], 0)
+        self.assertEqual(self.f.escalations, [])
+        it = db.get("r2")
+        self.assertIsNone(it["prelive_checked_at"])
+        self.assertIsNone(it["alert_2h_at"])
+        self.assertIsNone(it["alert_late_at"])
+        self.now = at(15, 10)
+        run(flow.tick())
+        self.assertEqual(self.calls.count("c-r2"), 2)       # retried
+        self.assertEqual(self.f.escalations, [])
+        self.boom = set()
+        self.now = at(15, 20)
+        run(flow.tick())
+        self.assertEqual(len(self.f.escalations), 1)
+        self.assertTrue(db.get("r2")["prelive_checked_at"])
+        self.now = at(15, 30)
+        run(flow.tick())
+        self.assertEqual(self.calls.count("c-r2"), 3)       # then never again
+
+    def test_press_before_the_check_wins_and_is_kept(self):
+        mid = db.get("r2")["card_message_id"]
+        ok, _ = run(flow.press_release(mid, {"name": "نورة", "did": "11",
+                                             "is_admin": False, "is_ops": False}))
+        self.assertTrue(ok)
+        self.code_state["c-r2"] = True
+        run(flow.tick())
+        self.assertEqual(db.get("r2")["released_by"], "نورة")
+        self.assertEqual(self.f.escalations, [])
+
+    def test_live_since_set_on_off_to_on_and_kept_on_on_to_on(self):
+        first = db.get_setting("live_since")
+        self.assertEqual(first, at(15, 0).isoformat(timespec="seconds"))
+        self.now = at(16, 0)
+        flow.set_live(True, "again")
+        self.assertEqual(db.get_setting("live_since"), first)
+
+    def test_off_then_on_again_restarts_the_window(self):
+        first = db.get_setting("live_since")
+        flow.set_live(False, "Faisal")
+        self.assertEqual(db.get_setting("live_since"), first)    # OFF keeps it (documented)
+        self.now = at(17, 0)
+        flow.set_live(True, "Faisal")
+        self.assertEqual(db.get_setting("live_since"), at(17, 0).isoformat(timespec="seconds"))
+
+    def test_no_live_since_means_no_prelive_check(self):
+        db.set_setting("live_since", None)
+        run(flow.tick())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(len(self.f.escalations), 2)        # r1 late + r2 2h, as before

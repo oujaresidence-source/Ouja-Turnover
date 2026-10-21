@@ -3061,7 +3061,7 @@ def _cg_code_rule(released, hrs):
     if passed:
         return ("- هذي الوحدة: الرمز يرسله الفريق بعد ما يرد الضيف على رسالة قواعد الشقة بكلمة "
                 "«أوافق»، و**موعد الدخول حلّ** والفريق ما سجّل إرسال الرمز. اعتذر للضيف باختصار "
-                "وقل إن الفريق يرسل له الرمز الحين. لو ما رد على رسالة القواعد، اطلب منه بلطف يكتب "
+                "وقل إن الفريق يتابع إرسال الرمز. لو ما رد على رسالة القواعد، اطلب منه بلطف يكتب "
                 "«أوافق على قواعد الشقة» هنا في المحادثة. " + agreed +
                 "لا تحدد وقت. **action='escalate'**.")
     return ("- هذي الوحدة: الرمز يرسله الفريق **بعد** ما يرد الضيف على رسالة قواعد الشقة بكلمة "
@@ -9784,6 +9784,16 @@ def _cg_mode_line(is_live):
             "للتشغيل: `!ouja رموز-تشغيل تشغيل`")
 
 
+# Arabic text pasted from a phone/WhatsApp often carries invisible direction marks: they must not
+# make a correct «تشغيل» look wrong (or, worse, be required to be typed).
+_CG_INVISIBLE = dict.fromkeys(map(ord, "\u200e\u200f\u061c\u200b\u202a\u202b\u202c\u202d"
+                                       "\u202e\u2066\u2067\u2068\u2069"))
+
+
+def _cg_clean_confirm(text):
+    return (text or "").translate(_CG_INVISIBLE).strip()
+
+
 @bot.command(name="رموز", aliases=["codegate"])
 async def codegate_cmd(ctx):
     """!ouja رموز — admin: run one pass now (ignores the 09:00 start) and report."""
@@ -9793,7 +9803,12 @@ async def codegate_cmd(ctx):
         return await ctx.reply("تسليم الرموز مو مفعّل.")
     rep = await _codegate.flow.tick(force=True)
     is_live = await _codegate.flow.run_blocking(_codegate.flow.live)
-    await ctx.reply(_cg_mode_line(is_live) + "\nتسليم الرموز · " +
+    since = ""
+    if is_live:
+        ls = await _codegate.flow.run_blocking(_codegate.db.get_setting, "live_since")
+        if ls:
+            since = "\nشغّال من: %s (live_since)" % str(ls).replace("T", " ")
+    await ctx.reply(_cg_mode_line(is_live) + since + "\nتسليم الرموز · " +
                     ", ".join("%s=%s" % kv for kv in rep.items()))
 
 
@@ -9805,7 +9820,7 @@ async def codegate_live_cmd(ctx, *, confirm: str = ""):
         return await ctx.reply("للمشرفين فقط.")
     if not _cg_ready():
         return await ctx.reply("تسليم الرموز مو مفعّل.")
-    if (confirm or "").strip() != "تشغيل":
+    if _cg_clean_confirm(confirm) != "تشغيل":
         return await ctx.reply("هذا يشغّل التنبيهات ويوقف رسائل التوقيع القديمة على وحدات الرموز. "
                                "للتأكيد اكتب بالضبط:\n`!ouja رموز-تشغيل تشغيل`")
     who = await _codegate.flow.run_blocking(_cw_presser_name, ctx.author)   # brain.db read

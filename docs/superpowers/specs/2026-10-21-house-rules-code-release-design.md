@@ -207,6 +207,11 @@ in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is tu
    before saving. As soon as 427132 is off, an admin types `!ouja رموز-تشغيل تشغيل` in Discord
    to end the soak (alerts on, gated units leave the old e-sign path). One booking is tested end to end: rules message → "I agree" → card → template
    → code → green card.
+   **Go-live burst guard:** the first live tick looks ONCE in the chat of every arrival whose
+   check-in is at or before `live_since + 3 h` (Hostaway's Doorcodera window; `live_since` is
+   stored on the OFF→ON switch only). Code found → recorded as released by «Hostaway (قبل
+   التشغيل)», green card, no alert; no code → normal alerts; Hostaway error → no alert that tick,
+   retried next tick. Later arrivals follow the normal flow.
 3. **Undo:** `!ouja رموز-ايقاف` (back to soak, one step); turn 288752's old text, 438108 and
    427132 back on in Hostaway; set `CODEGATE_ENABLED=0` or revert the commit. Nothing is deleted at any step.
 

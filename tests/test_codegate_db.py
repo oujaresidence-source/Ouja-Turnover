@@ -21,6 +21,35 @@ def row(res_id="r1", **kw):
     return r
 
 
+class TestMigration(unittest.TestCase):
+    def test_prelive_column_added_to_an_old_table(self):
+        from contextlib import closing
+        tmp = tempfile.mkdtemp(prefix="cgm_")
+        bdb.set_db_path_for_tests(os.path.join(tmp, "brain.db"))
+        db.reset_init_cache()
+        old = db.SCHEMA.replace("    prelive_checked_at TEXT,\n", "")
+        self.assertNotEqual(old, db.SCHEMA)
+        with closing(bdb.connect()) as cx:
+            cx.executescript(old)
+            cx.execute("INSERT INTO codegate_items(res_id, day) VALUES ('old1', ?)", (DAY,))
+            cx.commit()
+            have = {r[1] for r in cx.execute("PRAGMA table_info(codegate_items)")}
+        self.assertNotIn("prelive_checked_at", have)
+        it = db.get("old1")                              # first call runs _ensure
+        self.assertEqual(it["day"], DAY)
+        self.assertIn("prelive_checked_at", it)
+        self.assertIsNone(it["prelive_checked_at"])
+        db.reset_init_cache()                            # second boot: idempotent
+        self.assertIn("prelive_checked_at", db.get("old1"))
+
+    def test_fresh_table_has_the_column(self):
+        tmp = tempfile.mkdtemp(prefix="cgm_")
+        bdb.set_db_path_for_tests(os.path.join(tmp, "brain.db"))
+        db.reset_init_cache()
+        db.upsert_arrival(row())
+        self.assertIn("prelive_checked_at", db.get("r1"))
+
+
 class TestDb(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="cg_")

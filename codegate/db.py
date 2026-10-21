@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     code_seen        INTEGER,
     code_check_at    TEXT,
     code_warned_at   TEXT,
+    prelive_checked_at TEXT,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +75,10 @@ CREATE TABLE IF NOT EXISTS codegate_settings (
 );
 """
 
+# Columns added after the first deploy: a table that already exists keeps its old shape (CREATE
+# TABLE IF NOT EXISTS is a no-op on it), so each is added once, additively, in _ensure.
+_LATE_COLUMNS = (("prelive_checked_at", "TEXT"),)
+
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
 # A booking moved to another date: what belonged to the old date (its card in the old day's
 # list, its alert stamps, the honesty check, a release for the old arrival) starts over.
@@ -101,6 +106,10 @@ def _ensure():
             return
         with closing(_bdb.connect()) as cx:
             cx.executescript(SCHEMA)
+            have = {r[1] for r in cx.execute("PRAGMA table_info(codegate_items)").fetchall()}
+            for col, decl in _LATE_COLUMNS:
+                if col not in have:
+                    cx.execute("ALTER TABLE codegate_items ADD COLUMN %s %s" % (col, decl))
             cx.commit()
         _inited.add(path)
 
@@ -209,6 +218,12 @@ def stamp(res_id, column, at_iso):
     if column not in STAMP_COLUMNS:
         raise ValueError("codegate.db.stamp: column not allowed: %r" % column)
     _x("UPDATE codegate_items SET %s=?, updated_at=? WHERE res_id=?" % column,
+       (at_iso, _now(), str(res_id)))
+
+
+def set_prelive_checked(res_id, at_iso):
+    """Go-live look at the chat is done (code found or not). Never stamped on a lookup error."""
+    _x("UPDATE codegate_items SET prelive_checked_at=?, updated_at=? WHERE res_id=?",
        (at_iso, _now(), str(res_id)))
 
 

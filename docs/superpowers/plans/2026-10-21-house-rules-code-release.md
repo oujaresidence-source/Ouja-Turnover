@@ -2121,6 +2121,8 @@ In Discord run `!ouja رموز`. Expected reply: `تسليم الرموز · see
 
 **Files:** none in the repo. All changes in `dashboard.hostaway.com`. Before each **Save**, show the owner a screenshot of exactly what will be saved and wait for "yes".
 
+**Go-live behaviour:** when `!ouja رموز-تشغيل تشغيل` is typed, the first live tick checks the chat once for each arrival with check-in ≤ `live_since + 3 h` and quietly marks those that already got Hostaway's auto-code as released by «Hostaway (قبل التشغيل)» — expect no burst of false alerts; only guests with no code get alerted.
+
 - [ ] **Step 1: Saved reply «🔑 كود الدخول / Door code».** Message Templates → new template. Body:
 
 ```

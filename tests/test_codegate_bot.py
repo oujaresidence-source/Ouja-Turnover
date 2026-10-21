@@ -307,6 +307,8 @@ class TestGatedBehaviour(_Live, unittest.TestCase):
             self.assertIn("action='escalate'", txt)
             self.assertNotIn("action='reply'", txt)
             self.assertIn("اعتذر", txt)
+            self.assertIn("الفريق يتابع إرسال الرمز", txt)
+            self.assertNotIn("الحين", txt)          # no time word next to «لا تحدد وقت»
             for bad in ("العقد", "توقيع", "شاف"):
                 self.assertNotIn(bad, txt)
         before = bot._cg_code_rule(released=False, hrs=2)
@@ -470,6 +472,28 @@ class TestSwitchCommands(unittest.TestCase):
         self.assertFalse(bot._codegate.flow.live())
         self.call(bot.codegate_live_cmd, confirm="yes")
         self.assertFalse(bot._codegate.flow.live())
+
+    def test_live_confirm_ignores_invisible_direction_marks(self):
+        for i, junk in enumerate(("\u200fتشغيل", "تشغيل\u200e", "\u061cتشغيل\u200b ", " \u200eتشغ\u200bيل\u200f ")):
+            bot._codegate.flow.set_live(False, "t")
+            self.call(bot.codegate_live_cmd, confirm=junk)
+            self.assertTrue(bot._codegate.flow.live(), "case %d" % i)
+        bot._codegate.flow.set_live(False, "t")
+        self.call(bot.codegate_live_cmd, confirm="تشغيلا")          # a real typo still refuses
+        self.assertFalse(bot._codegate.flow.live())
+
+    def test_status_reports_live_since_when_live(self):
+        orig = bot._codegate.flow.tick
+
+        async def fake_tick(**k):
+            return {"live": 1, "seen": 0}
+        bot._codegate.flow.tick = fake_tick
+        self.addCleanup(lambda: setattr(bot._codegate.flow, "tick", orig))
+        self.assertNotIn("live_since", self.call(bot.codegate_cmd))
+        self.call(bot.codegate_live_cmd, confirm="تشغيل")
+        stamp = bot._codegate.db.get_setting("live_since")
+        self.assertTrue(stamp)
+        self.assertIn(stamp[:16].replace("T", " "), self.call(bot.codegate_cmd))
 
     def test_live_on_then_off(self):
         txt = self.call(bot.codegate_live_cmd, confirm="تشغيل")
