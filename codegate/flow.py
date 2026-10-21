@@ -105,6 +105,8 @@ def _buttons(it):
 
 async def _render(it, now_, channel_id):
     """Post the card if it has none; edit it only when its content changed."""
+    if it.get("cancelled") and not it.get("card_message_id"):
+        return None                     # never had a card, never will
     view = _view_item(it)
     embed = engine.card(view, now_)
     h = engine.content_hash({"e": embed, "b": _buttons(it)})
@@ -124,6 +126,60 @@ async def _render(it, now_, channel_id):
     return None
 
 
+async def _process_item(it, now_, channel_id, rep):
+    rid = it["res_id"]
+    if not it.get("cancelled") and it.get("conversation_id"):
+        try:
+            msgs = await run_blocking(HOST.messages, it["conversation_id"]) or []
+            r = engine.guest_replies(msgs)
+            await run_blocking(
+                db.set_replies, rid,
+                r["rules_at"].isoformat(timespec="seconds") if r["rules_at"] else None,
+                [{"at": x["at"].isoformat(timespec="seconds") if x["at"] else None,
+                  "text": x["text"]} for x in r["replies"]])
+        except Exception as e:      # stale replies are better than a skipped alert
+            print("[codegate] replies refresh %s failed: %s" % (rid, e))
+    it = await run_blocking(db.get, rid)
+    # honesty check: pressed, but is the code really in the chat?
+    if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
+        rel = _dt(it["released_at"])
+        if rel and now_ >= rel + datetime.timedelta(minutes=engine.CODE_CHECK_MIN):
+            seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
+            await run_blocking(db.set_code_seen, rid, seen)
+            await run_blocking(db.stamp, rid, "code_check_at",
+                               now_.isoformat(timespec="seconds"))
+            if not seen and not it.get("code_warned_at"):
+                who = ("<@%s>" % it["released_by_did"]) if it.get("released_by_did") else ""
+                await HOST.post(channel_id, (who + " " if who else "") +
+                                "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
+                                "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
+                await run_blocking(db.stamp, rid, "code_warned_at",
+                                   now_.isoformat(timespec="seconds"))
+                rep["warned"] += 1
+            it = await run_blocking(db.get, rid)
+    kind = engine.alert_due(_view_item(it), now_)
+    if kind:
+        stamp = now_.isoformat(timespec="seconds")
+        await run_blocking(db.stamp, rid, "alert_late_at" if kind == "late"
+                           else "alert_2h_at", stamp)
+        if kind == "late" and not it.get("alert_2h_at"):
+            await run_blocking(db.stamp, rid, "alert_2h_at", stamp)
+        # a release (or cancel) may have landed while we were busy: look again before sending
+        it = await run_blocking(db.get, rid)
+        if not it.get("released_at") and not it.get("cancelled"):
+            text = engine.alert_text(kind, _view_item(it), _mention(it))
+            await HOST.post(channel_id, text)
+            await HOST.escalate(("🔑 باقي ساعتين وما أُرسل الرمز · " if kind == "2h"
+                                 else "🚨 حلّ الدخول وما أُرسل الرمز · ") + (it.get("unit") or ""),
+                                text)
+            await run_blocking(db.event, rid, "alert_" + kind)
+            rep["alerts"] += 1
+    it = await run_blocking(db.get, rid)        # never repaint from a stale copy
+    res = await _render(it, now_, channel_id)
+    if res:
+        rep[res] += 1
+
+
 async def tick(now_=None, force=False):
     if not enabled():
         return {"skipped": "off"}
@@ -138,7 +194,18 @@ async def tick(now_=None, force=False):
         for a in arrivals:
             if str(a.get("day")) != day or not is_gated(a.get("lid")):
                 continue
-            cov = await run_blocking(HOST.cover, a["lid"], day) or {}
+            try:
+                cov = await run_blocking(HOST.cover, a["lid"], day) or {}
+            except Exception as e:
+                print("[codegate] cover lookup failed for %s: %s" % (a.get("res_id"), e))
+                cov = {}
+            if not (cov.get("name") or cov.get("did") or cov.get("role_id")):
+                # a failed lookup must not blank who may press: keep what we stored
+                prev = await run_blocking(db.get, str(a["res_id"]))
+                if prev:
+                    cov = {"name": prev.get("cover_name"), "did": prev.get("cover_did"),
+                           "role_id": prev.get("cover_role_id"),
+                           "owner_did": cov.get("owner_did") or prev.get("owner_did")}
             await run_blocking(db.upsert_arrival, dict(a, res_id=str(a["res_id"]),
                                                        cover_name=cov.get("name") or "",
                                                        cover_did=cov.get("did") or "",
@@ -158,59 +225,22 @@ async def tick(now_=None, force=False):
                 k = it.get("cover_did") or it.get("cover_role_id") or it.get("cover_name") or "ops"
                 groups.setdefault(k, []).append(it)
         for k, rows in groups.items():
-            if await run_blocking(db.header_posted, day, k):
-                continue
-            mid = await HOST.post(channel_id, engine.header_text(_mention(rows[0]),
-                                                                 rows[0].get("cover_name"),
-                                                                 len(rows)))
-            await run_blocking(db.mark_header, day, k, mid)
-            rep["headers"] += 1
+            try:
+                if await run_blocking(db.header_posted, day, k):
+                    continue
+                mid = await HOST.post(channel_id, engine.header_text(_mention(rows[0]),
+                                                                     rows[0].get("cover_name"),
+                                                                     len(rows)))
+                if mid:                 # a failed post is retried on the next tick
+                    await run_blocking(db.mark_header, day, k, mid)
+                    rep["headers"] += 1
+            except Exception as e:
+                print("[codegate] header %s failed: %s" % (k, e))
         for it in items:
-            rid = it["res_id"]
-            if not it.get("cancelled") and it.get("conversation_id"):
-                msgs = await run_blocking(HOST.messages, it["conversation_id"]) or []
-                r = engine.guest_replies(msgs)
-                await run_blocking(
-                    db.set_replies, rid,
-                    r["rules_at"].isoformat(timespec="seconds") if r["rules_at"] else None,
-                    [{"at": x["at"].isoformat(timespec="seconds") if x["at"] else None,
-                      "text": x["text"]} for x in r["replies"]])
-            it = await run_blocking(db.get, rid)
-            # honesty check: pressed, but is the code really in the chat?
-            if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
-                rel = _dt(it["released_at"])
-                if rel and now_ >= rel + datetime.timedelta(minutes=engine.CODE_CHECK_MIN):
-                    seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
-                    await run_blocking(db.set_code_seen, rid, seen)
-                    await run_blocking(db.stamp, rid, "code_check_at",
-                                       now_.isoformat(timespec="seconds"))
-                    if not seen and not it.get("code_warned_at"):
-                        who = ("<@%s>" % it["released_by_did"]) if it.get("released_by_did") else ""
-                        await HOST.post(channel_id, (who + " " if who else "") +
-                                        "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
-                                        "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
-                        await run_blocking(db.stamp, rid, "code_warned_at",
-                                           now_.isoformat(timespec="seconds"))
-                        rep["warned"] += 1
-                    it = await run_blocking(db.get, rid)
-            kind = engine.alert_due(_view_item(it), now_)
-            if kind:
-                stamp = now_.isoformat(timespec="seconds")
-                await run_blocking(db.stamp, rid, "alert_late_at" if kind == "late"
-                                   else "alert_2h_at", stamp)
-                if kind == "late" and not it.get("alert_2h_at"):
-                    await run_blocking(db.stamp, rid, "alert_2h_at", stamp)
-                text = engine.alert_text(kind, _view_item(it), _mention(it))
-                await HOST.post(channel_id, text)
-                await HOST.escalate(("🔑 باقي ساعتين وما أُرسل الرمز · " if kind == "2h"
-                                     else "🚨 حلّ الدخول وما أُرسل الرمز · ") + (it.get("unit") or ""),
-                                    text)
-                await run_blocking(db.event, rid, "alert_" + kind)
-                rep["alerts"] += 1
-                it = await run_blocking(db.get, rid)
-            res = await _render(it, now_, channel_id)
-            if res:
-                rep[res] += 1
+            try:
+                await _process_item(it, now_, channel_id, rep)
+            except Exception as e:
+                print("[codegate] item %s failed: %s" % (it.get("res_id"), e))
         return rep
 
 

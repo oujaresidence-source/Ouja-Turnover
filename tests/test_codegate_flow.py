@@ -223,5 +223,132 @@ class TestPress(FlowCase):
         self.assertIsNone(db.get("r1")["released_at"])
 
 
+class TestRobust(FlowCase):
+    def test_one_bad_conversation_does_not_stop_the_day(self):
+        self.f.arrivals = [self.f.arr("r1", GATED, hh=16), self.f.arr("r2", GATED, hh=16)]
+        good = flow.HOST.messages
+
+        def flaky(cid):
+            if cid == "c-r1":
+                raise RuntimeError("hostaway down")
+            return good(cid)
+        flow.HOST.messages = flaky
+        run(flow.tick())
+        self.assertIsNotNone(db.get("r2")["card_message_id"])
+        self.now = at(14, 1)
+        run(flow.tick())
+        self.assertTrue(db.get("r2")["alert_2h_at"])
+        self.assertTrue(db.get("r1")["alert_2h_at"])   # the bad one is still alerted
+        self.assertEqual(len(self.f.escalations), 2)
+
+    def test_item_that_blows_up_late_does_not_stop_the_next(self):
+        self.f.arrivals = [self.f.arr("r1", GATED), self.f.arr("r2", GATED)]
+        real = self.f.post
+
+        async def post(ch, text, embed=None, buttons=None):
+            if embed and "Gr1" in embed["title"] + str(embed.get("fields")):
+                raise RuntimeError("discord 500")
+            return await real(ch, text, embed=embed, buttons=buttons)
+        flow.HOST.post = post
+        run(flow.tick())
+        self.assertIsNotNone(db.get("r2")["card_message_id"])
+
+    def test_failed_arrivals_fetch_raises(self):
+        def boom():
+            raise RuntimeError("hostaway down")
+        flow.HOST.today_arrivals = boom
+        with self.assertRaises(RuntimeError):
+            run(flow.tick())
+
+    def test_cancelled_before_nine_never_gets_a_ghost_card(self):
+        self.now = at(8, 30)
+        run(flow.tick())
+        self.f.arrivals = []
+        self.now = at(9, 5)
+        run(flow.tick())
+        self.assertEqual(db.get("r1")["cancelled"], 1)
+        self.assertEqual(self.cards(), [])
+        self.assertIsNone(db.get("r1")["card_message_id"])
+
+    def test_failed_header_post_is_retried(self):
+        real = self.f.post
+        state = {"n": 0}
+
+        async def post(ch, text, embed=None, buttons=None):
+            state["n"] += 1
+            if state["n"] == 1:
+                return None
+            return await real(ch, text, embed=embed, buttons=buttons)
+        flow.HOST.post = post
+        run(flow.tick())
+        self.assertEqual([p for p in self.f.posts if not p["buttons"]], [])
+        run(flow.tick())
+        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
+
+    def test_release_during_alert_is_not_followed_by_alert_or_red_card(self):
+        run(flow.tick())
+        mid = self.cards()[0]["id"]
+        self.now = at(14, 1)
+        real = self.f.escalate
+
+        async def escalate(title, detail):
+            await real(title, detail)
+            await flow.press_release(mid, {"name": "نورة", "did": "11",
+                                           "is_admin": False, "is_ops": False})
+        flow.HOST.escalate = escalate
+        run(flow.tick())
+        self.assertEqual(self.f.edits[-1]["embed"]["color"], engine.COLOR_DONE)
+
+    def test_press_between_read_and_alert_suppresses_alert(self):
+        run(flow.tick())
+        mid = self.cards()[0]["id"]
+        self.now = at(14, 1)
+        real = flow.db.stamp
+
+        def stamp(rid, col, at_iso):
+            real(rid, col, at_iso)
+            if col == "alert_2h_at" and not db.get(rid)["released_at"]:
+                db.release(rid, "نورة", "11", at_iso)
+        flow.db.stamp = stamp
+        try:
+            run(flow.tick())
+        finally:
+            flow.db.stamp = real
+        self.assertEqual(self.f.escalations, [])
+        self.assertTrue(mid)
+
+    def test_failed_cover_lookup_keeps_stored_coverer(self):
+        run(flow.tick())
+        flow.HOST.cover = lambda lid, day: None
+        self.now = at(9, 30)
+        run(flow.tick())
+        it = db.get("r1")
+        self.assertEqual((it["cover_name"], it["cover_did"]), ("نورة", "11"))
+        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
+
+
+class TestPressEdges(FlowCase):
+    def p(self):
+        return {"name": "نورة", "did": "11", "is_admin": False, "is_ops": False}
+
+    def test_press_on_cancelled_booking_refused(self):
+        run(flow.tick())
+        mid = self.cards()[0]["id"]
+        self.f.arrivals = []
+        self.now = at(10)
+        run(flow.tick())
+        ok, msg = run(flow.press_release(mid, self.p()))
+        self.assertFalse(ok)
+        self.assertIsNone(db.get("r1")["released_at"])
+
+    def test_press_after_redeploy_still_works(self):
+        run(flow.tick())
+        mid = self.cards()[0]["id"]
+        db.reset_init_cache()
+        ok, _ = run(flow.press_release(mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(db.get("r1")["released_by"], "نورة")
+
+
 if __name__ == "__main__":
     unittest.main()
