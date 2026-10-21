@@ -13,6 +13,7 @@ import concurrent.futures
 import datetime
 import functools
 import os
+import time
 
 from . import db, engine
 from .host import HOST, wire
@@ -21,15 +22,42 @@ _pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix=
 _locks = {}
 _units_cache = {"key": None, "ids": set()}
 _REPO_UNITS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "units.json")
+_live_cache = {"v": None, "at": 0.0}
+LIVE_TTL_SEC = 30
 
 
 def wire_for_tests(caps):
     _units_cache.update({"key": None, "ids": set()})
+    _live_cache.update({"v": None, "at": 0.0})
     wire(caps)
 
 
 def enabled():
     return os.environ.get("CODEGATE_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def live():
+    """The SOAK switch, stored in brain.db (the owner never edits Railway). OFF by default:
+    while Hostaway still runs the old e-sign flow the list and cards run, but no alert, no
+    escalation, no honesty check, and every other bot path treats the units as before.
+    Turned on with `!ouja رموز-تشغيل تشغيل` in the Hostaway-switch sitting."""
+    now = time.monotonic()
+    if _live_cache["v"] is not None and now - _live_cache["at"] < LIVE_TTL_SEC:
+        return _live_cache["v"]
+    try:
+        v = db.get_setting("live", "0") == "1"
+    except Exception as e:
+        print("[codegate] live switch unreadable, keeping %s: %s" % (_live_cache["v"], e))
+        v = bool(_live_cache["v"])
+    _live_cache.update({"v": v, "at": now})
+    return v
+
+
+def set_live(on, by=""):
+    db.set_setting("live", "1" if on else "0", by)
+    db.event("_switch", "live_on" if on else "live_off", by)
+    _live_cache.update({"v": bool(on), "at": time.monotonic()})
+    return bool(on)
 
 
 def _state_units_path():
@@ -103,12 +131,12 @@ def _buttons(it):
     return ["undo"] if it.get("released_at") else ["release"]
 
 
-async def _render(it, now_, channel_id):
+async def _render(it, now_, channel_id, soak=False):
     """Post the card if it has none; edit it only when its content changed."""
     if it.get("cancelled") and not it.get("card_message_id"):
         return None                     # never had a card, never will
     view = _view_item(it)
-    embed = engine.card(view, now_)
+    embed = engine.card(view, now_, soak=soak)
     h = engine.content_hash({"e": embed, "b": _buttons(it)})
     if not it.get("card_message_id"):
         mid = await HOST.post(channel_id, _mention(it) or None, embed=embed, buttons=_buttons(it))
@@ -126,7 +154,7 @@ async def _render(it, now_, channel_id):
     return None
 
 
-async def _process_item(it, now_, channel_id, rep):
+async def _process_item(it, now_, channel_id, rep, is_live=True):
     rid = it["res_id"]
     if not it.get("cancelled") and it.get("conversation_id"):
         try:
@@ -140,11 +168,25 @@ async def _process_item(it, now_, channel_id, rep):
         except Exception as e:      # stale replies are better than a skipped alert
             print("[codegate] replies refresh %s failed: %s" % (rid, e))
     it = await run_blocking(db.get, rid)
+    # SOAK: list and cards only. No honesty check, no alert, and nothing stamped, so both run
+    # normally from the first tick after the switch is turned on.
+    if not is_live:
+        res = await _render(it, now_, channel_id, soak=True)
+        if res:
+            rep[res] += 1
+        return
     # honesty check: pressed, but is the code really in the chat?
     if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
         rel = _dt(it["released_at"])
         if rel and now_ >= rel + datetime.timedelta(minutes=engine.CODE_CHECK_MIN):
-            seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
+            try:
+                seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
+            except Exception as e:      # Hostaway down ≠ "no code": look again next tick
+                print("[codegate] code check %s failed, retrying next tick: %s" % (rid, e))
+                seen = None
+        else:
+            seen = None
+        if seen is not None:
             await run_blocking(db.set_code_seen, rid, seen)
             await run_blocking(db.stamp, rid, "code_check_at",
                                now_.isoformat(timespec="seconds"))
@@ -186,10 +228,12 @@ async def tick(now_=None, force=False):
     async with _lock("tick"):
         now_ = now_ or HOST.now()
         day = now_.date().isoformat()
-        rep = {"seen": 0, "posted": 0, "edited": 0, "alerts": 0, "headers": 0,
-               "cancelled": 0, "warned": 0}
+        is_live = await run_blocking(live)
+        rep = {"live": int(is_live), "seen": 0, "posted": 0, "edited": 0, "alerts": 0,
+               "headers": 0, "cancelled": 0, "warned": 0}
         gated = await run_blocking(units)
-        arrivals = await run_blocking(HOST.today_arrivals) or []
+        # the tick's OWN day, so a tick that straddles midnight can't mix two days
+        arrivals = await run_blocking(HOST.today_arrivals, day) or []
         keep = set()
         for a in arrivals:
             if str(a.get("day")) != day or not is_gated(a.get("lid")):
@@ -199,10 +243,14 @@ async def tick(now_=None, force=False):
             except Exception as e:
                 print("[codegate] cover lookup failed for %s: %s" % (a.get("res_id"), e))
                 cov = {}
+            prev = await run_blocking(db.get, str(a["res_id"]))
+            if prev and prev.get("day") != day:
+                # moved from another date: db.upsert_arrival starts its card/alerts over
+                await run_blocking(db.event, str(a["res_id"]), "moved", "",
+                                   "%s → %s" % (prev.get("day"), day))
             if not (cov.get("name") or cov.get("did") or cov.get("role_id")):
                 # a failed lookup must not blank who may press: keep what we stored
-                prev = await run_blocking(db.get, str(a["res_id"]))
-                if prev:
+                if prev and prev.get("day") == day:
                     cov = {"name": prev.get("cover_name"), "did": prev.get("cover_did"),
                            "role_id": prev.get("cover_role_id"),
                            "owner_did": cov.get("owner_did") or prev.get("owner_did")}
@@ -238,7 +286,7 @@ async def tick(now_=None, force=False):
                 print("[codegate] header %s failed: %s" % (k, e))
         for it in items:
             try:
-                await _process_item(it, now_, channel_id, rep)
+                await _process_item(it, now_, channel_id, rep, is_live=is_live)
             except Exception as e:
                 print("[codegate] item %s failed: %s" % (it.get("res_id"), e))
         return rep
@@ -247,7 +295,8 @@ async def tick(now_=None, force=False):
 async def _rerender(res_id):
     it = await run_blocking(db.get, res_id)
     if it:
-        await _render(it, HOST.now(), it.get("channel_id"))
+        await _render(it, HOST.now(), it.get("channel_id"),
+                      soak=not await run_blocking(live))
 
 
 async def press_release(message_id, presser):

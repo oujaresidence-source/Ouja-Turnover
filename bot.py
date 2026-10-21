@@ -2560,8 +2560,14 @@ def _was_code_sent_recently(conversation_id, since_hours=24):
     except Exception as e:
         print(f"_was_code_sent_recently fetch error ({conversation_id}):", e)
         return False
+    return _code_sent_in(msgs, since_hours)
+
+
+def _code_sent_in(msgs, since_hours=24):
+    """PURE half of _was_code_sent_recently: a host-side message with a 4–6 digit number near a
+    code keyword, inside the last N hours."""
     cutoff = datetime.now(TZ) - timedelta(hours=since_hours)
-    for m in msgs:
+    for m in msgs or []:
         if _msg_is_inbound(m):
             continue
         body = (m.get("body") or "")
@@ -3041,14 +3047,26 @@ SYSTEM_PROMPT_ANTI_NAG_GATED = (
 
 def _cg_code_rule(released, hrs):
     """Musaed's code-question rule on a «تسليم الرموز» unit. Never a contract, never a time
-    promise, never a code."""
+    promise, never a code, never a claim about what the team saw. Check-in passed with no
+    release = a guest at the door: escalate."""
     if released:
         return ("- الفريق سجّل إنه أرسل الرمز ✅. وجّه الضيف يشوف آخر رسائل الفريق في المحادثة؛ "
                 "لو ما لقاه **action='escalate'** عشان الفريق يعيد الإرسال.")
+    agreed = ("لو الضيف كتب «أوافق» فعلاً، اشكره وقل إن الفريق يرسل الرمز، "
+              "ولا تطلبها منه مرة ثانية. ")
+    try:
+        passed = hrs is not None and float(hrs) <= 0
+    except (TypeError, ValueError):
+        passed = False
+    if passed:
+        return ("- هذي الوحدة: الرمز يرسله الفريق بعد ما يرد الضيف على رسالة قواعد الشقة بكلمة "
+                "«أوافق»، و**موعد الدخول حلّ** والفريق ما سجّل إرسال الرمز. اعتذر للضيف باختصار "
+                "وقل إن الفريق يرسل له الرمز الحين. لو ما رد على رسالة القواعد، اطلب منه بلطف يكتب "
+                "«أوافق على قواعد الشقة» هنا في المحادثة. " + agreed +
+                "لا تحدد وقت. **action='escalate'**.")
     return ("- هذي الوحدة: الرمز يرسله الفريق **بعد** ما يرد الضيف على رسالة قواعد الشقة بكلمة "
             "«أوافق». لو ما رد، اطلب منه بلطف يرد عليها بـ«أوافق على قواعد الشقة» هنا في المحادثة، "
-            "وقل إن الفريق يرسل الرمز بعدها. لو الضيف كتب «أوافق» فعلاً في المحادثة، طمّنه إن "
-            "الفريق شاف موافقته وبيرسل الرمز، ولا تطلبها منه مرة ثانية. "
+            "وقل إن الفريق يرسل الرمز بعدها. " + agreed +
             "لا تطلب منه أي شي ثاني ولا تحدد وقت. action='reply'.")
 
 
@@ -3067,7 +3085,7 @@ def _check_agreement_for_one(r, now):
     res_id = r.get("id")
     if not res_id:
         return False
-    if _cg_gated(r.get("listingMapId")):
+    if _cg_live_gated(r.get("listingMapId")):
         return False    # «تسليم الرموز» owns gated units: «أوافق» + manual code, its own alerts
     if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
         return False
@@ -3853,7 +3871,7 @@ def compute_arrivals_with_status(window_hours=36, lookback_hours=4):
             "checkin_label": ci_dt.strftime("%a %H:%M"),
             "hours_until": round(hrs, 1),
             "nights": _res_nights(r),
-            "signed": (_cg_released(r.get("id")) if _cg_gated(lid)
+            "signed": (_cg_released(r.get("id")) if _cg_live_gated(lid)
                        else _is_agreement_signed(r)),
             "conversation_id": r.get("conversationId"),
             "total_price": r.get("totalPrice"),
@@ -3994,7 +4012,7 @@ def build_update_rows():
         lid = a.get("listing_id")
         # agreement: distinguish 'not needed' from 'not signed'
         try:
-            if _cg_gated(lid):
+            if _cg_live_gated(lid):
                 # «تسليم الرموز» unit: "signed" carries the code-release state, and Hostaway's own
                 # agreement flag is irrelevant here, so this check must come first.
                 agr = "code_released" if a.get("signed") else "awaiting_agree"
@@ -4376,7 +4394,7 @@ def compute_urgent_now():
         for a in arrivals:
             if a["signed"] or a["hours_until"] < 0:
                 continue
-            if _cg_gated(a.get("listing_id")):
+            if _cg_live_gated(a.get("listing_id")):
                 continue    # «تسليم الرموز» raises its own alerts for these units
             sev = "high" if a["hours_until"] <= 2 else "med"
             items.append({
@@ -9465,6 +9483,19 @@ def _cg_gated(lid):
         return False
 
 
+def _cg_live_gated(lid):
+    """Gated AND the soak switch is on (`!ouja رموز-تشغيل تشغيل`). Every path that changes how a
+    unit behaves outside the code-release list itself (old signing reminder, Musaed, /update,
+    urgent, watchdog) asks THIS, so during the soak those units behave exactly as before.
+    flow.live() is a cached brain.db read, called only for gated units. Never raises."""
+    if not _cg_gated(lid):
+        return False
+    try:
+        return bool(_codegate.flow.live())
+    except Exception:
+        return False
+
+
 def _cg_released(res_id):
     if not _HAS_CODEGATE or not res_id:
         return False
@@ -9474,10 +9505,31 @@ def _cg_released(res_id):
         return False
 
 
-def _cg_today_arrivals():
-    """Every CONFIRMED arrival today from a targeted arrival-window query (never the truncated
-    cache — CLAUDE.md trap 4). BLOCKING."""
-    today = datetime.now(TZ).date()
+def _cg_checkin_hm(r, lid):
+    """(hour, minute) of check-in: the reservation's own time when it has one, else the
+    listing's official time WITH its minutes (15:30 stays 15:30)."""
+    raw = r.get("checkInTime")
+    if raw not in (None, ""):
+        txt = str(raw)
+        try:
+            if ":" in txt:
+                hh, mm = txt.split(":")[:2]
+                return min(int(hh), 23), min(max(int(mm[:2]), 0), 59)
+            return min(int(float(txt)), 23), 0
+        except (ValueError, TypeError):
+            pass
+    try:
+        mins = int(unit_checkin_minutes(lid))
+    except Exception:
+        mins = 16 * 60
+    return min(mins // 60, 23), mins % 60
+
+
+def _cg_today_arrivals(day_iso=None):
+    """Every CONFIRMED arrival on `day_iso` (the tick's own day; default today) from a targeted
+    arrival-window query (never the truncated cache — CLAUDE.md trap 4). BLOCKING."""
+    today = (datetime.fromisoformat(str(day_iso)[:10]).date() if day_iso
+             else datetime.now(TZ).date())
     iso = today.isoformat()
     listings = get_listings_map() or {}
     out, seen = [], set()
@@ -9492,12 +9544,8 @@ def _cg_today_arrivals():
             continue
         if not _cg_gated(lid):          # no check-in lookup (a Hostaway call) for ungated units
             continue
-        try:
-            default_h = unit_checkin_minutes(lid) // 60
-        except Exception:
-            default_h = 16
-        hour = parse_hour(r.get("checkInTime"), default_h)
-        ci = datetime(today.year, today.month, today.day, min(hour, 23), 0, tzinfo=TZ)
+        hour, minute = _cg_checkin_hm(r, lid)
+        ci = datetime(today.year, today.month, today.day, hour, minute, tzinfo=TZ)
         out.append({"res_id": str(r.get("id")), "lid": lid, "day": iso,
                     "unit": listings.get(lid) or r.get("listingName") or "unit-%s" % lid,
                     "guest": r.get("guestName") or r.get("guestFirstName") or "ضيف",
@@ -9507,16 +9555,23 @@ def _cg_today_arrivals():
 
 
 def _cg_messages(conversation_id):
-    """The chat as {inbound, body, at} for codegate.engine.guest_replies. BLOCKING."""
+    """The chat as {inbound, body, at} for codegate.engine.guest_replies. BLOCKING. A fetch
+    error RAISES: an empty list would repaint the card as "no reply / no rules message"
+    (flow keeps the stored replies when this raises)."""
     if not conversation_id:
         return []
-    try:
-        data = api_get(f"/conversations/{conversation_id}/messages")
-    except Exception as e:
-        print("[codegate] messages fetch failed:", e)
-        return []
+    data = api_get(f"/conversations/{conversation_id}/messages") or {}
     return [{"inbound": _msg_is_inbound(m), "body": m.get("body") or "",
              "at": _parse_msg_dt(_msg_time(m))} for m in (data.get("result") or [])]
+
+
+def _cg_code_sent(conversation_id):
+    """Honesty check: a code message in the last 24h? BLOCKING. Unlike _was_code_sent_recently
+    a Hostaway error RAISES, so flow retries next tick instead of recording "no code"."""
+    if not conversation_id:
+        return False
+    data = api_get(f"/conversations/{conversation_id}/messages") or {}
+    return _code_sent_in(data.get("result") or [], since_hours=24)
 
 
 def _cg_cover(lid, day):
@@ -9607,7 +9662,7 @@ def _cg_wire():
         "state_path": _state_path,
         "today_arrivals": _cg_today_arrivals,
         "messages": _cg_messages,
-        "code_sent": (lambda cid: _was_code_sent_recently(cid, since_hours=24)),
+        "code_sent": _cg_code_sent,
         "cover": _cg_cover,
         "channel": _cg_channel,
         "post": _cg_post,
@@ -9643,6 +9698,15 @@ def _cg_presser(interaction):
             "is_ops": bool(role is not None and any(r.id == role.id for r in roles))}
 
 
+async def _cg_defer(interaction):
+    """Acknowledge at once; _cw_reply then answers with a follow-up (it checks is_done())."""
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+    except Exception as e:
+        print("[codegate] defer failed:", e)
+
+
 class CodegateConfirmView(discord.ui.View):
     """The ask-again step: a written «أوافق» in the chat AND the code sent from Hostaway."""
 
@@ -9652,6 +9716,7 @@ class CodegateConfirmView(discord.ui.View):
 
     @discord.ui.button(label="نعم، كتب «أوافق» وأرسلت الرمز", style=discord.ButtonStyle.success)
     async def yes(self, interaction, button):
+        await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
         presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
         ok, msg = await _codegate.flow.press_release(self.message_id, presser)
         await _cw_reply(interaction, msg)
@@ -9682,6 +9747,7 @@ class CodegateView(discord.ui.View):
     async def undo(self, interaction, button):
         if not _cg_ready():
             return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
+        await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
         presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
         ok, msg = await _codegate.flow.press_undo(interaction.message.id, presser)
         await _cw_reply(interaction, msg)
@@ -9711,6 +9777,13 @@ async def codegate_loop():
         print("[codegate] loop error:", e)
 
 
+def _cg_mode_line(is_live):
+    return ("الوضع: 🟢 مباشر — التنبيهات شغالة والبوت يتعامل مع هذي الوحدات بنظام «أوافق»."
+            if is_live else
+            "الوضع: 🧪 تجربة — القائمة والبطاقات فقط، بدون تنبيهات، والوحدات على النظام القديم. "
+            "للتشغيل: `!ouja رموز-تشغيل تشغيل`")
+
+
 @bot.command(name="رموز", aliases=["codegate"])
 async def codegate_cmd(ctx):
     """!ouja رموز — admin: run one pass now (ignores the 09:00 start) and report."""
@@ -9719,7 +9792,37 @@ async def codegate_cmd(ctx):
     if not _cg_ready():
         return await ctx.reply("تسليم الرموز مو مفعّل.")
     rep = await _codegate.flow.tick(force=True)
-    await ctx.reply("تسليم الرموز · " + ", ".join("%s=%s" % kv for kv in rep.items()))
+    is_live = await _codegate.flow.run_blocking(_codegate.flow.live)
+    await ctx.reply(_cg_mode_line(is_live) + "\nتسليم الرموز · " +
+                    ", ".join("%s=%s" % kv for kv in rep.items()))
+
+
+@bot.command(name="رموز-تشغيل", aliases=["codegate-live"])
+async def codegate_live_cmd(ctx, *, confirm: str = ""):
+    """!ouja رموز-تشغيل تشغيل — admin: end the soak (alerts on, gated units leave the old
+    e-sign path). Typed confirmation, because it changes what guests are told."""
+    if not _tk_is_admin(ctx.author):
+        return await ctx.reply("للمشرفين فقط.")
+    if not _cg_ready():
+        return await ctx.reply("تسليم الرموز مو مفعّل.")
+    if (confirm or "").strip() != "تشغيل":
+        return await ctx.reply("هذا يشغّل التنبيهات ويوقف رسائل التوقيع القديمة على وحدات الرموز. "
+                               "للتأكيد اكتب بالضبط:\n`!ouja رموز-تشغيل تشغيل`")
+    who = await _codegate.flow.run_blocking(_cw_presser_name, ctx.author)   # brain.db read
+    await _codegate.flow.run_blocking(_codegate.flow.set_live, True, who)
+    await ctx.reply("✅ " + _cg_mode_line(True))
+
+
+@bot.command(name="رموز-ايقاف", aliases=["codegate-soak"])
+async def codegate_soak_cmd(ctx):
+    """!ouja رموز-ايقاف — admin, one step: back to the soak (list only, old behaviour)."""
+    if not _tk_is_admin(ctx.author):
+        return await ctx.reply("للمشرفين فقط.")
+    if not _cg_ready():
+        return await ctx.reply("تسليم الرموز مو مفعّل.")
+    who = await _codegate.flow.run_blocking(_cw_presser_name, ctx.author)   # brain.db read
+    await _codegate.flow.run_blocking(_codegate.flow.set_live, False, who)
+    await ctx.reply("⏸ " + _cg_mode_line(False))
 
 
 # ---------------- «متابعة الخروج» commands (slash + !ouja fallback, admin only) ----------------
@@ -13203,7 +13306,7 @@ def claude_draft(guest_name, unit, history_text, guide_url=None, confirmed=False
             arrival = _parse_date(r.get("arrivalDate"))
             signed = _is_agreement_signed(r)
             needs_agr = _unit_requires_agreement(listing_id) if listing_id else True
-            gated = _cg_gated(listing_id)
+            gated = _cg_live_gated(listing_id)
             released = _cg_released(reservation_id) if gated else False
             # Stay-state decides everything here: an in-house / departed guest NEVER gets a
             # "still being cleaned / not ready yet" answer about the code (that was the bug —
@@ -74706,7 +74809,7 @@ def _watchdog_snapshot(open_maint=None):
                    "time_label": ci[11:16] if len(ci) >= 16 else "",
                    "nights": a.get("nights"), "price": a.get("total_price"),
                    "signed": bool(a.get("signed")),
-                   "gated": _cg_gated(a.get("listing_id")),
+                   "gated": _cg_live_gated(a.get("listing_id")),
                    "open_tickets": open_by_lid.get(a.get("listing_id"), 0)}
             cid = a.get("conversation_id")
             if mode == "manual":

@@ -26,6 +26,11 @@ LABEL_RELEASE = "✅ وافق وأرسلت الرمز"
 LABEL_UNDO = "↩️ تراجع"
 CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"
 
+HOSTAWAY_RES_URL = "https://dashboard.hostaway.com/reservations/%s"
+SOAK_NAME = "🧪 وضع التجربة"
+SOAK_TEXT = "الرمز يُرسل تلقائياً من Hostaway حالياً — لا تحتاج تضغط الزر."
+TITLE_MAX = 256
+
 COLOR_WAIT = 0xC9A227    # the dashboard gold
 COLOR_DONE = 0x2E8B57
 COLOR_ALERT = 0xD64545
@@ -121,7 +126,7 @@ def ar_num(n):
     return str(n).translate(_AR_DIGITS)
 
 
-def card(item, now):
+def card(item, now, soak=False):
     replies = item.get("replies") or []
     if replies:
         quoted = "\n".join("> " + r["text"] + ("  · " + _hhmm(r.get("at")) if r.get("at") else "")
@@ -135,8 +140,10 @@ def card(item, now):
     elif item.get("released_at"):
         status = "أُرسل الرمز ✅ — %s %s" % (item.get("released_by") or "", _hhmm(item["released_at"]))
         color = COLOR_DONE
-    elif item.get("alert_2h_at") or item.get("alert_late_at"):
-        status, color = "⏰ متأخر — ما أُرسل الرمز بعد", COLOR_ALERT
+    elif item.get("alert_late_at"):
+        status, color = "🚨 متأخر — حلّ الدخول وما أُرسل الرمز", COLOR_ALERT
+    elif item.get("alert_2h_at"):
+        status, color = "⏰ قرب الدخول — ما أُرسل الرمز بعد", COLOR_ALERT
     else:
         status, color = "⏳ بانتظار «أوافق» ثم إرسال الرمز", COLOR_WAIT
     fields = [
@@ -147,10 +154,19 @@ def card(item, now):
         {"name": "ردود الضيف (حرفياً)", "value": quoted[:1024], "inline": False},
         {"name": "الحالة", "value": status, "inline": False},
     ]
+    if item.get("res_id"):
+        fields.append({"name": "المحادثة", "inline": False,
+                       "value": "[افتح الحجز في Hostaway](%s)"
+                                % (HOSTAWAY_RES_URL % item["res_id"])})
     if item.get("code_warned_at"):
         fields.append({"name": "⚠️ تنبيه", "inline": False,
                        "value": "ضُغط الزر بس ما شفت رسالة الرمز في المحادثة — تأكد إنها انرسلت."})
-    return {"title": "🔑 %s — %s" % (item.get("unit") or "", item.get("guest") or ""),
+    if soak:
+        fields.append({"name": SOAK_NAME, "value": SOAK_TEXT, "inline": False})
+    title = "🔑 %s — %s" % (item.get("unit") or "", item.get("guest") or "")
+    if len(title) > TITLE_MAX:
+        title = title[:TITLE_MAX - 1] + "…"
+    return {"title": title,
             "description": "الرمز يُرسل بعد ما يكتب الضيف «أوافق» في المحادثة — "
                            "استخدم الرد الجاهز «🔑 كود الدخول» في Hostaway.",
             "color": color, "fields": fields,

@@ -172,6 +172,33 @@ class TestCard(unittest.TestCase):
                          engine.COLOR_ALERT)
         self.assertEqual(engine.card(self.base(cancelled=1), at(14))["color"], engine.COLOR_OFF)
 
+    def test_status_two_hour_vs_late(self):
+        two = json.dumps(engine.card(self.base(alert_2h_at="x"), at(14, 30)), ensure_ascii=False)
+        self.assertIn("قرب الدخول", two)
+        self.assertNotIn("متأخر", two)
+        late = json.dumps(engine.card(self.base(alert_2h_at="x", alert_late_at="y"), at(16, 5)),
+                          ensure_ascii=False)
+        self.assertIn("متأخر", late)
+
+    def test_hostaway_link_field(self):
+        e = engine.card(self.base(res_id="555123"), at(11))
+        link = [f for f in e["fields"] if "dashboard.hostaway.com/reservations/555123" in f["value"]]
+        self.assertEqual(len(link), 1)
+        self.assertFalse(any("hostaway.com/reservations" in f["value"]
+                             for f in engine.card(self.base(), at(11))["fields"]))
+
+    def test_soak_note_only_in_soak(self):
+        soak = json.dumps(engine.card(self.base(), at(11), soak=True), ensure_ascii=False)
+        live = json.dumps(engine.card(self.base(), at(11)), ensure_ascii=False)
+        self.assertIn(engine.SOAK_NAME, soak)
+        self.assertIn(engine.SOAK_TEXT, soak)
+        self.assertNotIn(engine.SOAK_NAME, live)
+
+    def test_title_clipped_to_discord_limit(self):
+        e = engine.card(self.base(unit="U" * 200, guest="G" * 200), at(11))
+        self.assertLessEqual(len(e["title"]), 256)
+        self.assertTrue(e["title"].endswith("…"))
+
     def test_code_warning_shown(self):
         e = engine.card(self.base(released_at=at(14).isoformat(), released_by="نورة",
                                   code_warned_at=at(14, 20).isoformat()), at(15))

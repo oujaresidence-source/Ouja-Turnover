@@ -7,9 +7,9 @@ does `import bot`. BLOCKING hooks run on the package's own pool; Discord hooks a
 class _Host:
     now = None             # () -> aware Riyadh datetime
     state_path = None      # (name) -> absolute path inside STATE_DIR
-    today_arrivals = None  # BLOCKING () -> [{res_id, lid, day, unit, guest, conversation_id, checkin_at}]
-    messages = None        # BLOCKING (conversation_id) -> [{inbound, body, at}]
-    code_sent = None       # BLOCKING (conversation_id) -> bool   (bot.py's _was_code_sent_recently)
+    today_arrivals = None  # BLOCKING (day_iso) -> [{res_id, lid, day, unit, guest, conversation_id, checkin_at}]
+    messages = None        # BLOCKING (conversation_id) -> [{inbound, body, at}]; RAISES on fetch failure
+    code_sent = None       # BLOCKING (conversation_id) -> bool; RAISES when Hostaway fails (bot._cg_code_sent)
     cover = None           # BLOCKING (lid, day) -> {name, did, role_id, owner_did}
     channel = None         # async () -> channel id of «تسليم-الرموز» (fallback #escalations)
     post = None            # async (channel_id, text, embed=None, buttons=None) -> message id | None

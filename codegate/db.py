@@ -66,9 +66,20 @@ CREATE TABLE IF NOT EXISTS codegate_headers (
     message_id  TEXT,
     PRIMARY KEY (day, key)
 );
+CREATE TABLE IF NOT EXISTS codegate_settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT,
+    by     TEXT,
+    at     TEXT
+);
 """
 
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
+# A booking moved to another date: what belonged to the old date (its card in the old day's
+# list, its alert stamps, the honesty check, a release for the old arrival) starts over.
+_DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
+              "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
+              "released_at")
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
              "cover_did", "cover_role_id", "owner_did")
 
@@ -128,6 +139,9 @@ def upsert_arrival(row):
     now = _now()
     vals = [str(row["res_id"])] + [row.get(k) for k in _SNAPSHOT]
     sets = ", ".join("%s=excluded.%s" % (k, k) for k in _SNAPSHOT)
+    # SQLite evaluates every SET expression against the OLD row, so `day` below is the stored one
+    sets += ", " + ", ".join("%s=CASE WHEN codegate_items.day IS excluded.day THEN %s ELSE NULL "
+                             "END" % (k, k) for k in _DAY_RESET)
     _x("INSERT INTO codegate_items(res_id, %s, cancelled, created_at, updated_at) "
        "VALUES (?, %s, 0, ?, ?) "
        "ON CONFLICT(res_id) DO UPDATE SET %s, cancelled=0, updated_at=excluded.updated_at"
@@ -214,3 +228,15 @@ def mark_header(day, key, message_id):
 def event(res_id, kind, actor="", detail=""):
     _x("INSERT INTO codegate_events(res_id, at, kind, actor, detail) VALUES (?,?,?,?,?)",
        (str(res_id), _now(), kind, actor or "", detail or ""))
+
+
+def get_setting(key, default=None):
+    rows = _q("SELECT value FROM codegate_settings WHERE key=?", (str(key),))
+    if not rows or rows[0]["value"] is None:
+        return default
+    return rows[0]["value"]
+
+
+def set_setting(key, value, by=""):
+    _x("INSERT OR REPLACE INTO codegate_settings(key, value, by, at) VALUES (?,?,?,?)",
+       (str(key), None if value is None else str(value), by or "", _now()))

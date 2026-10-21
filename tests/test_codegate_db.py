@@ -81,6 +81,40 @@ class TestDb(unittest.TestCase):
         db.reset_init_cache()                      # a "restart"
         self.assertTrue(db.header_posted(DAY, "11"))
 
+    def test_settings_roundtrip_and_default(self):
+        self.assertEqual(db.get_setting("live", "0"), "0")
+        db.set_setting("live", "1", "Faisal")
+        self.assertEqual(db.get_setting("live", "0"), "1")
+        db.reset_init_cache()                      # a "restart"
+        self.assertEqual(db.get_setting("live"), "1")
+        db.set_setting("live", "0", "Faisal")
+        self.assertEqual(db.get_setting("live"), "0")
+
+    def test_moved_date_resets_card_alerts_and_release(self):
+        db.upsert_arrival(row())
+        db.set_card("r1", "900", "555", "h")
+        db.stamp("r1", "alert_2h_at", "t")
+        db.stamp("r1", "alert_late_at", "t")
+        db.stamp("r1", "code_warned_at", "t")
+        db.set_code_seen("r1", False)
+        db.release("r1", "نورة", "11", "t")
+        db.upsert_arrival(row(day="2026-10-22", checkin_at="2026-10-22T16:00:00+03:00"))
+        it = db.get("r1")
+        self.assertEqual(it["day"], "2026-10-22")
+        for col in ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
+                    "code_seen", "code_check_at", "code_warned_at", "released_by",
+                    "released_by_did", "released_at"):
+            self.assertIsNone(it[col], col)
+        self.assertIsNone(db.item_by_message("555"))
+
+    def test_same_day_upsert_keeps_card_and_stamps(self):
+        db.upsert_arrival(row())
+        db.set_card("r1", "900", "555", "h")
+        db.stamp("r1", "alert_2h_at", "t")
+        db.upsert_arrival(row(guest="Sara A."))
+        it = db.get("r1")
+        self.assertEqual((it["card_message_id"], it["alert_2h_at"]), ("555", "t"))
+
 
 if __name__ == "__main__":
     unittest.main()
