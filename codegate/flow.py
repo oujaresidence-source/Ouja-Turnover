@@ -1,0 +1,256 @@
+# codegate/flow.py
+# -*- coding: utf-8 -*-
+"""
+codegate.flow — the tick and the two buttons of «تسليم الرموز».
+
+The bot LISTS, RECORDS and ALERTS. It never decides that a guest agreed and never sends a code:
+a person reads the quoted reply, sends the code from Hostaway's saved reply, and presses
+«✅ وافق وأرسلت الرمز».
+"""
+
+import asyncio
+import concurrent.futures
+import datetime
+import functools
+import os
+
+from . import db, engine
+from .host import HOST, wire
+
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="codegate")
+_locks = {}
+_units_cache = {"key": None, "ids": set()}
+_REPO_UNITS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "units.json")
+
+
+def wire_for_tests(caps):
+    _units_cache.update({"key": None, "ids": set()})
+    wire(caps)
+
+
+def enabled():
+    return os.environ.get("CODEGATE_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _state_units_path():
+    try:
+        return HOST.state_path("codegate_units.json") if HOST.state_path else None
+    except Exception:
+        return None
+
+
+def units():
+    """Gated listing ids, re-read when either file's mtime changes."""
+    paths = [p for p in (_state_units_path(), _REPO_UNITS) if p]
+    key = tuple((p, os.path.getmtime(p)) for p in paths if os.path.exists(p))
+    if key != _units_cache["key"]:
+        _units_cache.update({"key": key, "ids": engine.load_units(_REPO_UNITS,
+                                                                   _state_units_path())})
+    return _units_cache["ids"]
+
+
+def is_gated(lid):
+    try:
+        return int(lid) in units()
+    except (TypeError, ValueError):
+        return False
+
+
+def released(res_id):
+    it = db.get(res_id) if res_id else None
+    return bool(it and it.get("released_at"))
+
+
+async def run_blocking(fn, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_pool, functools.partial(fn, *args, **kwargs))
+
+
+def _lock(name):
+    if name not in _locks:
+        _locks[name] = asyncio.Lock()
+    return _locks[name]
+
+
+def _dt(iso):
+    if not iso:
+        return None
+    d = datetime.datetime.fromisoformat(str(iso))
+    return d if d.tzinfo else d.replace(tzinfo=engine.tz())
+
+
+def _view_item(it):
+    """A db row in the shape engine.card/alert_due expect (datetimes, parsed replies)."""
+    v = dict(it)
+    v["checkin_at"] = _dt(it.get("checkin_at"))
+    v["rules_at"] = _dt(it.get("rules_at"))
+    v["replies"] = [{"at": _dt(r.get("at")), "text": r.get("text") or ""}
+                    for r in (it.get("replies") or [])]
+    return v
+
+
+def _mention(it):
+    if it.get("cover_did"):
+        return "<@%s>" % it["cover_did"]
+    if it.get("cover_role_id"):
+        return "<@&%s>" % it["cover_role_id"]
+    return ""
+
+
+def _buttons(it):
+    if it.get("cancelled"):
+        return []
+    return ["undo"] if it.get("released_at") else ["release"]
+
+
+async def _render(it, now_, channel_id):
+    """Post the card if it has none; edit it only when its content changed."""
+    view = _view_item(it)
+    embed = engine.card(view, now_)
+    h = engine.content_hash({"e": embed, "b": _buttons(it)})
+    if not it.get("card_message_id"):
+        mid = await HOST.post(channel_id, _mention(it) or None, embed=embed, buttons=_buttons(it))
+        if mid:
+            await run_blocking(db.set_card, it["res_id"], channel_id, mid, h)
+            await run_blocking(db.event, it["res_id"], "card_posted")
+            return "posted"
+        return None
+    if h != it.get("card_hash"):
+        ok = await HOST.edit(it.get("channel_id") or channel_id, it["card_message_id"],
+                             embed=embed, buttons=_buttons(it))
+        if ok:
+            await run_blocking(db.set_hash, it["res_id"], h)
+            return "edited"
+    return None
+
+
+async def tick(now_=None, force=False):
+    if not enabled():
+        return {"skipped": "off"}
+    async with _lock("tick"):
+        now_ = now_ or HOST.now()
+        day = now_.date().isoformat()
+        rep = {"seen": 0, "posted": 0, "edited": 0, "alerts": 0, "headers": 0,
+               "cancelled": 0, "warned": 0}
+        gated = await run_blocking(units)
+        arrivals = await run_blocking(HOST.today_arrivals) or []
+        keep = set()
+        for a in arrivals:
+            if str(a.get("day")) != day or not is_gated(a.get("lid")):
+                continue
+            cov = await run_blocking(HOST.cover, a["lid"], day) or {}
+            await run_blocking(db.upsert_arrival, dict(a, res_id=str(a["res_id"]),
+                                                       cover_name=cov.get("name") or "",
+                                                       cover_did=cov.get("did") or "",
+                                                       cover_role_id=cov.get("role_id") or "",
+                                                       owner_did=cov.get("owner_did") or ""))
+            keep.add(str(a["res_id"]))
+        rep["seen"] = len(keep)
+        rep["cancelled"] = len(await run_blocking(db.mark_cancelled, day, keep))
+        if not gated or (not force and now_.hour < engine.START_HOUR):
+            return rep
+        channel_id = await HOST.channel()
+        items = await run_blocking(db.day_items, day)
+        # one header per person, before their first card
+        groups = {}
+        for it in items:
+            if not it.get("cancelled"):
+                k = it.get("cover_did") or it.get("cover_role_id") or it.get("cover_name") or "ops"
+                groups.setdefault(k, []).append(it)
+        for k, rows in groups.items():
+            if await run_blocking(db.header_posted, day, k):
+                continue
+            mid = await HOST.post(channel_id, engine.header_text(_mention(rows[0]),
+                                                                 rows[0].get("cover_name"),
+                                                                 len(rows)))
+            await run_blocking(db.mark_header, day, k, mid)
+            rep["headers"] += 1
+        for it in items:
+            rid = it["res_id"]
+            if not it.get("cancelled") and it.get("conversation_id"):
+                msgs = await run_blocking(HOST.messages, it["conversation_id"]) or []
+                r = engine.guest_replies(msgs)
+                await run_blocking(
+                    db.set_replies, rid,
+                    r["rules_at"].isoformat(timespec="seconds") if r["rules_at"] else None,
+                    [{"at": x["at"].isoformat(timespec="seconds") if x["at"] else None,
+                      "text": x["text"]} for x in r["replies"]])
+            it = await run_blocking(db.get, rid)
+            # honesty check: pressed, but is the code really in the chat?
+            if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
+                rel = _dt(it["released_at"])
+                if rel and now_ >= rel + datetime.timedelta(minutes=engine.CODE_CHECK_MIN):
+                    seen = await run_blocking(HOST.code_sent, it.get("conversation_id"))
+                    await run_blocking(db.set_code_seen, rid, seen)
+                    await run_blocking(db.stamp, rid, "code_check_at",
+                                       now_.isoformat(timespec="seconds"))
+                    if not seen and not it.get("code_warned_at"):
+                        who = ("<@%s>" % it["released_by_did"]) if it.get("released_by_did") else ""
+                        await HOST.post(channel_id, (who + " " if who else "") +
+                                        "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
+                                        "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
+                        await run_blocking(db.stamp, rid, "code_warned_at",
+                                           now_.isoformat(timespec="seconds"))
+                        rep["warned"] += 1
+                    it = await run_blocking(db.get, rid)
+            kind = engine.alert_due(_view_item(it), now_)
+            if kind:
+                stamp = now_.isoformat(timespec="seconds")
+                await run_blocking(db.stamp, rid, "alert_late_at" if kind == "late"
+                                   else "alert_2h_at", stamp)
+                if kind == "late" and not it.get("alert_2h_at"):
+                    await run_blocking(db.stamp, rid, "alert_2h_at", stamp)
+                text = engine.alert_text(kind, _view_item(it), _mention(it))
+                await HOST.post(channel_id, text)
+                await HOST.escalate(("🔑 باقي ساعتين وما أُرسل الرمز · " if kind == "2h"
+                                     else "🚨 حلّ الدخول وما أُرسل الرمز · ") + (it.get("unit") or ""),
+                                    text)
+                await run_blocking(db.event, rid, "alert_" + kind)
+                rep["alerts"] += 1
+                it = await run_blocking(db.get, rid)
+            res = await _render(it, now_, channel_id)
+            if res:
+                rep[res] += 1
+        return rep
+
+
+async def _rerender(res_id):
+    it = await run_blocking(db.get, res_id)
+    if it:
+        await _render(it, HOST.now(), it.get("channel_id"))
+
+
+async def press_release(message_id, presser):
+    it = await run_blocking(db.item_by_message, message_id)
+    if not it:
+        return False, "ما لقيت هذا الحجز في السجل."
+    if it.get("cancelled"):
+        return False, "الحجز ملغي — ما يحتاج رمز."
+    if it.get("released_at"):
+        return False, "أُرسل من قبل — %s %s" % (it.get("released_by") or "",
+                                                str(it["released_at"])[11:16])
+    if not engine.may_release(presser.get("did"), it.get("cover_did"), it.get("owner_did"),
+                              presser.get("is_admin"), presser.get("is_ops")):
+        return False, "هذي الشقة على %s اليوم — هو أو المشرف يضغط الزر." % (
+            it.get("cover_name") or "فريق العمليات")
+    now_ = HOST.now().isoformat(timespec="seconds")
+    if not await run_blocking(db.release, it["res_id"], presser.get("name") or "",
+                              presser.get("did") or "", now_):
+        fresh = await run_blocking(db.get, it["res_id"])
+        return False, "أُرسل من قبل — %s" % ((fresh or {}).get("released_by") or "")
+    await run_blocking(db.event, it["res_id"], "released", presser.get("name") or "")
+    await _rerender(it["res_id"])
+    return True, "تم ✅ — سجّلت إنك أرسلت الرمز."
+
+
+async def press_undo(message_id, presser):
+    if not presser.get("is_admin"):
+        return False, "التراجع للمشرفين فقط."
+    it = await run_blocking(db.item_by_message, message_id)
+    if not it or not it.get("released_at"):
+        return False, "ما فيه تسليم أتراجع عنه."
+    await run_blocking(db.undo, it["res_id"], presser.get("name") or "",
+                       HOST.now().isoformat(timespec="seconds"))
+    await run_blocking(db.event, it["res_id"], "undone", presser.get("name") or "")
+    await _rerender(it["res_id"])
+    return True, "تم التراجع — رجعت البطاقة بانتظار التسليم."
