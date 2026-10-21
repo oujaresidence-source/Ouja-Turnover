@@ -1,0 +1,8 @@
+{
+  "_doc": "Listings where the guest must reply «أوافق» and staff release the door code by hand. $STATE_DIR/codegate_units.json overrides this file. Owner decision 2026-10-21: the 34 of Hostaway automation 288752 + 103 NRJS.",
+  "listing_ids": [383921, 385091, 437215, 441826, 441858, 456602, 457230, 457287, 461328, 462594,
+                  483841, 485203, 503713, 513034, 522603, 523916, 526697, 535903, 535907, 576627,
+                  589273,
+                  476054, 477784, 479967, 482287, 482978, 487707, 487708, 490891, 497191, 500593,
+                  500595, 507451, 515929, 553753]
+}
