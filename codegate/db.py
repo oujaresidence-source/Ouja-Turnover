@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     room_close_pending INTEGER DEFAULT 0,
     sent_by_bot      INTEGER DEFAULT 0,
     held_channel_id  TEXT,
-    delete_fail_count INTEGER DEFAULT 0,
+    card_room_fail_count INTEGER DEFAULT 0,
+    held_room_fail_count INTEGER DEFAULT 0,
+    moving_to        TEXT,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -83,7 +85,10 @@ _LATE_COLUMNS = (("prelive_checked_at", "TEXT"),
                  ("room_close_pending", "INTEGER DEFAULT 0"),
                  ("sent_by_bot", "INTEGER DEFAULT 0"),
                  ("held_channel_id", "TEXT"),              # the turnover room the bot HELD
-                 ("delete_fail_count", "INTEGER DEFAULT 0"))
+                 ("card_room_fail_count", "INTEGER DEFAULT 0"),   # failed closes, per room
+                 ("held_room_fail_count", "INTEGER DEFAULT 0"),
+                 ("moving_to", "TEXT"))                    # "<lid>|<day>": a move whose close
+#                                                            is still owed (the row is FROZEN)
 
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
 # A booking moved to another date OR another unit: what belonged to the old arrival (its card and
@@ -92,8 +97,9 @@ STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_a
 _DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
               "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
               "released_at", "room_kind", "room_close_pending", "sent_by_bot",
-              "held_channel_id", "delete_fail_count")
-_RESET_TO_ZERO = ("room_close_pending", "sent_by_bot", "delete_fail_count")   # flags, not NULL
+              "held_channel_id", "card_room_fail_count", "held_room_fail_count")
+_RESET_TO_ZERO = ("room_close_pending", "sent_by_bot", "card_room_fail_count",
+                  "held_room_fail_count")                                   # flags, not NULL
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
              "cover_did", "cover_role_id", "owner_did")
 
@@ -165,7 +171,8 @@ def upsert_arrival(row):
                              for k in _DAY_RESET)
     _x("INSERT INTO codegate_items(res_id, %s, cancelled, created_at, updated_at) "
        "VALUES (?, %s, 0, ?, ?) "
-       "ON CONFLICT(res_id) DO UPDATE SET %s, cancelled=0, updated_at=excluded.updated_at"
+       "ON CONFLICT(res_id) DO UPDATE SET %s, cancelled=0, moving_to=NULL, "
+       "updated_at=excluded.updated_at"
        % (", ".join(_SNAPSHOT), ", ".join("?" * len(_SNAPSHOT)), sets),
        vals + [now, now])
 
@@ -272,7 +279,7 @@ def set_held(res_id, channel_id):
 def room_closed(res_id, channel_id, held=False):
     """Forget a room that is closed (or given up on). It is the card's room → the card goes with
     it; it is the held room (held=True, or equal to held_channel_id) → the held close is done.
-    Resets the delete-failure count."""
+    Only the tally of the room(s) actually forgotten resets."""
     ch = None if channel_id is None else str(channel_id)
     # SQLite evaluates every SET expression against the OLD row
     card = "channel_id IS NOT NULL AND channel_id IS ?"
@@ -284,16 +291,40 @@ def room_closed(res_id, channel_id, held=False):
        "channel_id=CASE WHEN {c} THEN NULL ELSE channel_id END, "
        "held_channel_id=CASE WHEN {h} THEN NULL ELSE held_channel_id END, "
        "room_close_pending=CASE WHEN {h} THEN 0 ELSE room_close_pending END, "
-       "delete_fail_count=0, updated_at=? WHERE res_id=?".format(c=card, h=hold),
-       (ch, ch, ch, ch, ch, ch, _now(), str(res_id)))
+       "card_room_fail_count=CASE WHEN {c} THEN 0 ELSE card_room_fail_count END, "
+       "held_room_fail_count=CASE WHEN {h} THEN 0 ELSE held_room_fail_count END, "
+       "updated_at=? WHERE res_id=?".format(c=card, h=hold),
+       (ch, ch, ch, ch, ch, ch, ch, ch, _now(), str(res_id)))
 
 
-def delete_failed(res_id):
-    """One more failed room delete for this row; returns the new count."""
-    _x("UPDATE codegate_items SET delete_fail_count=COALESCE(delete_fail_count, 0)+1, "
-       "updated_at=? WHERE res_id=?", (_now(), str(res_id)))
-    rows = _q("SELECT delete_fail_count FROM codegate_items WHERE res_id=?", (str(res_id),))
-    return int(rows[0]["delete_fail_count"] or 0) if rows else 0
+def delete_failed(res_id, held):
+    """One more failed close of this row's held room (held=True) or card room; returns that
+    room's new count. Each room has its own tally, so "at most 3 tries" holds per room."""
+    col = "held_room_fail_count" if held else "card_room_fail_count"
+    _x("UPDATE codegate_items SET %s=COALESCE(%s, 0)+1, updated_at=? WHERE res_id=?"
+       % (col, col), (_now(), str(res_id)))
+    rows = _q("SELECT %s AS n FROM codegate_items WHERE res_id=?" % col, (str(res_id),))
+    return int(rows[0]["n"] or 0) if rows else 0
+
+
+def set_moving(res_id, lid, day):
+    """FREEZE: the booking moved to (lid, day) but a close on its old arrival is still owed, so
+    the upsert waits. A frozen row is skipped by the tick, ignored by should_hold and refuses
+    presses. upsert_arrival clears it; so does clear_moving_except when the move stops."""
+    _x("UPDATE codegate_items SET moving_to=?, updated_at=? WHERE res_id=?",
+       ("%s|%s" % (lid, day), _now(), str(res_id)))
+
+
+def clear_moving_except(res_ids):
+    keep = sorted({str(x) for x in res_ids or ()})
+    marks = ",".join("?" * len(keep))
+    _x("UPDATE codegate_items SET moving_to=NULL WHERE moving_to IS NOT NULL" +
+       (" AND res_id NOT IN (%s)" % marks if keep else ""), tuple(keep))
+
+
+def items_moving_to(lid, day):
+    return [_shape(r) for r in _q("SELECT * FROM codegate_items WHERE moving_to=? "
+                                  "ORDER BY res_id", ("%s|%s" % (lid, day),))]
 
 
 def mark_sent_by_bot(res_id):

@@ -50,7 +50,7 @@ class TestMigration(unittest.TestCase):
         db.reset_init_cache()
         old = db.SCHEMA
         for col in ("room_kind", "room_close_pending", "sent_by_bot", "held_channel_id",
-                    "delete_fail_count"):
+                    "card_room_fail_count", "held_room_fail_count", "moving_to"):
             lines = [ln for ln in old.split("\n") if ln.strip().startswith(col + " ")]
             self.assertEqual(len(lines), 1, col)
             old = old.replace(lines[0] + "\n", "")
@@ -63,7 +63,8 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(it["room_close_pending"], 0)
         self.assertEqual(it["sent_by_bot"], 0)
         self.assertIsNone(it["held_channel_id"])
-        self.assertEqual(it["delete_fail_count"], 0)
+        self.assertEqual((it["card_room_fail_count"], it["held_room_fail_count"]), (0, 0))
+        self.assertIsNone(it["moving_to"])
         db.reset_init_cache()                            # second boot: idempotent
         self.assertIn("sent_by_bot", db.get("old1"))
 
@@ -225,16 +226,20 @@ class TestDb(unittest.TestCase):
         db.set_room("r1", "C1", "code")
         db.set_card("r1", "C1", "555", "h")
         db.set_held("r1", "T1")
-        db.delete_failed("r1")
+        db.delete_failed("r1", held=False)
+        db.delete_failed("r1", held=True)
+        db.delete_failed("r1", held=True)
         db.room_closed("r1", "C1")                       # the code room: card goes, hold stays
         it = db.get("r1")
         self.assertEqual((it["channel_id"], it["room_kind"], it["card_message_id"]),
                          (None, None, None))
         self.assertEqual((it["held_channel_id"], it["room_close_pending"]), ("T1", 1))
-        self.assertEqual(it["delete_fail_count"], 0)
+        # only the closed room's tally resets: the held room keeps its two failures
+        self.assertEqual((it["card_room_fail_count"], it["held_room_fail_count"]), (0, 2))
         db.room_closed("r1", "T1", held=True)
         it = db.get("r1")
         self.assertEqual((it["held_channel_id"], it["room_close_pending"]), (None, 0))
+        self.assertEqual(it["held_room_fail_count"], 0)
 
     def test_room_closed_held_is_card_room(self):
         db.upsert_arrival(row())
@@ -249,9 +254,24 @@ class TestDb(unittest.TestCase):
         db.room_closed("r1", None, held=True)
         self.assertEqual(db.get("r1")["room_close_pending"], 0)
 
-    def test_delete_failed_counts(self):
+    def test_delete_failed_counts_per_room(self):
         db.upsert_arrival(row())
-        self.assertEqual([db.delete_failed("r1") for _ in range(3)], [1, 2, 3])
+        self.assertEqual([db.delete_failed("r1", held=False) for _ in range(3)], [1, 2, 3])
+        self.assertEqual([db.delete_failed("r1", held=True) for _ in range(2)], [1, 2])
+
+    def test_moving_freeze(self):
+        db.upsert_arrival(row("r1"))
+        db.upsert_arrival(row("r2"))
+        db.set_moving("r1", 526697, DAY)
+        self.assertEqual(db.get("r1")["moving_to"], "526697|" + DAY)
+        self.assertEqual([r["res_id"] for r in db.items_moving_to(526697, DAY)], ["r1"])
+        self.assertEqual(db.items_moving_to(461328, DAY), [])
+        db.set_moving("r2", 526697, DAY)
+        db.clear_moving_except({"r2"})                   # r1 no longer moving this tick
+        self.assertIsNone(db.get("r1")["moving_to"])
+        self.assertEqual(db.get("r2")["moving_to"], "526697|" + DAY)
+        db.upsert_arrival(row("r2", lid=526697))         # the move completes: freeze gone
+        self.assertIsNone(db.get("r2")["moving_to"])
 
     def test_items_for_unit_day(self):
         db.upsert_arrival(row("r1"))
@@ -267,11 +287,12 @@ class TestDb(unittest.TestCase):
         db.release("r1", "نورة", "11", "t")
         db.mark_sent_by_bot("r1")
         db.set_held("r1", "T1")
-        db.delete_failed("r1")
+        db.delete_failed("r1", held=False)
+        db.delete_failed("r1", held=True)
         db.upsert_arrival(row(day="2026-10-22", checkin_at="2026-10-22T16:00:00+03:00"))
         it = db.get("r1")
         for col in ("channel_id", "room_kind", "room_close_pending", "sent_by_bot",
-                    "held_channel_id", "delete_fail_count"):
+                    "held_channel_id", "card_room_fail_count", "held_room_fail_count"):
             self.assertFalse(it[col], col)
         db.set_room("r1", "C2", "code")
         db.set_close_pending("r1", True)
