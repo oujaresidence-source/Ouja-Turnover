@@ -820,6 +820,17 @@ class TestDiscordCaps(_Fx, unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _arun(bot._cg_edit("900", "5"))
 
+    def test_post_none_when_room_gone_so_alert_still_escalates(self):
+        """flow posts an alert into the card's room and THEN escalates: a hand-deleted room must
+        answer None (the contract's "no message"), not raise past the escalation."""
+        import discord
+        for err in (_http_error(discord.NotFound, 404), _http_error(discord.Forbidden, 403)):
+            self.channel(err)
+            self.assertIsNone(_arun(bot._cg_post("900", "hi")))
+        self.channel(_http_error(discord.HTTPException, 503))
+        with self.assertRaises(discord.HTTPException):
+            _arun(bot._cg_post("900", "hi"))
+
     def test_delete_room(self):
         import contextlib
         import io

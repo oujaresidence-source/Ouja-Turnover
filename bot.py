@@ -9779,16 +9779,23 @@ def _cg_view(buttons):
 
 
 async def _cg_post(channel_id, text, embed=None, buttons=None):
+    """Message id, or None when the room is gone (NotFound/Forbidden): flow posts an alert into
+    the card's room and THEN escalates, so a hand-deleted room must not raise past that. Any
+    other failure raises (isolated per item; the next tick retries)."""
     if not channel_id:
         return None
-    ch = await _cw_channel(channel_id)
     kw = {}
     if embed:
         kw["embed"] = _cw_embed(embed)
     if buttons:
         kw["view"] = _cg_view(buttons)
-    msg = await ch.send(content=text, allowed_mentions=discord.AllowedMentions(
-        users=True, roles=True, everyone=False), **kw)
+    try:
+        ch = await _cw_channel(channel_id)
+        msg = await ch.send(content=text, allowed_mentions=discord.AllowedMentions(
+            users=True, roles=True, everyone=False), **kw)
+    except (discord.NotFound, discord.Forbidden):
+        print("[codegate] post: room %s is gone" % channel_id)
+        return None
     return str(msg.id)
 
 
