@@ -3,7 +3,9 @@
 """«تسليم الرموز» flow against a fake Discord + fake Hostaway, a temp brain.db, injected now.
 Run: python3 -m unittest tests.test_codegate_flow"""
 import asyncio
+import contextlib
 import datetime
+import io
 import json
 import os
 import sys
@@ -17,7 +19,9 @@ from codegate import db, engine, flow  # noqa: E402
 TZ = engine.tz()
 DAY = "2026-10-21"
 GATED, OPEN = 461328, 999
+GATED2 = 526697                     # a second gated unit (no turnover room in the fake)
 CODE_WORD = "كود الدخول 4821"       # what the fake code_in treats as "the code message"
+ROOM = "room-T"                     # the gated unit's turnover room in the fake
 
 
 def at(hh, mm=0):
@@ -31,6 +35,14 @@ def run(c):
 class Fake:
     def __init__(self):
         self.posts, self.edits, self.escalations = [], [], []
+        self.rooms = {(GATED, DAY): ROOM}           # (lid, day) -> turnover room
+        self.departures = set()
+        self.departure_calls = []
+        self.code_rooms, self.deleted, self.reviews, self.sends = [], [], [], []
+        self.send_result = (True, "sent")
+        self.create_ok = True
+        self.delete_ok = True
+        self.edit_ok = True
         self.arrivals = [self.arr("r1", GATED), self.arr("r9", OPEN)]
         self.msgs = {"c-r1": [{"inbound": False, "at": at(8),
                                "body": 'Please reply "I agree to the house rules"'},
@@ -46,18 +58,45 @@ class Fake:
 
     async def post(self, ch, text, embed=None, buttons=None):
         self._mid += 1
-        self.posts.append({"id": str(self._mid), "text": text, "embed": embed, "buttons": buttons})
+        self.posts.append({"id": str(self._mid), "ch": ch, "text": text, "embed": embed,
+                           "buttons": buttons})
         return str(self._mid)
 
     async def edit(self, ch, mid, embed=None, buttons=None):
-        self.edits.append({"id": mid, "embed": embed, "buttons": buttons})
-        return True
+        self.edits.append({"id": mid, "ch": ch, "embed": embed, "buttons": buttons})
+        return self.edit_ok
 
     async def escalate(self, title, detail):
         self.escalations.append(title)
 
-    async def channel(self):
-        return "900"
+    def find_room(self, lid, day):
+        return self.rooms.get((int(lid), day))
+
+    def departures_today(self, day):
+        self.departure_calls.append(day)
+        return set(self.departures)
+
+    async def create_code_room(self, item):
+        if not self.create_ok:
+            return None
+        ch = "code-%s-%d" % (item["res_id"], len(self.code_rooms) + 1)
+        self.code_rooms.append(ch)
+        return ch
+
+    def send_code(self, res_id, conversation_id):
+        self.sends.append(res_id)
+        if isinstance(self.send_result, Exception):
+            raise self.send_result
+        return self.send_result
+
+    async def delete_room(self, channel_id, reason):
+        if not self.delete_ok:
+            return False
+        self.deleted.append((channel_id, reason))
+        return True
+
+    async def log_review(self, text):
+        self.reviews.append(text)
 
 
 class FlowCase(unittest.TestCase):
@@ -67,7 +106,7 @@ class FlowCase(unittest.TestCase):
         db.reset_init_cache()
         units = os.path.join(self.tmp, "codegate_units.json")
         with open(units, "w") as fh:
-            json.dump({"listing_ids": [GATED]}, fh)
+            json.dump({"listing_ids": [GATED, GATED2]}, fh)
         self.f = Fake()
         self.now = at(9, 5)
         flow.wire_for_tests({
@@ -80,8 +119,10 @@ class FlowCase(unittest.TestCase):
                                         for m in msgs),
             "cover": lambda lid, day: {"name": "نورة", "did": "11", "role_id": "",
                                        "owner_did": "22"},
-            "channel": self.f.channel, "post": self.f.post, "edit": self.f.edit,
-            "escalate": self.f.escalate,
+            "post": self.f.post, "edit": self.f.edit, "escalate": self.f.escalate,
+            "find_room": self.f.find_room, "departures_today": self.f.departures_today,
+            "create_code_room": self.f.create_code_room, "send_code": self.f.send_code,
+            "delete_room": self.f.delete_room, "log_review": self.f.log_review,
         })
         self.asked_days = []
         self.addCleanup(self._restore_globals, bdb._DB_PATH_OVERRIDE)
@@ -104,7 +145,14 @@ class FlowCase(unittest.TestCase):
         return list(self.f.arrivals)
 
     def cards(self):
-        return [p for p in self.f.posts if p["buttons"]]
+        return [p for p in self.f.posts if p["embed"]]
+
+    def texts(self):
+        return [p for p in self.f.posts if not p["embed"]]
+
+    @staticmethod
+    def p(did="11", admin=False, ops=False, name="نورة"):
+        return {"name": name, "did": did, "is_admin": admin, "is_ops": ops}
 
 
 class TestTick(FlowCase):
@@ -121,18 +169,16 @@ class TestTick(FlowCase):
         run(flow.tick(force=True))
         self.assertEqual(len(self.cards()), 1)
 
-    def test_header_mentions_coverer_once(self):
+    def test_card_mentions_coverer_and_no_header(self):
         run(flow.tick())
-        headers = [p for p in self.f.posts if not p["buttons"]]
-        self.assertEqual(len(headers), 1)
-        self.assertIn("<@11>", headers[0]["text"])
+        self.assertEqual(self.texts(), [])                 # no per-person header any more
+        self.assertEqual(self.cards()[0]["text"], "<@11>")
 
     def test_tick_twice_and_restart_is_idempotent(self):
         run(flow.tick())
         db.reset_init_cache()                              # simulated redeploy
         run(flow.tick())
         self.assertEqual(len(self.cards()), 1)
-        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
         self.assertEqual(self.f.edits, [])                 # unchanged content → no edit
 
     def test_new_reply_edits_card(self):
@@ -185,51 +231,59 @@ class TestPress(FlowCase):
         run(flow.tick())
         self.mid = self.cards()[0]["id"]
 
-    def p(self, did="11", admin=False, ops=False, name="نورة"):
-        return {"name": name, "did": did, "is_admin": admin, "is_ops": ops}
-
-    def test_coverer_releases_card_turns_green(self):
-        ok, msg = run(flow.press_release(self.mid, self.p()))
+    def test_coverer_manual_card_turns_green(self):
+        ok, msg = run(flow.press_manual(self.mid, self.p()))
         self.assertTrue(ok)
         self.assertEqual(self.f.edits[-1]["embed"]["color"], engine.COLOR_DONE)
+        self.assertEqual(self.f.edits[-1]["buttons"], ["undo"])
         self.assertEqual(db.get("r1")["released_by"], "نورة")
+        self.assertEqual(self.f.sends, [])                 # manual = the bot sends nothing
 
     def test_stranger_refused(self):
-        ok, msg = run(flow.press_release(self.mid, self.p(did="77", name="x")))
-        self.assertFalse(ok)
+        for press in (flow.press_send, flow.press_manual):
+            ok, msg = run(press(self.mid, self.p(did="77", name="x")))
+            self.assertFalse(ok)
+            self.assertIn("نورة", msg)
         self.assertIsNone(db.get("r1")["released_at"])
+        self.assertEqual(self.f.sends, [])
 
     def test_double_press_first_wins(self):
-        run(flow.press_release(self.mid, self.p()))
-        ok, msg = run(flow.press_release(self.mid, self.p(did="22", name="ناصر")))
+        run(flow.press_manual(self.mid, self.p()))
+        ok, msg = run(flow.press_manual(self.mid, self.p(did="22", name="ناصر")))
         self.assertFalse(ok)
         self.assertIn("أُرسل من قبل", msg)
 
     def test_unknown_message(self):
-        ok, msg = run(flow.press_release("424242", self.p()))
-        self.assertFalse(ok)
+        for press in (flow.press_send, flow.press_manual):
+            ok, msg = run(press("424242", self.p()))
+            self.assertFalse(ok)
+
+    def test_release_alias_is_manual(self):
+        """bot.py (revision 1) still calls press_release until R3 rewires the view."""
+        self.assertIs(flow.press_release, flow.press_manual)
 
     def test_release_stops_alerts(self):
-        run(flow.press_release(self.mid, self.p()))
+        run(flow.press_manual(self.mid, self.p()))
         self.now = at(16, 30)
         run(flow.tick())
         self.assertEqual(self.f.escalations, [])
 
     def test_honesty_warning_when_code_not_seen(self):
         self.now = at(13)
-        run(flow.press_release(self.mid, self.p()))
+        run(flow.press_manual(self.mid, self.p()))
         self.now = at(13, 20)
         run(flow.tick())
         warns = [p for p in self.f.posts if p["text"] and "ما شفت رسالة الرمز" in p["text"]]
         self.assertEqual(len(warns), 1)
         self.assertIn("<@11>", warns[0]["text"])
+        self.assertEqual(warns[0]["ch"], ROOM)              # into the card's room
         run(flow.tick())
         self.assertEqual(len([p for p in self.f.posts
                               if p["text"] and "ما شفت رسالة الرمز" in p["text"]]), 1)
 
     def test_no_warning_when_code_seen(self):
         self.now = at(13)
-        run(flow.press_release(self.mid, self.p()))
+        run(flow.press_manual(self.mid, self.p()))
         self.f.code["c-r1"] = True
         self.now = at(13, 20)
         run(flow.tick())
@@ -237,12 +291,14 @@ class TestPress(FlowCase):
         self.assertFalse(any(p["text"] and "ما شفت" in p["text"] for p in self.f.posts))
 
     def test_undo_admin_only(self):
-        run(flow.press_release(self.mid, self.p()))
+        run(flow.press_manual(self.mid, self.p()))
         ok, _ = run(flow.press_undo(self.mid, self.p()))
         self.assertFalse(ok)
-        ok, _ = run(flow.press_undo(self.mid, self.p(did="5", admin=True, name="Faisal")))
+        ok, msg = run(flow.press_undo(self.mid, self.p(did="5", admin=True, name="Faisal")))
         self.assertTrue(ok)
+        self.assertIn("صححت السجل — الرسالة اللي انرسلت ما تنحذف.", msg)
         self.assertIsNone(db.get("r1")["released_at"])
+        self.assertEqual(self.f.edits[-1]["buttons"], ["send", "manual"])
 
 
 class TestRobust(FlowCase):
@@ -292,7 +348,7 @@ class TestRobust(FlowCase):
         self.assertEqual(self.cards(), [])
         self.assertIsNone(db.get("r1")["card_message_id"])
 
-    def test_failed_header_post_is_retried(self):
+    def test_failed_card_post_is_retried(self):
         real = self.f.post
         state = {"n": 0}
 
@@ -303,9 +359,9 @@ class TestRobust(FlowCase):
             return await real(ch, text, embed=embed, buttons=buttons)
         flow.HOST.post = post
         run(flow.tick())
-        self.assertEqual([p for p in self.f.posts if not p["buttons"]], [])
+        self.assertEqual(self.cards(), [])
         run(flow.tick())
-        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
+        self.assertEqual(len(self.cards()), 1)
 
     def test_release_during_alert_is_not_followed_by_alert_or_red_card(self):
         run(flow.tick())
@@ -315,8 +371,8 @@ class TestRobust(FlowCase):
 
         async def escalate(title, detail):
             await real(title, detail)
-            await flow.press_release(mid, {"name": "نورة", "did": "11",
-                                           "is_admin": False, "is_ops": False})
+            await flow.press_manual(mid, {"name": "نورة", "did": "11",
+                                          "is_admin": False, "is_ops": False})
         flow.HOST.escalate = escalate
         run(flow.tick())
         self.assertEqual(self.f.edits[-1]["embed"]["color"], engine.COLOR_DONE)
@@ -346,28 +402,27 @@ class TestRobust(FlowCase):
         run(flow.tick())
         it = db.get("r1")
         self.assertEqual((it["cover_name"], it["cover_did"]), ("نورة", "11"))
-        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
 
 
 class TestPressEdges(FlowCase):
-    def p(self):
-        return {"name": "نورة", "did": "11", "is_admin": False, "is_ops": False}
-
     def test_press_on_cancelled_booking_refused(self):
         run(flow.tick())
         mid = self.cards()[0]["id"]
         self.f.arrivals = []
         self.now = at(10)
         run(flow.tick())
-        ok, msg = run(flow.press_release(mid, self.p()))
-        self.assertFalse(ok)
+        for press in (flow.press_send, flow.press_manual):
+            ok, msg = run(press(mid, self.p()))
+            self.assertFalse(ok)
+            self.assertIn("ملغي", msg)
         self.assertIsNone(db.get("r1")["released_at"])
+        self.assertEqual(self.f.sends, [])
 
     def test_press_after_redeploy_still_works(self):
         run(flow.tick())
         mid = self.cards()[0]["id"]
         db.reset_init_cache()
-        ok, _ = run(flow.press_release(mid, self.p()))
+        ok, _ = run(flow.press_manual(mid, self.p()))
         self.assertTrue(ok)
         self.assertEqual(db.get("r1")["released_by"], "نورة")
 
@@ -379,10 +434,10 @@ class TestSoak(FlowCase):
     def test_default_is_soak(self):
         self.assertFalse(flow.live())
 
-    def test_soak_posts_cards_and_headers_only(self):
+    def test_soak_posts_cards_only(self):
         run(flow.tick())
         self.assertEqual(len(self.cards()), 1)
-        self.assertEqual(len([p for p in self.f.posts if not p["buttons"]]), 1)
+        self.assertEqual(self.texts(), [])
         blob = json.dumps(self.cards()[0]["embed"], ensure_ascii=False)
         self.assertIn(engine.SOAK_NAME, blob)
         self.assertIn(engine.SOAK_TEXT, blob)
@@ -410,8 +465,8 @@ class TestSoak(FlowCase):
         calls = []
         flow.HOST.code_sent = lambda cid: calls.append(cid) or False
         self.now = at(13)
-        ok, _ = run(flow.press_release(mid, {"name": "نورة", "did": "11",
-                                             "is_admin": False, "is_ops": False}))
+        ok, _ = run(flow.press_manual(mid, {"name": "نورة", "did": "11",
+                                            "is_admin": False, "is_ops": False}))
         self.assertTrue(ok)
         self.assertIn(engine.SOAK_NAME, json.dumps(self.f.edits[-1]["embed"], ensure_ascii=False))
         self.now = at(13, 30)
@@ -476,8 +531,8 @@ class TestCodeCheckErrors(FlowCase):
         run(flow.tick())
         mid = self.cards()[0]["id"]
         self.now = at(13)
-        run(flow.press_release(mid, {"name": "نورة", "did": "11",
-                                     "is_admin": False, "is_ops": False}))
+        run(flow.press_manual(mid, {"name": "نورة", "did": "11",
+                                    "is_admin": False, "is_ops": False}))
 
         def boom(cid):
             raise RuntimeError("hostaway 500")
@@ -638,8 +693,8 @@ class TestGoLive(FlowCase):
 
     def test_press_before_the_check_wins_and_is_kept(self):
         mid = db.get("r2")["card_message_id"]
-        ok, _ = run(flow.press_release(mid, {"name": "نورة", "did": "11",
-                                             "is_admin": False, "is_ops": False}))
+        ok, _ = run(flow.press_manual(mid, {"name": "نورة", "did": "11",
+                                            "is_admin": False, "is_ops": False}))
         self.assertTrue(ok)
         self.give_code("c-r2")
         run(flow.tick())
@@ -711,6 +766,447 @@ class TestGoLive(FlowCase):
         run(flow.tick())
         self.assertIsNone(db.get("r1")["prelive_checked_at"])
         self.assertEqual(len(self.f.escalations), 2)        # r1 late + r2 2h, as before
+
+
+def quiet(fn, *a, **k):
+    """Run fn with the package's expected failure prints swallowed (pristine test output)."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*a, **k)
+
+
+class TestPlacement(FlowCase):
+    """R2: the card lives in the unit's turnover room; a code-only room only when none comes."""
+
+    def test_card_goes_into_turnover_room(self):
+        run(flow.tick())
+        card = self.cards()[0]
+        self.assertEqual(card["ch"], ROOM)
+        self.assertEqual(card["buttons"], ["send", "manual"])
+        it = db.get("r1")
+        self.assertEqual((it["channel_id"], it["room_kind"]), (ROOM, "turnover"))
+        self.assertEqual(self.f.code_rooms, [])
+        self.assertEqual(self.f.departure_calls, [])    # nobody needed a fallback
+
+    def test_code_room_when_no_departure(self):
+        self.f.rooms = {}
+        self.f.arrivals = [self.f.arr("r1", GATED), self.f.arr("r2", GATED2)]
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r2-2"])
+        self.assertEqual(self.f.departure_calls, [DAY])  # once per tick, not per item
+        self.assertEqual({c["ch"] for c in self.cards()}, {"code-r1-1", "code-r2-2"})
+        self.assertEqual(db.get("r1")["room_kind"], "code")
+        run(flow.tick())                                  # placed: no second room
+        self.assertEqual(len(self.f.code_rooms), 2)
+        self.assertEqual(len(self.cards()), 2)
+
+    def test_waits_for_late_turnover_room(self):
+        """Checkout after 21:00: the turnover room opens after 09:00. No code room meanwhile."""
+        self.f.rooms = {}
+        self.f.departures = {GATED}
+        run(flow.tick())
+        self.now = at(11, 0)
+        run(flow.tick())
+        self.assertEqual(self.cards(), [])
+        self.assertEqual(self.f.code_rooms, [])
+        self.f.rooms = {(GATED, DAY): ROOM}               # the turnover room appears
+        self.now = at(12, 0)
+        run(flow.tick())
+        self.assertEqual([c["ch"] for c in self.cards()], [ROOM])
+        self.assertEqual(self.f.code_rooms, [])
+
+    def test_fallback_code_room_at_2h(self):
+        self.f.rooms = {}
+        self.f.departures = {GATED}
+        self.now = at(13, 59)
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, [])
+        self.assertEqual(self.f.escalations, [])
+        self.now = at(14, 0)
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r1-1"])
+        self.assertEqual([c["ch"] for c in self.cards()], ["code-r1-1"])
+        alerts = [p for p in self.texts() if "باقي ساعتين" in (p["text"] or "")]
+        self.assertEqual([a["ch"] for a in alerts], ["code-r1-1"])   # the alert is in the room
+        self.assertEqual(len(self.f.escalations), 1)
+
+    def test_departure_lookup_error_waits_until_fallback(self):
+        self.f.rooms = {}
+
+        def boom(day):
+            raise RuntimeError("hostaway 500")
+        flow.HOST.departures_today = boom
+        quiet(run, flow.tick())
+        self.assertEqual(self.f.code_rooms, [])           # unknown ≠ "no departure"
+        self.now = at(14, 0)
+        quiet(run, flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r1-1"])
+
+    def test_code_room_failure_retried(self):
+        self.f.rooms = {}
+        self.f.create_ok = False
+        run(flow.tick())
+        self.assertEqual(self.cards(), [])
+        self.assertIsNone(db.get("r1")["channel_id"])
+        self.f.create_ok = True
+        self.now = at(9, 20)
+        run(flow.tick())
+        self.assertEqual([c["ch"] for c in self.cards()], ["code-r1-1"])
+
+    def test_alerts_post_into_room(self):
+        self.f.arrivals = [self.f.arr("r1", GATED), self.f.arr("r2", GATED2)]
+        self.f.create_ok = False                          # r2 can't get a room
+        self.now = at(14, 1)
+        run(flow.tick())
+        alerts = [p for p in self.texts() if "باقي ساعتين" in (p["text"] or "")]
+        self.assertEqual([a["ch"] for a in alerts], [ROOM])           # r1, in its room
+        self.assertEqual(len(self.f.escalations), 2)                  # r2 still escalates
+        self.assertTrue(any("U%s" % GATED2 in t for t in self.f.escalations))
+
+
+class TestSoakR2(FlowCase):
+    LIVE = False
+
+    def test_soak_only_existing_turnover_rooms_no_buttons(self):
+        self.f.arrivals = [self.f.arr("r1", GATED), self.f.arr("r2", GATED2)]
+        run(flow.tick())
+        self.assertEqual([c["ch"] for c in self.cards()], [ROOM])
+        self.assertEqual(self.cards()[0]["buttons"], [])
+        self.assertIn(engine.SOAK_NAME, json.dumps(self.cards()[0]["embed"], ensure_ascii=False))
+        self.now = at(14, 30)
+        run(flow.tick())
+        self.now = at(16, 30)
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, [])           # no code-only room in soak
+        self.assertEqual(self.f.departure_calls, [])
+        self.assertEqual(self.f.escalations, [])
+        self.assertEqual(self.texts(), [])
+        self.assertIsNone(db.get("r2")["channel_id"])
+        self.assertFalse(flow.should_hold(GATED, DAY))    # no holds in soak
+        ok, msg = run(flow.press_send(self.cards()[0]["id"], self.p()))
+        self.assertFalse(ok)                              # Hostaway still auto-sends
+        self.assertEqual(self.f.sends, [])
+        self.assertIsNone(db.get("r1")["released_at"])
+
+    def test_lost_card_dropped_in_soak(self):
+        run(flow.tick())
+        self.f.edit_ok = False
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 10), "body": "see you"})
+        self.now = at(9, 20)
+        run(flow.tick())
+        self.assertEqual(db.get("r1")["channel_id"], ROOM)
+        self.f.rooms = {}
+        self.now = at(9, 30)
+        run(flow.tick())
+        self.assertEqual(len(self.cards()), 1)
+        self.assertEqual(self.f.code_rooms, [])
+
+
+class TestSend(FlowCase):
+    def setUp(self):
+        super().setUp()
+        self.f.rooms = {}                                 # vacant last night: code-only room
+        run(flow.tick())
+        self.mid = self.cards()[0]["id"]
+        self.room = "code-r1-1"
+
+    def test_send_success_records_green_and_deletes_code_room(self):
+        self.now = at(12, 7)
+        ok, msg = run(flow.press_send(self.mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(msg, "تم ✅ — أرسلت الرمز للضيف.")
+        self.assertEqual(self.f.sends, ["r1"])
+        it = db.get("r1")
+        self.assertEqual((it["released_by"], it["sent_by_bot"], it["code_seen"]), ("نورة", 1, 1))
+        self.assertEqual(self.f.edits[-1]["embed"]["color"], engine.COLOR_DONE)
+        self.assertEqual(self.f.deleted, [(self.room, "codegate: code sent")])
+        self.assertEqual(len(self.f.reviews), 1)
+        line = self.f.reviews[0]
+        for part in ("🔑 أُرسل الرمز", "U%s" % GATED, "Gr1", "نورة", "12:07"):
+            self.assertIn(part, line)
+        self.assertIsNone(it["channel_id"])
+        kinds = [e["kind"] for e in db._q("SELECT kind FROM codegate_events WHERE res_id='r1'")]
+        self.assertIn("code_sent_bot", kinds)
+        self.now = at(16, 30)                             # nothing re-posted, nothing alerted
+        run(flow.tick())
+        self.assertEqual(len(self.cards()), 1)
+        self.assertEqual(self.f.escalations, [])
+        self.assertEqual(len(self.f.deleted), 1)
+
+    def test_send_empty_code_refuses_and_records_nothing(self):
+        self.f.send_result = (False, "no_code")
+        ok, msg = run(flow.press_send(self.mid, self.p()))
+        self.assertFalse(ok)
+        self.assertIn("Hostaway ما فيه رمز لهذا الحجز", msg)
+        self.assertIn(engine.LABEL_MANUAL, msg)
+        it = db.get("r1")
+        self.assertIsNone(it["released_at"])
+        self.assertIsNone(it["released_by"])
+        self.assertFalse(it["sent_by_bot"])
+        self.assertEqual(self.f.deleted, [])
+        self.assertEqual(self.f.edits[-1]["buttons"] if self.f.edits else ["send", "manual"],
+                         ["send", "manual"])
+        ok, _ = run(flow.press_manual(self.mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(db.get("r1")["released_by"], "نورة")
+        self.assertEqual(self.f.deleted, [])              # manual: wait for the honesty check
+
+    def test_send_failure_undoes_release(self):
+        cases = [((False, "killed"), "مفتاح الإيقاف"),
+                 ((False, "duplicate"), "ما أرسلتها مرتين"),
+                 ((False, "error"), "Hostaway ما رد"),
+                 ((False, "something new"), "Hostaway ما رد"),
+                 (RuntimeError("boom"), "Hostaway ما رد"),
+                 (None, "Hostaway ما رد")]
+        for result, want in cases:
+            with self.subTest(result=result):
+                self.f.send_result = result
+                ok, msg = quiet(run, flow.press_send(self.mid, self.p()))
+                self.assertFalse(ok)
+                self.assertIn(want, msg)
+                it = db.get("r1")
+                self.assertIsNone(it["released_at"])
+                self.assertFalse(it["sent_by_bot"])
+        self.assertEqual(self.f.deleted, [])
+        kinds = [e["kind"] for e in db._q("SELECT kind FROM codegate_events WHERE res_id='r1'")]
+        self.assertEqual(kinds.count("code_send_failed"), len(cases))
+        self.now = at(14, 1)                              # still waiting: the alert still fires
+        run(flow.tick())
+        self.assertEqual(len(self.f.escalations), 1)
+
+    def test_send_double_press_one_send(self):
+        async def both():
+            return await asyncio.gather(flow.press_send(self.mid, self.p()),
+                                        flow.press_send(self.mid, self.p(did="22", name="ناصر")))
+        res = run(both())
+        self.assertEqual(sorted(ok for ok, _ in res), [False, True])
+        self.assertIn("أُرسل من قبل", [m for ok, m in res if not ok][0])
+        ok, msg = run(flow.press_send(self.mid, self.p()))
+        self.assertFalse(ok)
+        self.assertEqual(self.f.sends, ["r1"])
+
+    def test_manual_records_then_honesty_deletes_code_room(self):
+        self.now = at(13)
+        ok, _ = run(flow.press_manual(self.mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(self.f.sends, [])
+        self.now = at(13, 10)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [])              # not checked yet
+        self.f.code["c-r1"] = True
+        self.now = at(13, 20)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(self.room, "codegate: code sent")])
+        self.assertEqual(len(self.f.reviews), 1)
+        self.assertIn("نورة", self.f.reviews[0])
+        run(flow.tick())
+        self.assertEqual(len(self.f.deleted), 1)
+
+    def test_manual_without_code_keeps_room(self):
+        self.now = at(13)
+        run(flow.press_manual(self.mid, self.p()))
+        self.now = at(13, 20)
+        run(flow.tick())                                  # honesty check: no code
+        self.assertEqual(self.f.deleted, [])
+        self.assertEqual(db.get("r1")["code_seen"], 0)
+
+    def test_audit_line_on_every_delete(self):
+        """A failed delete writes no audit line, never raises, and is retried by the tick."""
+        self.f.delete_ok = False
+        ok, _ = quiet(run, flow.press_send(self.mid, self.p()))
+        self.assertTrue(ok)                               # the code WAS sent
+        self.assertEqual(self.f.reviews, [])
+        self.assertEqual(db.get("r1")["channel_id"], self.room)
+        self.f.delete_ok = True
+        self.now = at(9, 20)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(self.room, "codegate: code sent")])
+        self.assertEqual(len(self.f.reviews), len(self.f.deleted))
+
+    def test_undo_after_bot_send_only_corrects_record(self):
+        run(flow.press_send(self.mid, self.p()))
+        ok, msg = run(flow.press_undo(self.mid, self.p(did="5", admin=True, name="Faisal")))
+        # the room (and so the card) is gone after a bot send: nothing to undo from
+        self.assertFalse(ok)
+        self.assertEqual(self.f.sends, ["r1"])
+
+
+class TestHoldAndClose(FlowCase):
+    def setUp(self):
+        super().setUp()
+        run(flow.tick())
+        self.mid = self.cards()[0]["id"]
+
+    def test_pending_close_runs_after_send(self):
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        flow.defer_close(GATED, DAY)
+        self.assertEqual(db.get("r1")["room_close_pending"], 1)
+        self.now = at(15, 3)
+        ok, _ = run(flow.press_send(self.mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(self.f.deleted, [(ROOM, "codegate: code sent")])
+        self.assertEqual(db.get("r1")["room_close_pending"], 0)
+        self.assertEqual(len(self.f.reviews), 1)
+        self.assertIn("15:03", self.f.reviews[0])
+
+    def test_turnover_room_not_deleted_without_pending(self):
+        ok, _ = run(flow.press_send(self.mid, self.p()))
+        self.assertTrue(ok)
+        self.assertEqual(self.f.deleted, [])
+        self.assertEqual(self.f.reviews, [])
+        self.assertFalse(flow.should_hold(GATED, DAY))    # sent: cleaning may delete it
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [])
+
+    def test_pending_close_after_manual_waits_for_honesty(self):
+        flow.defer_close(GATED, DAY)
+        self.now = at(13)
+        run(flow.press_manual(self.mid, self.p()))
+        self.assertEqual(self.f.deleted, [])
+        self.f.code["c-r1"] = True
+        self.now = at(13, 20)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(ROOM, "codegate: code sent")])
+
+    def test_held_room_closed_when_booking_cancelled(self):
+        flow.defer_close(GATED, DAY)
+        self.f.arrivals = []
+        self.now = at(11)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(ROOM, "codegate: booking cancelled")])
+        self.assertEqual(len(self.f.reviews), 1)
+
+    def test_held_room_closed_next_day_without_code(self):
+        flow.defer_close(GATED, DAY)
+        self.f.arrivals = []
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(ROOM, "codegate: day over")])
+        self.assertEqual(len(self.f.reviews), 1)
+
+    def test_unheld_turnover_room_never_swept(self):
+        self.f.arrivals = []
+        self.now = at(11)
+        run(flow.tick())                                  # cancelled, not held
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        run(flow.tick())                                  # day over, not held
+        self.assertEqual(self.f.deleted, [])
+
+    def test_should_hold_matrix(self):
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        self.assertTrue(flow.should_hold(str(GATED), DAY))
+        self.assertFalse(flow.should_hold(OPEN, DAY))       # not gated
+        self.assertFalse(flow.should_hold(GATED2, DAY))     # gated, but no arrival today
+        self.assertFalse(flow.should_hold(GATED, "2026-10-22"))
+        self.assertFalse(flow.should_hold(None, DAY))
+        flow.set_live(False, "t")
+        self.assertFalse(flow.should_hold(GATED, DAY))      # soak
+        flow.set_live(True, "t")
+        real = flow.db.items_for
+
+        def boom(lid, day):
+            raise RuntimeError("db locked")
+        flow.db.items_for = boom
+        try:
+            self.assertFalse(quiet(flow.should_hold, GATED, DAY))   # never raises
+        finally:
+            flow.db.items_for = real
+        run(flow.press_manual(self.mid, self.p()))
+        self.assertFalse(flow.should_hold(GATED, DAY))      # released
+        db.undo("r1", "t", "t")
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        self.f.arrivals = []
+        self.now = at(10)
+        run(flow.tick())
+        self.assertFalse(flow.should_hold(GATED, DAY))      # cancelled
+
+    def test_lost_card_reposted_when_live(self):
+        self.f.edit_ok = False
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 10), "body": "see you"})
+        self.now = at(9, 20)
+        run(flow.tick())
+        it = db.get("r1")
+        self.assertIsNone(it["channel_id"])
+        self.assertIsNone(it["card_message_id"])
+        self.f.edit_ok = True
+        self.now = at(9, 30)
+        run(flow.tick())                                  # turnover room still there
+        self.assertEqual([c["ch"] for c in self.cards()], [ROOM, ROOM])
+        self.f.edit_ok = False                            # now the whole room goes
+        self.f.rooms = {}
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 35), "body": "ok"})
+        self.now = at(9, 40)
+        run(flow.tick())
+        self.f.edit_ok = True
+        self.now = at(9, 50)
+        run(flow.tick())
+        self.assertEqual([c["ch"] for c in self.cards()], [ROOM, ROOM, "code-r1-1"])
+
+    def test_lost_code_room_card_closes_old_room(self):
+        """Only the card was deleted by hand: the old code-only room must not be orphaned."""
+        self.f.rooms = {}
+        self.f.arrivals = [self.f.arr("r2", GATED2)]
+        run(flow.tick())
+        self.f.edit_ok = False
+        self.f.msgs["c-r2"] = [{"inbound": True, "at": at(9, 10), "body": "hello"}]
+        self.now = at(9, 20)
+        run(flow.tick())
+        self.assertEqual([d[0] for d in self.f.deleted], ["code-r2-1"])
+        self.assertEqual(len(self.f.reviews), 1)
+        self.f.edit_ok = True
+        self.now = at(9, 30)
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r2-1", "code-r2-2"])
+
+
+class TestRoomCleanup(FlowCase):
+    def setUp(self):
+        super().setUp()
+        self.f.rooms = {}
+        run(flow.tick())
+        self.room = "code-r1-1"
+
+    def test_cancelled_code_room_deleted(self):
+        self.f.arrivals = []
+        self.now = at(11)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(self.room, "codegate: booking cancelled")])
+        self.assertEqual(len(self.f.reviews), 1)
+        self.assertIn("ملغي", self.f.reviews[0])
+        run(flow.tick())
+        self.assertEqual(len(self.f.deleted), 1)
+
+    def test_old_code_room_deleted_next_day(self):
+        self.f.arrivals = []
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [(self.room, "codegate: day over")])
+        self.assertEqual(len(self.f.reviews), 1)
+
+    def test_moved_booking_closes_old_code_room(self):
+        nxt = "2026-10-22"
+        self.f.arrivals = [dict(self.f.arr("r1", GATED), day=nxt,
+                                checkin_at=nxt + "T16:00:00+03:00")]
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        run(flow.tick())
+        self.assertIn((self.room, "codegate: booking moved"), self.f.deleted)
+        self.assertEqual(self.f.code_rooms, [self.room, "code-r1-2"])   # a fresh room today
+
+    def test_soak_never_deletes(self):
+        flow.set_live(False, "t")
+        self.f.arrivals = []
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        run(flow.tick())
+        self.assertEqual(self.f.deleted, [])
+
+    def test_turnover_room_of_cancelled_booking_not_deleted(self):
+        self.f.rooms = {(GATED2, DAY): "room-2"}
+        self.f.arrivals = [self.f.arr("r1", GATED), self.f.arr("r2", GATED2)]
+        self.now = at(9, 30)
+        run(flow.tick())
+        self.f.arrivals = [self.f.arr("r1", GATED)]
+        self.now = at(10)
+        run(flow.tick())
+        self.assertNotIn("room-2", [d[0] for d in self.f.deleted])
 
 
 if __name__ == "__main__":

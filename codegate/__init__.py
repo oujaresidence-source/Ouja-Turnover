@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 codegate — «تسليم الرموز». On gated listings the guest replies «أوافق» to the house-rules
-message and the employee covering the unit that day releases the door code BY HAND.
+message; the employee covering the unit that day presses one button and the bot sends the door
+code (or records one sent by hand). Spec §9, revision 2.
 
     engine.py — PURE: replies, alerts, permission, every word
     db.py     — codegate_* tables in brain.db
     host.py   — HOST bridge filled by bot.py (codegate.wire)
-    flow.py   — tick + the two buttons
+    flow.py   — tick, room placement/holds/closes, the send/manual/undo buttons
 
-The bot never decides agreement and never sends a code (owner ruling 2026-10-21).
+The bot never decides agreement; it sends a code only when a person presses «✅ وافق — أرسل
+الرمز» on a live gated unit (owner ruling 2026-10-22, replacing 2026-10-21's "never sends").
 """
 
 from . import engine, db, flow  # noqa: F401

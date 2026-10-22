@@ -200,6 +200,18 @@ class TestDb(unittest.TestCase):
         self.assertEqual(sorted(r["res_id"] for r in db.code_room_items()), ["r1", "r2"])
         self.assertEqual([r["res_id"] for r in db.code_room_items(older_than_day=DAY)], ["r2"])
 
+    def test_held_room_items(self):
+        db.upsert_arrival(row("r1", day="2026-10-20"))
+        db.upsert_arrival(row("r2", day="2026-10-20"))
+        db.upsert_arrival(row("r3"))
+        db.set_room("r1", "T1", "turnover")
+        db.set_room("r2", "T2", "turnover")
+        db.set_room("r3", "T3", "turnover")
+        db.set_close_pending("r1", True)
+        db.set_close_pending("r3", True)
+        self.assertEqual(sorted(r["res_id"] for r in db.held_room_items()), ["r1", "r3"])
+        self.assertEqual([r["res_id"] for r in db.held_room_items(older_than_day=DAY)], ["r1"])
+
     def test_items_for_unit_day(self):
         db.upsert_arrival(row("r1"))
         db.upsert_arrival(row("r2", lid=5))

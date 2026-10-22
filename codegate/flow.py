@@ -1,11 +1,14 @@
 # codegate/flow.py
 # -*- coding: utf-8 -*-
 """
-codegate.flow — the tick and the two buttons of «تسليم الرموز».
+codegate.flow — the tick and the buttons of «تسليم الرموز» (revision 2, spec §9).
 
-The bot LISTS, RECORDS and ALERTS. It never decides that a guest agreed and never sends a code:
-a person reads the quoted reply, sends the code from Hostaway's saved reply, and presses
-«✅ وافق وأرسلت الرمز».
+The card lives in the unit's turnover room for the day; with no turnover coming, in a code-only
+room (live only). The bot never decides that a guest agreed: a person reads the reply (the card
+shows a hint) and presses «✅ وافق — أرسل الرمز», the ONLY path that sends a door code, or
+«📝 أرسلته يدوياً» for a code sent by hand. A turnover room the bot held for the code, and every
+code-only room, closes once the code is with the guest. Soak (switch OFF): cards in existing
+turnover rooms only — no rooms opened, no holds, no re-posts, no alerts, no send button.
 """
 
 import asyncio
@@ -145,33 +148,165 @@ def _mention(it):
     return ""
 
 
-def _buttons(it):
-    if it.get("cancelled"):
+def _buttons(it, is_live):
+    """Soak: none (the soak note explains; Hostaway still auto-sends). Live: send + manual
+    until released, then admin undo."""
+    if it.get("cancelled") or not is_live:
         return []
-    return ["undo"] if it.get("released_at") else ["release"]
+    return ["undo"] if it.get("released_at") else ["send", "manual"]
 
 
-async def _render(it, now_, channel_id, soak=False):
-    """Post the card if it has none; edit it only when its content changed."""
+async def _render(it, now_, is_live):
+    """Post the card into its room if it has none; edit it only when its content changed.
+    No room yet → nothing. Returns "posted" | "edited" | "lost" | None."""
     if it.get("cancelled") and not it.get("card_message_id"):
         return None                     # never had a card, never will
+    channel_id = it.get("channel_id")
+    if not channel_id:
+        return None                     # placement hasn't found or opened a room yet
     view = _view_item(it)
-    embed = engine.card(view, now_, soak=soak)
-    h = engine.content_hash({"e": embed, "b": _buttons(it)})
+    embed = engine.card(view, now_, soak=not is_live)
+    buttons = _buttons(it, is_live)
+    h = engine.content_hash({"e": embed, "b": buttons})
     if not it.get("card_message_id"):
-        mid = await HOST.post(channel_id, _mention(it) or None, embed=embed, buttons=_buttons(it))
+        mid = await HOST.post(channel_id, _mention(it) or None, embed=embed, buttons=buttons)
         if mid:
             await run_blocking(db.set_card, it["res_id"], channel_id, mid, h)
-            await run_blocking(db.event, it["res_id"], "card_posted")
+            await run_blocking(db.event, it["res_id"], "card_posted", "", str(channel_id))
             return "posted"
         return None
     if h != it.get("card_hash"):
-        ok = await HOST.edit(it.get("channel_id") or channel_id, it["card_message_id"],
-                             embed=embed, buttons=_buttons(it))
+        ok = await HOST.edit(channel_id, it["card_message_id"], embed=embed, buttons=buttons)
         if ok:
             await run_blocking(db.set_hash, it["res_id"], h)
             return "edited"
+        if is_live:
+            await _card_lost(it)
+            return "lost"
+        # soak: leave it (no re-posts in soak)
     return None
+
+
+async def _card_lost(it):
+    """Live: the card (or its whole room) was deleted. Forget the room so placement runs again
+    next tick. A code-only room whose card alone was deleted would otherwise be orphaned, so it
+    is closed (best effort: if the room itself is gone the delete just fails)."""
+    rid = it["res_id"]
+    await run_blocking(db.event, rid, "card_lost", "", str(it.get("channel_id") or ""))
+    if it.get("room_kind") == "code" and it.get("channel_id"):
+        await _close_room(it, "codegate: card lost",
+                          "🗑️ غرفة رمز انحذفت بطاقتها — بفتح غيرها · %s · %s · %s"
+                          % (it.get("unit") or "", it.get("guest") or "",
+                             _hhmm_now()))
+    await run_blocking(db.set_room, rid, None, None)
+
+
+def _hhmm_now():
+    return _now_riyadh().strftime("%H:%M")
+
+
+async def _close_room(it, reason, audit):
+    """Delete the item's room. Success → the item forgets the room, the held close is cleared and
+    one audit line goes to #oujact-review. Failure → logged, kept for a retry, never raises."""
+    rid, ch = it["res_id"], it.get("channel_id")
+    if not ch:
+        return False
+    try:
+        ok = bool(await HOST.delete_room(ch, reason)) if HOST.delete_room else False
+    except Exception as e:
+        print("[codegate] room delete %s (%s) raised: %s" % (ch, rid, e))
+        ok = False
+    if not ok:
+        print("[codegate] room delete %s (%s) failed: %s" % (ch, rid, reason))
+        try:
+            await run_blocking(db.event, rid, "room_delete_failed", "", reason)
+        except Exception:
+            pass
+        return False
+    try:
+        await run_blocking(db.set_room, rid, None, None)
+        await run_blocking(db.set_close_pending, rid, False)
+        await run_blocking(db.event, rid, "room_deleted", "", "%s %s" % (reason, ch))
+    except Exception as e:
+        print("[codegate] room %s deleted but not recorded (%s): %s" % (ch, rid, e))
+    try:
+        if HOST.log_review:
+            await HOST.log_review(audit)
+    except Exception as e:
+        print("[codegate] audit line for %s failed: %s" % (rid, e))
+    return True
+
+
+def _delivered(it):
+    """The code is known to be with the guest: the bot sent it, or the honesty check (or the
+    go-live look) saw it in the chat after a manual record."""
+    return bool(it.get("released_at")) and bool(it.get("sent_by_bot") or it.get("code_seen") == 1)
+
+
+async def _after_code_sent(it):
+    """Once the code is with the guest: a code-only room closes; a turnover room closes only if
+    cleaning already asked to delete it (room_close_pending). Idempotent — the tick calls it
+    again for a delete that failed."""
+    if not it or not it.get("channel_id") or not _delivered(it):
+        return False
+    kind = it.get("room_kind")
+    if kind == "code" or (kind == "turnover" and it.get("room_close_pending")):
+        audit = "🔑 أُرسل الرمز · %s · %s · %s · %s" % (
+            it.get("unit") or "", it.get("guest") or "", it.get("released_by") or "",
+            engine._hhmm(it.get("released_at")) or _hhmm_now())
+        return await _close_room(it, "codegate: code sent", audit)
+    return False
+
+
+async def _departures(ctx, day):
+    """Listing ids with a departure today, fetched at most once per tick. None = unknown."""
+    if "departures" not in ctx:
+        try:
+            got = await run_blocking(HOST.departures_today, day) if HOST.departures_today \
+                else None
+            ctx["departures"] = None if got is None else {int(x) for x in got}
+        except Exception as e:
+            print("[codegate] departures lookup failed: %s" % e)
+            ctx["departures"] = None
+    return ctx["departures"]
+
+
+async def _place(it, now_, is_live, ctx, rep):
+    """Give a waiting card a room: the unit's turnover room if it exists; live only, a code-only
+    room — unless a departure today means the turnover room is still coming, in which case wait
+    until check-in − 2h. Soak never opens a room."""
+    if it.get("channel_id") or it.get("cancelled") or it.get("released_at"):
+        return it
+    rid, day = it["res_id"], it.get("day")
+    try:
+        room = await run_blocking(HOST.find_room, it.get("lid"), day) if HOST.find_room else None
+    except Exception as e:      # don't open a code room just because the lookup hiccupped
+        print("[codegate] find_room %s failed: %s" % (rid, e))
+        return it
+    if room:
+        await run_blocking(db.set_room, rid, room, "turnover")
+        return await run_blocking(db.get, rid)
+    if not is_live:
+        return it
+    ci = _dt(it.get("checkin_at"))
+    fallback = ci is None or now_ >= ci - datetime.timedelta(minutes=engine.ALERT_LEAD_MIN)
+    if not fallback:
+        deps = await _departures(ctx, day)
+        try:
+            lid = int(it.get("lid"))
+        except (TypeError, ValueError):
+            lid = None
+        if deps is None or lid in deps:
+            rep["waiting"] += 1
+            return it               # the turnover room is (maybe) still coming
+    ch = await HOST.create_code_room(it) if HOST.create_code_room else None
+    if not ch:
+        await run_blocking(db.event, rid, "code_room_failed")
+        return it                   # the bot side alerted; try again next tick
+    await run_blocking(db.set_room, rid, ch, "code")
+    await run_blocking(db.event, rid, "code_room_opened", "", str(ch))
+    rep["rooms"] += 1
+    return await run_blocking(db.get, rid)
 
 
 async def _prelive_check(it, now_, rep, msgs):
@@ -201,8 +336,9 @@ async def _prelive_check(it, now_, rep, msgs):
     return None
 
 
-async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
+async def _process_item(it, now_, rep, is_live=True, prelive=None, ctx=None):
     """`prelive` = (live_since, live_since + 3 h) when a go-live moment is stored."""
+    ctx = {} if ctx is None else ctx
     rid = it["res_id"]
     msgs = None                     # the chat as fetched THIS pass (None = not / failed)
     if not it.get("cancelled") and it.get("conversation_id"):
@@ -217,14 +353,27 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
         except Exception as e:      # stale replies are better than a skipped alert
             print("[codegate] replies refresh %s failed: %s" % (rid, e))
     it = await run_blocking(db.get, rid)
-    # SOAK: list and cards only. No honesty check, no alert, and nothing stamped, so both run
-    # normally from the first tick after the switch is turned on.
+    # SOAK: cards in turnover rooms that already exist, nothing else. No honesty check, no
+    # alert, no code-only room and nothing stamped, so all of it runs normally from the first
+    # tick after the switch is turned on.
     if not is_live:
-        res = await _render(it, now_, channel_id, soak=True)
+        it = await _place(it, now_, False, ctx, rep)
+        res = await _render(it, now_, False)
         if res:
             rep[res] += 1
         return
-    # GO-LIVE: arrivals inside Doorcodera's window are looked at once before any alert.
+    # a cancelled booking needs no code: its code-only room goes, and a turnover room the bot
+    # held for the code gets the delete cleaning already asked for
+    if it.get("cancelled") and it.get("channel_id") and (
+            it.get("room_kind") == "code" or
+            (it.get("room_kind") == "turnover" and it.get("room_close_pending"))):
+        if await _close_room(it, "codegate: booking cancelled",
+                             "🗑️ حذفت غرفة الرمز — الحجز ملغي · %s · %s · %s"
+                             % (it.get("unit") or "", it.get("guest") or "", _hhmm_now())):
+            rep["deleted"] += 1
+        return
+    # GO-LIVE: arrivals inside Doorcodera's window are looked at once before any alert (and
+    # before placement, so an already-sent code never opens a code-only room).
     hold_alerts = False
     if prelive and not it.get("released_at") and not it.get("cancelled"):
         # a check older than the current go-live doesn't count: after a rollback and a second
@@ -234,7 +383,7 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
         if (last is None or last < prelive[0]) and ci and ci <= prelive[1]:
             hold_alerts = (await _prelive_check(it, now_, rep, msgs)) == "skip"
             it = await run_blocking(db.get, rid)
-    # honesty check: pressed, but is the code really in the chat?
+    # honesty check: recorded by hand, but is the code really in the chat?
     if it.get("released_at") and it.get("code_seen") is None and not it.get("cancelled"):
         rel = _dt(it["released_at"])
         if rel and now_ >= rel + datetime.timedelta(minutes=engine.CODE_CHECK_MIN):
@@ -251,13 +400,19 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
                                now_.isoformat(timespec="seconds"))
             if not seen and not it.get("code_warned_at"):
                 who = ("<@%s>" % it["released_by_did"]) if it.get("released_by_did") else ""
-                await HOST.post(channel_id, (who + " " if who else "") +
-                                "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
-                                "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
+                text = ((who + " " if who else "") +
+                        "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
+                        "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
+                if it.get("channel_id"):
+                    await HOST.post(it["channel_id"], text)
+                else:                   # its room is gone: #escalations still hears it
+                    await HOST.escalate("⚠️ ما شفت رسالة الرمز · " + (it.get("unit") or ""),
+                                        text)
                 await run_blocking(db.stamp, rid, "code_warned_at",
                                    now_.isoformat(timespec="seconds"))
                 rep["warned"] += 1
             it = await run_blocking(db.get, rid)
+    it = await _place(it, now_, True, ctx, rep)
     kind = None if hold_alerts else engine.alert_due(_view_item(it), now_)
     if kind:
         stamp = now_.isoformat(timespec="seconds")
@@ -269,16 +424,22 @@ async def _process_item(it, now_, channel_id, rep, is_live=True, prelive=None):
         it = await run_blocking(db.get, rid)
         if not it.get("released_at") and not it.get("cancelled"):
             text = engine.alert_text(kind, _view_item(it), _mention(it))
-            await HOST.post(channel_id, text)
+            if it.get("channel_id"):        # into the card's room; no room yet → escalate only
+                await HOST.post(it["channel_id"], text)
             await HOST.escalate(("🔑 باقي ساعتين وما أُرسل الرمز · " if kind == "2h"
                                  else "🚨 حلّ الدخول وما أُرسل الرمز · ") + (it.get("unit") or ""),
                                 text)
             await run_blocking(db.event, rid, "alert_" + kind)
             rep["alerts"] += 1
     it = await run_blocking(db.get, rid)        # never repaint from a stale copy
-    res = await _render(it, now_, channel_id)
+    res = await _render(it, now_, True)
     if res:
         rep[res] += 1
+    # the code is with the guest (manual record seen by the honesty check, or a delete that
+    # failed earlier): close the room it no longer needs
+    it = await run_blocking(db.get, rid)
+    if await _after_code_sent(it):
+        rep["deleted"] += 1
 
 
 def _prelive_window():
@@ -292,6 +453,25 @@ def _prelive_window():
     return (ls, ls + datetime.timedelta(hours=PRELIVE_WINDOW_H)) if ls else None
 
 
+async def _sweep_old_rooms(day, rep):
+    """Live: rooms codegate owns from days before `day` are closed — code-only rooms, and turnover
+    rooms the bot held for a code that was never recorded (cleaning already asked to delete
+    them; the day is over, so the hold has no purpose left)."""
+    old = [(it, "🗑️ حذفت غرفة رمز من يوم فات (%s)")
+           for it in await run_blocking(db.code_room_items, day)]
+    old += [(it, "🗑️ حذفت غرفة تنظيف كانت معلّقة للرمز — يوم فات (%s) وما سُجل إرسال الرمز")
+            for it in await run_blocking(db.held_room_items, day)]
+    for it, head in old:
+        try:
+            if await _close_room(it, "codegate: day over",
+                                 (head + " · %s · %s · %s")
+                                 % (it.get("day") or "", it.get("unit") or "",
+                                    it.get("guest") or "", _hhmm_now())):
+                rep["deleted"] += 1
+        except Exception as e:
+            print("[codegate] old room %s failed: %s" % (it.get("res_id"), e))
+
+
 async def tick(now_=None, force=False):
     if not enabled():
         return {"skipped": "off"}
@@ -299,8 +479,9 @@ async def tick(now_=None, force=False):
         now_ = now_ or HOST.now()
         day = now_.date().isoformat()
         is_live = await run_blocking(live)
-        rep = {"live": int(is_live), "seen": 0, "posted": 0, "edited": 0, "alerts": 0,
-               "headers": 0, "cancelled": 0, "warned": 0, "prelive": 0}
+        rep = {"live": int(is_live), "seen": 0, "posted": 0, "edited": 0, "lost": 0,
+               "alerts": 0, "cancelled": 0, "warned": 0, "prelive": 0, "rooms": 0,
+               "waiting": 0, "deleted": 0}
         gated = await run_blocking(units)
         # the tick's OWN day, so a tick that straddles midnight can't mix two days
         arrivals = await run_blocking(HOST.today_arrivals, day) or []
@@ -315,9 +496,19 @@ async def tick(now_=None, force=False):
                 cov = {}
             prev = await run_blocking(db.get, str(a["res_id"]))
             if prev and prev.get("day") != day:
-                # moved from another date: db.upsert_arrival starts its card/alerts over
+                # moved from another date: db.upsert_arrival starts its card/alerts/room over,
+                # so the old date's code-only room is closed first or it would be orphaned
                 await run_blocking(db.event, str(a["res_id"]), "moved", "",
                                    "%s → %s" % (prev.get("day"), day))
+                if is_live and prev.get("room_kind") == "code" and prev.get("channel_id"):
+                    try:
+                        if await _close_room(prev, "codegate: booking moved",
+                                             "🗑️ حذفت غرفة الرمز — الحجز انتقل لـ %s · %s · %s"
+                                             % (day, prev.get("unit") or "",
+                                                prev.get("guest") or "")):
+                            rep["deleted"] += 1
+                    except Exception as e:
+                        print("[codegate] moved room %s failed: %s" % (a.get("res_id"), e))
             if not (cov.get("name") or cov.get("did") or cov.get("role_id")):
                 # a failed lookup must not blank who may press: keep what we stored
                 if prev and prev.get("day") == day:
@@ -334,31 +525,14 @@ async def tick(now_=None, force=False):
         rep["cancelled"] = len(await run_blocking(db.mark_cancelled, day, keep))
         if not gated or (not force and now_.hour < engine.START_HOUR):
             return rep
-        channel_id = await HOST.channel()
+        if is_live:
+            await _sweep_old_rooms(day, rep)
         items = await run_blocking(db.day_items, day)
-        # one header per person, before their first card
-        groups = {}
-        for it in items:
-            if not it.get("cancelled"):
-                k = it.get("cover_did") or it.get("cover_role_id") or it.get("cover_name") or "ops"
-                groups.setdefault(k, []).append(it)
-        for k, rows in groups.items():
-            try:
-                if await run_blocking(db.header_posted, day, k):
-                    continue
-                mid = await HOST.post(channel_id, engine.header_text(_mention(rows[0]),
-                                                                     rows[0].get("cover_name"),
-                                                                     len(rows)))
-                if mid:                 # a failed post is retried on the next tick
-                    await run_blocking(db.mark_header, day, k, mid)
-                    rep["headers"] += 1
-            except Exception as e:
-                print("[codegate] header %s failed: %s" % (k, e))
         prelive = await run_blocking(_prelive_window) if is_live else None
+        ctx = {}                    # per-tick memo (departures fetched once)
         for it in items:
             try:
-                await _process_item(it, now_, channel_id, rep, is_live=is_live,
-                                    prelive=prelive)
+                await _process_item(it, now_, rep, is_live=is_live, prelive=prelive, ctx=ctx)
             except Exception as e:
                 print("[codegate] item %s failed: %s" % (it.get("res_id"), e))
         return rep
@@ -367,34 +541,101 @@ async def tick(now_=None, force=False):
 async def _rerender(res_id):
     it = await run_blocking(db.get, res_id)
     if it:
-        await _render(it, HOST.now(), it.get("channel_id"),
-                      soak=not await run_blocking(live))
+        await _render(it, HOST.now(), await run_blocking(live))
+    return it
 
 
-async def press_release(message_id, presser):
+def _whose(it):
+    return "هذي الشقة على %s اليوم — هو أو المشرف يضغط الزر." % (
+        it.get("cover_name") or "فريق العمليات")
+
+
+async def _press_checks(message_id, presser, need_live):
+    """(item, None) when the press may go ahead, else (item|None, refusal text)."""
     it = await run_blocking(db.item_by_message, message_id)
     if not it:
-        return False, "ما لقيت هذا الحجز في السجل."
+        return None, "ما لقيت هذا الحجز في السجل."
     if it.get("cancelled"):
-        return False, "الحجز ملغي — ما يحتاج رمز."
+        return it, "الحجز ملغي — ما يحتاج رمز."
+    if need_live and not await run_blocking(live):
+        return it, "وضع التجربة — Hostaway يرسل الرمز تلقائياً حالياً، ما يحتاج تضغط."
     if it.get("released_at"):
-        return False, "أُرسل من قبل — %s %s" % (it.get("released_by") or "",
-                                                str(it["released_at"])[11:16])
+        return it, "أُرسل من قبل — %s %s" % (it.get("released_by") or "",
+                                             str(it["released_at"])[11:16])
     if not engine.may_release(presser.get("did"), it.get("cover_did"), it.get("owner_did"),
                               presser.get("is_admin"), presser.get("is_ops")):
-        return False, "هذي الشقة على %s اليوم — هو أو المشرف يضغط الزر." % (
-            it.get("cover_name") or "فريق العمليات")
+        return it, _whose(it)
+    return it, None
+
+
+_SEND_FAIL = {
+    "no_code": "Hostaway ما فيه رمز لهذا الحجز — أرسله يدوياً من Hostaway ثم اضغط "
+               "«%s»." % engine.LABEL_MANUAL,
+    "killed": "الإرسال للضيوف موقوف حالياً (مفتاح الإيقاف).",
+    "duplicate": "هذي الرسالة انرسلت قبل شوي — ما أرسلتها مرتين.",
+    "error": "Hostaway ما رد — جرّب بعد دقيقة.",
+}
+
+
+async def press_send(message_id, presser):
+    """«✅ وافق — أرسل الرمز»: the ONLY path that sends a door code. The release is recorded
+    FIRST (first press wins, so a double press can't send twice) and undone if the send fails."""
+    it, refusal = await _press_checks(message_id, presser, need_live=True)
+    if refusal:
+        return False, refusal
+    rid = it["res_id"]
+    now_ = HOST.now().isoformat(timespec="seconds")
+    if not await run_blocking(db.release, rid, presser.get("name") or "",
+                              presser.get("did") or "", now_):
+        fresh = await run_blocking(db.get, rid)
+        return False, "أُرسل من قبل — %s" % ((fresh or {}).get("released_by") or "")
+    try:
+        if not HOST.send_code:
+            raise RuntimeError("send_code not wired")
+        res = await run_blocking(HOST.send_code, rid, it.get("conversation_id"))
+        ok, why = bool(res[0]), str(res[1])
+    except Exception as e:      # the sender must not raise; if it does, it did not send
+        print("[codegate] send_code %s raised: %s" % (rid, type(e).__name__))
+        ok, why = False, "error"
+    if not ok:
+        await run_blocking(db.undo, rid, "system", HOST.now().isoformat(timespec="seconds"))
+        await run_blocking(db.event, rid, "code_send_failed", presser.get("name") or "", why)
+        await _rerender(rid)
+        return False, _SEND_FAIL.get(why, _SEND_FAIL["error"])
+    await run_blocking(db.mark_sent_by_bot, rid)
+    await run_blocking(db.set_code_seen, rid, True)     # nothing left for the honesty check
+    await run_blocking(db.event, rid, "code_sent_bot", presser.get("name") or "")
+    fresh = await _rerender(rid)
+    try:
+        await _after_code_sent(fresh)
+    except Exception as e:      # the code is sent; a room that won't close is the tick's job
+        print("[codegate] after-send %s failed: %s" % (rid, e))
+    return True, "تم ✅ — أرسلت الرمز للضيف."
+
+
+async def press_manual(message_id, presser):
+    """«📝 أرسلته يدوياً»: records a code sent by hand from Hostaway (manual-code units). Works
+    in soak too. The honesty check (live) later confirms it, and only then is the room closed."""
+    it, refusal = await _press_checks(message_id, presser, need_live=False)
+    if refusal:
+        return False, refusal
     now_ = HOST.now().isoformat(timespec="seconds")
     if not await run_blocking(db.release, it["res_id"], presser.get("name") or "",
                               presser.get("did") or "", now_):
         fresh = await run_blocking(db.get, it["res_id"])
         return False, "أُرسل من قبل — %s" % ((fresh or {}).get("released_by") or "")
-    await run_blocking(db.event, it["res_id"], "released", presser.get("name") or "")
+    await run_blocking(db.event, it["res_id"], "code_manual", presser.get("name") or "")
     await _rerender(it["res_id"])
-    return True, "تم ✅ — سجّلت إنك أرسلت الرمز."
+    return True, "تم ✅ — سجّلت إنك أرسلت الرمز بنفسك."
+
+
+# DEPRECATED: bot.py's revision-1 view still calls press_release; the old button meant "I sent it
+# by hand", which is press_manual. Task R3 rewires the view and removes this alias.
+press_release = press_manual
 
 
 async def press_undo(message_id, presser):
+    """Admin only. Corrects the RECORD; a message already sent to the guest cannot be unsent."""
     if not presser.get("is_admin"):
         return False, "التراجع للمشرفين فقط."
     it = await run_blocking(db.item_by_message, message_id)
@@ -404,4 +645,29 @@ async def press_undo(message_id, presser):
                        HOST.now().isoformat(timespec="seconds"))
     await run_blocking(db.event, it["res_id"], "undone", presser.get("name") or "")
     await _rerender(it["res_id"])
-    return True, "تم التراجع — رجعت البطاقة بانتظار التسليم."
+    return True, "صححت السجل — الرسالة اللي انرسلت ما تنحذف."
+
+
+def should_hold(lid, day):
+    """BLOCKING, for bot.py's three automatic turnover-room deletes: True = don't delete this
+    room yet (live, gated, and that day's arrival still has no code). Never raises — on any
+    error it answers False, i.e. today's behaviour."""
+    try:
+        if not live() or not is_gated(lid):
+            return False
+        return any(not r.get("cancelled") and not r.get("released_at")
+                   for r in db.items_for(lid, day))
+    except Exception as e:
+        print("[codegate] should_hold %s/%s failed, not holding: %s" % (lid, day, e))
+        return False
+
+
+def defer_close(lid, day):
+    """BLOCKING: the bot held the room; delete it once the code is sent (_after_code_sent)."""
+    try:
+        for r in db.items_for(lid, day):
+            if not r.get("cancelled"):
+                db.set_close_pending(r["res_id"], True)
+                db.event(r["res_id"], "close_deferred")
+    except Exception as e:
+        print("[codegate] defer_close %s/%s failed: %s" % (lid, day, e))

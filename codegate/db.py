@@ -268,6 +268,18 @@ def code_room_items(older_than_day=None):
     return [_shape(r) for r in _q(sql + " ORDER BY day, res_id", args)]
 
 
+def held_room_items(older_than_day=None):
+    """Rows whose turnover room the bot HELD for the code (room_close_pending) and that still
+    has a channel_id — the deferred close codegate owes."""
+    sql = ("SELECT * FROM codegate_items WHERE room_kind='turnover' AND room_close_pending=1 "
+           "AND channel_id IS NOT NULL AND channel_id != ''")
+    args = ()
+    if older_than_day:
+        sql += " AND day < ?"
+        args = (older_than_day,)
+    return [_shape(r) for r in _q(sql + " ORDER BY day, res_id", args)]
+
+
 def items_for(lid, day):
     try:
         lid = int(lid)
