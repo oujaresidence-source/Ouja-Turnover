@@ -2103,7 +2103,11 @@ Expected: `EXIT=0` before the push. If the rebase pulled in new commits, re-run 
 
 - [ ] **Step 5: Live check after Railway restarts**
 
-In Discord run `!ouja رموز`. Expected: no error; the mode line shows «الوضع: 🧪 تجربة» (soak); the placement counts (how many cards were placed in turnover rooms, how many units had no room that day); and `code_available=N/M`. A card (with the 🧪 line, no buttons) appears in today's turnover rooms for the gated units that have an arrival. There is no «تسليم-الرموز» channel in this revision. The owner confirms the tagged names are right.
+In Discord run `!ouja رموز` (an admin). No error should appear, and the reply should show these exact pieces so the owner can match them one by one:
+  - the mode line starts **«الوضع: 🧪 تجربة»** (soak). If it says «🟢 مباشر» something is wrong: stop and tell Claude;
+  - a line `البطاقات · turnover=N, code=N, waiting=N · code_available=N/M`: `turnover=N` is how many of today's cards sit in an apartment's turnover room; **`code=` must read `0` in soak** (code-only rooms are never opened in soak; if it is above 0, stop and tell Claude); `waiting=N` is the arrivals that have no room yet; `code_available=N/M` is how many of today's M gated arrivals have a door code in Hostaway (the code itself is never shown).
+
+A card (with the 🧪 «وضع التجربة» line, no buttons) appears in today's turnover rooms for the gated units that have an arrival. There is no «تسليم-الرموز» channel in this revision. The owner confirms the tagged names are right.
 
 ---
 
@@ -2121,17 +2125,15 @@ In Discord run `!ouja رموز`. Expected: no error; the mode line shows «ال�
 
 **Files:** none in the repo. All changes in `dashboard.hostaway.com`. Before each **Save**, show the owner a screenshot of exactly what will be saved and wait for "yes". Do the steps in this order.
 
+**Why this order:** automation 288752 is what sends the guest the signing link today, and 427132 («Doorcodera») only sends the code AFTER signing. So rewriting 288752 early would leave new guests with no signing link, no code and no alert while the bot is still in soak. 288752, 427132 and 438108 are therefore changed together, in one block (Step 5), with the bot switched on straight after. Everything before Step 5 does not touch codes or alerts.
+
 **Go-live behaviour:** when `!ouja رموز-تشغيل تشغيل` is typed, the first live tick checks the chat once for each arrival with check-in ≤ `live_since + 3 h` and quietly marks those that already got Hostaway's auto-code as released by «Hostaway (قبل التشغيل)». Expect no burst of false alerts; only guests with no code get alerted. From then on the code is sent **by the bot**, when staff press «✅ وافق — أرسل الرمز» on the card.
 
-- [ ] **Step 1 (a): Check that Hostaway gives door codes.** Run `!ouja رموز` and read `code_available=N/M` (N = today's live gated arrivals that have a `doorCode` in Hostaway, M = all of them; the code itself is never shown). **If N is much smaller than M, Hostaway isn't giving door codes for many bookings.** Those units need «📝 أرسلته يدوياً» (staff send the code by hand in Hostaway, then press the button). **Stop and tell the owner before continuing.**
-- [ ] **Step 2 (b): Rewrite automation 288752** (`/messages/automations/288752`):
-  - Name: `house rules – I agree`; Subject: `house rules`.
-  - Default message: the full bilingual text from spec §4.1, verbatim.
-  - Event trigger: **At Reservation** (owner decision).
-  - Listings: keep the 34 and **add 103 NRJS (526697)**.
-  - Channels unchanged. Screenshot → owner yes → Save. (Unchanged from Revision 1.)
-- [ ] **Step 3 (c): House rules field** on each of the 35 listings (Listings → listing → Edit → House rules): replace with the Airbnb-safe text (spec §4.1 step 5 / the Requests text agreed earlier), without the fine or the contract line; also remove the fine sentence from C2 NFL's description. One listing first, owner yes, then the rest. Report the count done. This does not touch codes or alerts, so it is done **before** the switch below; it can take as long as it needs.
-- [ ] **Step 4 (d): Saved reply «🔑 كود الدخول / Door code» is OPTIONAL.** The bot sends the code itself once live, so this template is only for **manual sends** (a unit whose `doorCode` is empty, or a code staff send by hand before pressing «📝 أرسلته يدوياً»). If created, body:
+**If anything goes wrong at any point after Step 5 starts, the undo is always the same, all at once and immediately** (see Step 8): `!ouja رموز-ايقاف` AND turn **427132** + **438108** back on, together; and if 288752 was already rewritten, put its old text back too.
+
+- [ ] **Step 1: Check that Hostaway gives door codes.** Run `!ouja رموز` and read `code_available=N/M` (N = today's live gated arrivals that have a `doorCode` in Hostaway, M = all of them; the code itself is never shown). **If N is much smaller than M, Hostaway isn't giving door codes for many bookings.** Those units need «📝 أرسلته يدوياً» (staff send the code by hand in Hostaway, then press the button). **Stop and tell the owner before continuing.**
+- [ ] **Step 2: House rules field** on each of the 35 listings (Listings → listing → Edit → House rules): replace with the Airbnb-safe text (spec §4.1 step 5 / the Requests text agreed earlier), without the fine or the contract line; also remove the fine sentence from C2 NFL's description. One listing first, owner yes, then the rest. Report the count done. This does not touch codes or alerts, so it is done **before** the switch; it can take as long as it needs.
+- [ ] **Step 3: Saved reply «🔑 كود الدخول / Door code» is OPTIONAL.** The bot sends the code itself once live, so this template is only for **manual sends** (a unit whose `doorCode` is empty, or a code staff send by hand before pressing «📝 أرسلته يدوياً»). If created, body:
 
 ```
 🔑 كود الدخول: {{door_code}} ثم #
@@ -2142,16 +2144,22 @@ The code works from check-in time — anything you need, we're right here 🤍
 ```
 
 Test it on one real arriving gated booking with the owner watching: insert the template in its chat and check the code fills in before sending. If `{{door_code}}` comes out empty, tell the owner (the code may live in the smart-lock integration instead). Skipping this step does not block go-live.
-- [ ] **Step 5: Pre-switch checks (all must be yes before Step 6).**
-  - (a) **Discord room headroom.** The server hit its 500-channel cap on 2026-10-14, and code-only rooms open at 09:00 for every gated arrival that has no checkout that day. Check in plain words: Server Settings → Channels (read the count), or run `!ouja-audit`. If the server is near the cap, free space first (see the day-3 cleanup memory) or the code-only rooms won't open and those guests get no card.
-  - (b) **Guests who booked BEFORE the rules message was switched to «At Reservation».** They never get the house-rules message, so they can't write «أوافق». Recommend a second Hostaway automation that sends the same house-rules text **1 day before check-in**, kept on for the first ~2 weeks and then turned off. New bookings will get the text twice (at booking, plus the reminder), which Airbnb allows as a reminder. **The owner confirms this in the sitting** (yes / no); if yes, create it as another change with its own screenshot and «yes» before saving.
-- [ ] **Step 6 (f): THE SWITCH — three actions back to back, no other work in between.** The moment Doorcodera is off, no guest gets a code from Hostaway, so the bot must be live within seconds:
-  1. Turn off **427132** ("Doorcodera") and **438108** ("arrival is less than an hour away") on the Automations list (owner yes for each toggle, asked just before: get both «yes» answers first, then flip them one after the other).
-  2. An admin types `!ouja رموز-تشغيل تشغيل` in Discord (the word «تشغيل» is the typed confirmation; without it the bot replies with the exact command).
-  3. Straight away, run `!ouja رموز`. Check it says «الوضع: 🟢 مباشر», the cards lose the «🧪 وضع التجربة» line, and the send and manual buttons are visible.
+- [ ] **Step 4: Pre-switch checks (all must be yes before Step 5).**
+  - (a) **Discord room headroom.** The server hit its 500-channel cap on 2026-10-14, and code-only rooms open at 09:00 for every gated arrival that has no checkout that day. Run `!ouja-audit` in Discord (read-only) and read the line «📦 القنوات: **N** من 500». **If N is above 470, STOP and tell Claude/the owner before switching**: the code-only rooms may not open and those guests would get no card.
+  - (b) **Guests who booked BEFORE the rules message was switched to «At Reservation».** They never get the house-rules message, so they can't write «أوافق». Recommend a second Hostaway automation that sends the same house-rules text **1 day before check-in**, kept on for the first ~2 weeks and then turned off. New bookings will get the text twice (at booking, plus the reminder); Airbnb lets hosts send reminders of rules that were on the listing at booking. **The owner confirms this in the sitting** (yes / no). It is created in Step 6, after the switch (created earlier, it would send the new text next to the old signing link). Also tell the owner: **bookings made before the switch whose check-in is within the next 24 hours get neither message** (the old 1-day-before moment has passed, the new one never fires for them); see Step 6.
+  - (c) **Prepare and approve the switch changes now, so Step 5 has no pauses.** Open automation 288752 (`/messages/automations/288752`) and fill in the new values WITHOUT saving: name `house rules – I agree`; Subject `house rules`; default message = the full bilingual text from spec §4.1, verbatim; event trigger **At Reservation** (owner decision); listings = keep the 34 and **add 103 NRJS (526697)**; channels unchanged. Before filling it in, take a screenshot of 288752 exactly as it is now and keep it (this is the «old text» for the undo; the same settings are in spec §3). Show the owner the filled-in screenshot and get a «yes» for the Save, plus a «yes» for turning off **427132** and a «yes» for turning off **438108**: get all three «yes» answers FIRST.
+- [ ] **Step 5: THE SWITCH — four actions back to back, no other work in between.** The moment Doorcodera is off, no guest gets a code from Hostaway, so the bot must be live within seconds. They happen in this order:
+  1. **Save automation 288752** (the filled-in form from Step 4(c)). This is the first action, immediately before turning anything off.
+  2. Turn off **427132** ("Doorcodera") and **438108** ("arrival is less than an hour away") on the Automations list, one after the other.
+  3. An admin types `!ouja رموز-تشغيل تشغيل` in Discord (the word «تشغيل» is the typed confirmation; without it the bot replies with the exact command).
+  4. Straight away, run `!ouja رموز`. Check it says «الوضع: 🟢 مباشر», the cards lose the «🧪 وضع التجربة» line, and the send and manual buttons are visible.
+  If anything in 1–4 fails or looks wrong: run `!ouja رموز-ايقاف` AND turn **427132** + **438108** back on, together and immediately; if 288752 was already saved, put its old text back too (Step 8). Then tell the owner.
 
-  From now the bot sends the codes, when staff press «✅ وافق — أرسل الرمز» on the card. Also from now: 2-hour / check-in alerts, the honesty check, code-only rooms for apartments with no turnover room, no old signing reminders, Musaed asks for «أوافق». If step 2 or 3 fails, turn **427132** and **438108** back on at once.
-- [ ] **Step 7 (g): End-to-end test on one real booking, with the real «✅ وافق — أرسل الرمز»** (owner watching):
+  From now the bot sends the codes, when staff press «✅ وافق — أرسل الرمز» on the card. Also from now: 2-hour / check-in alerts, the honesty check, code-only rooms for apartments with no turnover room, no old signing reminders, Musaed asks for «أوافق».
+- [ ] **Step 6: Right after the switch (transition).**
+  - If the owner said yes in Step 4(b): create the second automation now (same house-rules text, **1 day before check-in**, same 35 listings, same channels), with its own screenshot and «yes» before saving. Note the date to turn it off in about 2 weeks.
+  - **Bookings made before the switch whose check-in is within the next 24 hours get neither message.** On switch day, the staff member on duty sends each of them the house-rules text by hand in Hostaway (the text in spec §4.1). List them with `/update`, or from the cards in their turnover rooms. Then they can reply «أوافق» and the card flow works as usual.
+- [ ] **Step 7: End-to-end test on one real booking, with the real «✅ وافق — أرسل الرمز»** (owner watching):
   1. the rules message reaches the guest and the guest replies «أوافق»;
   2. the card shows **✅ كتب «أوافق»**;
   3. staff press «✅ وافق — أرسل الرمز» and confirm;
@@ -2160,12 +2168,12 @@ Test it on one real arriving gated booking with the owner watching: insert the t
   6. a code-only room deletes itself, or a turnover room closes if cleaning was already approved (if cleaning is approved later, the room closes right after the code is sent);
   7. an audit line appears in `#oujact-review`;
   8. 15 minutes later there's no warning.
-  If any step fails, press «↩️ تراجع» only to correct the record (it cannot unsend), run `!ouja رموز-ايقاف`, and tell the owner.
-- [ ] **Step 8: Write the undo note for the owner:**
-  - `!ouja رموز-ايقاف` stops **all** sending and buttons at once (back to soak, one step);
-  - turn Hostaway automations **438108** and **427132** back on;
-  - restore 288752's old text (saved copy in `docs/superpowers/specs/2026-10-21-house-rules-code-release-design.md` §3 + the screenshots);
-  - set `CODEGATE_ENABLED=0` or revert the codegate commits.
+  If any step fails: press «↩️ تراجع» only to correct the record (it cannot unsend), then run `!ouja رموز-ايقاف` AND turn **427132** + **438108** back on, together and immediately, put 288752's old text back (it was rewritten in Step 5), and tell the owner.
+- [ ] **Step 8: Write the undo note for the owner** (one list, do all of it at once, immediately; nothing here needs Railway or a code change):
+  1. Discord: `!ouja رموز-ايقاف` (stops **all** sending and buttons at once; back to soak, one step);
+  2. Hostaway: turn automations **427132** and **438108** back on, **together** with step 1, not later;
+  3. Hostaway: if 288752 was already rewritten, restore its old text: it sends `{{rental_agreement_link}}` **1 day before check-in**, all channels, on the original 34 listings (without 103 NRJS). The old settings are the spec §3 table (row 288752) and the «before» screenshot taken in Step 4(c);
+  4. Hostaway: if the second (1-day-before) house-rules automation from Step 6 was created, turn it off.
 - [ ] **Step 9: Staff note (give to the team, short, Arabic and English):**
 
 ```
@@ -2186,6 +2194,6 @@ Test it on one real arriving gated booking with the owner watching: insert the t
 
 ## Self-Review Notes
 
-- Spec coverage: §4.1 → Task 8; §4.2 units/list/coverer/refresh/button/honesty/alerts/storage/switch → Tasks 1–4; §4.3 → Task 5; §5 rollout → Tasks 6–8; §6 decisions → units.json (103 NRJS), Task 8 Step 2 (At Reservation), confirm text (typed «أوافق»); §7 tests → Tasks 1–5.
+- Spec coverage: §4.1 → Task 8; §4.2 units/list/coverer/refresh/button/honesty/alerts/storage/switch → Tasks 1–4; §4.3 → Task 5; §5 rollout → Tasks 6–8; §6 decisions → units.json (103 NRJS), Task 8 Step 4(c)/Step 5 (At Reservation), confirm text (typed «أوافق»); §7 tests → Tasks 1–5.
 - Names are consistent across tasks: `is_gated`, `released`, `press_release`, `press_undo`, `tick(force=)`, `set_code_seen`, `STAMP_COLUMNS`, button keys `release` and `undo`, custom ids `cg_release` and `cg_undo`.
 - One named lookup is left to the implementer: the variable that holds Musaed's system prompt (Task 5 Step 1, `grep -n "ANTI-NAG (important)" bot.py`), so the new constant is appended in that prompt's own string style.

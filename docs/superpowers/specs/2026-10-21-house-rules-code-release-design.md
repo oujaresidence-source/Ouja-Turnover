@@ -199,7 +199,7 @@ in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is tu
 
 ## 5. Rollout
 
-1. **Bot first, while Hostaway still runs the old flow.** The list and buttons go live. For a
+1. **Bot first, while Hostaway still runs the old flow.** ~~The list and buttons go live.~~ *(Superseded by §9 item 6 and the soak description in §4.2: cards only, no buttons, no alerts.)* For a
    day or two the team sees real arrivals on the list (with codes still going out
    automatically) and we check that every card lands on the right person.
    This is the bot's *soak* mode (§4.2): no alerts and no change to what guests are told.
@@ -208,14 +208,13 @@ in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is tu
    to end the soak (alerts on, gated units leave the old e-sign path). One booking is tested end to end: rules message → "I agree" → card → template
    → code → green card.
    **Revision 2 (§9) supersedes the order and the last hop:** run `!ouja رموز` first and read `code_available=N/M`; the saved reply is optional (manual sends only); the end-to-end test uses the real «✅ وافق — أرسل الرمز» button, so the bot (not a template) sends the code. See plan Tasks 7–8.
-   **Order inside the sitting (plan Task 8):** every Hostaway edit that does not move codes (the 288752 rewrite, the House-rules field on the 35 listings, the optional saved reply, the before-check-in reminder automation) is done FIRST; turning off 427132 and 438108, typing `!ouja رموز-تشغيل تشغيل` and running `!ouja رموز` then happen back to back, so no guest is left without a code or an alert.
+   **Order inside the sitting (plan Task 8):** the Hostaway edits that do not touch codes or alerts (the House-rules field on the 35 listings, the optional saved reply) are done FIRST. The 288752 rewrite is NOT one of them: 288752 is what sends the signing link and 427132 only sends the code after signing, so rewriting it early would leave new guests with no link, no code and no alert while the bot is still in soak. It is the FIRST action of the switch block: save 288752, turn off 427132 and 438108, type `!ouja رموز-تشغيل تشغيل`, run `!ouja رموز`, all back to back. The before-check-in reminder automation is created right after the switch. Bookings made before the switch with check-in inside the next 24 hours get neither message: staff send them the house-rules text by hand that day.
    **Go-live burst guard:** the first live tick looks ONCE in the chat of every arrival whose
    check-in is at or before `live_since + 3 h` (Hostaway's Doorcodera window; `live_since` is
    stored on the OFF→ON switch only). Code found → recorded as released by «Hostaway (قبل
    التشغيل)», green card, no alert; no code → normal alerts; Hostaway error → no alert that tick,
    retried next tick. Later arrivals follow the normal flow.
-3. **Undo:** `!ouja رموز-ايقاف` (back to soak, one step); turn 288752's old text, 438108 and
-   427132 back on in Hostaway; set `CODEGATE_ENABLED=0` or revert the commit. Nothing is deleted at any step.
+3. **Undo (all at once, immediately; nothing needs Railway):** `!ouja رموز-ايقاف` (back to soak, one step) AND turn 427132 + 438108 back on in Hostaway, together; if 288752 was already rewritten, restore its old text too (§3 table, row 288752, and the «before» screenshot). Nothing is deleted at any step.
 
 ## 6. Owner decisions (2026-10-21)
 
