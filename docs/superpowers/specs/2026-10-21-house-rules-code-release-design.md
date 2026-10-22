@@ -208,6 +208,7 @@ in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is tu
    to end the soak (alerts on, gated units leave the old e-sign path). One booking is tested end to end: rules message → "I agree" → card → template
    → code → green card.
    **Revision 2 (§9) supersedes the order and the last hop:** run `!ouja رموز` first and read `code_available=N/M`; the saved reply is optional (manual sends only); the end-to-end test uses the real «✅ وافق — أرسل الرمز» button, so the bot (not a template) sends the code. See plan Tasks 7–8.
+   **Order inside the sitting (plan Task 8):** every Hostaway edit that does not move codes (the 288752 rewrite, the House-rules field on the 35 listings, the optional saved reply, the before-check-in reminder automation) is done FIRST; turning off 427132 and 438108, typing `!ouja رموز-تشغيل تشغيل` and running `!ouja رموز` then happen back to back, so no guest is left without a code or an alert.
    **Go-live burst guard:** the first live tick looks ONCE in the chat of every arrival whose
    check-in is at or before `live_since + 3 h` (Hostaway's Doorcodera window; `live_since` is
    stored on the OFF→ON switch only). Code found → recorded as released by «Hostaway (قبل

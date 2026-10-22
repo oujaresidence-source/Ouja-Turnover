@@ -2088,7 +2088,7 @@ git log --oneline origin/main..HEAD
 git diff --stat origin/main..HEAD
 ```
 
-Tell the owner in plain words what goes live: a new channel «تسليم-الرموز», a morning list from 09:00, buttons, alerts. No guest message changes until Task 8. Ask: "Push now?" **Wait for an explicit yes.**
+Tell the owner in plain words what goes live: the push ships **SOAK** only. Cards appear inside the existing turnover rooms, each with the 🧪 «وضع التجربة» line. No buttons, no alerts, no code-only rooms, nothing guest-facing; Hostaway keeps sending the old messages and codes. Ask: "Push now?" **Wait for an explicit yes.**
 
 - [ ] **Step 4: On yes, push to main**
 
@@ -2103,7 +2103,7 @@ Expected: `EXIT=0` before the push. If the rebase pulled in new commits, re-run 
 
 - [ ] **Step 5: Live check after Railway restarts**
 
-In Discord run `!ouja رموز`. Expected reply: `تسليم الرموز · seen=<n>, posted=<n>, …` with no error, and the channel «تسليم-الرموز» exists (or the cards appear in #escalations, with the fallback noted to the owner). Each card shows today's gated arrivals tagged to the right person; the owner confirms the names.
+In Discord run `!ouja رموز`. Expected: no error; the mode line shows «الوضع: 🧪 تجربة» (soak); the placement counts (how many cards were placed in turnover rooms, how many units had no room that day); and `code_available=N/M`. A card (with the 🧪 line, no buttons) appears in today's turnover rooms for the gated units that have an arrival. There is no «تسليم-الرموز» channel in this revision. The owner confirms the tagged names are right.
 
 ---
 
@@ -2112,7 +2112,7 @@ In Discord run `!ouja رموز`. Expected reply: `تسليم الرموز · see
 **Files:** none.
 
 - [ ] **Step 0:** The bot is in *soak* (the stored live switch is OFF by default). Cards appear **inside the apartment's turnover room** when one exists; there is no «تسليم-الرموز» channel and no per-person header. In soak there are **no code-only rooms, no holds, no re-posts, no alerts, and no buttons** (send and manual are hidden); each card says «🧪 وضع التجربة». `!ouja رموز` shows «الوضع: 🧪 تجربة».
-- [ ] **Step 1:** For 1–2 days, Hostaway still sends the old agreement and auto-code messages. The cards will mostly show «⏳ ما رد بعد» or «⚠️ رد بس مو واضح» (expected: the new rules message isn't live yet) and the honesty check will see the auto-sent codes.
+- [ ] **Step 1:** For 1–2 days, Hostaway still sends the old agreement and auto-code messages. The cards will mostly show «⏳ ما رد بعد» or «⚠️ رد بس مو واضح» (expected: the new rules message isn't live yet). Soak runs **no** honesty check and sends nothing: Hostaway's auto-codes keep going out untouched and the bot only shows the cards.
 - [ ] **Step 2:** Each morning, staff check two things on every card: (1) it landed in the **right apartment's turnover room**, and (2) it is **tagged to the right person** (the coverer for that day). Apartments with no turnover room that day have no card in soak. That is expected, so compare the missing ones against Hostaway's arrivals for the 35 units. Fix calendar or `units.json` mismatches before Task 8.
 
 ---
@@ -2130,8 +2130,8 @@ In Discord run `!ouja رموز`. Expected reply: `تسليم الرموز · see
   - Event trigger: **At Reservation** (owner decision).
   - Listings: keep the 34 and **add 103 NRJS (526697)**.
   - Channels unchanged. Screenshot → owner yes → Save. (Unchanged from Revision 1.)
-- [ ] **Step 3 (c): Turn off 438108** ("arrival is less than an hour away") and **427132** ("Doorcodera"): toggle each on the Automations list → owner yes for each. From this moment Hostaway no longer sends codes on these units; the bot sends them when staff press the button. (Unchanged from Revision 1.)
-- [ ] **Step 4 (d): Saved reply «🔑 كود الدخول / Door code» is now OPTIONAL.** The bot sends the code itself, so this template is only for **manual sends** (a unit whose `doorCode` is empty, or a code staff send by hand before pressing «📝 أرسلته يدوياً»). If created, body:
+- [ ] **Step 3 (c): House rules field** on each of the 35 listings (Listings → listing → Edit → House rules): replace with the Airbnb-safe text (spec §4.1 step 5 / the Requests text agreed earlier), without the fine or the contract line; also remove the fine sentence from C2 NFL's description. One listing first, owner yes, then the rest. Report the count done. This does not touch codes or alerts, so it is done **before** the switch below; it can take as long as it needs.
+- [ ] **Step 4 (d): Saved reply «🔑 كود الدخول / Door code» is OPTIONAL.** The bot sends the code itself once live, so this template is only for **manual sends** (a unit whose `doorCode` is empty, or a code staff send by hand before pressing «📝 أرسلته يدوياً»). If created, body:
 
 ```
 🔑 كود الدخول: {{door_code}} ثم #
@@ -2142,8 +2142,15 @@ The code works from check-in time — anything you need, we're right here 🤍
 ```
 
 Test it on one real arriving gated booking with the owner watching: insert the template in its chat and check the code fills in before sending. If `{{door_code}}` comes out empty, tell the owner (the code may live in the smart-lock integration instead). Skipping this step does not block go-live.
-- [ ] **Step 5 (e): House rules field** on each of the 35 listings (Listings → listing → Edit → House rules): replace with the Airbnb-safe text (spec §4.1 step 5 / the Requests text agreed earlier), without the fine or the contract line; also remove the fine sentence from C2 NFL's description. One listing first, owner yes, then the rest. Report the count done. (Unchanged from Revision 1.)
-- [ ] **Step 6 (f): End the soak in Discord.** An admin types `!ouja رموز-تشغيل تشغيل` (the word «تشغيل» is the typed confirmation; without it the bot replies with the exact command), then runs `!ouja رموز` **straight away**. Check it says «الوضع: 🟢 مباشر», the cards lose the «🧪 وضع التجربة» line, and the send and manual buttons are visible. From now: 2-hour / check-in alerts, the honesty check, code-only rooms for apartments with no turnover room, no old signing reminders, Musaed asks for «أوافق».
+- [ ] **Step 5: Pre-switch checks (all must be yes before Step 6).**
+  - (a) **Discord room headroom.** The server hit its 500-channel cap on 2026-10-14, and code-only rooms open at 09:00 for every gated arrival that has no checkout that day. Check in plain words: Server Settings → Channels (read the count), or run `!ouja-audit`. If the server is near the cap, free space first (see the day-3 cleanup memory) or the code-only rooms won't open and those guests get no card.
+  - (b) **Guests who booked BEFORE the rules message was switched to «At Reservation».** They never get the house-rules message, so they can't write «أوافق». Recommend a second Hostaway automation that sends the same house-rules text **1 day before check-in**, kept on for the first ~2 weeks and then turned off. New bookings will get the text twice (at booking, plus the reminder), which Airbnb allows as a reminder. **The owner confirms this in the sitting** (yes / no); if yes, create it as another change with its own screenshot and «yes» before saving.
+- [ ] **Step 6 (f): THE SWITCH — three actions back to back, no other work in between.** The moment Doorcodera is off, no guest gets a code from Hostaway, so the bot must be live within seconds:
+  1. Turn off **427132** ("Doorcodera") and **438108** ("arrival is less than an hour away") on the Automations list (owner yes for each toggle, asked just before: get both «yes» answers first, then flip them one after the other).
+  2. An admin types `!ouja رموز-تشغيل تشغيل` in Discord (the word «تشغيل» is the typed confirmation; without it the bot replies with the exact command).
+  3. Straight away, run `!ouja رموز`. Check it says «الوضع: 🟢 مباشر», the cards lose the «🧪 وضع التجربة» line, and the send and manual buttons are visible.
+
+  From now the bot sends the codes, when staff press «✅ وافق — أرسل الرمز» on the card. Also from now: 2-hour / check-in alerts, the honesty check, code-only rooms for apartments with no turnover room, no old signing reminders, Musaed asks for «أوافق». If step 2 or 3 fails, turn **427132** and **438108** back on at once.
 - [ ] **Step 7 (g): End-to-end test on one real booking, with the real «✅ وافق — أرسل الرمز»** (owner watching):
   1. the rules message reaches the guest and the guest replies «أوافق»;
   2. the card shows **✅ كتب «أوافق»**;
