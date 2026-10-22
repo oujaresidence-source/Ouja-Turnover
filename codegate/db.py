@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     held_room_fail_count INTEGER DEFAULT 0,
     moving_to        TEXT,
     card_lost_at     TEXT,
+    room_refusals    INTEGER DEFAULT 0,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -90,9 +91,10 @@ _LATE_COLUMNS = (("prelive_checked_at", "TEXT"),
                  ("held_room_fail_count", "INTEGER DEFAULT 0"),
                  ("moving_to", "TEXT"),                    # "<lid>|<day>": a move whose close
 #                                                            is still owed (the row is FROZEN)
-                 ("card_lost_at", "TEXT"))                 # live lost a card (room deleted):
+                 ("card_lost_at", "TEXT"),                 # live lost a card (room deleted):
 #                                                            placement no longer waits for a
 #                                                            turnover room that won't reopen
+                 ("room_refusals", "INTEGER DEFAULT 0"))   # rooms that took no card today
 
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at",
                  "card_lost_at")
@@ -103,9 +105,9 @@ _DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "aler
               "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
               "released_at", "room_kind", "room_close_pending", "sent_by_bot",
               "held_channel_id", "card_room_fail_count", "held_room_fail_count",
-              "card_lost_at")
+              "card_lost_at", "room_refusals")
 _RESET_TO_ZERO = ("room_close_pending", "sent_by_bot", "card_room_fail_count",
-                  "held_room_fail_count")                                   # flags, not NULL
+                  "held_room_fail_count", "room_refusals")                                   # flags, not NULL
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
              "cover_did", "cover_role_id", "owner_did")
 
@@ -310,6 +312,15 @@ def delete_failed(res_id, held):
     _x("UPDATE codegate_items SET %s=COALESCE(%s, 0)+1, updated_at=? WHERE res_id=?"
        % (col, col), (_now(), str(res_id)))
     rows = _q("SELECT %s AS n FROM codegate_items WHERE res_id=?" % col, (str(res_id),))
+    return int(rows[0]["n"] or 0) if rows else 0
+
+
+def bump_refusals(res_id):
+    """One more room that took no card (gone, or the bot may not write there); returns the
+    new count. flow stops placing the item for the day at flow.ROOM_REFUSALS_MAX."""
+    _x("UPDATE codegate_items SET room_refusals=COALESCE(room_refusals, 0)+1, updated_at=? "
+       "WHERE res_id=?", (_now(), str(res_id)))
+    rows = _q("SELECT room_refusals AS n FROM codegate_items WHERE res_id=?", (str(res_id),))
     return int(rows[0]["n"] or 0) if rows else 0
 
 

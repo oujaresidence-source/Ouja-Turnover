@@ -51,6 +51,7 @@ class Fake:
         self.missing = set()                        # rooms gone from Discord's cache
         self.post_gone = set()                      # rooms whose post answers None (gone)
         self.send_lids = []
+        self.post_attempts = []
         self.arrivals = [self.arr("r1", GATED), self.arr("r9", OPEN)]
         self.msgs = {"c-r1": [{"inbound": False, "at": at(8),
                                "body": 'Please reply "I agree to the house rules"'},
@@ -68,6 +69,7 @@ class Fake:
         return ch not in self.missing
 
     async def post(self, ch, text, embed=None, buttons=None):
+        self.post_attempts.append(ch)
         if ch in self.post_gone:
             return None
         self._mid += 1
@@ -79,6 +81,8 @@ class Fake:
         self.edits.append({"id": mid, "ch": ch, "embed": embed, "buttons": buttons})
         if self.edit_raises is not None:
             raise self.edit_raises
+        if ch in self.missing:
+            return False
         return self.edit_ok
 
     def release_send_claim(self, res_id):
@@ -1888,6 +1892,138 @@ class TestR3Fix1(FlowCase):
             self.assertIn("قائمة الرموز", msg)
         self.assertEqual(self.f.sends, [])
         self.assertIsNone(db.get("r1")["released_at"])
+
+
+class _CodePrefix(set):
+    """post_gone for every code-only room (a permission refusal on rooms the bot opens)."""
+
+    def __contains__(self, ch):
+        return str(ch).startswith("code-")
+
+
+class TestR3Fix2(FlowCase):
+    """R3 fix round 2: no room churn, no warning lost in a dead room, settled items stay quiet."""
+
+    def kinds(self, rid="r1"):
+        return [e["kind"] for e in db._q("SELECT kind FROM codegate_events WHERE res_id=?",
+                                         (rid,))]
+
+    def refusal_lines(self, texts):
+        return [t for t in texts if "ما قدرت أكتب في غرفة الرمز" in t]
+
+    def test_refused_code_room_given_up_after_one_retry(self):
+        self.f.rooms = {}
+        self.f.post_gone = _CodePrefix()
+        for m in (5, 10, 15, 20, 25, 30):
+            self.now = at(14, m)
+            run(flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r1-2"])   # one retry, then stop
+        self.assertEqual(sorted(ch for ch, _ in self.f.deleted), ["code-r1-1", "code-r1-2"])
+        self.assertEqual(len(self.refusal_lines(self.f.reviews)), 1)
+        self.assertEqual(len(self.refusal_lines(self.f.escalations)), 1)
+        it = db.get("r1")
+        self.assertIsNone(it["channel_id"])
+        self.assertIn("room_refused_gave_up", self.kinds())
+        self.now = at(16, 5)                        # alerts keep flowing, by escalation
+        run(flow.tick())
+        self.assertTrue(any("حلّ الدخول" in t for t in self.f.escalations))
+        self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r1-2"])
+
+    def test_refused_turnover_room_is_not_retried_forever(self):
+        self.f.post_gone = {ROOM}                   # the turnover room refuses us
+        self.f.departures = {GATED}
+        for m in (5, 10, 15, 20, 25):
+            self.now = at(9, m)
+            run(flow.tick())
+        self.assertEqual(self.f.post_attempts, [ROOM, ROOM])   # one retry, then stop
+        self.assertEqual(self.f.code_rooms, [])
+        self.assertEqual(self.f.deleted, [])        # never a turnover room
+        self.assertEqual(len(self.refusal_lines(self.f.escalations)), 1)
+
+    def test_honesty_warning_escalates_when_room_deleted(self):
+        run(flow.tick())
+        self.f.send_result = (False, "unknown")
+        run(flow.press_send(self.cards()[0]["id"], self.p()))
+        self.assertFalse(flow.should_hold(GATED, DAY))   # cleaning may delete it normally
+        self.f.missing.add(ROOM)
+        self.f.post_gone.add(ROOM)
+        self.now = at(9, 40)
+        run(flow.tick())
+        it = db.get("r1")
+        self.assertTrue(it["code_warned_at"])
+        self.assertEqual(len([t for t in self.f.escalations if "ما شفت رسالة الرمز" in t]), 1)
+        self.assertNotIn("card_lost", self.kinds())     # settled: no lost card, no re-place
+        self.assertEqual(self.f.code_rooms, [])
+
+    def test_honesty_warning_escalates_when_post_refused(self):
+        run(flow.tick())
+        run(flow.press_manual(self.cards()[0]["id"], self.p()))
+        self.f.post_gone.add(ROOM)                  # the room is there but refuses the post
+        self.now = at(9, 40)
+        run(flow.tick())
+        self.assertEqual(len([t for t in self.f.escalations if "ما شفت رسالة الرمز" in t]), 1)
+
+    def test_honesty_warning_still_goes_into_a_live_room(self):
+        run(flow.tick())
+        run(flow.press_manual(self.cards()[0]["id"], self.p()))
+        self.now = at(9, 40)
+        run(flow.tick())
+        self.assertEqual([t for t in self.f.escalations if "ما شفت رسالة الرمز" in t], [])
+        self.assertTrue(any("ما شفت رسالة الرمز" in p["text"] for p in self.texts()))
+
+    def test_released_item_room_gone_is_not_lost(self):
+        run(flow.tick())
+        run(flow.press_manual(self.cards()[0]["id"], self.p()))
+        self.f.missing.add(ROOM)
+        self.f.code["c-r1"] = True
+        self.now = at(9, 40)
+        rep = run(flow.tick())
+        self.assertEqual(rep["lost"], 0)
+        self.assertNotIn("card_lost", self.kinds())
+        self.assertIsNone(db.get("r1")["card_lost_at"])
+        self.assertEqual(self.f.code_rooms, [])
+
+    def test_code_room_audit_says_reopen_only_when_it_will(self):
+        self.f.rooms = {}
+        self.now = at(14, 5)
+        run(flow.tick())
+        self.f.missing.add("code-r1-1")
+        self.f.gone.add("code-r1-1")
+        self.now = at(14, 10)
+        run(flow.tick())                            # waiting item: a new room is coming
+        self.assertTrue(any("بفتح غيرها" in t for t in self.f.reviews))
+        self.now = at(14, 15)
+        run(flow.tick())
+        mid = self.cards()[-1]["id"]
+        run(flow.press_manual(mid, self.p()))       # released: nothing will be reopened
+        self.f.reviews.clear()
+        self.f.missing.add("code-r1-2")
+        self.f.gone.add("code-r1-2")
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(14, 16), "body": "thanks"})
+        self.now = at(14, 20)
+        run(flow.tick())
+        self.assertTrue(self.f.reviews)
+        self.assertFalse(any("بفتح غيرها" in t for t in self.f.reviews))
+        self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r1-2"])
+
+    def test_db_error_after_send_says_dont_press_again(self):
+        run(flow.tick())
+        orig = db.mark_sent_by_bot
+
+        def boom(res_id):
+            raise RuntimeError("disk full")
+        db.mark_sent_by_bot = boom
+        try:
+            ok, msg = quiet(run, flow.press_send(self.cards()[0]["id"], self.p()))
+        finally:
+            db.mark_sent_by_bot = orig
+        self.assertTrue(ok)
+        self.assertEqual(msg, "انرسل الرمز ✅ بس صار خطأ بالتسجيل — لا تضغط مرة ثانية.")
+        self.assertEqual(self.f.sends, ["r1"])
+        self.assertTrue(db.get("r1")["released_at"])        # first press wins: no 2nd send
+        ok, _ = run(flow.press_send(self.cards()[0]["id"], self.p()))
+        self.assertFalse(ok)
+        self.assertEqual(self.f.sends, ["r1"])
 
 
 if __name__ == "__main__":

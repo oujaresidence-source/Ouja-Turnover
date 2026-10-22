@@ -35,6 +35,9 @@ PRELIVE_NAME = "Hostaway (قبل التشغيل)"
 # than DELETE_GIVE_UP_DAYS old), with one «⚠️ ما قدرت أقفل الغرفة» line for a person to act on.
 DELETE_MAX_TRIES = 3
 DELETE_GIVE_UP_DAYS = 2
+# A room that takes no card (gone, or no permission to write) is re-placed once; the second
+# refusal of the day stops placement for that item and escalates once.
+ROOM_REFUSALS_MAX = 2
 
 
 def wire_for_tests(caps):
@@ -160,6 +163,24 @@ def _buttons(it, is_live):
     return ["undo"] if it.get("released_at") else ["send", "manual"]
 
 
+def _settled(it):
+    """Released or cancelled: nothing more to place, so a gone room is just forgotten."""
+    return bool(it.get("released_at") or it.get("cancelled"))
+
+
+def _room_alive(channel_id):
+    """HOST.room_exists, where unsure = alive (a False re-places a card or reroutes a warning)."""
+    if not channel_id:
+        return False
+    if not HOST.room_exists:
+        return True
+    try:
+        return bool(HOST.room_exists(channel_id))
+    except Exception as e:
+        print("[codegate] room check %s failed: %s" % (channel_id, type(e).__name__))
+        return True
+
+
 async def _render(it, now_, is_live):
     """Post the card into its room if it has none; edit it only when its content changed.
     No room yet → nothing. Returns "posted" | "edited" | "lost" | None."""
@@ -168,17 +189,12 @@ async def _render(it, now_, is_live):
     channel_id = it.get("channel_id")
     if not channel_id:
         return None                     # placement hasn't found or opened a room yet
-    if is_live and HOST.room_exists:
-        # the room was deleted by hand (e.g. «!ouja احذف-المؤكدة» on a held, cleaned room): a card
-        # with nothing new to say is never edited, so a failed edit can't be what notices it
-        try:
-            gone = not HOST.room_exists(channel_id)
-        except Exception as e:      # unsure = it exists (a False re-places the card)
-            print("[codegate] room check %s failed: %s" % (channel_id, type(e).__name__))
-            gone = False
-        if gone:
-            await _card_lost(it)
-            return "lost"
+    # the room was deleted by hand (e.g. «!ouja احذف-المؤكدة» on a held, cleaned room): a card
+    # with nothing new to say is never edited, so a failed edit can't be what notices it. A
+    # settled item's room is SUPPOSED to go (cleaning deletes it once the code is out)
+    if is_live and not _settled(it) and not _room_alive(channel_id):
+        await _card_lost(it)
+        return "lost"
     view = _view_item(it)
     embed = engine.card(view, now_, soak=not is_live)
     buttons = _buttons(it, is_live)
@@ -189,9 +205,8 @@ async def _render(it, now_, is_live):
             await run_blocking(db.set_card, it["res_id"], channel_id, mid, h)
             await run_blocking(db.event, it["res_id"], "card_posted", "", str(channel_id))
             return "posted"
-        if is_live:                 # the room went before the first post: place it again
-            await _card_lost(it)
-            return "lost"
+        if is_live:
+            return await _post_refused(it)
         return None
     if h != it.get("card_hash"):
         ok = await HOST.edit(channel_id, it["card_message_id"], embed=embed, buttons=buttons)
@@ -199,10 +214,64 @@ async def _render(it, now_, is_live):
             await run_blocking(db.set_hash, it["res_id"], h)
             return "edited"
         if is_live:
+            if _settled(it):
+                await _room_gone_settled(it)
+                return None
             await _card_lost(it)
             return "lost"
         # soak: leave it (no re-posts in soak)
     return None
+
+
+async def _post_refused(it):
+    """Live: the room took no card (gone, or the bot may not write there). The first refusal of
+    the day re-places the card; the second stops placement for this item for the day, says so
+    ONCE (#oujact-review + #escalations), and leaves the alerts to #escalations — an item with
+    no room escalates every alert. Bounds what would otherwise be a new room every tick."""
+    rid, ch = it["res_id"], it.get("channel_id")
+    if _settled(it):
+        await _room_gone_settled(it)
+        return None
+    n = await run_blocking(db.bump_refusals, rid)
+    if n < ROOM_REFUSALS_MAX:
+        await _card_lost(it)
+        return "lost"
+    unit, guest = it.get("unit") or "", it.get("guest") or ""
+    if n == ROOM_REFUSALS_MAX:
+        await run_blocking(db.event, rid, "room_refused_gave_up", "", str(ch or ""))
+        text = "⚠️ ما قدرت أكتب في غرفة الرمز — تحقق من صلاحيات البوت · %s · %s" % (unit, guest)
+        try:
+            if HOST.log_review:
+                await HOST.log_review(text)
+        except Exception as e:
+            print("[codegate] refusal audit %s failed: %s" % (rid, type(e).__name__))
+        try:
+            await HOST.escalate("⚠️ ما قدرت أكتب في غرفة الرمز · " + unit,
+                                text + "\nلين تنحل، أرسل الرمز يدوياً من Hostaway — "
+                                       "تنبيهات هذا الحجز توصل هنا.")
+        except Exception as e:
+            print("[codegate] refusal escalation %s failed: %s" % (rid, type(e).__name__))
+    if it.get("room_kind") == "code" and ch:
+        await _close_room(it, ch, "codegate: cannot post",
+                          "🗑️ قفلت غرفة رمز ما قدرت أكتب فيها · %s · %s · %s"
+                          % (unit, guest, _hhmm_now()))
+    else:
+        await run_blocking(db.set_room, rid, None, None)
+    return None
+
+
+async def _room_gone_settled(it):
+    """A released/cancelled item's room is gone: forget it quietly (no lost card, no
+    re-placement). A code-only room is still closed through the counted path."""
+    rid, ch = it["res_id"], it.get("channel_id")
+    await run_blocking(db.event, rid, "room_gone_settled", "", str(ch or ""))
+    if it.get("room_kind") == "code" and ch:
+        why = "الحجز ملغي" if it.get("cancelled") else "الرمز مسجّل"
+        await _close_room(it, ch, "codegate: room gone",
+                          "🗑️ غرفة رمز انحذفت — %s، ما تحتاج غيرها · %s · %s · %s"
+                          % (why, it.get("unit") or "", it.get("guest") or "", _hhmm_now()))
+        return
+    await run_blocking(db.set_room, rid, None, None)
 
 
 async def _card_lost(it):
@@ -218,9 +287,12 @@ async def _card_lost(it):
         # success or give-up forgets the room (room_closed); a failed try KEEPS channel_id so
         # the next tick's edit fails again and retries the close (under the per-room cap) —
         # wiping it here would orphan the room
+        again = (not _settled(it) and
+                 int(it.get("room_refusals") or 0) < ROOM_REFUSALS_MAX)
         await _close_room(it, it["channel_id"], "codegate: card lost",
-                          "🗑️ غرفة رمز انحذفت بطاقتها — بفتح غيرها · %s · %s · %s"
-                          % (it.get("unit") or "", it.get("guest") or "", _hhmm_now()))
+                          "🗑️ غرفة رمز انحذفت بطاقتها%s · %s · %s · %s"
+                          % (" — بفتح غيرها" if again else "", it.get("unit") or "",
+                             it.get("guest") or "", _hhmm_now()))
         return
     await run_blocking(db.set_room, rid, None, None)
 
@@ -367,6 +439,8 @@ async def _place(it, now_, is_live, ctx, rep):
     until check-in − 2h. Soak never opens a room."""
     if it.get("channel_id") or it.get("cancelled") or it.get("released_at"):
         return it
+    if int(it.get("room_refusals") or 0) >= ROOM_REFUSALS_MAX:
+        return it                   # gave up for the day: alerts go to #escalations only
     rid, day = it["res_id"], it.get("day")
     try:
         room = await run_blocking(HOST.find_room, it.get("lid"), day) if HOST.find_room else None
@@ -495,9 +569,10 @@ async def _process_item(it, now_, rep, is_live=True, prelive=None, ctx=None):
                 text = ((who + " " if who else "") +
                         "⚠️ ضُغط الزر على **%s** بس ما شفت رسالة الرمز في "
                         "المحادثة — تأكد إنها انرسلت." % (it.get("unit") or ""))
-                if it.get("channel_id"):
-                    await HOST.post(it["channel_id"], text)
-                else:                   # its room is gone: #escalations still hears it
+                posted = None
+                if _room_alive(it.get("channel_id")):
+                    posted = await HOST.post(it["channel_id"], text)
+                if not posted:          # no room, or it is gone: #escalations still hears it
                     await HOST.escalate("⚠️ ما شفت رسالة الرمز · " + (it.get("unit") or ""),
                                         text)
                 await run_blocking(db.stamp, rid, "code_warned_at",
@@ -772,9 +847,13 @@ async def press_send(message_id, presser):
         await run_blocking(db.event, rid, "code_send_failed", presser.get("name") or "", why)
         await _rerender(rid)
         return False, _SEND_FAIL.get(why, _SEND_FAIL["error"])
-    await run_blocking(db.mark_sent_by_bot, rid)
-    await run_blocking(db.set_code_seen, rid, True)     # nothing left for the honesty check
-    await run_blocking(db.event, rid, "code_sent_bot", presser.get("name") or "")
+    try:
+        await run_blocking(db.mark_sent_by_bot, rid)
+        await run_blocking(db.set_code_seen, rid, True)     # nothing left for the honesty check
+        await run_blocking(db.event, rid, "code_sent_bot", presser.get("name") or "")
+    except Exception as e:      # the code IS with the guest; the release (first press wins)
+        print("[codegate] after-send record %s failed: %s" % (rid, type(e).__name__))
+        return True, "انرسل الرمز ✅ بس صار خطأ بالتسجيل — لا تضغط مرة ثانية."
     fresh = await _rerender(rid)
     try:
         await _after_code_sent(fresh)
