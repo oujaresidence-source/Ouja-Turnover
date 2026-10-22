@@ -545,6 +545,70 @@ class TestSwitchCommands(unittest.TestCase):
         self.assertIn("تجربة", txt)
         self.assertFalse(bot._codegate.flow.live())
 
+    def _seed_today(self):
+        db = bot._codegate.db
+        today = bot.now_riyadh().date().isoformat()
+        base = {"lid": 461328, "day": today, "unit": "C2", "guest": "G", "conversation_id": "c",
+                "checkin_at": today + "T16:00:00+03:00", "cover_name": "", "cover_did": "",
+                "cover_role_id": "", "owner_did": ""}
+        for rid in ("71", "72", "73", "74"):
+            db.upsert_arrival(dict(base, res_id=rid))
+        db.set_room("71", "500", "turnover")
+        db.set_room("72", "501", "code")
+        db.mark_cancelled(today, {"71", "72", "73"})              # 74 cancelled: not counted
+
+    def test_status_reports_placement_and_code_available_never_the_code(self):
+        orig_tick, orig_get = bot._codegate.flow.tick, bot.api_get
+
+        async def fake_tick(**k):
+            return {"live": 1, "seen": 3}
+        asked = []
+
+        def get(path, params=None):
+            asked.append(path)
+            door = {"/reservations/71": "987654", "/reservations/72": " # ",
+                    "/reservations/73": "135791"}
+            if path == "/reservations/73":
+                raise RuntimeError("hostaway 500 135791")
+            return {"result": {"doorCode": door.get(path)}}
+        bot._codegate.flow.tick = fake_tick
+        bot.api_get = get
+        self.addCleanup(lambda: setattr(bot._codegate.flow, "tick", orig_tick))
+        self.addCleanup(lambda: setattr(bot, "api_get", orig_get))
+        self._seed_today()
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            txt = self.call(bot.codegate_cmd)
+        self.assertIn("turnover=1", txt)
+        self.assertIn("code=1", txt)
+        self.assertIn("waiting=1", txt)
+        self.assertIn("code_available=1/3", txt)
+        self.assertIn("code_errors=1", txt)
+        self.assertEqual(sorted(asked), ["/reservations/71", "/reservations/72",
+                                         "/reservations/73"])
+        for code in ("987654", "135791"):
+            self.assertNotIn(code, txt)
+            self.assertNotIn(code, out.getvalue())
+
+    def test_status_counts_run_off_the_event_loop(self):
+        flow = bot._codegate.flow
+        orig_tick, orig_rb = flow.tick, flow.run_blocking
+        hopped = []
+
+        async def fake_tick(**k):
+            return {"live": 0, "seen": 0}
+
+        async def rb(fn, *a, **k):
+            hopped.append(getattr(fn, "__name__", ""))
+            return fn(*a, **k)
+        flow.tick, flow.run_blocking = fake_tick, rb
+        self.addCleanup(lambda: setattr(flow, "tick", orig_tick))
+        self.addCleanup(lambda: setattr(flow, "run_blocking", orig_rb))
+        self.call(bot.codegate_cmd)
+        self.assertIn("_cg_status_counts", hopped)
+
     def test_status_command_reports_mode(self):
         import asyncio
         orig = bot._codegate.flow.tick

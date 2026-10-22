@@ -9980,9 +9980,39 @@ def _cg_clean_confirm(text):
     return (text or "").translate(_CG_INVISIBLE).strip()
 
 
+def _cg_status_counts(day_iso):
+    """!ouja رموز: where today's cards sit (turnover room / code-only room / still waiting for
+    a room) and how many of today's gated arrivals have a usable door code in Hostaway
+    (code_available=N/M — what «✅ وافق — أرسل الرمز» would find). doorCode is read to COUNT it
+    only: a code is never printed, logged or returned (exception type names only). BLOCKING:
+    one Hostaway read per arrival, so it runs on the codegate pool."""
+    flow, E = _codegate.flow, _codegate.engine
+    rows = [r for r in _codegate.db.day_items(day_iso)
+            if not r.get("cancelled") and flow.is_gated(r.get("lid"))]
+    placed = [r for r in rows if r.get("channel_id")]
+    out = {"turnover": sum(1 for r in placed if r.get("room_kind") == "turnover"),
+           "code": sum(1 for r in placed if r.get("room_kind") == "code"),
+           "waiting": sum(1 for r in rows if not r.get("channel_id") and not r.get("released_at")),
+           "have": 0, "total": len(rows), "errors": 0}
+    for r in rows:
+        try:
+            res = (api_get(f"/reservations/{r['res_id']}") or {}).get("result") or {}
+            code = str(res.get("doorCode") or "").strip()
+            if code:
+                E.code_message(code)        # the sender's own test: ValueError = no usable code
+                out["have"] += 1
+        except ValueError:
+            pass
+        except Exception as e:
+            out["errors"] += 1
+            print("[codegate] door-code count failed:", type(e).__name__)
+    return out
+
+
 @bot.command(name="رموز", aliases=["codegate"])
 async def codegate_cmd(ctx):
-    """!ouja رموز — admin: run one pass now (ignores the 09:00 start) and report."""
+    """!ouja رموز — admin: run one pass now (ignores the 09:00 start) and report, with where
+    today's cards sit and how many arrivals have a door code in Hostaway (never the code)."""
     if not _tk_is_admin(ctx.author):
         return await ctx.reply("للمشرفين فقط.")
     if not _cg_ready():
@@ -9994,8 +10024,16 @@ async def codegate_cmd(ctx):
         ls = await _codegate.flow.run_blocking(_codegate.db.get_setting, "live_since")
         if ls:
             since = "\nشغّال من: %s (live_since)" % str(ls).replace("T", " ")
+    try:
+        c = await _codegate.flow.run_blocking(_cg_status_counts, now_riyadh().date().isoformat())
+        counts = ("\nالبطاقات · turnover=%d, code=%d, waiting=%d · code_available=%d/%d"
+                  % (c["turnover"], c["code"], c["waiting"], c["have"], c["total"]))
+        if c["errors"]:
+            counts += ", code_errors=%d" % c["errors"]
+    except Exception as e:
+        counts = "\nالبطاقات · ما قدرت أعدّها (%s)" % type(e).__name__
     await ctx.reply(_cg_mode_line(is_live) + since + "\nتسليم الرموز · " +
-                    ", ".join("%s=%s" % kv for kv in rep.items()))
+                    ", ".join("%s=%s" % kv for kv in rep.items()) + counts)
 
 
 @bot.command(name="رموز-تشغيل", aliases=["codegate-live"])
