@@ -199,9 +199,13 @@ async def _card_lost(it):
     rid = it["res_id"]
     await run_blocking(db.event, rid, "card_lost", "", str(it.get("channel_id") or ""))
     if it.get("room_kind") == "code" and it.get("channel_id"):
+        # success or give-up forgets the room (room_closed); a failed try KEEPS channel_id so
+        # the next tick's edit fails again and retries the close (under the per-room cap) —
+        # wiping it here would orphan the room
         await _close_room(it, it["channel_id"], "codegate: card lost",
                           "🗑️ غرفة رمز انحذفت بطاقتها — بفتح غيرها · %s · %s · %s"
                           % (it.get("unit") or "", it.get("guest") or "", _hhmm_now()))
+        return
     await run_blocking(db.set_room, rid, None, None)
 
 
@@ -219,11 +223,12 @@ def _too_old(it):
 
 
 async def _delete_failed(it, ch, reason, held):
-    """Count one failed close. After DELETE_MAX_TRIES (or at once for an old row) stop trying:
-    forget the room and tell #oujact-review so a person deletes it by hand."""
+    """Count one failed close of THIS room (the card's room or the held room each have their own
+    tally). After DELETE_MAX_TRIES for that room (or at once for an old row) stop trying: forget
+    the room and tell #oujact-review so a person deletes it by hand."""
     rid = it["res_id"]
     try:
-        n = await run_blocking(db.delete_failed, rid)
+        n = await run_blocking(db.delete_failed, rid, held)
         await run_blocking(db.event, rid, "room_delete_failed", "", "%s %s" % (reason, ch or ""))
         if n < DELETE_MAX_TRIES and not _too_old(it):
             return
@@ -533,6 +538,9 @@ async def _sweep_old_rooms(day, rep):
     except Exception as e:
         print("[codegate] old-room sweep skipped: %s" % e)
         return
+    # a frozen move is retried by the move path only (one try per tick per room)
+    code_rows = [r for r in code_rows if not r.get("moving_to")]
+    held_rows = [r for r in held_rows if not r.get("moving_to")]
     for it in code_rows:
         try:
             if await _close_room(it, it.get("channel_id"), "codegate: day over",
@@ -595,6 +603,7 @@ async def tick(now_=None, force=False):
         # the tick's OWN day, so a tick that straddles midnight can't mix two days
         arrivals = await run_blocking(HOST.today_arrivals, day) or []
         keep = set()
+        frozen = set()              # moved, but a close on the old arrival is still owed
         for a in arrivals:
             if str(a.get("day")) != day or not is_gated(a.get("lid")):
                 continue
@@ -616,7 +625,16 @@ async def tick(now_=None, force=False):
                     except Exception as e:
                         print("[codegate] moved rooms %s failed: %s" % (a.get("res_id"), e))
                         owed = True
-                    if owed:            # keep the old ids for the retry next tick
+                    if owed:
+                        # FREEZE: keep the old ids for the retry next tick, and stop the row
+                        # acting as an arrival of the old unit meanwhile (no room, no alert, no
+                        # hold, no press); _delete_failed's per-room cap bounds how long
+                        try:
+                            await run_blocking(db.set_moving, str(a["res_id"]),
+                                               int(a.get("lid")), day)
+                        except Exception as e:
+                            print("[codegate] freeze %s failed: %s" % (a.get("res_id"), e))
+                        frozen.add(str(a["res_id"]))
                         keep.add(str(a["res_id"]))
                         continue
             if not (cov.get("name") or cov.get("did") or cov.get("role_id")):
@@ -631,7 +649,11 @@ async def tick(now_=None, force=False):
                                                        cover_role_id=cov.get("role_id") or "",
                                                        owner_did=cov.get("owner_did") or ""))
             keep.add(str(a["res_id"]))
+        # a row frozen by an earlier tick whose move did not show up again (cancelled, or moved
+        # back) is unfrozen, so it is handled as what it now is
+        await run_blocking(db.clear_moving_except, frozen)
         rep["seen"] = len(keep)
+        rep["frozen"] = len(frozen)
         rep["cancelled"] = len(await run_blocking(db.mark_cancelled, day, keep))
         if not gated or (not force and now_.hour < engine.START_HOUR):
             return rep
@@ -641,6 +663,8 @@ async def tick(now_=None, force=False):
         prelive = await run_blocking(_prelive_window) if is_live else None
         ctx = {}                    # per-tick memo (departures fetched once)
         for it in items:
+            if it.get("moving_to") or it["res_id"] in frozen:
+                continue            # frozen move: no placement, no alert, no render
             try:
                 await _process_item(it, now_, rep, is_live=is_live, prelive=prelive, ctx=ctx)
             except Exception as e:
@@ -667,6 +691,8 @@ async def _press_checks(message_id, presser, need_live):
         return None, "ما لقيت هذا الحجز في السجل."
     if it.get("cancelled"):
         return it, "الحجز ملغي — ما يحتاج رمز."
+    if it.get("moving_to"):
+        return it, "الحجز انتقل لشقة أو يوم ثاني — انتظر بطاقته الجديدة."
     if need_live and not await run_blocking(live):
         return it, "وضع التجربة — Hostaway يرسل الرمز تلقائياً حالياً، ما يحتاج تضغط."
     if it.get("released_at"):
@@ -761,11 +787,19 @@ async def press_undo(message_id, presser):
 def should_hold(lid, day):
     """BLOCKING, for bot.py's three automatic turnover-room deletes: True = don't delete this
     room yet (live, gated, and that day's arrival still has no code). Never raises — on any
-    error it answers False, i.e. today's behaviour."""
+    error it answers False, i.e. today's behaviour.
+
+    A FROZEN row (moved; a close on its old arrival still owed) holds neither unit: it is no
+    longer the old unit's arrival, and it does not hold the new unit's room either, because
+    defer_close could only attach that hold to the frozen row, where the move would treat it
+    as the OLD hold and close it early. The window is bounded by the per-room delete cap
+    (≤ DELETE_MAX_TRIES ticks); a new-unit room deleted by cleaning in it costs only a later
+    code-only room (placement's normal fallback), never a wrong delete."""
     try:
         if not live() or not is_gated(lid):
             return False
         return any(not r.get("cancelled") and not r.get("released_at")
+                   and not r.get("moving_to")
                    for r in db.items_for(lid, day))
     except Exception as e:
         print("[codegate] should_hold %s/%s failed, not holding: %s" % (lid, day, e))
@@ -778,7 +812,8 @@ def defer_close(lid, day, channel_id=None):
     is remembered by its own id — `channel_id` when the bot passes it, else looked up now — so
     the close never depends on which room the card is in. Never raises."""
     try:
-        rows = [r for r in db.items_for(lid, day) if not r.get("cancelled")]
+        rows = [r for r in db.items_for(lid, day)
+                if not r.get("cancelled") and not r.get("moving_to")]   # frozen: holds nothing
         if not rows:
             return
         ch = channel_id

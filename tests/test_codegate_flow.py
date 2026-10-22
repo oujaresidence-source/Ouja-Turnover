@@ -1454,5 +1454,145 @@ class TestDeleteFailures(FlowCase):
         self.assertIn("see you", json.dumps(self.f.edits[-1]["embed"], ensure_ascii=False))
 
 
+class TestFrozenMove(FlowCase):
+    """Fix round 2: while a move's close is still owed the row is FROZEN — it is not an arrival
+    of the old unit any more and not yet one of the new unit."""
+
+    def start(self):
+        """Probe E: r1 on GATED2 (code-only room, check-in 12:00), its GATED2 turnover room
+        held, then moved to GATED while Discord refuses every delete."""
+        self.f.arrivals = [self.f.arr("r1", GATED2, hh=12)]
+        run(flow.tick())
+        flow.defer_close(GATED2, DAY, channel_id="room-old-T")
+        self.f.delete_ok = False
+        self.f.arrivals = [self.f.arr("r1", GATED, hh=12)]
+
+    def test_frozen_row_opens_nothing_alerts_nothing_holds_nothing(self):
+        self.start()
+        for m in (30, 40):                                # failures 1, 2: still frozen
+            self.now = at(9, m)
+            quiet(run, flow.tick())
+            it = db.get("r1")
+            self.assertEqual((it["lid"], it["moving_to"]), (GATED2, "%s|%s" % (GATED, DAY)))
+            self.assertFalse(flow.should_hold(GATED2, DAY))     # not the old unit's any more
+            self.assertFalse(flow.should_hold(GATED, DAY))      # documented: not yet the new's
+            held = db.get("r1")["held_channel_id"]
+            flow.defer_close(GATED2, DAY, channel_id="room-race")   # a racing hold: ignored
+            self.assertEqual(db.get("r1")["held_channel_id"], held)
+        self.assertEqual(self.f.code_rooms, ["code-r1-1"])      # no new room for the old unit
+        self.assertEqual(len(self.cards()), 1)
+        self.now = at(9, 50)                              # failure 3: given up, move completes
+        quiet(run, flow.tick())
+        it = db.get("r1")
+        self.assertEqual((it["lid"], it["moving_to"], it["channel_id"]), (GATED, None, ROOM))
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        self.assertFalse(flow.should_hold(GATED2, DAY))
+        self.now = at(10, 0)                              # the 2h mark: the NEW unit's alert
+        quiet(run, flow.tick())
+        self.assertEqual(len(self.f.escalations), 1)
+        self.assertIn("U%s" % GATED, self.f.escalations[0])
+        self.assertFalse(any("U%s" % GATED2 in t for t in self.f.escalations))
+
+    def test_frozen_row_refuses_presses(self):
+        self.start()
+        self.now = at(9, 30)
+        quiet(run, flow.tick())
+        mid = db.get("r1")["card_message_id"]
+        for press in (flow.press_send, flow.press_manual):
+            ok, msg = run(press(mid, self.p()))
+            self.assertFalse(ok)
+            self.assertIn("انتقل", msg)
+        self.assertEqual(self.f.sends, [])
+        self.assertIsNone(db.get("r1")["released_at"])
+
+    def test_frozen_row_that_stops_arriving_is_unfrozen_and_closed(self):
+        self.start()
+        self.now = at(9, 30)
+        quiet(run, flow.tick())
+        self.assertTrue(db.get("r1")["moving_to"])
+        self.f.arrivals = []                              # the booking is gone altogether
+        self.f.delete_ok = True
+        self.now = at(9, 40)
+        run(flow.tick())
+        it = db.get("r1")
+        self.assertIsNone(it["moving_to"])
+        self.assertEqual(it["cancelled"], 1)
+        self.assertEqual(sorted(d[0] for d in self.f.deleted), ["code-r1-1", "room-old-T"])
+
+    def test_old_day_sweep_skips_frozen_row(self):
+        """A date move whose close is owed is retried by the move path only — the old-day sweep
+        must not spend a second try on it in the same tick."""
+        self.f.rooms = {}
+        run(flow.tick())
+        nxt = "2026-10-22"
+        self.f.arrivals = [dict(self.f.arr("r1", GATED), day=nxt,
+                                checkin_at=nxt + "T16:00:00+03:00")]
+        self.f.delete_ok = False
+        self.now = datetime.datetime(2026, 10, 22, 9, 5, tzinfo=TZ)
+        quiet(run, flow.tick())
+        self.assertEqual(self.f.delete_calls, 1)
+
+
+class TestPerRoomFailures(FlowCase):
+    """Fix round 2: each room gets at most 3 tries, whatever happens to the other room."""
+
+    def setUp(self):
+        super().setUp()
+        self.f.rooms = {}
+        run(flow.tick())                                  # card in code-r1-1
+        flow.defer_close(GATED, DAY, channel_id="room-T2")
+        self.f.delete_ok = False
+        self.f.arrivals = []                              # cancelled: both rooms owed
+
+    def attempts(self, ch):
+        return [e for e in db._q("SELECT detail FROM codegate_events WHERE "
+                                 "kind='room_delete_failed'") if e["detail"].endswith(ch)]
+
+    def test_each_room_three_tries(self):
+        for m in (20, 30, 40, 50, 59):
+            self.now = at(9, m)
+            quiet(run, flow.tick())
+        self.assertEqual(len(self.attempts("code-r1-1")), 3)
+        self.assertEqual(len(self.attempts("room-T2")), 3)
+        self.assertEqual(self.f.delete_calls, 6)
+        gave_up = [r for r in self.f.reviews if r.startswith("⚠️ ما قدرت أقفل الغرفة")]
+        self.assertEqual(len(gave_up), 2)
+
+    def test_success_on_one_room_keeps_the_others_tally(self):
+        for m in (20, 30):                                # both fail twice
+            self.now = at(9, m)
+            quiet(run, flow.tick())
+        self.f.gone.add("code-r1-1")                      # the code room now closes fine
+        self.now = at(9, 40)
+        quiet(run, flow.tick())
+        self.assertIsNone(db.get("r1")["channel_id"])
+        it = db.get("r1")
+        self.assertEqual((it["room_close_pending"], it["held_channel_id"]), (0, None))
+        self.assertEqual(len(self.attempts("room-T2")), 3)     # gave up on its 3rd try
+
+
+class TestCardLostRetry(FlowCase):
+    def test_lost_code_card_failed_close_keeps_room_and_retries(self):
+        """Probe F: the card in a code-only room is lost and the close fails — the room id is
+        kept (not orphaned) and retried; no second room opens meanwhile."""
+        self.f.rooms = {}
+        run(flow.tick())
+        self.f.edit_ok = False
+        self.f.delete_ok = False
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 10), "body": "x"})
+        self.now = at(9, 20)
+        quiet(run, flow.tick())
+        self.assertEqual(db.get("r1")["channel_id"], "code-r1-1")
+        self.assertEqual(self.f.code_rooms, ["code-r1-1"])
+        self.f.delete_ok = True
+        self.now = at(9, 30)
+        run(flow.tick())                                  # retry: closed, then re-placed
+        self.assertEqual(self.f.deleted, [("code-r1-1", "codegate: card lost")])
+        self.f.edit_ok = True
+        self.now = at(9, 40)
+        run(flow.tick())
+        self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r1-2"])
+
+
 if __name__ == "__main__":
     unittest.main()
