@@ -42,6 +42,28 @@ class TestMigration(unittest.TestCase):
         db.reset_init_cache()                            # second boot: idempotent
         self.assertIn("prelive_checked_at", db.get("old1"))
 
+    def test_late_columns_added(self):
+        """R2: room_kind, room_close_pending, sent_by_bot reach a table built before them."""
+        from contextlib import closing
+        tmp = tempfile.mkdtemp(prefix="cgm_")
+        bdb.set_db_path_for_tests(os.path.join(tmp, "brain.db"))
+        db.reset_init_cache()
+        old = db.SCHEMA
+        for col in ("room_kind", "room_close_pending", "sent_by_bot"):
+            lines = [ln for ln in old.split("\n") if ln.strip().startswith(col + " ")]
+            self.assertEqual(len(lines), 1, col)
+            old = old.replace(lines[0] + "\n", "")
+        with closing(bdb.connect()) as cx:
+            cx.executescript(old)
+            cx.execute("INSERT INTO codegate_items(res_id, day) VALUES ('old1', ?)", (DAY,))
+            cx.commit()
+        it = db.get("old1")
+        self.assertIsNone(it["room_kind"])
+        self.assertEqual(it["room_close_pending"], 0)
+        self.assertEqual(it["sent_by_bot"], 0)
+        db.reset_init_cache()                            # second boot: idempotent
+        self.assertIn("sent_by_bot", db.get("old1"))
+
     def test_fresh_table_has_the_column(self):
         tmp = tempfile.mkdtemp(prefix="cgm_")
         bdb.set_db_path_for_tests(os.path.join(tmp, "brain.db"))
@@ -103,13 +125,6 @@ class TestDb(unittest.TestCase):
         db.upsert_arrival(row("r2"))
         self.assertEqual(db.get("r2")["cancelled"], 0)
 
-    def test_header_latch(self):
-        self.assertFalse(db.header_posted(DAY, "11"))
-        db.mark_header(DAY, "11", "777")
-        self.assertTrue(db.header_posted(DAY, "11"))
-        db.reset_init_cache()                      # a "restart"
-        self.assertTrue(db.header_posted(DAY, "11"))
-
     def test_settings_roundtrip_and_default(self):
         self.assertEqual(db.get_setting("live", "0"), "0")
         db.set_setting("live", "1", "Faisal")
@@ -143,6 +158,71 @@ class TestDb(unittest.TestCase):
         db.upsert_arrival(row(guest="Sara A."))
         it = db.get("r1")
         self.assertEqual((it["card_message_id"], it["alert_2h_at"]), ("555", "t"))
+
+    def test_set_room_clears_card(self):
+        db.upsert_arrival(row())
+        db.set_room("r1", "T1", "turnover")
+        db.set_card("r1", "T1", "555", "h")
+        db.set_room("r1", "T1", "turnover")              # same room: card kept
+        it = db.get("r1")
+        self.assertEqual((it["card_message_id"], it["card_hash"]), ("555", "h"))
+        db.set_room("r1", "C9", "code")                  # new room: the old card is not here
+        it = db.get("r1")
+        self.assertEqual((it["channel_id"], it["room_kind"]), ("C9", "code"))
+        self.assertIsNone(it["card_message_id"])
+        self.assertIsNone(it["card_hash"])
+        self.assertIsNone(db.item_by_message("555"))
+        db.set_room("r1", None, None)                    # lost: placement starts over
+        it = db.get("r1")
+        self.assertIsNone(it["channel_id"])
+        self.assertIsNone(it["room_kind"])
+
+    def test_close_pending_and_sent_by_bot(self):
+        db.upsert_arrival(row())
+        db.set_close_pending("r1", True)
+        self.assertEqual(db.get("r1")["room_close_pending"], 1)
+        db.set_close_pending("r1", False)
+        self.assertEqual(db.get("r1")["room_close_pending"], 0)
+        db.release("r1", "نورة", "11", "t1")
+        db.mark_sent_by_bot("r1")
+        self.assertEqual(db.get("r1")["sent_by_bot"], 1)
+        db.undo("r1", "system", "t2")                    # undo forgets the bot send too
+        self.assertEqual(db.get("r1")["sent_by_bot"], 0)
+
+    def test_code_room_items(self):
+        db.upsert_arrival(row("r1"))
+        db.upsert_arrival(row("r2", day="2026-10-20"))
+        db.upsert_arrival(row("r3"))
+        db.upsert_arrival(row("r4", day="2026-10-20"))
+        db.set_room("r1", "C1", "code")
+        db.set_room("r2", "C2", "code")
+        db.set_room("r3", "T3", "turnover")
+        self.assertEqual(sorted(r["res_id"] for r in db.code_room_items()), ["r1", "r2"])
+        self.assertEqual([r["res_id"] for r in db.code_room_items(older_than_day=DAY)], ["r2"])
+
+    def test_items_for_unit_day(self):
+        db.upsert_arrival(row("r1"))
+        db.upsert_arrival(row("r2", lid=5))
+        db.upsert_arrival(row("r3", day="2026-10-22"))
+        self.assertEqual([r["res_id"] for r in db.items_for(461328, DAY)], ["r1"])
+        self.assertEqual([r["res_id"] for r in db.items_for("461328", DAY)], ["r1"])
+
+    def test_day_change_resets_room(self):
+        db.upsert_arrival(row())
+        db.set_room("r1", "C1", "code")
+        db.set_close_pending("r1", True)
+        db.release("r1", "نورة", "11", "t")
+        db.mark_sent_by_bot("r1")
+        db.upsert_arrival(row(day="2026-10-22", checkin_at="2026-10-22T16:00:00+03:00"))
+        it = db.get("r1")
+        for col in ("channel_id", "room_kind", "room_close_pending", "sent_by_bot"):
+            self.assertFalse(it[col], col)
+        db.set_room("r1", "C2", "code")
+        db.set_close_pending("r1", True)
+        db.upsert_arrival(row(day="2026-10-22", checkin_at="2026-10-22T16:00:00+03:00"))
+        it = db.get("r1")                                # same day: kept
+        self.assertEqual((it["channel_id"], it["room_kind"], it["room_close_pending"]),
+                         ("C2", "code", 1))
 
 
 if __name__ == "__main__":

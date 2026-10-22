@@ -8,7 +8,7 @@ WHAT THE SCHEMA ENFORCES
   * One booking = one row (res_id PRIMARY KEY): a double tick or a redeploy never posts a
     second card.
   * First press wins: release() only updates a row whose released_at IS NULL.
-  * One header per person per day (codegate_headers PRIMARY KEY (day, key)).
+  * A card lives in ONE room: set_room() to a different channel forgets the old card.
 """
 
 import datetime
@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     code_check_at    TEXT,
     code_warned_at   TEXT,
     prelive_checked_at TEXT,
+    room_kind        TEXT,
+    room_close_pending INTEGER DEFAULT 0,
+    sent_by_bot      INTEGER DEFAULT 0,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -61,12 +64,8 @@ CREATE TABLE IF NOT EXISTS codegate_events (
     actor   TEXT,
     detail  TEXT
 );
-CREATE TABLE IF NOT EXISTS codegate_headers (
-    day         TEXT NOT NULL,
-    key         TEXT NOT NULL,
-    message_id  TEXT,
-    PRIMARY KEY (day, key)
-);
+-- codegate_headers (revision 1's per-person header latch) is no longer created; a brain.db
+-- that already has it keeps it, unused and harmless.
 CREATE TABLE IF NOT EXISTS codegate_settings (
     key    TEXT PRIMARY KEY,
     value  TEXT,
@@ -77,14 +76,17 @@ CREATE TABLE IF NOT EXISTS codegate_settings (
 
 # Columns added after the first deploy: a table that already exists keeps its old shape (CREATE
 # TABLE IF NOT EXISTS is a no-op on it), so each is added once, additively, in _ensure.
-_LATE_COLUMNS = (("prelive_checked_at", "TEXT"),)
+_LATE_COLUMNS = (("prelive_checked_at", "TEXT"),
+                 ("room_kind", "TEXT"),                    # "turnover" | "code"
+                 ("room_close_pending", "INTEGER DEFAULT 0"),
+                 ("sent_by_bot", "INTEGER DEFAULT 0"))
 
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
 # A booking moved to another date: what belonged to the old date (its card in the old day's
 # list, its alert stamps, the honesty check, a release for the old arrival) starts over.
 _DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
               "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
-              "released_at")
+              "released_at", "room_kind", "room_close_pending", "sent_by_bot")
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
              "cover_did", "cover_role_id", "owner_did")
 
@@ -208,7 +210,8 @@ def release(res_id, by_name, by_did, at_iso):
 
 def undo(res_id, by_name, at_iso):
     n = _x("UPDATE codegate_items SET released_by=NULL, released_by_did=NULL, released_at=NULL, "
-           "code_seen=NULL, code_check_at=NULL, code_warned_at=NULL, undone_by=?, undone_at=?, "
+           "code_seen=NULL, code_check_at=NULL, code_warned_at=NULL, sent_by_bot=0, "
+           "undone_by=?, undone_at=?, "
            "updated_at=? WHERE res_id=? AND released_at IS NOT NULL",
            (by_name, at_iso, _now(), str(res_id)))
     return n == 1
@@ -231,13 +234,47 @@ def set_code_seen(res_id, seen):
     _x("UPDATE codegate_items SET code_seen=? WHERE res_id=?", (1 if seen else 0, str(res_id)))
 
 
-def header_posted(day, key):
-    return bool(_q("SELECT 1 FROM codegate_headers WHERE day=? AND key=?", (day, str(key))))
+def set_room(res_id, channel_id, kind):
+    """The room the card lives in ("turnover" | "code"), or (None, None) to place it again.
+    A DIFFERENT channel forgets the card (it is not in the new room). room_close_pending is
+    deliberately kept: the bot may hold a turnover room before the card is placed in it."""
+    ch = None if channel_id is None else str(channel_id)
+    # SQLite evaluates every SET expression against the OLD row
+    _x("UPDATE codegate_items SET "
+       "card_message_id=CASE WHEN channel_id IS ? THEN card_message_id ELSE NULL END, "
+       "card_hash=CASE WHEN channel_id IS ? THEN card_hash ELSE NULL END, "
+       "channel_id=?, room_kind=?, updated_at=? WHERE res_id=?",
+       (ch, ch, ch, kind, _now(), str(res_id)))
 
 
-def mark_header(day, key, message_id):
-    _x("INSERT OR IGNORE INTO codegate_headers(day, key, message_id) VALUES (?,?,?)",
-       (day, str(key), str(message_id or "")))
+def set_close_pending(res_id, on):
+    _x("UPDATE codegate_items SET room_close_pending=?, updated_at=? WHERE res_id=?",
+       (1 if on else 0, _now(), str(res_id)))
+
+
+def mark_sent_by_bot(res_id):
+    _x("UPDATE codegate_items SET sent_by_bot=1, updated_at=? WHERE res_id=?",
+       (_now(), str(res_id)))
+
+
+def code_room_items(older_than_day=None):
+    """Rows whose card sits in a code-only room that still exists (channel_id set)."""
+    sql = ("SELECT * FROM codegate_items WHERE room_kind='code' AND channel_id IS NOT NULL "
+           "AND channel_id != ''")
+    args = ()
+    if older_than_day:
+        sql += " AND day < ?"
+        args = (older_than_day,)
+    return [_shape(r) for r in _q(sql + " ORDER BY day, res_id", args)]
+
+
+def items_for(lid, day):
+    try:
+        lid = int(lid)
+    except (TypeError, ValueError):
+        return []
+    return [_shape(r) for r in _q("SELECT * FROM codegate_items WHERE lid=? AND day=? "
+                                  "ORDER BY res_id", (lid, day))]
 
 
 def event(res_id, kind, actor="", detail=""):
