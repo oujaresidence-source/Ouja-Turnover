@@ -65,6 +65,7 @@ _MARKS = re.compile("[\u0640\u064B-\u065F\u0670\u06D6-\u06ED]")
 HOSTAWAY_RES_URL = "https://dashboard.hostaway.com/reservations/%s"
 SOAK_NAME = "🧪 وضع التجربة"
 SOAK_TEXT = "الرمز يُرسل تلقائياً من Hostaway حالياً — لا تحتاج تضغط الزر."
+SOAK_DESCRIPTION = "🧪 وضع التجربة — الرمز يُرسل تلقائياً من Hostaway، ما فيه أزرار حالياً."
 TITLE_MAX = 256
 
 COLOR_WAIT = 0xC9A227    # the dashboard gold
@@ -295,9 +296,13 @@ def card(item, now, soak=False):
     title = "🔑 %s — %s" % (item.get("unit") or "", item.get("guest") or "")
     if len(title) > TITLE_MAX:
         title = title[:TITLE_MAX - 1] + "…"
+    if soak:
+        description = SOAK_DESCRIPTION
+    else:
+        description = ("اقرأ رد الضيف، ثم اضغط «%s». لو Hostaway ما عنده رمز للحجز، "
+                       "أرسله يدوياً واضغط «%s»." % (LABEL_SEND, LABEL_MANUAL))
     return {"title": title,
-            "description": "اقرأ رد الضيف، ثم اضغط «%s». لو Hostaway ما عنده رمز للحجز، "
-                           "أرسله يدوياً واضغط «%s»." % (LABEL_SEND, LABEL_MANUAL),
+            "description": description,
             "color": color, "fields": fields,
             "footer": {"text": "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر"}}
 

@@ -214,6 +214,13 @@ class TestCard(unittest.TestCase):
         self.assertIn(engine.SOAK_TEXT, soak)
         self.assertNotIn(engine.SOAK_NAME, live)
 
+    def test_soak_description_has_no_press_instruction(self):
+        e = engine.card(self.base(), at(11), soak=True)
+        self.assertEqual(e["description"],
+                         "🧪 وضع التجربة — الرمز يُرسل تلقائياً من Hostaway، ما فيه أزرار حالياً.")
+        self.assertNotIn("اضغط", e["description"])
+        self.assertIn("اضغط «✅ وافق — أرسل الرمز»", engine.card(self.base(), at(11))["description"])
+
     def test_title_clipped_to_discord_limit(self):
         e = engine.card(self.base(unit="U" * 200, guest="G" * 200), at(11))
         self.assertLessEqual(len(e["title"]), 256)

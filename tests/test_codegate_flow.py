@@ -894,6 +894,24 @@ class TestPlacement(FlowCase):
         self.assertTrue(any("U%s" % GATED2 in t for t in self.f.escalations))
 
 
+class TestKillSwitchTurnsLiveOff(FlowCase):
+    def test_disabled_env_forces_live_and_hold_off(self):
+        run(flow.tick())
+        self.assertTrue(flow.live())
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        old = os.environ.get("CODEGATE_ENABLED")
+        os.environ["CODEGATE_ENABLED"] = "0"
+        try:
+            self.assertFalse(flow.live())
+            self.assertFalse(flow.should_hold(GATED, DAY))
+        finally:
+            if old is None:
+                os.environ.pop("CODEGATE_ENABLED", None)
+            else:
+                os.environ["CODEGATE_ENABLED"] = old
+        self.assertTrue(flow.live())
+
+
 class TestSoakR2(FlowCase):
     LIVE = False
 

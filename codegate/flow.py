@@ -54,7 +54,11 @@ def live():
     """The SOAK switch, stored in brain.db (the owner never edits Railway). OFF by default:
     while Hostaway still runs the old e-sign flow the list and cards run, but no alert, no
     escalation, no honesty check, and every other bot path treats the units as before.
-    Turned on with `!ouja رموز-تشغيل تشغيل` in the Hostaway-switch sitting."""
+    Turned on with `!ouja رموز-تشغيل تشغيل` in the Hostaway-switch sitting.
+    CODEGATE_ENABLED=0 also forces this False (the undo note's "set CODEGATE_ENABLED=0" must
+    return every live check — should_hold, _cg_live_gated — to the old behaviour)."""
+    if not enabled():
+        return False
     now = time.monotonic()
     if _live_cache["v"] is not None and now - _live_cache["at"] < LIVE_TTL_SEC:
         return _live_cache["v"]

@@ -271,6 +271,30 @@ class TestWiring(unittest.TestCase):
         self.assertEqual(calls, [461328])
 
 
+class TestKillSwitch(unittest.TestCase):
+    def test_disabled_env_turns_cg_live_gated_off(self):
+        flow = bot._codegate.flow
+        old_env = os.environ.get("CODEGATE_ENABLED")
+        old_get = flow.db.get_setting
+        old_cache = dict(flow._live_cache)
+        flow.db.get_setting = lambda key, default=None: "1" if key == "live" else default
+        flow._live_cache.update({"v": None, "at": 0.0})
+        try:
+            os.environ["CODEGATE_ENABLED"] = "1"
+            self.assertTrue(flow.live())
+            self.assertTrue(bot._cg_live_gated(461328))
+            os.environ["CODEGATE_ENABLED"] = "0"
+            self.assertFalse(flow.live())
+            self.assertFalse(bot._cg_live_gated(461328))
+        finally:
+            flow.db.get_setting = old_get
+            flow._live_cache.update(old_cache)
+            if old_env is None:
+                os.environ.pop("CODEGATE_ENABLED", None)
+            else:
+                os.environ["CODEGATE_ENABLED"] = old_env
+
+
 class TestGatedBehaviour(_Live, unittest.TestCase):
     def setUp(self):
         self.patch_live()

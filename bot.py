@@ -340,8 +340,10 @@ except Exception as _cw_err:            # pragma: no cover
     _HAS_CHECKOUT = False
 
 # «تسليم الرموز» — on gated listings the guest replies «أوافق» to the house-rules message and
-# the employee covering the unit that day releases the door code BY HAND. The bot lists,
-# records and alerts; it never decides agreement and never sends a code. Additive; brain.db.
+# the employee covering the unit that day releases the door code. The bot lists, records and
+# alerts; it never decides agreement. The bot sends a code ONLY when staff press
+# «✅ وافق — أرسل الرمز» on a live gated unit, through `_cg_send_code`; the outbound firewall
+# still blocks every other path. Additive; brain.db.
 try:
     import codegate as _codegate
     _HAS_CODEGATE = True
