@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     room_kind        TEXT,
     room_close_pending INTEGER DEFAULT 0,
     sent_by_bot      INTEGER DEFAULT 0,
+    held_channel_id  TEXT,
+    delete_fail_count INTEGER DEFAULT 0,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -79,14 +81,19 @@ CREATE TABLE IF NOT EXISTS codegate_settings (
 _LATE_COLUMNS = (("prelive_checked_at", "TEXT"),
                  ("room_kind", "TEXT"),                    # "turnover" | "code"
                  ("room_close_pending", "INTEGER DEFAULT 0"),
-                 ("sent_by_bot", "INTEGER DEFAULT 0"))
+                 ("sent_by_bot", "INTEGER DEFAULT 0"),
+                 ("held_channel_id", "TEXT"),              # the turnover room the bot HELD
+                 ("delete_fail_count", "INTEGER DEFAULT 0"))
 
 STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
-# A booking moved to another date: what belonged to the old date (its card in the old day's
-# list, its alert stamps, the honesty check, a release for the old arrival) starts over.
+# A booking moved to another date OR another unit: what belonged to the old arrival (its card and
+# room, a held room, its alert stamps, the honesty check, a release) starts over. flow.tick closes
+# the old code-only room and the old held room BEFORE this reset (or skips the upsert to retry).
 _DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
               "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
-              "released_at", "room_kind", "room_close_pending", "sent_by_bot")
+              "released_at", "room_kind", "room_close_pending", "sent_by_bot",
+              "held_channel_id", "delete_fail_count")
+_RESET_TO_ZERO = ("room_close_pending", "sent_by_bot", "delete_fail_count")   # flags, not NULL
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
              "cover_did", "cover_role_id", "owner_did")
 
@@ -150,9 +157,12 @@ def upsert_arrival(row):
     now = _now()
     vals = [str(row["res_id"])] + [row.get(k) for k in _SNAPSHOT]
     sets = ", ".join("%s=excluded.%s" % (k, k) for k in _SNAPSHOT)
-    # SQLite evaluates every SET expression against the OLD row, so `day` below is the stored one
-    sets += ", " + ", ".join("%s=CASE WHEN codegate_items.day IS excluded.day THEN %s ELSE NULL "
-                             "END" % (k, k) for k in _DAY_RESET)
+    # SQLite evaluates every SET expression against the OLD row, so `day`/`lid` below are the
+    # stored ones
+    sets += ", " + ", ".join("%s=CASE WHEN codegate_items.day IS excluded.day AND "
+                             "codegate_items.lid IS excluded.lid THEN %s ELSE %s END"
+                             % (k, k, "0" if k in _RESET_TO_ZERO else "NULL")
+                             for k in _DAY_RESET)
     _x("INSERT INTO codegate_items(res_id, %s, cancelled, created_at, updated_at) "
        "VALUES (?, %s, 0, ?, ?) "
        "ON CONFLICT(res_id) DO UPDATE SET %s, cancelled=0, updated_at=excluded.updated_at"
@@ -252,6 +262,40 @@ def set_close_pending(res_id, on):
        (1 if on else 0, _now(), str(res_id)))
 
 
+def set_held(res_id, channel_id):
+    """The bot held a turnover room for this arrival's code. channel_id None = held, but the
+    room is looked up (find_room) when it is time to close it."""
+    _x("UPDATE codegate_items SET room_close_pending=1, held_channel_id=?, updated_at=? "
+       "WHERE res_id=?", (None if channel_id is None else str(channel_id), _now(), str(res_id)))
+
+
+def room_closed(res_id, channel_id, held=False):
+    """Forget a room that is closed (or given up on). It is the card's room → the card goes with
+    it; it is the held room (held=True, or equal to held_channel_id) → the held close is done.
+    Resets the delete-failure count."""
+    ch = None if channel_id is None else str(channel_id)
+    # SQLite evaluates every SET expression against the OLD row
+    card = "channel_id IS NOT NULL AND channel_id IS ?"
+    hold = "(%d=1 OR (held_channel_id IS NOT NULL AND held_channel_id IS ?))" % (1 if held else 0)
+    _x("UPDATE codegate_items SET "
+       "card_message_id=CASE WHEN {c} THEN NULL ELSE card_message_id END, "
+       "card_hash=CASE WHEN {c} THEN NULL ELSE card_hash END, "
+       "room_kind=CASE WHEN {c} THEN NULL ELSE room_kind END, "
+       "channel_id=CASE WHEN {c} THEN NULL ELSE channel_id END, "
+       "held_channel_id=CASE WHEN {h} THEN NULL ELSE held_channel_id END, "
+       "room_close_pending=CASE WHEN {h} THEN 0 ELSE room_close_pending END, "
+       "delete_fail_count=0, updated_at=? WHERE res_id=?".format(c=card, h=hold),
+       (ch, ch, ch, ch, ch, ch, _now(), str(res_id)))
+
+
+def delete_failed(res_id):
+    """One more failed room delete for this row; returns the new count."""
+    _x("UPDATE codegate_items SET delete_fail_count=COALESCE(delete_fail_count, 0)+1, "
+       "updated_at=? WHERE res_id=?", (_now(), str(res_id)))
+    rows = _q("SELECT delete_fail_count FROM codegate_items WHERE res_id=?", (str(res_id),))
+    return int(rows[0]["delete_fail_count"] or 0) if rows else 0
+
+
 def mark_sent_by_bot(res_id):
     _x("UPDATE codegate_items SET sent_by_bot=1, updated_at=? WHERE res_id=?",
        (_now(), str(res_id)))
@@ -269,10 +313,9 @@ def code_room_items(older_than_day=None):
 
 
 def held_room_items(older_than_day=None):
-    """Rows whose turnover room the bot HELD for the code (room_close_pending) and that still
-    has a channel_id — the deferred close codegate owes."""
-    sql = ("SELECT * FROM codegate_items WHERE room_kind='turnover' AND room_close_pending=1 "
-           "AND channel_id IS NOT NULL AND channel_id != ''")
+    """Rows with a held turnover room (room_close_pending) — the deferred close codegate owes.
+    Tracked by held_channel_id, whatever room the card itself is in (or none)."""
+    sql = "SELECT * FROM codegate_items WHERE room_close_pending=1"
     args = ()
     if older_than_day:
         sql += " AND day < ?"

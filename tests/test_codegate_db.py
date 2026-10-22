@@ -49,7 +49,8 @@ class TestMigration(unittest.TestCase):
         bdb.set_db_path_for_tests(os.path.join(tmp, "brain.db"))
         db.reset_init_cache()
         old = db.SCHEMA
-        for col in ("room_kind", "room_close_pending", "sent_by_bot"):
+        for col in ("room_kind", "room_close_pending", "sent_by_bot", "held_channel_id",
+                    "delete_fail_count"):
             lines = [ln for ln in old.split("\n") if ln.strip().startswith(col + " ")]
             self.assertEqual(len(lines), 1, col)
             old = old.replace(lines[0] + "\n", "")
@@ -61,6 +62,8 @@ class TestMigration(unittest.TestCase):
         self.assertIsNone(it["room_kind"])
         self.assertEqual(it["room_close_pending"], 0)
         self.assertEqual(it["sent_by_bot"], 0)
+        self.assertIsNone(it["held_channel_id"])
+        self.assertEqual(it["delete_fail_count"], 0)
         db.reset_init_cache()                            # second boot: idempotent
         self.assertIn("sent_by_bot", db.get("old1"))
 
@@ -201,16 +204,54 @@ class TestDb(unittest.TestCase):
         self.assertEqual([r["res_id"] for r in db.code_room_items(older_than_day=DAY)], ["r2"])
 
     def test_held_room_items(self):
+        """A held close is tracked by the held room itself, whatever room the card is in."""
         db.upsert_arrival(row("r1", day="2026-10-20"))
         db.upsert_arrival(row("r2", day="2026-10-20"))
         db.upsert_arrival(row("r3"))
+        db.upsert_arrival(row("r4"))
         db.set_room("r1", "T1", "turnover")
         db.set_room("r2", "T2", "turnover")
-        db.set_room("r3", "T3", "turnover")
-        db.set_close_pending("r1", True)
-        db.set_close_pending("r3", True)
-        self.assertEqual(sorted(r["res_id"] for r in db.held_room_items()), ["r1", "r3"])
+        db.set_room("r3", "C3", "code")                  # card in a code room, turnover held
+        db.set_held("r1", "T1")
+        db.set_held("r3", "T3")
+        db.set_held("r4", None)                          # held, room to be looked up
+        self.assertEqual(sorted(r["res_id"] for r in db.held_room_items()), ["r1", "r3", "r4"])
         self.assertEqual([r["res_id"] for r in db.held_room_items(older_than_day=DAY)], ["r1"])
+        self.assertEqual((db.get("r3")["held_channel_id"], db.get("r3")["room_close_pending"]),
+                         ("T3", 1))
+
+    def test_room_closed_forgets_only_that_room(self):
+        db.upsert_arrival(row())
+        db.set_room("r1", "C1", "code")
+        db.set_card("r1", "C1", "555", "h")
+        db.set_held("r1", "T1")
+        db.delete_failed("r1")
+        db.room_closed("r1", "C1")                       # the code room: card goes, hold stays
+        it = db.get("r1")
+        self.assertEqual((it["channel_id"], it["room_kind"], it["card_message_id"]),
+                         (None, None, None))
+        self.assertEqual((it["held_channel_id"], it["room_close_pending"]), ("T1", 1))
+        self.assertEqual(it["delete_fail_count"], 0)
+        db.room_closed("r1", "T1", held=True)
+        it = db.get("r1")
+        self.assertEqual((it["held_channel_id"], it["room_close_pending"]), (None, 0))
+
+    def test_room_closed_held_is_card_room(self):
+        db.upsert_arrival(row())
+        db.set_room("r1", "T1", "turnover")
+        db.set_card("r1", "T1", "555", "h")
+        db.set_held("r1", "T1")
+        db.room_closed("r1", "T1", held=True)
+        it = db.get("r1")
+        self.assertEqual((it["channel_id"], it["card_message_id"], it["held_channel_id"],
+                          it["room_close_pending"]), (None, None, None, 0))
+        db.set_held("r1", None)                          # held room never resolved, then gone
+        db.room_closed("r1", None, held=True)
+        self.assertEqual(db.get("r1")["room_close_pending"], 0)
+
+    def test_delete_failed_counts(self):
+        db.upsert_arrival(row())
+        self.assertEqual([db.delete_failed("r1") for _ in range(3)], [1, 2, 3])
 
     def test_items_for_unit_day(self):
         db.upsert_arrival(row("r1"))
@@ -225,9 +266,12 @@ class TestDb(unittest.TestCase):
         db.set_close_pending("r1", True)
         db.release("r1", "نورة", "11", "t")
         db.mark_sent_by_bot("r1")
+        db.set_held("r1", "T1")
+        db.delete_failed("r1")
         db.upsert_arrival(row(day="2026-10-22", checkin_at="2026-10-22T16:00:00+03:00"))
         it = db.get("r1")
-        for col in ("channel_id", "room_kind", "room_close_pending", "sent_by_bot"):
+        for col in ("channel_id", "room_kind", "room_close_pending", "sent_by_bot",
+                    "held_channel_id", "delete_fail_count"):
             self.assertFalse(it[col], col)
         db.set_room("r1", "C2", "code")
         db.set_close_pending("r1", True)
@@ -235,6 +279,23 @@ class TestDb(unittest.TestCase):
         it = db.get("r1")                                # same day: kept
         self.assertEqual((it["channel_id"], it["room_kind"], it["room_close_pending"]),
                          ("C2", "code", 1))
+
+    def test_unit_change_same_day_resets_room(self):
+        """A guest moved to another unit the same day: the old unit's room is not his any more."""
+        db.upsert_arrival(row())
+        db.set_room("r1", "T1", "turnover")
+        db.set_card("r1", "T1", "555", "h")
+        db.set_held("r1", "T1")
+        db.stamp("r1", "alert_2h_at", "t")
+        db.upsert_arrival(row(lid=526697))
+        it = db.get("r1")
+        self.assertEqual(it["lid"], 526697)
+        for col in ("channel_id", "card_message_id", "room_kind", "held_channel_id",
+                    "room_close_pending", "alert_2h_at"):
+            self.assertFalse(it[col], col)
+        db.set_room("r1", "T2", "turnover")
+        db.upsert_arrival(row(lid="526697"))             # same unit (as text): kept
+        self.assertEqual(db.get("r1")["channel_id"], "T2")
 
 
 if __name__ == "__main__":
