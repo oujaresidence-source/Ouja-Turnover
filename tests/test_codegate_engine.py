@@ -355,6 +355,17 @@ class TestVerdict(unittest.TestCase):
                                    "I don’t agree"))
 
 
+    # round 3: negations that were still missing
+    def test_remaining_negations_are_unclear(self):
+        words = ("didnt", "shouldnt", "couldnt", "wouldnt", "havent", "arent", "isnt", "wasnt",
+                 "wont", "cant", "dont", "doesnt", "refuse", "refused", "unable", "ابدا", "ابداً",
+                 "مابي", "مابغى", "مابغي", "ماابي", "dis")
+        for w in words:
+            self.assertEqual(self.v("i %s agree" % w), "unclear", w)
+            self.assertEqual(self.v("%s اوافق" % w), "unclear", w)
+        self.assertEqual(self.v("i dis agree"), "unclear")
+
+
 class TestSendTexts(unittest.TestCase):
     WATCHDOG = r"\d{3,10}\s*#|#\s*\d{3,10}"   # watchdog/engine.py:43
 

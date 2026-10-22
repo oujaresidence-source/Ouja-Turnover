@@ -48,7 +48,10 @@ _AGREE_TOKENS = _squashed("أوافق", "اوافق", "نوافق", "موافق"
                           "موافقون", "agree", "agreed")
 _NEGATIONS = _squashed("ما", "لا", "مو", "مب", "مش", "غير", "no", "not", "never", "disagree",
                        "dont", "cant", "cannot", "wont", "wouldnt", "doesnt", "isnt",
-                       "ماني", "مانيب", "مقدر", "ماقدر", "مستحيل", "ابد", "أبد")
+                       "ماني", "مانيب", "مقدر", "ماقدر", "مستحيل", "ابد", "أبد", "ابدا", "ابداً",
+                       "مابي", "مابغى", "مابغي", "ماابي",
+                       "didnt", "shouldnt", "couldnt", "havent", "arent", "wasnt",
+                       "refuse", "refused", "unable", "dis")   # "dis agree" = disagree, split
 # words that may sit between a negation and the agree word without breaking the link:
 # "ما اقدر اقول اوافق", "not going to agree"
 _FILLERS = _squashed("اقدر", "أقدر", "راح", "ب", "going", "to", "gonna", "want", "اقول", "أقول")
