@@ -31,16 +31,25 @@ class _Host:
     #                        retried next tick and must never open a duplicate (R3 implements)
     departures_today = None  # BLOCKING (day_iso) -> set[int] listing ids with a confirmed
     #                        departure that day (a turnover room is coming)
-    send_code = None       # BLOCKING (res_id, conversation_id) -> (ok: bool, why: str), why in
-    #                        "sent" | "no_code" | "killed" | "duplicate" | "error". Reads doorCode
-    #                        from a FRESH GET /reservations/{id}, sends, never logs the body, and
-    #                        RAISES nothing (flow still treats a raise as "error")
+    send_code = None       # BLOCKING (res_id, conversation_id, lid=None) -> (ok: bool, why: str),
+    #                        why in "sent" | "no_code" | "no_conversation" | "cancelled" (not a
+    #                        confirmed booking any more) | "moved" (listingMapId != lid) |
+    #                        "killed" | "duplicate" | "error" (NOT sent; flow undoes the release)
+    #                        | "unknown" (timed out AFTER the post went out: maybe sent — the
+    #                        dedupe claim is kept and flow keeps the release, unverified, for
+    #                        the honesty check). Reads doorCode + status from a FRESH
+    #                        GET /reservations/{id}, never logs the body, RAISES nothing (flow
+    #                        still treats a raise as "error")
     delete_room = None     # async (channel_id, reason) -> bool. True when deleted OR when the
     #                        channel is ALREADY GONE (Discord NotFound: someone deleted it by
     #                        hand — the close is done). False only for a real error (Forbidden,
     #                        5xx, timeout): flow retries at most 3 times (at once gives up for a
     #                        row > 2 days old) and then writes «⚠️ ما قدرت أقفل الغرفة» (R3)
     log_review = None      # async (text) -> None: one audit line to #oujact-review
+    room_exists = None     # (channel_id) -> bool. Optional, NOT blocking (a Discord cache lookup,
+    #                        safe on the loop). False = the room is gone (deleted by hand): live
+    #                        treats the card as lost and re-places it next tick. When unsure
+    #                        (guild unavailable) it must answer True — a False re-places the card
     release_send_claim = None  # BLOCKING (res_id) -> None. Optional: frees the sender's dedupe
     #                        claim `codegate-send:<res_id>` after an admin undo, so a legitimate
     #                        re-send is not refused as "duplicate"

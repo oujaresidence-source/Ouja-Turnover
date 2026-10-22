@@ -12,9 +12,10 @@ import bot  # noqa: E402
 sys.stdout.flush()
 
 _REAL_API_REQUEST = bot._api_request
-# sha1 of inspect.getsource(outbound_firewall) + inspect.getsource(send_guest_message) at R3:
-# the code sender must not change the firewall by a single byte
-FIREWALL_SHA1 = "2ce3d29ecbda7a74736fa09c8c35eefc197ee8f5"
+# sha1 of inspect.getsource(outbound_firewall) + inspect.getsource(send_guest_message) +
+# repr(_FW_CODE_CTX), taken from the firewall as it stood at 7bd6cc0 (before R3): the code sender
+# must not change the firewall by a single byte
+FIREWALL_SHA1 = "bfd8901481bf17204e4d55776f4cd0b7f9fd1e12"
 NET_CALLS = []
 
 
@@ -73,6 +74,7 @@ class TestWiring(unittest.TestCase):
         self.assertIs(H.delete_room, bot._cg_delete_room)
         self.assertIs(H.log_review, bot._ready_log_review)
         self.assertIs(H.release_send_claim, bot._cg_release_send_claim)
+        self.assertIs(H.room_exists, bot._cg_room_exists)
         self.assertFalse(hasattr(bot, "_cg_channel"))
 
     def test_gated_helpers(self):
@@ -642,11 +644,14 @@ class TestSendCode(_Fx, unittest.TestCase):
         self.swap("ASSISTANT_SEND_KILL", False)
         self.gets, self.posts, self.events = [], [], []
         self.door = "1234"
+        self.status = "new"
+        self.listing = 461328
         self.post_error = None
 
         def get(path, params=None):
             self.gets.append(path)
-            return {"result": {"id": 77, "doorCode": self.door}}
+            return {"result": {"id": 77, "doorCode": self.door, "status": self.status,
+                               "listingMapId": self.listing}}
 
         def post(path, body):
             if self.post_error is not None:
@@ -657,12 +662,12 @@ class TestSendCode(_Fx, unittest.TestCase):
         self.swap("api_post", post)
         self.swap("log_event", lambda cat, text: self.events.append((cat, text)))
 
-    def send(self, res_id="77", cid="c77"):
+    def send(self, res_id="77", cid="c77", lid=461328):
         import contextlib
         import io
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            res = bot._cg_send_code(res_id, cid)
+            res = bot._cg_send_code(res_id, cid, lid)
         self.printed = out.getvalue()
         return res
 
@@ -683,9 +688,48 @@ class TestSendCode(_Fx, unittest.TestCase):
             self.door = door
             self.assertEqual(self.send(res_id="r-%r" % (door,)), (False, "no_code"), door)
         self.assertEqual(self.posts, [])
-        self.door = "1234"
-        self.assertEqual(self.send(cid=""), (False, "no_code"))      # no conversation
         self.assertEqual(self.posts, [])
+
+    def test_missing_conversation_has_its_own_reason(self):
+        self.assertEqual(self.send(cid=""), (False, "no_conversation"))
+        self.assertEqual((self.gets, self.posts), ([], []))         # not even a read
+
+    def test_booking_cancelled_in_hostaway_gets_no_code(self):
+        for status in ("cancelled", "inquiry", "", None):
+            self.status = status
+            self.assertEqual(self.send(res_id="s-%r" % (status,)), (False, "cancelled"), status)
+        self.assertEqual(self.posts, [])
+        self.status = "modified"
+        self.assertEqual(self.send(), (True, "sent"))
+
+    def test_booking_moved_to_another_unit_gets_no_code(self):
+        self.listing = 526697
+        self.assertEqual(self.send(), (False, "moved"))
+        self.assertEqual(self.posts, [])
+        self.listing = "461328"                                    # same unit, as a string
+        self.assertEqual(self.send(), (True, "sent"))
+
+    def test_unit_check_skipped_when_unknown(self):
+        self.listing = None
+        self.assertEqual(self.send(res_id="a"), (True, "sent"))
+        self.listing = 526697
+        self.assertEqual(self.send(res_id="b", lid=None), (True, "sent"))
+
+    def test_timeout_after_post_keeps_claim_and_says_unknown(self):
+        import requests
+        self.post_error = requests.exceptions.ReadTimeout("read timed out 1234")
+        self.assertEqual(self.send(), (False, "unknown"))
+        self.assertNotIn("1234", self.printed)
+        self.post_error = None
+        self.assertEqual(self.send(), (False, "duplicate"))         # claim kept: no 2nd send
+        self.assertEqual(self.posts, [])
+
+    def test_connect_timeout_never_reached_hostaway_releases_claim(self):
+        import requests
+        self.post_error = requests.exceptions.ConnectTimeout("connect timed out")
+        self.assertEqual(self.send(), (False, "error"))
+        self.post_error = None
+        self.assertEqual(self.send(), (True, "sent"))
 
     def test_empty_code_takes_no_claim(self):
         self.door = ""
@@ -739,7 +783,11 @@ class TestSendCode(_Fx, unittest.TestCase):
         import inspect
         src = "".join(inspect.getsource(f) for f in (bot.outbound_firewall,
                                                       bot.send_guest_message))
-        self.assertEqual(hashlib.sha1(src.encode("utf-8")).hexdigest(), FIREWALL_SHA1)
+        src += repr(bot._FW_CODE_CTX)
+        self.assertEqual(hashlib.sha1(src.encode("utf-8")).hexdigest(), FIREWALL_SHA1,
+                         "the outbound firewall changed — re-verify that codegate's "
+                         "_cg_send_code is still the only code-sending exemption, then update "
+                         "FIREWALL_SHA1")
 
 
 def _http_error(cls, status):
@@ -850,6 +898,19 @@ class TestDiscordCaps(_Fx, unittest.TestCase):
             self.assertIs(_arun(bot._cg_delete_room("900", "r")), False)
             self.channel(RuntimeError("x"))
             self.assertIs(_arun(bot._cg_delete_room("900", "r")), False)
+
+    def test_room_exists_is_a_cache_lookup(self):
+        known = {900: object()}
+        self.swap("get_channel", lambda cid: known.get(cid), owner=bot.bot)
+        self.swap("get_guild", lambda gid: object(), owner=bot.bot)
+        self.assertTrue(bot._cg_room_exists("900"))
+        self.assertFalse(bot._cg_room_exists("901"))
+        self.assertTrue(bot._cg_room_exists("garbage"))           # unsure = exists
+        self.swap("get_guild", lambda gid: None, owner=bot.bot)   # guild not loaded: unsure
+        self.assertTrue(bot._cg_room_exists("901"))
+        unavailable = type("G", (), {"unavailable": True})()
+        self.swap("get_guild", lambda gid: unavailable, owner=bot.bot)
+        self.assertTrue(bot._cg_room_exists("901"))
 
     def test_find_room_uses_turnover_key(self):
         self.swap("_cw_channels_in", lambda guild: [
@@ -1012,6 +1073,15 @@ class TestDeleteGuard(_Fx, unittest.TestCase):
                                                      461328, "2026-10-22")))
         self.assertFalse(_arun(bot._cg_hold_room(None, 461328, "2026-10-22")))
 
+    def test_guard_readies_codegate_before_the_list_check(self):
+        order = []
+        flow = bot._codegate.flow
+        gated = flow.is_gated
+        self.swap("_cg_ready", lambda: order.append("ready") or True)
+        self.swap("is_gated", lambda lid: order.append("gated") or gated(lid), owner=flow)
+        _arun(bot._cg_hold_room(_FakeChannel(topic=self.KEY_TOPIC), 461328, "2026-10-22"))
+        self.assertEqual(order[:2], ["ready", "gated"])
+
     def test_guard_uses_codegate_pool_not_to_thread(self):
         import asyncio
         orig = asyncio.to_thread
@@ -1145,7 +1215,11 @@ class TestDeferFirst(unittest.TestCase):
                 log.append(("send_message",))
 
         class Follow:
+            def __init__(self):
+                self.texts = []
+
             async def send(self, *a, **k):
+                self.texts.append(a[0] if a else None)
                 log.append(("followup", k.get("ephemeral")))
 
         msg = type("M", (), {"id": 4242})()
@@ -1196,6 +1270,42 @@ class TestDeferFirst(unittest.TestCase):
         self.assertEqual(log[0], ("defer", True))
         self.assertEqual(log[2], ("press", "manual"))
         self.assertEqual(log[-1], ("followup", True))
+
+    def test_callbacks_always_answer(self):
+        import asyncio
+        flow = bot._codegate.flow
+        cases = [("yes", lambda: bot.CodegateConfirmView.yes(bot.CodegateConfirmView(1, "send"),
+                                                             self.i, None), "press_send"),
+                 ("undo", lambda: bot.CodegateView.undo(bot.CodegateView(), self.i, None),
+                  "press_undo"),
+                 ("send", lambda: bot.CodegateView.send(bot.CodegateView(), self.i, None),
+                  None)]
+        for name, call, press in cases:
+            with self.subTest(name=name):
+                log = []
+                self.i = self._interaction(log)
+                saved = (flow.run_blocking, flow.press_send, flow.press_undo)
+
+                async def rb(fn, *a, **k):
+                    raise RuntimeError("secret 1234")
+
+                async def ok_press(*a, **k):
+                    return True, "ok"
+                flow.run_blocking = rb
+                flow.press_send = flow.press_undo = ok_press
+                import contextlib
+                import io
+                out = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(out):
+                        asyncio.run(call())
+                finally:
+                    flow.run_blocking, flow.press_send, flow.press_undo = saved
+                self.assertEqual(log[0], ("defer", True))
+                self.assertEqual(log[-1], ("followup", True))
+                self.assertEqual(self.i.followup.texts[-1], "صار خطأ — جرّب مرة ثانية")
+                self.assertIn("RuntimeError", out.getvalue())
+                self.assertNotIn("1234", out.getvalue())
 
     def test_undo_defers_first(self):
         async def go(i):

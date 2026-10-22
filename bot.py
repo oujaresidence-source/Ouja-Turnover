@@ -9663,23 +9663,35 @@ def _cg_send_claim(res_id):
     return "codegate-send:%s" % res_id
 
 
-def _cg_send_code(res_id, conversation_id):
+def _cg_send_code(res_id, conversation_id, lid=None):
     """«تسليم الرموز»: send the door code for ONE reservation, after a staff press + confirm.
     The only path in the bot that may send a code: it deliberately does not go through
     send_guest_message's code-leak firewall, and so it must NEVER print or log the body or the
-    code (exception TYPE names only). Honours the kill switch; reads doorCode from a FRESH
-    GET /reservations/{id}; a persisted dedupe claim stops a second send (6h, freed by an admin
-    undo or a failed send). Returns (ok, why), why in sent|no_code|killed|duplicate|error.
-    Never raises."""
+    code (exception TYPE names only). Honours the kill switch; reads doorCode, status and unit
+    from a FRESH GET /reservations/{id} (a booking cancelled, or moved to another unit, since the
+    last tick gets nothing); a persisted dedupe claim stops a second send (6h, freed by an admin
+    undo or a send that surely failed). Returns (ok, why), why in sent | no_code |
+    no_conversation | cancelled | moved | killed | duplicate | error | unknown (timed out after
+    the post went out: maybe sent, so the claim is KEPT). Never raises."""
     if ASSISTANT_SEND_KILL:
         return False, "killed"
+    if not conversation_id:
+        return False, "no_conversation"
     try:
         r = (api_get(f"/reservations/{res_id}") or {}).get("result") or {}
     except Exception as e:
         print("[codegate] reservation read failed:", type(e).__name__)
         return False, "error"
+    if str(r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+        return False, "cancelled"
+    if lid not in (None, "") and r.get("listingMapId") not in (None, ""):
+        try:
+            if int(r.get("listingMapId")) != int(lid):
+                return False, "moved"
+        except (TypeError, ValueError):
+            return False, "moved"
     code = str(r.get("doorCode") or "").strip()
-    if not code or not conversation_id:
+    if not code:
         return False, "no_code"
     try:
         body = with_signature(_codegate.engine.code_message(code))
@@ -9694,6 +9706,13 @@ def _cg_send_code(res_id, conversation_id):
     try:
         api_post(f"/conversations/{conversation_id}/messages",
                  {"body": body, "communicationType": "email"})
+    except requests.exceptions.ConnectTimeout:     # never reached Hostaway: surely not sent
+        _once_release(claim)
+        print("[codegate] code send failed: ConnectTimeout")
+        return False, "error"
+    except requests.exceptions.Timeout as e:       # the post went out, no answer: maybe sent —
+        print("[codegate] code send unconfirmed:", type(e).__name__)   # KEEP the claim
+        return False, "unknown"
     except Exception as e:
         _once_release(claim)
         print("[codegate] code send failed:", type(e).__name__)
@@ -9708,6 +9727,18 @@ def _cg_send_code(res_id, conversation_id):
 def _cg_release_send_claim(res_id):
     """After an admin undo: free the dedupe claim so a legitimate re-send isn't "duplicate"."""
     _once_release(_cg_send_claim(res_id))
+
+
+def _cg_room_exists(channel_id):
+    """Is the card's room still there? A Discord CACHE lookup (safe on the loop). Unsure — the
+    guild not loaded or unavailable, a garbled id — answers True: a False re-places the card."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None or getattr(guild, "unavailable", False):
+        return True
+    try:
+        return bot.get_channel(int(channel_id)) is not None
+    except (TypeError, ValueError):
+        return True
 
 
 async def _cg_delete_room(channel_id, reason):
@@ -9743,10 +9774,10 @@ async def _cg_hold_room(channel, lid=None, date_iso=None):
             day = str(date_iso or "")[:10]
         if lid in (None, "") or not day:
             return False
+        _cg_ready()                         # wired (unit-list path) before the list check
         flow = _codegate.flow
         if not flow.is_gated(lid):          # the unit list only (file mtime), no pool hop
             return False
-        _cg_ready()
         if not await flow.run_blocking(flow.should_hold, lid, day):
             return False
         held = await flow.run_blocking(flow.defer_close, lid, day, channel_id=str(channel.id))
@@ -9839,6 +9870,7 @@ def _cg_wire():
         "delete_room": _cg_delete_room,
         "log_review": _ready_log_review,
         "release_send_claim": _cg_release_send_claim,
+        "room_exists": _cg_room_exists,
     })
     return True
 
@@ -9878,6 +9910,16 @@ async def _cg_defer(interaction):
         print("[codegate] defer failed:", e)
 
 
+_CG_OOPS = "صار خطأ — جرّب مرة ثانية"
+
+
+async def _cg_oops(interaction, where, e):
+    """A button must ALWAYS answer (a silent failure leaves «thinking…» forever). The exception
+    TYPE only is printed — never its text, which could carry a guest's data."""
+    print("[codegate] %s failed: %s" % (where, type(e).__name__))
+    await _cw_reply(interaction, _CG_OOPS)
+
+
 class CodegateConfirmView(discord.ui.View):
     """The ask-again step. kind "send" = the bot sends the code now (press_send, the ONLY code
     path); kind "manual" = record a code sent by hand from Hostaway (press_manual)."""
@@ -9894,10 +9936,13 @@ class CodegateConfirmView(discord.ui.View):
     @discord.ui.button(label="نعم", style=discord.ButtonStyle.success)
     async def yes(self, interaction, button):
         await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
-        presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
-        press = (_codegate.flow.press_send if self.kind == "send"
-                 else _codegate.flow.press_manual)
-        ok, msg = await press(self.message_id, presser)
+        try:
+            presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db
+            press = (_codegate.flow.press_send if self.kind == "send"
+                     else _codegate.flow.press_manual)
+            ok, msg = await press(self.message_id, presser)
+        except Exception as e:
+            return await _cg_oops(interaction, "confirm " + self.kind, e)
         await _cw_reply(interaction, msg)
 
     @discord.ui.button(label="لا، رجوع", style=discord.ButtonStyle.secondary)
@@ -9919,11 +9964,14 @@ class CodegateView(discord.ui.View):
         if not _cg_ready():
             return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
         await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
-        it = await _codegate.flow.run_blocking(_codegate.db.item_by_message,
-                                               interaction.message.id)        # brain.db read
-        E = _codegate.engine
-        text = (E.CONFIRM_SEND if E.agree_verdict((it or {}).get("replies") or []) == "yes"
-                else E.CONFIRM_SEND_UNCLEAR)
+        try:
+            it = await _codegate.flow.run_blocking(_codegate.db.item_by_message,
+                                                   interaction.message.id)    # brain.db read
+            E = _codegate.engine
+            text = (E.CONFIRM_SEND if E.agree_verdict((it or {}).get("replies") or []) == "yes"
+                    else E.CONFIRM_SEND_UNCLEAR)
+        except Exception as e:
+            return await _cg_oops(interaction, "send click", e)
         await _cw_reply(interaction, text,
                         view=CodegateConfirmView(interaction.message.id, "send"))
 
@@ -9941,8 +9989,11 @@ class CodegateView(discord.ui.View):
         if not _cg_ready():
             return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
         await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
-        presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
-        ok, msg = await _codegate.flow.press_undo(interaction.message.id, presser)
+        try:
+            presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db
+            ok, msg = await _codegate.flow.press_undo(interaction.message.id, presser)
+        except Exception as e:
+            return await _cg_oops(interaction, "undo", e)
         await _cw_reply(interaction, msg)
 
 

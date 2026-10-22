@@ -168,6 +168,17 @@ async def _render(it, now_, is_live):
     channel_id = it.get("channel_id")
     if not channel_id:
         return None                     # placement hasn't found or opened a room yet
+    if is_live and HOST.room_exists:
+        # the room was deleted by hand (e.g. «!ouja احذف-المؤكدة» on a held, cleaned room): a card
+        # with nothing new to say is never edited, so a failed edit can't be what notices it
+        try:
+            gone = not HOST.room_exists(channel_id)
+        except Exception as e:      # unsure = it exists (a False re-places the card)
+            print("[codegate] room check %s failed: %s" % (channel_id, type(e).__name__))
+            gone = False
+        if gone:
+            await _card_lost(it)
+            return "lost"
     view = _view_item(it)
     embed = engine.card(view, now_, soak=not is_live)
     buttons = _buttons(it, is_live)
@@ -178,6 +189,9 @@ async def _render(it, now_, is_live):
             await run_blocking(db.set_card, it["res_id"], channel_id, mid, h)
             await run_blocking(db.event, it["res_id"], "card_posted", "", str(channel_id))
             return "posted"
+        if is_live:                 # the room went before the first post: place it again
+            await _card_lost(it)
+            return "lost"
         return None
     if h != it.get("card_hash"):
         ok = await HOST.edit(channel_id, it["card_message_id"], embed=embed, buttons=buttons)
@@ -198,6 +212,8 @@ async def _card_lost(it):
     gone, delete_room reports that as closed)."""
     rid = it["res_id"]
     await run_blocking(db.event, rid, "card_lost", "", str(it.get("channel_id") or ""))
+    # a deleted turnover room is never reopened by the sync loop: placement stops waiting for it
+    await run_blocking(db.stamp, rid, "card_lost_at", _now_riyadh().isoformat(timespec="seconds"))
     if it.get("room_kind") == "code" and it.get("channel_id"):
         # success or give-up forgets the room (room_closed); a failed try KEEPS channel_id so
         # the next tick's edit fails again and retries the close (under the per-room cap) —
@@ -363,7 +379,8 @@ async def _place(it, now_, is_live, ctx, rep):
     if not is_live:
         return it
     ci = _dt(it.get("checkin_at"))
-    fallback = ci is None or now_ >= ci - datetime.timedelta(minutes=engine.ALERT_LEAD_MIN)
+    fallback = (ci is None or bool(it.get("card_lost_at")) or
+                now_ >= ci - datetime.timedelta(minutes=engine.ALERT_LEAD_MIN))
     if not fallback:
         deps = await _departures(ctx, day)
         try:
@@ -696,6 +713,8 @@ async def _press_checks(message_id, presser, need_live):
         return None, "ما لقيت هذا الحجز في السجل."
     if it.get("cancelled"):
         return it, "الحجز ملغي — ما يحتاج رمز."
+    if not await run_blocking(is_gated, it.get("lid")):
+        return it, "هذي الشقة مو على قائمة الرموز الحين."
     if it.get("moving_to"):
         return it, "الحجز انتقل لشقة أو يوم ثاني — انتظر بطاقته الجديدة."
     if need_live and not await run_blocking(live):
@@ -715,6 +734,10 @@ _SEND_FAIL = {
     "killed": "الإرسال للضيوف موقوف حالياً (مفتاح الإيقاف).",
     "duplicate": "هذي الرسالة انرسلت قبل شوي — ما أرسلتها مرتين.",
     "error": "Hostaway ما رد — جرّب بعد دقيقة.",
+    "no_conversation": "الحجز ما له محادثة في Hostaway — أرسل الرمز يدوياً.",
+    "cancelled": "الحجز ملغي في Hostaway — ما أرسلت الرمز.",
+    "moved": "الحجز انتقل لشقة ثانية في Hostaway — ما أرسلت الرمز، انتظر بطاقته الجديدة.",
+    "unknown": "ما تأكدت إن الرسالة وصلت — شيّك المحادثة في Hostaway قبل ما تضغط مرة ثانية.",
 }
 
 
@@ -733,11 +756,17 @@ async def press_send(message_id, presser):
     try:
         if not HOST.send_code:
             raise RuntimeError("send_code not wired")
-        res = await run_blocking(HOST.send_code, rid, it.get("conversation_id"))
+        res = await run_blocking(HOST.send_code, rid, it.get("conversation_id"), it.get("lid"))
         ok, why = bool(res[0]), str(res[1])
     except Exception as e:      # the sender must not raise; if it does, it did not send
         print("[codegate] send_code %s raised: %s" % (rid, type(e).__name__))
         ok, why = False, "error"
+    if not ok and why == "unknown":
+        # timed out AFTER the post went out: maybe sent. Keep the release (first press wins, so
+        # nobody can send twice) but unverified — the honesty check looks for it in the chat
+        await run_blocking(db.event, rid, "code_send_unknown", presser.get("name") or "")
+        await _rerender(rid)
+        return False, _SEND_FAIL["unknown"]
     if not ok:
         await run_blocking(db.undo, rid, "system", HOST.now().isoformat(timespec="seconds"))
         await run_blocking(db.event, rid, "code_send_failed", presser.get("name") or "", why)
@@ -804,6 +833,8 @@ def should_hold(lid, day):
     try:
         if not live() or not is_gated(lid):
             return False
+        if str(day) < _now_riyadh().date().isoformat():
+            return False            # a day that is over holds nothing (the sweep closes it)
         return any(not r.get("cancelled") and not r.get("released_at")
                    and not r.get("moving_to")
                    for r in db.items_for(lid, day))

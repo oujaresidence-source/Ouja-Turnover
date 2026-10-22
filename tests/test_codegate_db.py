@@ -50,7 +50,8 @@ class TestMigration(unittest.TestCase):
         db.reset_init_cache()
         old = db.SCHEMA
         for col in ("room_kind", "room_close_pending", "sent_by_bot", "held_channel_id",
-                    "card_room_fail_count", "held_room_fail_count", "moving_to"):
+                    "card_room_fail_count", "held_room_fail_count", "moving_to",
+                    "card_lost_at"):
             lines = [ln for ln in old.split("\n") if ln.strip().startswith(col + " ")]
             self.assertEqual(len(lines), 1, col)
             old = old.replace(lines[0] + "\n", "")
@@ -65,6 +66,7 @@ class TestMigration(unittest.TestCase):
         self.assertIsNone(it["held_channel_id"])
         self.assertEqual((it["card_room_fail_count"], it["held_room_fail_count"]), (0, 0))
         self.assertIsNone(it["moving_to"])
+        self.assertIsNone(it["card_lost_at"])
         db.reset_init_cache()                            # second boot: idempotent
         self.assertIn("sent_by_bot", db.get("old1"))
 

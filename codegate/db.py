@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS codegate_items (
     card_room_fail_count INTEGER DEFAULT 0,
     held_room_fail_count INTEGER DEFAULT 0,
     moving_to        TEXT,
+    card_lost_at     TEXT,
     alert_2h_at      TEXT,
     alert_late_at    TEXT,
     cancelled        INTEGER NOT NULL DEFAULT 0,
@@ -87,17 +88,22 @@ _LATE_COLUMNS = (("prelive_checked_at", "TEXT"),
                  ("held_channel_id", "TEXT"),              # the turnover room the bot HELD
                  ("card_room_fail_count", "INTEGER DEFAULT 0"),   # failed closes, per room
                  ("held_room_fail_count", "INTEGER DEFAULT 0"),
-                 ("moving_to", "TEXT"))                    # "<lid>|<day>": a move whose close
+                 ("moving_to", "TEXT"),                    # "<lid>|<day>": a move whose close
 #                                                            is still owed (the row is FROZEN)
+                 ("card_lost_at", "TEXT"))                 # live lost a card (room deleted):
+#                                                            placement no longer waits for a
+#                                                            turnover room that won't reopen
 
-STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at")
+STAMP_COLUMNS = ("alert_2h_at", "alert_late_at", "code_check_at", "code_warned_at",
+                 "card_lost_at")
 # A booking moved to another date OR another unit: what belonged to the old arrival (its card and
 # room, a held room, its alert stamps, the honesty check, a release) starts over. flow.tick closes
 # the old code-only room and the old held room BEFORE this reset (or skips the upsert to retry).
 _DAY_RESET = ("channel_id", "card_message_id", "card_hash", "alert_2h_at", "alert_late_at",
               "code_seen", "code_check_at", "code_warned_at", "released_by", "released_by_did",
               "released_at", "room_kind", "room_close_pending", "sent_by_bot",
-              "held_channel_id", "card_room_fail_count", "held_room_fail_count")
+              "held_channel_id", "card_room_fail_count", "held_room_fail_count",
+              "card_lost_at")
 _RESET_TO_ZERO = ("room_close_pending", "sent_by_bot", "card_room_fail_count",
                   "held_room_fail_count")                                   # flags, not NULL
 _SNAPSHOT = ("lid", "day", "unit", "guest", "conversation_id", "checkin_at", "cover_name",
