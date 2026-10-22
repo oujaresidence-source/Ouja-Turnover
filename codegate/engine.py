@@ -34,15 +34,29 @@ CONFIRM_MANUAL = "سجّل إنك أرسلت الرمز بنفسك من Hostaway
 CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"  # deprecated, OLD text: R3 removes
 VERDICT_LABEL = {"yes": "✅ كتب «أوافق»", "unclear": "⚠️ رد بس مو واضح", "none": "⏳ ما رد بعد"}
 
-_AGREE_TOKENS = frozenset(("أوافق", "اوافق", "نوافق", "موافق", "موافقه", "موافقة", "موافقين",
-                           "موافقون", "agree", "agreed"))
-_NEGATIONS = frozenset(("ما", "لا", "مو", "مب", "مش", "غير", "no", "not", "never", "disagree",
-                        "dont", "cant", "cannot", "wont", "wouldnt", "doesnt", "isnt"))
+def _squash(w):
+    """Collapse repeated letters so elongation never matters: "noo" -> "no", "agreeeee" -> "agre"
+    (the constants below go through it too, so "agree" is "agre" on both sides)."""
+    return re.sub(r"(.)\1+", r"\1", w)
+
+
+def _squashed(*words):
+    return frozenset(_squash(w) for w in words)
+
+
+_AGREE_TOKENS = _squashed("أوافق", "اوافق", "نوافق", "موافق", "موافقه", "موافقة", "موافقين",
+                          "موافقون", "agree", "agreed")
+_NEGATIONS = _squashed("ما", "لا", "مو", "مب", "مش", "غير", "no", "not", "never", "disagree",
+                       "dont", "cant", "cannot", "wont", "wouldnt", "doesnt", "isnt",
+                       "ماني", "مانيب", "مقدر", "ماقدر", "مستحيل", "ابد", "أبد")
+# words that may sit between a negation and the agree word without breaking the link:
+# "ما اقدر اقول اوافق", "not going to agree"
+_FILLERS = _squashed("اقدر", "أقدر", "راح", "ب", "going", "to", "gonna", "want", "اقول", "أقول")
 # "no problem, I agree" is agreement, so these idioms are removed before negations are looked for
 _IDIOMS = ("ما عندنا اعتراض", "ما عندي مشكلة", "ما فيه مشكلة", "لا مشكلة", "لا بأس", "لا تقلق",
            "no problem", "no worries")
-_QUESTION_WORDS = frozenset(("هل", "وش", "ايش", "إيش", "شنو", "ليش", "what", "do", "does", "how",
-                             "why"))
+_QUESTION_WORDS = _squashed("هل", "وش", "ايش", "إيش", "شنو", "ليش", "what", "do", "does", "how",
+                            "why")
 _NEG_WINDOW = 2   # a negation only counts within this many words right before the agree word
 _WORD = re.compile(r"[\w']+")
 _MARKS = re.compile("[\u0640\u064B-\u065F\u0670\u06D6-\u06ED]")
@@ -87,7 +101,6 @@ def _fold(s):
 
 
 _INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
-_REPEATS = re.compile(r"(\w)\1{2,}")
 _ATTRIBUTION = re.compile(r"\bon\b[^\n]{0,120}?\bwrote\s*:|في[^\n]{0,120}?\d[^\n]{0,60}?كتب")
 _QUOTE_MARK = re.compile(r"(?:^|\s)>")
 
@@ -96,7 +109,7 @@ def _own_text(text):
     """Only what the guest typed: no invisible characters, no marks, and none of the quoted
     copy of our own message that an email reply carries."""
     t = _MARKS.sub("", _INVISIBLE.sub("", _fold(text)))
-    t = t.replace("_", " ").replace("\u2019", "'")
+    t = t.replace("_", " ").replace("\u2019", "'").replace("\u2018", "'")
     t = "\n".join(ln for ln in t.split("\n") if not ln.lstrip().startswith(">"))
     m = _ATTRIBUTION.search(t)
     if m:
@@ -105,27 +118,35 @@ def _own_text(text):
 
 
 def _words(text):
-    words = _WORD.findall(_REPEATS.sub(r"\1", text))
-    flat = " " + " ".join(words) + " "
+    """Squashed words, quote marks off their edges (inner apostrophes stay: don't, can't)."""
+    words = [_squash(w.strip("'")) for w in _WORD.findall(text)]
+    flat = " " + " ".join(w for w in words if w) + " "
     for idiom in _IDIOMS:
-        flat = flat.replace(" %s " % idiom, "  ")
+        flat = flat.replace(" %s " % " ".join(_squash(x) for x in idiom.split()), "  ")
     return flat.split()
 
 
-def _squash(w):
-    return re.sub(r"(.)\1+", r"\1", w)     # "agreeeee" and "agree" both become "agre"
-
-
-_AGREE_SQUASHED = frozenset(_squash(t) for t in _AGREE_TOKENS)
-
-
-def _is_agree(w):
-    w = _squash(w)
-    return w in _AGREE_SQUASHED or (w[:1] in ("و", "ف") and w[1:] in _AGREE_SQUASHED)
+def _in(w, group):
+    """In the group, with or without a leading و/ف attached ("ولا", "وما", "فلا")."""
+    return w in group or (w[:1] in ("و", "ف") and w[1:] in group)
 
 
 def _is_negation(w):
-    return w in _NEGATIONS or w.endswith("n't")
+    return _in(w, _NEGATIONS) or w.endswith("n't")
+
+
+def _negated(words, i):
+    """A negation within the 2 words before words[i], not counting fillers."""
+    seen = 0
+    for w in reversed(words[:i]):
+        if _in(w, _FILLERS):
+            continue
+        if _is_negation(w):
+            return True
+        seen += 1
+        if seen >= _NEG_WINDOW:
+            break
+    return False
 
 
 def _is_question(text, words):
@@ -136,11 +157,10 @@ def _reply_state(text):
     """None (no agree word) | "yes" | "no" (negated, or asked as a question)."""
     t = _own_text(text)
     words = _words(t)
-    hits = [i for i, w in enumerate(words) if _is_agree(w)]
+    hits = [i for i, w in enumerate(words) if _in(w, _AGREE_TOKENS)]
     if not hits:
         return None
-    i = hits[-1]
-    if _is_question(t, words) or any(_is_negation(w) for w in words[max(0, i - _NEG_WINDOW):i]):
+    if _is_question(t, words) or _negated(words, hits[-1]):
         return "no"
     return "yes"
 

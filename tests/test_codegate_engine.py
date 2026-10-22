@@ -326,6 +326,35 @@ class TestVerdict(unittest.TestCase):
         self.assertEqual(self.v("ما\u200f أوافق"), "unclear")
 
 
+    # round 2, 1: a leading و/ف glued to a negation
+    def test_prefixed_negations_are_unclear(self):
+        self.assertAll("unclear", ("ولا أوافق", "وما أوافق", "فلا اوافق", "ومو موافق",
+                                   "ولا اوافق ابد"))
+
+    # round 2, 2: more negations, and far negations through filler words
+    def test_more_negations_and_far_negations(self):
+        self.assertAll("unclear", ("ماني موافق", "مانيب موافق", "مقدر اوافق", "ماقدر اوافق",
+                                   "مستحيل اوافق", "ابد ما اوافق", "أبد أوافق", "never agree",
+                                   "not going to agree", "I am not gonna agree",
+                                   "I do not want to agree", "ما اقدر اقول اوافق",
+                                   "ما راح اوافق", "ما بـ اوافق"))
+
+    def test_fillers_alone_do_not_negate_and_idioms_still_work(self):
+        self.assertAll("yes", ("going to agree", "راح اوافق", "اقدر اوافق", "لا بأس، أوافق",
+                               "no problem, I'm going to agree"))
+
+    # round 2, 3: short elongation of a negation
+    def test_elongated_negation(self):
+        self.assertAll("unclear", ("noo agree", "nooo agree", "لاا اوافق", "مااا اوافق"))
+
+    # round 2, 4: quote marks stuck to a word
+    def test_quote_marks_on_word_edges(self):
+        self.assertAll("yes", ("Reply 'I agree'", "'agree'", "\"agree\"", "«أوافق»", "‹أوافق›",
+                               "ok 'agreed'"))
+        self.assertAll("unclear", ("I don't agree", "I can't agree", "I 'don't' agree",
+                                   "I don’t agree"))
+
+
 class TestSendTexts(unittest.TestCase):
     WATCHDOG = r"\d{3,10}\s*#|#\s*\d{3,10}"   # watchdog/engine.py:43
 
