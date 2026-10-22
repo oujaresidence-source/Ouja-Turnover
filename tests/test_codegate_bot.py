@@ -783,6 +783,40 @@ class TestSendCode(_Fx, unittest.TestCase):
                          (False, "unknown"))
         self.assertFalse(bot._once_claim(bot._cg_send_claim("j")))
 
+    def test_truncated_or_undecodable_body_after_post_is_unknown(self):
+        """The POST was processed; only reading the answer failed — never free the claim."""
+        import requests
+        for i, err in enumerate((requests.exceptions.ChunkedEncodingError("truncated 1234"),
+                                 requests.exceptions.ContentDecodingError("gzip 1234"),
+                                 requests.exceptions.RetryError("retries"),
+                                 requests.exceptions.RequestException("generic"),
+                                 RuntimeError("token fetch failed"))):
+            with self.subTest(err=type(err).__name__):
+                rid = "post-%d" % i
+                self.assertEqual(self._post_outcome(err, rid), (False, "unknown"))
+                self.assertFalse(bot._once_claim(bot._cg_send_claim(rid)))      # kept
+                self.assertNotIn("1234", self.printed)
+
+    def test_pre_send_tls_proxy_and_closed_pool_are_error(self):
+        import requests
+        from urllib3.exceptions import (ClosedPoolError, MaxRetryError, ProxyError,
+                                        SSLError)
+        cases = (requests.exceptions.SSLError(MaxRetryError(None, "/x", SSLError("handshake"))),
+                 requests.exceptions.ProxyError(MaxRetryError(None, "/x", ProxyError("p", None))),
+                 requests.exceptions.ConnectionError(ClosedPoolError(None, "closed")),
+                 requests.exceptions.ConnectTimeout("connect timed out"))
+        for i, err in enumerate(cases):
+            with self.subTest(err=type(err).__name__):
+                rid = "tls-%d" % i
+                self.assertEqual(self._post_outcome(err, rid), (False, "error"))
+                self.assertTrue(bot._once_claim(bot._cg_send_claim(rid)))       # freed
+
+    def test_max_retry_with_a_non_connect_reason_is_unknown(self):
+        import requests
+        from urllib3.exceptions import MaxRetryError, ResponseError
+        err = requests.exceptions.ConnectionError(MaxRetryError(None, "/x", ResponseError("r")))
+        self.assertEqual(self._post_outcome(err, "mr"), (False, "unknown"))
+
     def test_200_with_json_is_sent(self):
         self.assertEqual(self._post_outcome(self._response(200, '{"status": "success"}'), "ok"),
                          (True, "sent"))
@@ -810,9 +844,12 @@ class TestSendCode(_Fx, unittest.TestCase):
         self.assertEqual(len(self.posts), 1)
 
     def test_send_failure_releases_claim(self):
-        self.post_error = RuntimeError("hostaway 500 body=1234")
-        self.assertEqual(self.send(), (False, "error"))
-        self.assertIn("RuntimeError", self.printed)
+        import requests
+        from urllib3.exceptions import MaxRetryError, NewConnectionError
+        self.post_error = requests.exceptions.ConnectionError(
+            MaxRetryError(None, "/x", NewConnectionError(None, "refused body=1234")))
+        self.assertEqual(self.send(), (False, "error"))              # surely not sent
+        self.assertIn("ConnectionError", self.printed)
         self.assertNotIn("1234", self.printed)                       # type name only
         self.post_error = None
         self.assertEqual(self.send(), (True, "sent"))                # the retry goes through

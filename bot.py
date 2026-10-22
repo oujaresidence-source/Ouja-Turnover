@@ -9724,35 +9724,40 @@ def _cg_send_code(res_id, conversation_id, lid=None):
 def _cg_post_outcome(e):
     """What a failed api_post (→ _api_request: one Session request, max_retries=0, then
     raise_for_status and r.json()) means for the guest: "error" = surely NOT sent (the claim is
-    freed), "unknown" = maybe sent (the claim is kept, so nobody can send twice).
-      ConnectTimeout                      → error   (never connected)
-      ConnectionError(MaxRetryError/...)  → error   (refused, DNS, TLS handshake, proxy: urllib3
-                                                     wraps every pre-send failure in MaxRetryError)
-      ConnectionError(ProtocolError/OSError) → unknown (dropped after the request went out)
-      other Timeout (ReadTimeout)         → unknown
-      HTTPError 5xx                       → unknown (Hostaway may have queued it)
-      HTTPError 4xx                       → error   (rejected; 429/401/403 already retried)
-      JSONDecodeError on a 2xx            → unknown (it answered OK, just not in JSON)
-      anything else                       → error"""
+    freed), "unknown" = maybe sent (the claim is kept, so nobody can send twice). The default is
+    "unknown": only these PROVEN pre-send failures are "error" —
+      ConnectTimeout                                   (never connected)
+      ConnectionError wrapping ClosedPoolError          (no connection was handed out)
+      ConnectionError wrapping MaxRetryError whose reason is a connect-phase failure:
+        NewConnectionError (refused, DNS), a TLS handshake SSLError, a ProxyError, or a
+        ConnectTimeoutError (urllib3 wraps every pre-send failure this way)
+      HTTPError 4xx                                    (rejected; 429/401/403 already retried)
+    Everything else — a dropped connection, a ReadTimeout, a 5xx, a truncated or undecodable
+    2xx body (ChunkedEncodingError, ContentDecodingError, JSONDecodeError), RetryError, even a
+    token-fetch failure before the POST — keeps the claim: wrongly "unknown" costs a warning and
+    an admin undo, wrongly "error" could send a guest a second code."""
     try:
-        from urllib3.exceptions import ClosedPoolError, MaxRetryError
+        from urllib3.exceptions import (ClosedPoolError, ConnectTimeoutError, MaxRetryError,
+                                        NewConnectionError, ProxyError as _U3ProxyError,
+                                        SSLError as _U3SSLError)
     except Exception:                   # pragma: no cover — urllib3 ships with requests
-        ClosedPoolError = MaxRetryError = ()
+        return "unknown"
     if isinstance(e, requests.exceptions.ConnectTimeout):
         return "error"
-    if isinstance(e, requests.exceptions.Timeout):
-        return "unknown"
     if isinstance(e, requests.exceptions.HTTPError):
         status = getattr(getattr(e, "response", None), "status_code", None) or 0
-        return "unknown" if int(status) >= 500 else "error"
+        return "error" if 400 <= int(status) < 500 else "unknown"
     if isinstance(e, requests.exceptions.ConnectionError):
         inner = e.args[0] if e.args else None
-        if MaxRetryError and isinstance(inner, (MaxRetryError, ClosedPoolError)):
+        if isinstance(inner, ClosedPoolError):
             return "error"
-        return "unknown"
-    if isinstance(e, (requests.exceptions.JSONDecodeError, json.JSONDecodeError)):
-        return "unknown"
-    return "error"
+        if isinstance(inner, MaxRetryError):
+            # on OpenSSL 3 a TLS EOF AFTER the request went out can also surface as an SSLError
+            # wrapped in MaxRetryError — indistinguishable from a handshake failure; accepted, rare
+            if isinstance(inner.reason, (NewConnectionError, ConnectTimeoutError, _U3SSLError,
+                                         _U3ProxyError)):
+                return "error"
+    return "unknown"
 
 
 def _cg_release_send_claim(res_id):
