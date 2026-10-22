@@ -221,6 +221,13 @@ class TestCard(unittest.TestCase):
         self.assertNotIn("اضغط", e["description"])
         self.assertIn("اضغط «✅ وافق — أرسل الرمز»", engine.card(self.base(), at(11))["description"])
 
+    def test_soak_footer_does_not_promise_a_bot_send(self):
+        soak = engine.card(self.base(), at(11), soak=True)["footer"]["text"]
+        self.assertEqual(soak, "«تسليم الرموز» · وضع التجربة — ما فيه أزرار، والرمز من Hostaway")
+        self.assertNotIn("ويرسل الرمز", soak)
+        self.assertEqual(engine.card(self.base(), at(11))["footer"]["text"],
+                         "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر")
+
     def test_title_clipped_to_discord_limit(self):
         e = engine.card(self.base(unit="U" * 200, guest="G" * 200), at(11))
         self.assertLessEqual(len(e["title"]), 256)

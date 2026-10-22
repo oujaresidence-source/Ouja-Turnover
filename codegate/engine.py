@@ -66,6 +66,8 @@ HOSTAWAY_RES_URL = "https://dashboard.hostaway.com/reservations/%s"
 SOAK_NAME = "🧪 وضع التجربة"
 SOAK_TEXT = "الرمز يُرسل تلقائياً من Hostaway حالياً — لا تحتاج تضغط الزر."
 SOAK_DESCRIPTION = "🧪 وضع التجربة — الرمز يُرسل تلقائياً من Hostaway، ما فيه أزرار حالياً."
+SOAK_FOOTER = "«تسليم الرموز» · وضع التجربة — ما فيه أزرار، والرمز من Hostaway"
+LIVE_FOOTER = "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر"
 TITLE_MAX = 256
 
 COLOR_WAIT = 0xC9A227    # the dashboard gold
@@ -304,7 +306,7 @@ def card(item, now, soak=False):
     return {"title": title,
             "description": description,
             "color": color, "fields": fields,
-            "footer": {"text": "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر"}}
+            "footer": {"text": SOAK_FOOTER if soak else LIVE_FOOTER}}
 
 
 def header_text(mention, name, n):
