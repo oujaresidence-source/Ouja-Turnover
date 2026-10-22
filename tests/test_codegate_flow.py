@@ -46,6 +46,8 @@ class Fake:
         self.gone_hits = []
         self.delete_calls = 0
         self.edit_ok = True
+        self.edit_raises = None                     # an Exception = a non-"gone" edit failure
+        self.released_claims = []
         self.arrivals = [self.arr("r1", GATED), self.arr("r9", OPEN)]
         self.msgs = {"c-r1": [{"inbound": False, "at": at(8),
                                "body": 'Please reply "I agree to the house rules"'},
@@ -67,7 +69,12 @@ class Fake:
 
     async def edit(self, ch, mid, embed=None, buttons=None):
         self.edits.append({"id": mid, "ch": ch, "embed": embed, "buttons": buttons})
+        if self.edit_raises is not None:
+            raise self.edit_raises
         return self.edit_ok
+
+    def release_send_claim(self, res_id):
+        self.released_claims.append(res_id)
 
     async def escalate(self, title, detail):
         self.escalations.append(title)
@@ -131,6 +138,7 @@ class FlowCase(unittest.TestCase):
             "find_room": self.f.find_room, "departures_today": self.f.departures_today,
             "create_code_room": self.f.create_code_room, "send_code": self.f.send_code,
             "delete_room": self.f.delete_room, "log_review": self.f.log_review,
+            "release_send_claim": self.f.release_send_claim,
         })
         self.asked_days = []
         self.addCleanup(self._restore_globals, bdb._DB_PATH_OVERRIDE)
@@ -266,9 +274,10 @@ class TestPress(FlowCase):
             ok, msg = run(press("424242", self.p()))
             self.assertFalse(ok)
 
-    def test_release_alias_is_manual(self):
-        """bot.py (revision 1) still calls press_release until R3 rewires the view."""
-        self.assertIs(flow.press_release, flow.press_manual)
+    def test_deprecated_pieces_removed(self):
+        """R3: the revision-1 alias and the dead HOST.channel are gone."""
+        self.assertFalse(hasattr(flow, "press_release"))
+        self.assertFalse(hasattr(flow.HOST, "channel"))
 
     def test_release_stops_alerts(self):
         run(flow.press_manual(self.mid, self.p()))
@@ -1592,6 +1601,113 @@ class TestCardLostRetry(FlowCase):
         self.now = at(9, 40)
         run(flow.tick())
         self.assertEqual(self.f.code_rooms, ["code-r1-1", "code-r1-2"])
+
+
+class TestR3FlowContract(FlowCase):
+    """R3: defer_close reports whether it recorded the hold; undo frees the send claim; an edit
+    that fails for any reason but "gone" is retried, never treated as a lost card."""
+
+    def setUp(self):
+        super().setUp()
+        run(flow.tick())
+        self.mid = self.cards()[0]["id"]
+
+    def test_defer_close_returns_true_when_recorded(self):
+        self.assertIs(flow.defer_close(GATED, DAY, channel_id="room-held"), True)
+        self.assertEqual(db.get("r1")["held_channel_id"], "room-held")
+
+    def test_defer_close_false_without_item(self):
+        self.assertIs(flow.defer_close(GATED2, DAY, channel_id="x"), False)
+
+    def test_defer_close_false_once_code_released(self):
+        """The race: the code went out between should_hold and defer_close → nothing recorded,
+        the caller deletes the room as it always did."""
+        self.assertTrue(flow.should_hold(GATED, DAY))
+        run(flow.press_send(self.mid, self.p()))
+        self.assertIs(flow.defer_close(GATED, DAY, channel_id="room-held"), False)
+        it = db.get("r1")
+        self.assertEqual((it["room_close_pending"], it["held_channel_id"]), (0, None))
+
+    def test_defer_close_false_on_db_error(self):
+        orig = db.items_for
+        db.items_for = lambda *a: (_ for _ in ()).throw(RuntimeError("db gone"))
+        try:
+            self.assertIs(quiet(flow.defer_close, GATED, DAY, channel_id="x"), False)
+        finally:
+            db.items_for = orig
+
+    def test_undo_releases_send_claim(self):
+        run(flow.press_manual(self.mid, self.p()))
+        ok, _ = run(flow.press_undo(self.mid, self.p(did="5", admin=True, name="Faisal")))
+        self.assertTrue(ok)
+        self.assertEqual(self.f.released_claims, ["r1"])
+
+    def test_refused_undo_releases_nothing(self):
+        ok, _ = run(flow.press_undo(self.mid, self.p(did="5", admin=True)))   # nothing to undo
+        self.assertFalse(ok)
+        run(flow.press_manual(self.mid, self.p()))
+        ok, _ = run(flow.press_undo(self.mid, self.p()))                       # not an admin
+        self.assertFalse(ok)
+        self.assertEqual(self.f.released_claims, [])
+
+    def test_undo_survives_claim_release_error(self):
+        run(flow.press_manual(self.mid, self.p()))
+
+        def boom(res_id):
+            raise OSError("volume gone")
+        flow.HOST.release_send_claim = boom
+        ok, _ = quiet(run, flow.press_undo(self.mid, self.p(did="5", admin=True)))
+        self.assertTrue(ok)
+        self.assertIsNone(db.get("r1")["released_at"])
+
+    def test_edit_error_is_retried_not_lost(self):
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 10), "body": "see you"})
+        self.f.edit_raises = RuntimeError("discord 503")
+        self.now = at(9, 20)
+        quiet(run, flow.tick())
+        it = db.get("r1")
+        self.assertEqual((it["channel_id"], it["card_message_id"]), (ROOM, self.mid))
+        self.assertEqual(len(self.cards()), 1)              # no duplicate card
+        self.assertEqual(self.f.deleted, [])
+        self.f.edit_raises = None
+        self.now = at(9, 30)
+        run(flow.tick())                                    # the next tick repaints it
+        self.assertEqual(len(self.cards()), 1)
+        self.assertNotEqual(db.get("r1")["card_hash"], it["card_hash"])
+
+    def test_edit_error_in_one_item_does_not_stop_the_next(self):
+        self.f.rooms[(GATED2, DAY)] = "room-T2"
+        self.f.arrivals.append(self.f.arr("r2", GATED2, hh=17))
+        run(flow.tick())
+        self.f.msgs["c-r1"].append({"inbound": True, "at": at(9, 10), "body": "see you"})
+        self.f.msgs["c-r2"] = [{"inbound": True, "at": at(9, 11), "body": "hello"}]
+        calls = []
+        real = self.f.edit
+
+        async def picky(ch, mid, embed=None, buttons=None):
+            calls.append(ch)
+            if ch == ROOM:
+                raise RuntimeError("discord 503")
+            return await real(ch, mid, embed=embed, buttons=buttons)
+        flow.HOST.edit = picky
+        self.now = at(9, 20)
+        quiet(run, flow.tick())
+        self.assertEqual(calls, [ROOM, "room-T2"])
+
+    def test_send_succeeds_even_if_repaint_raises(self):
+        flow.defer_close(GATED, DAY, channel_id=ROOM)
+        self.f.edit_raises = RuntimeError("discord 503")
+        ok, msg = quiet(run, flow.press_send(self.mid, self.p()))
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.f.sends, ["r1"])
+        self.assertEqual(self.f.deleted, [(ROOM, "codegate: code sent")])
+
+    def test_manual_and_undo_answer_even_if_repaint_raises(self):
+        self.f.edit_raises = RuntimeError("discord 503")
+        ok, _ = quiet(run, flow.press_manual(self.mid, self.p()))
+        self.assertTrue(ok)
+        ok, _ = quiet(run, flow.press_undo(self.mid, self.p(did="5", admin=True)))
+        self.assertTrue(ok)
 
 
 if __name__ == "__main__":

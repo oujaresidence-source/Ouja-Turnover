@@ -413,10 +413,10 @@ class TestSendTexts(unittest.TestCase):
         self.assertEqual(engine.CONFIRM_MANUAL, "سجّل إنك أرسلت الرمز بنفسك من Hostaway؟")
         self.assertTrue(engine.CONFIRM_SEND_UNCLEAR.startswith("⚠️ ما لقيت «أوافق» واضحة"))
 
-    def test_deprecated_names_keep_old_text_until_r3(self):
-        # bot.py (revision 1) still imports these and hardcodes the old button label; R3 deletes both
-        self.assertEqual(engine.LABEL_RELEASE, "✅ وافق وأرسلت الرمز")
-        self.assertTrue(engine.CONFIRM_TEXT)
+    def test_deprecated_names_removed(self):
+        # R3 rewired bot.py to LABEL_SEND / CONFIRM_SEND*, so the revision-1 names are gone
+        self.assertFalse(hasattr(engine, "LABEL_RELEASE"))
+        self.assertFalse(hasattr(engine, "CONFIRM_TEXT"))
 
 
 class TestTexts(unittest.TestCase):

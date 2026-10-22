@@ -673,9 +673,14 @@ async def tick(now_=None, force=False):
 
 
 async def _rerender(res_id):
+    """Repaint after a press. A Discord failure here must not turn a done press into an error
+    (the code may already be with the guest): it is logged, and the next tick repaints."""
     it = await run_blocking(db.get, res_id)
     if it:
-        await _render(it, HOST.now(), await run_blocking(live))
+        try:
+            await _render(it, HOST.now(), await run_blocking(live))
+        except Exception as e:
+            print("[codegate] repaint %s failed, the tick retries: %s" % (res_id, type(e).__name__))
     return it
 
 
@@ -765,11 +770,6 @@ async def press_manual(message_id, presser):
     return True, "تم ✅ — سجّلت إنك أرسلت الرمز بنفسك."
 
 
-# DEPRECATED: bot.py's revision-1 view still calls press_release; the old button meant "I sent it
-# by hand", which is press_manual. Task R3 rewires the view and removes this alias.
-press_release = press_manual
-
-
 async def press_undo(message_id, presser):
     """Admin only. Corrects the RECORD; a message already sent to the guest cannot be unsent."""
     if not presser.get("is_admin"):
@@ -780,6 +780,12 @@ async def press_undo(message_id, presser):
     await run_blocking(db.undo, it["res_id"], presser.get("name") or "",
                        HOST.now().isoformat(timespec="seconds"))
     await run_blocking(db.event, it["res_id"], "undone", presser.get("name") or "")
+    # the sender's dedupe claim would refuse a legitimate re-send for hours: free it
+    try:
+        if HOST.release_send_claim:
+            await run_blocking(HOST.release_send_claim, it["res_id"])
+    except Exception as e:
+        print("[codegate] send claim release %s failed: %s" % (it["res_id"], type(e).__name__))
     await _rerender(it["res_id"])
     return True, "صححت السجل — الرسالة اللي انرسلت ما تنحذف."
 
@@ -810,12 +816,17 @@ def defer_close(lid, day, channel_id=None):
     """BLOCKING: the bot held this unit's turnover room instead of deleting it; codegate deletes
     it once the code is sent (or the booking is cancelled/moved, or the day is over). The room
     is remembered by its own id — `channel_id` when the bot passes it, else looked up now — so
-    the close never depends on which room the card is in. Never raises."""
+    the close never depends on which room the card is in. Never raises.
+
+    Returns True only when a hold was RECORDED. False (no waiting arrival — e.g. the code went
+    out between should_hold and this call — or any error) tells the caller to delete the room
+    exactly as it always did, so a room is never kept open with nobody owing its close."""
     try:
         rows = [r for r in db.items_for(lid, day)
-                if not r.get("cancelled") and not r.get("moving_to")]   # frozen: holds nothing
+                if not r.get("cancelled") and not r.get("moving_to")   # frozen: holds nothing
+                and not r.get("released_at")]                          # code out: nothing owed
         if not rows:
-            return
+            return False
         ch = channel_id
         if ch is None and HOST.find_room:
             try:
@@ -826,5 +837,7 @@ def defer_close(lid, day, channel_id=None):
         for r in rows:
             db.set_held(r["res_id"], ch)
             db.event(r["res_id"], "close_deferred", "", str(ch or ""))
+        return True
     except Exception as e:
         print("[codegate] defer_close %s/%s failed: %s" % (lid, day, e))
+        return False

@@ -14,9 +14,11 @@ class _Host:
     cover = None           # BLOCKING (lid, day) -> {name, did, role_id, owner_did}
     post = None            # async (channel_id, text, embed=None, buttons=None) -> message id | None
     edit = None            # async (channel_id, message_id, embed=None, buttons=None) -> bool
-    #                        False = the message (or its room) is gone: live re-places the card.
-    #                        Return False ONLY on Discord NotFound; any other failure must not be
-    #                        False, or live posts a duplicate card (R3 implements)
+    #                        False ONLY when the card (or its room) is gone — Discord NotFound,
+    #                        or Forbidden (we lost access to the room): live re-places the card.
+    #                        Any other failure RAISES: the tick isolates it per item and the next
+    #                        tick retries (a False there would post a duplicate card or close a
+    #                        code-only room for nothing)
     escalate = None        # async (title, detail) -> None   (bot.py's _post_system_escalation)
     # ---- revision 2: the card lives in the unit's turnover room ----
     find_room = None       # BLOCKING (lid, day_iso) -> channel id of the turnover room keyed
@@ -39,9 +41,9 @@ class _Host:
     #                        5xx, timeout): flow retries at most 3 times (at once gives up for a
     #                        row > 2 days old) and then writes «⚠️ ما قدرت أقفل الغرفة» (R3)
     log_review = None      # async (text) -> None: one audit line to #oujact-review
-    # DEPRECATED (revision 1's «تسليم-الرموز» channel): nothing reads it any more. Kept only so
-    # bot.py's revision-1 _cg_wire, which still passes it, keeps wiring. Task R3 removes it.
-    channel = None
+    release_send_claim = None  # BLOCKING (res_id) -> None. Optional: frees the sender's dedupe
+    #                        claim `codegate-send:<res_id>` after an admin undo, so a legitimate
+    #                        re-send is not refused as "duplicate"
 
 
 HOST = _Host()

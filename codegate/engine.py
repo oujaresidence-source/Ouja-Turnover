@@ -26,12 +26,10 @@ QUOTE_CHARS = 300
 LABEL_SEND = "✅ وافق — أرسل الرمز"
 LABEL_MANUAL = "📝 أرسلته يدوياً"
 LABEL_UNDO = "↩️ تراجع"
-LABEL_RELEASE = "✅ وافق وأرسلت الرمز"   # deprecated, OLD text: bot.py hardcodes it; R3 removes
 CONFIRM_SEND = "يرسل البوت الرمز للضيف الحين من Hostaway. متأكد إنه كتب «أوافق»؟"
 CONFIRM_SEND_UNCLEAR = ("⚠️ ما لقيت «أوافق» واضحة في ردوده. لو قرأت ردّه وتأكدت إنه موافق، كمّل — "
                         "غير كذا اطلب منه يكتبها أول.")
 CONFIRM_MANUAL = "سجّل إنك أرسلت الرمز بنفسك من Hostaway؟"
-CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"  # deprecated, OLD text: R3 removes
 VERDICT_LABEL = {"yes": "✅ كتب «أوافق»", "unclear": "⚠️ رد بس مو واضح", "none": "⏳ ما رد بعد"}
 
 def _squash(w):

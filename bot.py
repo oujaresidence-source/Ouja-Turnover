@@ -9598,23 +9598,171 @@ def _cg_cover(lid, day):
             "role_id": c.get("role_id") or "", "owner_did": owner_did or ""}
 
 
-async def _cg_channel():
-    """«تسليم-الرموز»; #escalations if Discord refuses a new channel (the 500-channel cap)."""
+def _cg_find_room(lid, day_iso):
+    """The unit's turnover room for that day: topic `oujact-key:<lid>:<day>`, across the whole
+    Turnovers category family (_cw_channels_in). Reads the guild cache only, so it is safe on
+    the codegate pool. None when the room doesn't exist (yet)."""
+    key = "%s:%s" % (lid, str(day_iso)[:10])
+    for c in _cw_channels_in(bot.get_guild(GUILD_ID)):
+        if c.get("key") == key:
+            return c.get("channel_id")
+    return None
+
+
+def _cg_code_room_name(unit):
+    """`<unit>-code` — never channel_name(unit) alone, never -oujact/-oujact-checkin (the tidy
+    rules and the turnover sweeps key on those)."""
+    return channel_name(unit or "")[:60] + "-code"
+
+
+async def _cg_create_code_room(item):
+    """The code-only room in Turnovers for an arrival with no turnover room. IDEMPOTENT: a room
+    already carrying this booking's exact topic AND this unit's name is returned instead of a
+    second one (a create that timed out is retried next tick). A room named for another unit is
+    never reused — the booking moved; flow closes that one. On failure: the escalation alert
+    and None (flow retries next tick)."""
     guild = bot.get_guild(GUILD_ID)
     if guild is None:
         return None
-    category = await get_assistant_category(guild)
-    ch = None
+    name = _cg_code_room_name(item.get("unit"))
+    topic = "codegate-room:1 codegate-res:%s" % item.get("res_id")
     try:
-        ch = await ensure_channel(guild, "تسليم-الرموز", category)
+        category = await get_category(guild)
+        # _make_channel_spill's last resort is the guild root, so a room with no category counts
+        pool = [ch for cat in _category_family(guild, category) for ch in cat.text_channels]
+        pool += [ch for ch in guild.text_channels if getattr(ch, "category", None) is None]
+        for ch in pool:
+            if (getattr(ch, "topic", "") or "") == topic and ch.name == name:
+                return str(ch.id)
+        ch = await _make_channel_spill(guild, category, name, topic=topic)
+        return str(ch.id)
     except Exception as e:
-        print("[codegate] channel create refused, falling back to escalations:", e)
-    if ch is None:
-        ch = await ensure_channel(guild, ESCALATION_CHANNEL, category)
-    return str(ch.id) if ch is not None else None
+        print("[codegate] code room for %s failed: %s" % (item.get("res_id"), type(e).__name__))
+        await _turnover_create_failed_alert(guild, item.get("unit") or "", e)
+        return None
 
 
-_CG_CUSTOM_ID = {"release": "cg_release", "undo": "cg_undo"}
+def _cg_departures_today(day_iso):
+    """Listing ids with a CONFIRMED departure on `day_iso` (a turnover room is coming). BLOCKING;
+    a Hostaway error raises (flow then treats the answer as unknown and waits)."""
+    iso = str(day_iso)[:10]
+    out = set()
+    for r in _ha_reservations_window("departureStartDate", "departureEndDate", iso, iso) or []:
+        if (r.get("status") or "").lower() not in CONFIRMED_STATUSES:
+            continue
+        if str(r.get("departureDate") or "")[:10] != iso:
+            continue
+        try:
+            out.add(int(r.get("listingMapId")))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _cg_send_claim(res_id):
+    return "codegate-send:%s" % res_id
+
+
+def _cg_send_code(res_id, conversation_id):
+    """«تسليم الرموز»: send the door code for ONE reservation, after a staff press + confirm.
+    The only path in the bot that may send a code: it deliberately does not go through
+    send_guest_message's code-leak firewall, and so it must NEVER print or log the body or the
+    code (exception TYPE names only). Honours the kill switch; reads doorCode from a FRESH
+    GET /reservations/{id}; a persisted dedupe claim stops a second send (6h, freed by an admin
+    undo or a failed send). Returns (ok, why), why in sent|no_code|killed|duplicate|error.
+    Never raises."""
+    if ASSISTANT_SEND_KILL:
+        return False, "killed"
+    try:
+        r = (api_get(f"/reservations/{res_id}") or {}).get("result") or {}
+    except Exception as e:
+        print("[codegate] reservation read failed:", type(e).__name__)
+        return False, "error"
+    code = str(r.get("doorCode") or "").strip()
+    if not code or not conversation_id:
+        return False, "no_code"
+    try:
+        body = with_signature(_codegate.engine.code_message(code))
+    except ValueError:                  # nothing left once spaces and '#' are stripped
+        return False, "no_code"
+    except Exception as e:
+        print("[codegate] code message failed:", type(e).__name__)
+        return False, "error"
+    claim = _cg_send_claim(res_id)
+    if not _once_claim(claim):
+        return False, "duplicate"
+    try:
+        api_post(f"/conversations/{conversation_id}/messages",
+                 {"body": body, "communicationType": "email"})
+    except Exception as e:
+        _once_release(claim)
+        print("[codegate] code send failed:", type(e).__name__)
+        return False, "error"
+    try:
+        log_event("guest", f"تسليم الرموز · أُرسل الرمز · حجز {res_id}")
+    except Exception:
+        pass
+    return True, "sent"
+
+
+def _cg_release_send_claim(res_id):
+    """After an admin undo: free the dedupe claim so a legitimate re-send isn't "duplicate"."""
+    _once_release(_cg_send_claim(res_id))
+
+
+async def _cg_delete_room(channel_id, reason):
+    """True when deleted OR already gone (NotFound: someone deleted it by hand — the close is
+    done). False on any other failure (Forbidden, 5xx, timeout): flow retries, capped."""
+    try:
+        ch = await _cw_channel(channel_id)
+        await ch.delete(reason=reason)
+        return True
+    except discord.NotFound:
+        return True
+    except Exception as e:
+        print("[codegate] room delete %s failed: %s" % (channel_id, type(e).__name__))
+        return False
+
+
+async def _cg_hold_room(channel, lid=None, date_iso=None):
+    """The guard at bot.py's three AUTOMATIC turnover-room deletes (Discord Approve, dashboard
+    approve, the ready-notice close). True = keep `channel` open: a live gated arrival on that
+    room's day still has no code, and codegate RECORDED the close it now owes (it deletes the
+    room right after the code is sent). False = delete exactly as before — every non-gated
+    unit, the soak, any error, and the race where the code went out between the check and the
+    record (defer_close then records nothing). The room's own oujact-key gives lid + day; the
+    caller's values are only a fallback. Off the event loop on the codegate pool, never
+    asyncio.to_thread (the dashboard caller is a request handler). Never raises."""
+    if not _HAS_CODEGATE or channel is None:
+        return False
+    try:
+        key = parse_topic_oujact_key(getattr(channel, "topic", "") or "")
+        if key:
+            lid, day = key.split(":", 1)
+        else:
+            day = str(date_iso or "")[:10]
+        if lid in (None, "") or not day:
+            return False
+        flow = _codegate.flow
+        if not flow.is_gated(lid):          # the unit list only (file mtime), no pool hop
+            return False
+        _cg_ready()
+        if not await flow.run_blocking(flow.should_hold, lid, day):
+            return False
+        held = await flow.run_blocking(flow.defer_close, lid, day, channel_id=str(channel.id))
+    except Exception as e:
+        print("[codegate] hold check failed, deleting as before:", type(e).__name__)
+        return False
+    if not held:
+        return False
+    try:
+        await channel.send("🔑 الغرفة تبقى مفتوحة لين ينرسل رمز الدخول — بعدها تنقفل تلقائياً.")
+    except Exception as e:
+        print("[codegate] hold note failed:", type(e).__name__)
+    return True
+
+
+_CG_CUSTOM_ID = {"send": "cg_send", "manual": "cg_manual", "undo": "cg_undo"}
 
 
 def _cg_view(buttons):
@@ -9622,7 +9770,7 @@ def _cg_view(buttons):
     discord.py stores any view passed to send()/edit(view=) under that message id and dispatches
     clicks there BEFORE the bot.add_view() registration, so a bare-Button view would eat every
     click on a card posted or repainted since the last restart."""
-    wanted = {_CG_CUSTOM_ID[b] for b in buttons or []}
+    wanted = {_CG_CUSTOM_ID[b] for b in buttons or [] if b in _CG_CUSTOM_ID}
     v = CodegateView()
     for child in list(v.children):
         if child.custom_id not in wanted:
@@ -9645,6 +9793,9 @@ async def _cg_post(channel_id, text, embed=None, buttons=None):
 
 
 async def _cg_edit(channel_id, message_id, embed=None, buttons=None):
+    """False ONLY when the card (or its room) is gone: NotFound, or Forbidden (we lost access to
+    the room — for codegate it is gone). Any other failure RAISES: flow isolates it per item and
+    the next tick retries. A False there would re-post the card or close a code-only room."""
     try:
         ch = await _cw_channel(channel_id)
         kw = {"view": _cg_view(buttons) if buttons else None}
@@ -9653,9 +9804,6 @@ async def _cg_edit(channel_id, message_id, embed=None, buttons=None):
         await ch.get_partial_message(int(message_id)).edit(**kw)
         return True
     except (discord.NotFound, discord.Forbidden):
-        return False
-    except Exception as e:
-        print("[codegate] edit failed:", e)
         return False
 
 
@@ -9674,10 +9822,16 @@ def _cg_wire():
         "code_sent": _cg_code_sent,
         "code_in": _cg_code_in,
         "cover": _cg_cover,
-        "channel": _cg_channel,
         "post": _cg_post,
         "edit": _cg_edit,
         "escalate": _cg_escalate,
+        "find_room": _cg_find_room,
+        "create_code_room": _cg_create_code_room,
+        "departures_today": _cg_departures_today,
+        "send_code": _cg_send_code,
+        "delete_room": _cg_delete_room,
+        "log_review": _ready_log_review,
+        "release_send_claim": _cg_release_send_claim,
     })
     return True
 
@@ -9718,39 +9872,61 @@ async def _cg_defer(interaction):
 
 
 class CodegateConfirmView(discord.ui.View):
-    """The ask-again step: a written «أوافق» in the chat AND the code sent from Hostaway."""
+    """The ask-again step. kind "send" = the bot sends the code now (press_send, the ONLY code
+    path); kind "manual" = record a code sent by hand from Hostaway (press_manual)."""
 
-    def __init__(self, message_id):
+    _YES = {"send": "نعم، أرسل الرمز للضيف", "manual": "نعم، أرسلته بنفسي"}
+    _NO = {"send": "تمام، ما أرسلت شي.", "manual": "تمام، ما سجّلت شي."}
+
+    def __init__(self, message_id, kind):
         super().__init__(timeout=120)
         self.message_id = str(message_id)
+        self.kind = "send" if kind == "send" else "manual"
+        self.yes.label = self._YES[self.kind]
 
-    @discord.ui.button(label="نعم، كتب «أوافق» وأرسلت الرمز", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="نعم", style=discord.ButtonStyle.success)
     async def yes(self, interaction, button):
         await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
         presser = await _codegate.flow.run_blocking(_cg_presser, interaction)   # brain.db read
-        ok, msg = await _codegate.flow.press_release(self.message_id, presser)
+        press = (_codegate.flow.press_send if self.kind == "send"
+                 else _codegate.flow.press_manual)
+        ok, msg = await press(self.message_id, presser)
         await _cw_reply(interaction, msg)
 
     @discord.ui.button(label="لا، رجوع", style=discord.ButtonStyle.secondary)
     async def no(self, interaction, button):
-        await _cw_reply(interaction, "تمام، ما سجّلت شي. لو الضيف رد بالتلفون اطلب منه يكتب "
-                                     "«أوافق» في المحادثة أولاً.")
+        await _cw_reply(interaction, self._NO[self.kind])
 
 
 class CodegateView(discord.ui.View):
     """Persistent card buttons. The card's message id IS the key (looked up in codegate.db),
-    so one registration serves every card across redeploys."""
+    so one registration serves every card across redeploys. Labels = engine.LABEL_* (a test
+    keeps them equal)."""
 
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ وافق وأرسلت الرمز", style=discord.ButtonStyle.success,
-                       custom_id="cg_release")
-    async def release(self, interaction, button):
+    @discord.ui.button(label="✅ وافق — أرسل الرمز", style=discord.ButtonStyle.success,
+                       custom_id="cg_send")
+    async def send(self, interaction, button):
         if not _cg_ready():
             return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
-        await _cw_reply(interaction, _codegate.engine.CONFIRM_TEXT,
-                        view=CodegateConfirmView(interaction.message.id))
+        await _cg_defer(interaction)        # answer inside Discord's 3 s before the thread hop
+        it = await _codegate.flow.run_blocking(_codegate.db.item_by_message,
+                                               interaction.message.id)        # brain.db read
+        E = _codegate.engine
+        text = (E.CONFIRM_SEND if E.agree_verdict((it or {}).get("replies") or []) == "yes"
+                else E.CONFIRM_SEND_UNCLEAR)
+        await _cw_reply(interaction, text,
+                        view=CodegateConfirmView(interaction.message.id, "send"))
+
+    @discord.ui.button(label="📝 أرسلته يدوياً", style=discord.ButtonStyle.secondary,
+                       custom_id="cg_manual")
+    async def manual(self, interaction, button):
+        if not _cg_ready():
+            return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
+        await _cw_reply(interaction, _codegate.engine.CONFIRM_MANUAL,
+                        view=CodegateConfirmView(interaction.message.id, "manual"))
 
     @discord.ui.button(label="↩️ تراجع", style=discord.ButtonStyle.secondary,
                        custom_id="cg_undo")
@@ -15810,15 +15986,19 @@ class CleaningProofReviewView(discord.ui.View):
                 # channel to close is the one we're in. Delete it DIRECTLY (verified by its
                 # oujact key) — this does NOT rely on category lookup, which silently misses
                 # channels once the turnovers category overflows Discord's 50-per-category cap.
+                # «تسليم الرموز»: a live gated arrival whose door code is unsent keeps the room
+                # open; codegate deletes it right after the code goes out (_cg_hold_room).
                 ch = interaction.channel
                 if parse_topic_oujact_key(getattr(ch, "topic", "") or "") == key:
-                    await ch.delete(reason=reason)
+                    if not await _cg_hold_room(ch, report.get("apartment_id"), report.get("date")):
+                        await ch.delete(reason=reason)
                 else:
                     # Card isn't in the turnover channel (e.g. an older central-room card):
                     # find the apartment's turnover channel by key and delete that instead.
                     guild = interaction.guild or (bot.get_guild(GUILD_ID) if GUILD_ID else None)
                     tch = await _oujact_find_turnover_channel(guild, report.get("apartment_id"), report.get("date"))
-                    if tch is not None:
+                    if tch is not None and not await _cg_hold_room(
+                            tch, report.get("apartment_id"), report.get("date")):
                         await tch.delete(reason=reason)
             except Exception as e:
                 # Surface WHY it didn't delete (e.g. Missing Permissions) instead of failing
@@ -16210,11 +16390,14 @@ async def _ready_close_channel(guild, lid, date_iso, reason, channel=None):
     the same tidy-up the approve path does, just deferred until the team decided."""
     key = "{}:{}".format(lid, str(date_iso)[:10])
     try:
+        # «تسليم الرموز»: a live gated arrival whose door code is unsent keeps the room open;
+        # codegate deletes it right after the code goes out (_cg_hold_room).
         if channel is not None and parse_topic_oujact_key(getattr(channel, "topic", "") or "") == key:
-            await channel.delete(reason=reason)
+            if not await _cg_hold_room(channel, lid, date_iso):
+                await channel.delete(reason=reason)
             return
         tch = await _oujact_find_turnover_channel(guild, lid, date_iso)
-        if tch is not None:
+        if tch is not None and not await _cg_hold_room(tch, lid, date_iso):
             await tch.delete(reason=reason)
     except Exception as e:
         print("ready-notice close channel error:", e)
@@ -58152,7 +58335,11 @@ async def _api_cleaning_report_decision(request):
                 asked = await _ready_offer(tch, report, actor)
             except Exception as e:
                 print("ready-notice offer error:", e)
-            if tch is not None and not asked:
+            # «تسليم الرموز»: a live gated arrival whose door code is unsent keeps the room
+            # open; codegate deletes it right after the code goes out (_cg_hold_room — the
+            # codegate pool, never asyncio.to_thread, in this request handler).
+            if tch is not None and not asked and not await _cg_hold_room(
+                    tch, report.get("apartment_id"), report.get("date")):
                 await tch.delete(reason="OujaCT: cleaning approved by " + (actor or "manager"))
         except Exception as e:
             print("oujact close-on-approve error:", e)
@@ -76103,7 +76290,7 @@ async def on_ready():
     bot.add_view(ReadyNotifyAskView())       # «شقتك جاهزة» send/skip question
     bot.add_view(ReadyNotifyConfirmView())   # ...and its are-you-sure step
     if _HAS_CODEGATE:
-        bot.add_view(CodegateView())     # «تسليم الرموز» release/undo (message id = key)
+        bot.add_view(CodegateView())     # «تسليم الرموز» send/manual/undo (message id = key)
     bot.add_view(MaintPanelView())     # ticket panels + ticket-room buttons (صيانة/RR/مشتريات)
     bot.add_view(RRPanelView())
     bot.add_view(MaintTicketView())
