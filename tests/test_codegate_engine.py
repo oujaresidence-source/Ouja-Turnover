@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -234,41 +235,131 @@ class TestVerdict(unittest.TestCase):
     def v(self, *texts):
         return engine.agree_verdict([{"at": at(10), "text": t} for t in texts])
 
+    def assertAll(self, expected, texts):
+        for t in texts:
+            self.assertEqual(self.v(t), expected, t)
+
     def test_verdict_yes_variants(self):
-        for t in ("أوافق على قواعد الشقة", "اوافق", "موافق 👍", "I agree", "agreed!", "ok agree"):
-            self.assertEqual(self.v(t), "yes", t)
+        self.assertAll("yes", ("أوافق على قواعد الشقة", "اوافق", "موافق 👍", "I agree",
+                               "agreed!", "ok agree"))
 
     def test_verdict_diacritics_and_tatweel_folded(self):
-        self.assertEqual(self.v("أُوَافِقُ"), "yes")
-        self.assertEqual(self.v("مـــوافق"), "yes")
+        self.assertAll("yes", ("أُوَافِقُ", "مـــوافق"))
 
     def test_verdict_negations_are_unclear(self):
-        for t in ("ما أوافق", "لا اوافق", "I don't agree", "not agree", "disagree"):
-            self.assertEqual(self.v(t), "unclear", t)
+        self.assertAll("unclear", ("ما أوافق", "لا اوافق", "I don't agree", "not agree",
+                                   "disagree"))
 
     def test_verdict_unclear(self):
-        for t in ("IGR RA", "ok", "what rules?"):
-            self.assertEqual(self.v(t), "unclear", t)
+        self.assertAll("unclear", ("IGR RA", "ok", "what rules?"))
 
     def test_verdict_none(self):
         self.assertEqual(engine.agree_verdict([]), "none")
 
-    def test_any_reply_can_carry_the_yes(self):
-        self.assertEqual(self.v("what rules?", "ok I agree"), "yes")
-        self.assertEqual(self.v("ما أوافق", "طيب أوافق"), "yes")
-
     def test_negation_must_be_in_the_same_reply(self):
         self.assertEqual(self.v("لا", "أوافق"), "yes")
 
+    # 2. more negations
+    def test_english_contractions_negate(self):
+        self.assertAll("unclear", ("can't agree", "cannot agree", "won't agree",
+                                   "wouldn't agree", "doesn’t agree", "isn't agree",
+                                   "no I agree", "cant agree"))
+
+    # 3. questions
+    def test_questions_are_not_agreement(self):
+        self.assertAll("unclear", ("هل لازم أوافق؟", "Do I need to agree?", "وش اوافق عليه؟",
+                                   "اوافق؟", "agree?", "هل اوافق", "what do I agree to",
+                                   "how do I agree"))
+
+    # 4. quoted text
+    def test_quoted_rules_message_is_not_a_yes(self):
+        quoted = "What rules?\n\n> Please reply: I agree to the house rules"
+        self.assertEqual(self.v(quoted), "unclear")
+        # _clip flattens newlines before the engine sees a reply
+        self.assertEqual(self.v("What rules? > Please reply: I agree to the house rules"),
+                         "unclear")
+
+    def test_attribution_line_cuts_everything_after(self):
+        self.assertEqual(self.v("What rules?\nOn Mon, Oct 21, 2026 at 10:00 AM Ouja <a@b.c> "
+                                "wrote:\nPlease reply I agree to the house rules"), "unclear")
+        self.assertEqual(self.v("ايش القواعد\nفي الاثنين، ٢١ أكتوبر ٢٠٢٦ في ١٠:٠٠ ص، كتب Ouja "
+                                "<a@b.c>:\nأوافق على قواعد الشقة"), "unclear")
+
+    def test_real_reply_above_the_quote_still_counts(self):
+        self.assertEqual(self.v("I agree\n\nOn Mon, Oct 21 at 10:00 Ouja wrote:\n> I agree to "
+                                "the house rules"), "yes")
+        self.assertEqual(self.v("أوافق\n> أوافق على قواعد الشقة"), "yes")
+
+    # 5. latest mention wins
+    def test_later_withdrawal_wins(self):
+        self.assertEqual(self.v("أوافق", "ما أوافق"), "unclear")
+        self.assertEqual(self.v("I agree", "wait, do I need to agree?"), "unclear")
+
+    def test_latest_mention_ignores_replies_without_a_token(self):
+        self.assertEqual(self.v("I agree", "what time is check-in"), "yes")
+        self.assertEqual(self.v("what rules?", "ok I agree"), "yes")
+        self.assertEqual(self.v("ما أوافق", "طيب أوافق"), "yes")
+
+    def test_no_reply_mentions_a_token(self):
+        self.assertEqual(self.v("ok", "thanks"), "unclear")
+
+    # 6. agreeing idioms are not negations
+    def test_agreeing_idioms_are_yes(self):
+        self.assertAll("yes", ("لا بأس، أوافق", "لا مشكلة أوافق", "لا تقلق أوافق",
+                               "ما فيه مشكلة موافق", "ما عندي مشكلة أوافق",
+                               "ما عندنا اعتراض، موافقين", "no problem I agree",
+                               "no worries, agreed"))
+
+    def test_negation_further_than_two_words_back_is_ignored(self):
+        self.assertEqual(self.v("ما عندي مشكلة وانا أوافق"), "yes")
+        self.assertEqual(self.v("ما أبي أوافق"), "unclear")
+
+    # 7. prefixed / plural / elongated
+    def test_prefixed_plural_and_elongated_forms(self):
+        self.assertAll("yes", ("وأوافق", "فموافق", "موافقين", "نوافق", "موافقون",
+                               "أوافقققق", "agreeeee", "مووووافق"))
+
+    # 8. invisible characters
+    def test_zero_width_bidi_and_underscore_are_stripped(self):
+        self.assertAll("yes", ("أوا\u200bفق", "\u202bأوافق\u202c", "أوافق_", "_agree_",
+                               "\u2066I agree\u2069"))
+        self.assertEqual(self.v("ما\u200f أوافق"), "unclear")
+
 
 class TestSendTexts(unittest.TestCase):
-    def test_code_message_has_code_twice_and_hash(self):
-        m = engine.code_message("1234")
-        self.assertIn("1234 ثم #", m)
-        self.assertIn("1234 then #", m)
+    WATCHDOG = r"\d{3,10}\s*#|#\s*\d{3,10}"   # watchdog/engine.py:43
 
-    def test_code_message_strips_code(self):
-        self.assertIn("🔑 كود الدخول: 99 ثم #", engine.code_message(" 99 "))
+    @staticmethod
+    def codegate_honesty_sees_a_code(text):
+        # codegate's honesty rule: a 4-6 digit number AND a "code" keyword in the same text
+        return bool(re.search(r"\b\d{4,6}\b", text)) and \
+            bool(re.search("كود|code", text, re.I))
+
+    def test_code_message_keeps_hash_right_after_the_digits(self):
+        m = engine.code_message("1234")
+        self.assertIn("🔑 كود الدخول: 1234#", m)
+        self.assertIn("🔑 Door code: 1234#", m)
+        self.assertEqual(m.count("1234"), 2)
+
+    def test_code_message_is_seen_by_the_watchdog(self):
+        self.assertTrue(re.search(self.WATCHDOG, engine.code_message("1234")))
+        self.assertTrue(re.search(self.WATCHDOG, engine.code_message("987654")))
+
+    def test_code_message_is_seen_by_the_codegate_honesty_check(self):
+        for c in ("1234", "56789", "987654"):
+            self.assertTrue(self.codegate_honesty_sees_a_code(engine.code_message(c)), c)
+
+    def test_code_message_normalises_the_code(self):
+        self.assertEqual(engine.code_message("1234#").count("1234#"), 2)
+        self.assertNotIn("##", engine.code_message("1234#"))
+        self.assertEqual(engine.code_message(" 12 34 "), engine.code_message("1234"))
+        self.assertIn("(اكتب الرقم ثم اضغط #)", engine.code_message("1234"))
+        self.assertIn("(enter the digits, then press #)", engine.code_message("1234"))
+
+    def test_code_message_refuses_an_empty_code(self):
+        for bad in ("", "   ", "#", None):
+            with self.assertRaises(ValueError):
+                engine.code_message(bad)
 
     def test_labels_verbatim(self):
         self.assertEqual(engine.LABEL_SEND, "✅ وافق — أرسل الرمز")

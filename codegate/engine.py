@@ -34,9 +34,16 @@ CONFIRM_MANUAL = "سجّل إنك أرسلت الرمز بنفسك من Hostaway
 CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"  # deprecated, OLD text: R3 removes
 VERDICT_LABEL = {"yes": "✅ كتب «أوافق»", "unclear": "⚠️ رد بس مو واضح", "none": "⏳ ما رد بعد"}
 
-_AGREE_TOKENS = ("أوافق", "اوافق", "موافق", "موافقه", "موافقة", "agree", "agreed")
-_NEGATIONS = frozenset(("ما", "لا", "مو", "مب", "مش", "غير", "don't", "dont", "not", "disagree",
-                        "never"))
+_AGREE_TOKENS = frozenset(("أوافق", "اوافق", "نوافق", "موافق", "موافقه", "موافقة", "موافقين",
+                           "موافقون", "agree", "agreed"))
+_NEGATIONS = frozenset(("ما", "لا", "مو", "مب", "مش", "غير", "no", "not", "never", "disagree",
+                        "dont", "cant", "cannot", "wont", "wouldnt", "doesnt", "isnt"))
+# "no problem, I agree" is agreement, so these idioms are removed before negations are looked for
+_IDIOMS = ("ما عندنا اعتراض", "ما عندي مشكلة", "ما فيه مشكلة", "لا مشكلة", "لا بأس", "لا تقلق",
+           "no problem", "no worries")
+_QUESTION_WORDS = frozenset(("هل", "وش", "ايش", "إيش", "شنو", "ليش", "what", "do", "does", "how",
+                             "why"))
+_NEG_WINDOW = 2   # a negation only counts within this many words right before the agree word
 _WORD = re.compile(r"[\w']+")
 _MARKS = re.compile("[\u0640\u064B-\u065F\u0670\u06D6-\u06ED]")
 
@@ -79,34 +86,90 @@ def _fold(s):
     return unicodedata.normalize("NFKC", str(s or "")).casefold()
 
 
+_INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
+_REPEATS = re.compile(r"(\w)\1{2,}")
+_ATTRIBUTION = re.compile(r"\bon\b[^\n]{0,120}?\bwrote\s*:|في[^\n]{0,120}?\d[^\n]{0,60}?كتب")
+_QUOTE_MARK = re.compile(r"(?:^|\s)>")
+
+
+def _own_text(text):
+    """Only what the guest typed: no invisible characters, no marks, and none of the quoted
+    copy of our own message that an email reply carries."""
+    t = _MARKS.sub("", _INVISIBLE.sub("", _fold(text)))
+    t = t.replace("_", " ").replace("\u2019", "'")
+    t = "\n".join(ln for ln in t.split("\n") if not ln.lstrip().startswith(">"))
+    m = _ATTRIBUTION.search(t)
+    if m:
+        t = t[:m.start()]
+    return _QUOTE_MARK.split(t)[0]       # replies arrive flattened to one line
+
+
 def _words(text):
-    t = _MARKS.sub("", _fold(text)).replace("\u2019", "'")
-    return _WORD.findall(t)
+    words = _WORD.findall(_REPEATS.sub(r"\1", text))
+    flat = " " + " ".join(words) + " "
+    for idiom in _IDIOMS:
+        flat = flat.replace(" %s " % idiom, "  ")
+    return flat.split()
+
+
+def _squash(w):
+    return re.sub(r"(.)\1+", r"\1", w)     # "agreeeee" and "agree" both become "agre"
+
+
+_AGREE_SQUASHED = frozenset(_squash(t) for t in _AGREE_TOKENS)
+
+
+def _is_agree(w):
+    w = _squash(w)
+    return w in _AGREE_SQUASHED or (w[:1] in ("و", "ف") and w[1:] in _AGREE_SQUASHED)
+
+
+def _is_negation(w):
+    return w in _NEGATIONS or w.endswith("n't")
+
+
+def _is_question(text, words):
+    return "?" in text or "؟" in text or bool(words) and words[0] in _QUESTION_WORDS
+
+
+def _reply_state(text):
+    """None (no agree word) | "yes" | "no" (negated, or asked as a question)."""
+    t = _own_text(text)
+    words = _words(t)
+    hits = [i for i, w in enumerate(words) if _is_agree(w)]
+    if not hits:
+        return None
+    i = hits[-1]
+    if _is_question(t, words) or any(_is_negation(w) for w in words[max(0, i - _NEG_WINDOW):i]):
+        return "no"
+    return "yes"
 
 
 def agree_verdict(replies):
     """"yes" | "unclear" | "none". Only a HINT for the staff member who reads the replies and
-    presses the button: a reply counts as agreement when it holds an agree word that is not
-    preceded, in the same reply, by a negation ("ما أوافق", "I don't agree", "disagree")."""
+    presses the button, so a false "yes" must be rare. The LATEST reply that mentions agreeing
+    decides; it is "yes" only when it is not negated, not a question, and not just our own
+    message quoted back."""
     if not replies:
         return "none"
-    for r in replies:
-        negated = False
-        for w in _words(r.get("text")):
-            if w in _AGREE_TOKENS:
-                if not negated:
-                    return "yes"
-            elif w in _NEGATIONS:
-                negated = True
+    for r in reversed(replies):
+        state = _reply_state(r.get("text"))
+        if state:
+            return "yes" if state == "yes" else "unclear"
     return "unclear"
 
 
 def code_message(code):
-    c = str(code).strip()
-    return ("🔑 كود الدخول: %s ثم #\n"
-            "يشتغل الكود من وقت الدخول — لو احتجت أي شي حنا هنا 🤍\n\n"
-            "🔑 Door code: %s then #\n"
-            "The code works from check-in time — anything you need, we're right here 🤍") % (c, c)
+    """The '#' stays glued to the digits: the watchdog and the honesty check both look for
+    'digits#' to recognise a sent code."""
+    c = re.sub(r"\s+", "", str(code if code is not None else "")).rstrip("#")
+    if not c:
+        raise ValueError("code_message needs a door code")
+    return ("🔑 كود الدخول: %s#\n"
+            "(اكتب الرقم ثم اضغط #) — يشتغل من وقت الدخول، ولو احتجت أي شي حنا هنا 🤍\n\n"
+            "🔑 Door code: %s#\n"
+            "(enter the digits, then press #) — works from check-in time; "
+            "anything you need, we're right here 🤍") % (c, c)
 
 
 def is_rules_message(body):
