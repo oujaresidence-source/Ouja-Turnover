@@ -31,6 +31,10 @@ LIVE_TTL_SEC = 30
 # check-in is within this window of the switch already had its code sent (if the guest agreed).
 PRELIVE_WINDOW_H = 3
 PRELIVE_NAME = "Hostaway (قبل التشغيل)"
+# A room delete that keeps failing is given up after this many tries (or at once for a row more
+# than DELETE_GIVE_UP_DAYS old), with one «⚠️ ما قدرت أقفل الغرفة» line for a person to act on.
+DELETE_MAX_TRIES = 3
+DELETE_GIVE_UP_DAYS = 2
 
 
 def wire_for_tests(caps):
@@ -188,16 +192,16 @@ async def _render(it, now_, is_live):
 
 
 async def _card_lost(it):
-    """Live: the card (or its whole room) was deleted. Forget the room so placement runs again
-    next tick. A code-only room whose card alone was deleted would otherwise be orphaned, so it
-    is closed (best effort: if the room itself is gone the delete just fails)."""
+    """Live: the card (or its whole room) was deleted. Forget the card's room so placement runs
+    again next tick (a held room is tracked separately and is untouched). A code-only room whose
+    card alone was deleted would otherwise be orphaned, so it is closed (if the room itself is
+    gone, delete_room reports that as closed)."""
     rid = it["res_id"]
     await run_blocking(db.event, rid, "card_lost", "", str(it.get("channel_id") or ""))
     if it.get("room_kind") == "code" and it.get("channel_id"):
-        await _close_room(it, "codegate: card lost",
+        await _close_room(it, it["channel_id"], "codegate: card lost",
                           "🗑️ غرفة رمز انحذفت بطاقتها — بفتح غيرها · %s · %s · %s"
-                          % (it.get("unit") or "", it.get("guest") or "",
-                             _hhmm_now()))
+                          % (it.get("unit") or "", it.get("guest") or "", _hhmm_now()))
     await run_blocking(db.set_room, rid, None, None)
 
 
@@ -205,10 +209,43 @@ def _hhmm_now():
     return _now_riyadh().strftime("%H:%M")
 
 
-async def _close_room(it, reason, audit):
-    """Delete the item's room. Success → the item forgets the room, the held close is cleared and
-    one audit line goes to #oujact-review. Failure → logged, kept for a retry, never raises."""
-    rid, ch = it["res_id"], it.get("channel_id")
+def _too_old(it):
+    """A row whose day is more than DELETE_GIVE_UP_DAYS behind today: one failure is enough."""
+    try:
+        d = datetime.date.fromisoformat(str(it.get("day")))
+    except (TypeError, ValueError):
+        return False
+    return (_now_riyadh().date() - d).days > DELETE_GIVE_UP_DAYS
+
+
+async def _delete_failed(it, ch, reason, held):
+    """Count one failed close. After DELETE_MAX_TRIES (or at once for an old row) stop trying:
+    forget the room and tell #oujact-review so a person deletes it by hand."""
+    rid = it["res_id"]
+    try:
+        n = await run_blocking(db.delete_failed, rid)
+        await run_blocking(db.event, rid, "room_delete_failed", "", "%s %s" % (reason, ch or ""))
+        if n < DELETE_MAX_TRIES and not _too_old(it):
+            return
+        await run_blocking(db.room_closed, rid, ch, held)
+        await run_blocking(db.event, rid, "room_delete_gave_up", "", "%s %s" % (reason, ch or ""))
+    except Exception as e:
+        print("[codegate] delete-failure bookkeeping %s failed: %s" % (rid, e))
+        return
+    try:
+        if HOST.log_review:
+            await HOST.log_review("⚠️ ما قدرت أقفل الغرفة %s · %s · %s · %s — احذفها يدوياً"
+                                  % ("<#%s>" % ch if ch else "(ما لقيتها)", it.get("unit") or "",
+                                     it.get("guest") or "", reason))
+    except Exception as e:
+        print("[codegate] give-up audit line for %s failed: %s" % (rid, e))
+
+
+async def _close_room(it, ch, reason, audit, held=False):
+    """Delete room `ch` of this item. delete_room is True when deleted OR already gone. Success →
+    the item forgets that room (the card's room and/or the held room) and one audit line goes to
+    #oujact-review. Failure → counted (_delete_failed), retried by later ticks, never raises."""
+    rid = it["res_id"]
     if not ch:
         return False
     try:
@@ -218,14 +255,10 @@ async def _close_room(it, reason, audit):
         ok = False
     if not ok:
         print("[codegate] room delete %s (%s) failed: %s" % (ch, rid, reason))
-        try:
-            await run_blocking(db.event, rid, "room_delete_failed", "", reason)
-        except Exception:
-            pass
+        await _delete_failed(it, ch, reason, held)
         return False
     try:
-        await run_blocking(db.set_room, rid, None, None)
-        await run_blocking(db.set_close_pending, rid, False)
+        await run_blocking(db.room_closed, rid, ch, held)
         await run_blocking(db.event, rid, "room_deleted", "", "%s %s" % (reason, ch))
     except Exception as e:
         print("[codegate] room %s deleted but not recorded (%s): %s" % (ch, rid, e))
@@ -237,6 +270,44 @@ async def _close_room(it, reason, audit):
     return True
 
 
+async def _close_held(it, reason, audit):
+    """The deferred close of the turnover room the bot held: held_channel_id, or (not resolved at
+    hold time) the unit's turnover room for that day looked up now. No such room any more → the
+    hold is simply done."""
+    if not it or not it.get("room_close_pending"):
+        return False
+    rid, ch = it["res_id"], it.get("held_channel_id")
+    if not ch:
+        try:
+            ch = await run_blocking(HOST.find_room, it.get("lid"), it.get("day")) \
+                if HOST.find_room else None
+        except Exception as e:
+            print("[codegate] held room lookup %s failed: %s" % (rid, e))
+            await _delete_failed(it, None, reason, True)
+            return False
+        if not ch:
+            await run_blocking(db.room_closed, rid, None, True)
+            await run_blocking(db.event, rid, "held_room_gone", "", reason)
+            return False
+    return await _close_room(it, ch, reason, audit, held=True)
+
+
+async def _close_owned(it, reason, audit):
+    """Close every room codegate owes a close for: the code-only room the card is in, and the held
+    turnover room. Returns (closed, still_owed). Never touches an unheld turnover room."""
+    rid = it["res_id"]
+    closed = 0
+    if it.get("room_kind") == "code" and it.get("channel_id"):
+        closed += bool(await _close_room(it, it["channel_id"], reason, audit))
+        it = await run_blocking(db.get, rid) or it
+    if it.get("room_close_pending"):
+        closed += bool(await _close_held(it, reason, audit))
+        it = await run_blocking(db.get, rid) or it
+    owed = bool((it.get("room_kind") == "code" and it.get("channel_id")) or
+                it.get("room_close_pending"))
+    return closed, owed
+
+
 def _delivered(it):
     """The code is known to be with the guest: the bot sent it, or the honesty check (or the
     go-live look) saw it in the chat after a manual record."""
@@ -244,18 +315,16 @@ def _delivered(it):
 
 
 async def _after_code_sent(it):
-    """Once the code is with the guest: a code-only room closes; a turnover room closes only if
-    cleaning already asked to delete it (room_close_pending). Idempotent — the tick calls it
-    again for a delete that failed."""
-    if not it or not it.get("channel_id") or not _delivered(it):
-        return False
-    kind = it.get("room_kind")
-    if kind == "code" or (kind == "turnover" and it.get("room_close_pending")):
-        audit = "🔑 أُرسل الرمز · %s · %s · %s · %s" % (
-            it.get("unit") or "", it.get("guest") or "", it.get("released_by") or "",
-            engine._hhmm(it.get("released_at")) or _hhmm_now())
-        return await _close_room(it, "codegate: code sent", audit)
-    return False
+    """Once the code is with the guest: the code-only room closes, and so does a turnover room the
+    bot held (cleaning already asked to delete it) — whichever room the card is in. Idempotent:
+    the tick calls it again for a delete that failed. Returns how many rooms it closed."""
+    if not it or not _delivered(it):
+        return 0
+    audit = "🔑 أُرسل الرمز · %s · %s · %s · %s" % (
+        it.get("unit") or "", it.get("guest") or "", it.get("released_by") or "",
+        engine._hhmm(it.get("released_at")) or _hhmm_now())
+    closed, _ = await _close_owned(it, "codegate: code sent", audit)
+    return closed
 
 
 async def _departures(ctx, day):
@@ -363,14 +432,15 @@ async def _process_item(it, now_, rep, is_live=True, prelive=None, ctx=None):
             rep[res] += 1
         return
     # a cancelled booking needs no code: its code-only room goes, and a turnover room the bot
-    # held for the code gets the delete cleaning already asked for
-    if it.get("cancelled") and it.get("channel_id") and (
-            it.get("room_kind") == "code" or
-            (it.get("room_kind") == "turnover" and it.get("room_close_pending"))):
-        if await _close_room(it, "codegate: booking cancelled",
-                             "🗑️ حذفت غرفة الرمز — الحجز ملغي · %s · %s · %s"
-                             % (it.get("unit") or "", it.get("guest") or "", _hhmm_now())):
-            rep["deleted"] += 1
+    # held for the code gets the delete cleaning already asked for. (A booking moved to another
+    # date also lands here — not arriving today — and the tick can't tell which.)
+    if it.get("cancelled") and ((it.get("room_kind") == "code" and it.get("channel_id")) or
+                                it.get("room_close_pending")):
+        closed, _ = await _close_owned(it, "codegate: booking cancelled",
+                                       "🗑️ قفلت الغرفة — الحجز ملغي أو انتقل · %s · %s · %s"
+                                       % (it.get("unit") or "", it.get("guest") or "",
+                                          _hhmm_now()))
+        rep["deleted"] += closed
         return
     # GO-LIVE: arrivals inside Doorcodera's window are looked at once before any alert (and
     # before placement, so an already-sent code never opens a code-only room).
@@ -438,8 +508,7 @@ async def _process_item(it, now_, rep, is_live=True, prelive=None, ctx=None):
     # the code is with the guest (manual record seen by the honesty check, or a delete that
     # failed earlier): close the room it no longer needs
     it = await run_blocking(db.get, rid)
-    if await _after_code_sent(it):
-        rep["deleted"] += 1
+    rep["deleted"] += await _after_code_sent(it)
 
 
 def _prelive_window():
@@ -456,20 +525,60 @@ def _prelive_window():
 async def _sweep_old_rooms(day, rep):
     """Live: rooms codegate owns from days before `day` are closed — code-only rooms, and turnover
     rooms the bot held for a code that was never recorded (cleaning already asked to delete
-    them; the day is over, so the hold has no purpose left)."""
-    old = [(it, "🗑️ حذفت غرفة رمز من يوم فات (%s)")
-           for it in await run_blocking(db.code_room_items, day)]
-    old += [(it, "🗑️ حذفت غرفة تنظيف كانت معلّقة للرمز — يوم فات (%s) وما سُجل إرسال الرمز")
-            for it in await run_blocking(db.held_room_items, day)]
-    for it, head in old:
+    them; the day is over, so the hold has no purpose left). A db error skips the sweep this
+    tick; it never aborts the tick."""
+    try:
+        code_rows = await run_blocking(db.code_room_items, day)
+        held_rows = await run_blocking(db.held_room_items, day)
+    except Exception as e:
+        print("[codegate] old-room sweep skipped: %s" % e)
+        return
+    for it in code_rows:
         try:
-            if await _close_room(it, "codegate: day over",
-                                 (head + " · %s · %s · %s")
+            if await _close_room(it, it.get("channel_id"), "codegate: day over",
+                                 "🗑️ حذفت غرفة رمز من يوم فات (%s) · %s · %s · %s"
                                  % (it.get("day") or "", it.get("unit") or "",
                                     it.get("guest") or "", _hhmm_now())):
                 rep["deleted"] += 1
         except Exception as e:
             print("[codegate] old room %s failed: %s" % (it.get("res_id"), e))
+    for it in held_rows:
+        try:
+            it = await run_blocking(db.get, it["res_id"]) or it
+            if await _close_held(it, "codegate: day over",
+                                 "🗑️ حذفت غرفة تنظيف كانت معلّقة للرمز — يوم فات (%s) وما سُجل "
+                                 "إرسال الرمز · %s · %s · %s"
+                                 % (it.get("day") or "", it.get("unit") or "",
+                                    it.get("guest") or "", _hhmm_now())):
+                rep["deleted"] += 1
+        except Exception as e:
+            print("[codegate] old held room %s failed: %s" % (it.get("res_id"), e))
+
+
+def _moved(prev, a, day):
+    if not prev:
+        return False
+    if prev.get("day") != day:
+        return True
+    try:
+        return int(prev.get("lid")) != int(a.get("lid"))
+    except (TypeError, ValueError):
+        return str(prev.get("lid")) != str(a.get("lid"))
+
+
+async def _close_for_move(prev, a, day, rep):
+    """Before upsert_arrival resets a moved booking's room: close its old code-only room and its
+    old HELD turnover room (cleaning asked for that delete). An unheld turnover room — another
+    unit's, or the same unit's on another day — is NEVER deleted. Returns True when something is
+    still owed (a failed delete): the caller then skips the upsert so channel ids survive for the
+    retry; _delete_failed's cap bounds how long."""
+    closed, owed = await _close_owned(
+        prev, "codegate: booking moved",
+        "🗑️ قفلت الغرفة — الحجز انتقل لـ %s · %s · %s" % (
+            day if prev.get("day") != day else "شقة ثانية", prev.get("unit") or "",
+            prev.get("guest") or ""))
+    rep["deleted"] += closed
+    return owed
 
 
 async def tick(now_=None, force=False):
@@ -495,20 +604,21 @@ async def tick(now_=None, force=False):
                 print("[codegate] cover lookup failed for %s: %s" % (a.get("res_id"), e))
                 cov = {}
             prev = await run_blocking(db.get, str(a["res_id"]))
-            if prev and prev.get("day") != day:
-                # moved from another date: db.upsert_arrival starts its card/alerts/room over,
-                # so the old date's code-only room is closed first or it would be orphaned
+            if _moved(prev, a, day):
+                # moved from another date or unit: db.upsert_arrival starts its card, room, hold
+                # and alerts over, so what codegate owes on the old arrival is closed first
                 await run_blocking(db.event, str(a["res_id"]), "moved", "",
-                                   "%s → %s" % (prev.get("day"), day))
-                if is_live and prev.get("room_kind") == "code" and prev.get("channel_id"):
+                                   "%s/%s → %s/%s" % (prev.get("day"), prev.get("lid"), day,
+                                                      a.get("lid")))
+                if is_live:
                     try:
-                        if await _close_room(prev, "codegate: booking moved",
-                                             "🗑️ حذفت غرفة الرمز — الحجز انتقل لـ %s · %s · %s"
-                                             % (day, prev.get("unit") or "",
-                                                prev.get("guest") or "")):
-                            rep["deleted"] += 1
+                        owed = await _close_for_move(prev, a, day, rep)
                     except Exception as e:
-                        print("[codegate] moved room %s failed: %s" % (a.get("res_id"), e))
+                        print("[codegate] moved rooms %s failed: %s" % (a.get("res_id"), e))
+                        owed = True
+                    if owed:            # keep the old ids for the retry next tick
+                        keep.add(str(a["res_id"]))
+                        continue
             if not (cov.get("name") or cov.get("did") or cov.get("role_id")):
                 # a failed lookup must not blank who may press: keep what we stored
                 if prev and prev.get("day") == day:
@@ -662,12 +772,24 @@ def should_hold(lid, day):
         return False
 
 
-def defer_close(lid, day):
-    """BLOCKING: the bot held the room; delete it once the code is sent (_after_code_sent)."""
+def defer_close(lid, day, channel_id=None):
+    """BLOCKING: the bot held this unit's turnover room instead of deleting it; codegate deletes
+    it once the code is sent (or the booking is cancelled/moved, or the day is over). The room
+    is remembered by its own id — `channel_id` when the bot passes it, else looked up now — so
+    the close never depends on which room the card is in. Never raises."""
     try:
-        for r in db.items_for(lid, day):
-            if not r.get("cancelled"):
-                db.set_close_pending(r["res_id"], True)
-                db.event(r["res_id"], "close_deferred")
+        rows = [r for r in db.items_for(lid, day) if not r.get("cancelled")]
+        if not rows:
+            return
+        ch = channel_id
+        if ch is None and HOST.find_room:
+            try:
+                ch = HOST.find_room(lid, day)
+            except Exception as e:      # stored as "held, look it up at close time"
+                print("[codegate] defer_close room lookup %s/%s failed: %s" % (lid, day, e))
+                ch = None
+        for r in rows:
+            db.set_held(r["res_id"], ch)
+            db.event(r["res_id"], "close_deferred", "", str(ch or ""))
     except Exception as e:
         print("[codegate] defer_close %s/%s failed: %s" % (lid, day, e))
