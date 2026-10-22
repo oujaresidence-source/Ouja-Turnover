@@ -11,6 +11,7 @@ nothing here ever sees a code. No I/O except load_units (two small JSON files).
 import hashlib
 import json
 import os
+import re
 import unicodedata
 from datetime import timedelta
 from zoneinfo import ZoneInfo
@@ -22,9 +23,22 @@ START_HOUR = 9
 MAX_QUOTES = 3
 QUOTE_CHARS = 300
 
-LABEL_RELEASE = "✅ وافق وأرسلت الرمز"
+LABEL_SEND = "✅ وافق — أرسل الرمز"
+LABEL_MANUAL = "📝 أرسلته يدوياً"
 LABEL_UNDO = "↩️ تراجع"
-CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"
+LABEL_RELEASE = "✅ وافق وأرسلت الرمز"   # deprecated, OLD text: bot.py hardcodes it; R3 removes
+CONFIRM_SEND = "يرسل البوت الرمز للضيف الحين من Hostaway. متأكد إنه كتب «أوافق»؟"
+CONFIRM_SEND_UNCLEAR = ("⚠️ ما لقيت «أوافق» واضحة في ردوده. لو قرأت ردّه وتأكدت إنه موافق، كمّل — "
+                        "غير كذا اطلب منه يكتبها أول.")
+CONFIRM_MANUAL = "سجّل إنك أرسلت الرمز بنفسك من Hostaway؟"
+CONFIRM_TEXT = "الضيف كتب «أوافق» في المحادثة، وأرسلت له الرمز من Hostaway؟"  # deprecated, OLD text: R3 removes
+VERDICT_LABEL = {"yes": "✅ كتب «أوافق»", "unclear": "⚠️ رد بس مو واضح", "none": "⏳ ما رد بعد"}
+
+_AGREE_TOKENS = ("أوافق", "اوافق", "موافق", "موافقه", "موافقة", "agree", "agreed")
+_NEGATIONS = frozenset(("ما", "لا", "مو", "مب", "مش", "غير", "don't", "dont", "not", "disagree",
+                        "never"))
+_WORD = re.compile(r"[\w']+")
+_MARKS = re.compile("[\u0640\u064B-\u065F\u0670\u06D6-\u06ED]")
 
 HOSTAWAY_RES_URL = "https://dashboard.hostaway.com/reservations/%s"
 SOAK_NAME = "🧪 وضع التجربة"
@@ -63,6 +77,36 @@ def load_units(repo_path, state_path):
 
 def _fold(s):
     return unicodedata.normalize("NFKC", str(s or "")).casefold()
+
+
+def _words(text):
+    t = _MARKS.sub("", _fold(text)).replace("\u2019", "'")
+    return _WORD.findall(t)
+
+
+def agree_verdict(replies):
+    """"yes" | "unclear" | "none". Only a HINT for the staff member who reads the replies and
+    presses the button: a reply counts as agreement when it holds an agree word that is not
+    preceded, in the same reply, by a negation ("ما أوافق", "I don't agree", "disagree")."""
+    if not replies:
+        return "none"
+    for r in replies:
+        negated = False
+        for w in _words(r.get("text")):
+            if w in _AGREE_TOKENS:
+                if not negated:
+                    return "yes"
+            elif w in _NEGATIONS:
+                negated = True
+    return "unclear"
+
+
+def code_message(code):
+    c = str(code).strip()
+    return ("🔑 كود الدخول: %s ثم #\n"
+            "يشتغل الكود من وقت الدخول — لو احتجت أي شي حنا هنا 🤍\n\n"
+            "🔑 Door code: %s then #\n"
+            "The code works from check-in time — anything you need, we're right here 🤍") % (c, c)
 
 
 def is_rules_message(body):
@@ -151,6 +195,7 @@ def card(item, now, soak=False):
         {"name": "المسؤول اليوم", "value": item.get("cover_name") or "— (فريق العمليات)",
          "inline": True},
         {"name": "رسالة القواعد", "value": rules, "inline": False},
+        {"name": "ما كتبه الضيف", "value": VERDICT_LABEL[agree_verdict(replies)], "inline": False},
         {"name": "ردود الضيف (حرفياً)", "value": quoted[:1024], "inline": False},
         {"name": "الحالة", "value": status, "inline": False},
     ]
@@ -167,10 +212,10 @@ def card(item, now, soak=False):
     if len(title) > TITLE_MAX:
         title = title[:TITLE_MAX - 1] + "…"
     return {"title": title,
-            "description": "الرمز يُرسل بعد ما يكتب الضيف «أوافق» في المحادثة — "
-                           "استخدم الرد الجاهز «🔑 كود الدخول» في Hostaway.",
+            "description": "اقرأ رد الضيف، ثم اضغط «%s». لو Hostaway ما عنده رمز للحجز، "
+                           "أرسله يدوياً واضغط «%s»." % (LABEL_SEND, LABEL_MANUAL),
             "color": color, "fields": fields,
-            "footer": {"text": "تسليم الرموز · البوت ما يقرّر الموافقة ولا يرسل الرمز"}}
+            "footer": {"text": "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر"}}
 
 
 def header_text(mention, name, n):

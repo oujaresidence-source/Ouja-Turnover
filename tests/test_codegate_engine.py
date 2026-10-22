@@ -154,6 +154,25 @@ class TestCard(unittest.TestCase):
         self.assertIn("16:00", blob)
         self.assertEqual(e["color"], engine.COLOR_WAIT)
 
+    def test_card_shows_verdict_field(self):
+        def field(it):
+            e = engine.card(it, at(11))
+            names = [f["name"] for f in e["fields"]]
+            i = names.index("ما كتبه الضيف")
+            self.assertLess(i, names.index("ردود الضيف (حرفياً)"))
+            return e["fields"][i]["value"]
+        self.assertEqual(field(self.base()), engine.VERDICT_LABEL["yes"])
+        self.assertEqual(field(self.base(replies=[{"at": at(10), "text": "IGR"}])),
+                         engine.VERDICT_LABEL["unclear"])
+        self.assertEqual(field(self.base(replies=[])), engine.VERDICT_LABEL["none"])
+
+    def test_card_description_and_footer(self):
+        e = engine.card(self.base(), at(11))
+        self.assertIn("اضغط «✅ وافق — أرسل الرمز»", e["description"])
+        self.assertIn("📝 أرسلته يدوياً", e["description"])
+        self.assertEqual(e["footer"]["text"],
+                         "«تسليم الرموز» · البوت يقرأ الرد ويرسل الرمز فقط لما تضغط الزر")
+
     def test_no_reply_yet(self):
         e = engine.card(self.base(replies=[]), at(11))
         self.assertIn("لا يوجد رد بعد", json.dumps(e, ensure_ascii=False))
@@ -209,6 +228,64 @@ class TestCard(unittest.TestCase):
         b = engine.content_hash(engine.card(self.base(replies=[]), at(11)))
         self.assertNotEqual(a, b)
         self.assertEqual(a, engine.content_hash(engine.card(self.base(), at(11))))
+
+
+class TestVerdict(unittest.TestCase):
+    def v(self, *texts):
+        return engine.agree_verdict([{"at": at(10), "text": t} for t in texts])
+
+    def test_verdict_yes_variants(self):
+        for t in ("أوافق على قواعد الشقة", "اوافق", "موافق 👍", "I agree", "agreed!", "ok agree"):
+            self.assertEqual(self.v(t), "yes", t)
+
+    def test_verdict_diacritics_and_tatweel_folded(self):
+        self.assertEqual(self.v("أُوَافِقُ"), "yes")
+        self.assertEqual(self.v("مـــوافق"), "yes")
+
+    def test_verdict_negations_are_unclear(self):
+        for t in ("ما أوافق", "لا اوافق", "I don't agree", "not agree", "disagree"):
+            self.assertEqual(self.v(t), "unclear", t)
+
+    def test_verdict_unclear(self):
+        for t in ("IGR RA", "ok", "what rules?"):
+            self.assertEqual(self.v(t), "unclear", t)
+
+    def test_verdict_none(self):
+        self.assertEqual(engine.agree_verdict([]), "none")
+
+    def test_any_reply_can_carry_the_yes(self):
+        self.assertEqual(self.v("what rules?", "ok I agree"), "yes")
+        self.assertEqual(self.v("ما أوافق", "طيب أوافق"), "yes")
+
+    def test_negation_must_be_in_the_same_reply(self):
+        self.assertEqual(self.v("لا", "أوافق"), "yes")
+
+
+class TestSendTexts(unittest.TestCase):
+    def test_code_message_has_code_twice_and_hash(self):
+        m = engine.code_message("1234")
+        self.assertIn("1234 ثم #", m)
+        self.assertIn("1234 then #", m)
+
+    def test_code_message_strips_code(self):
+        self.assertIn("🔑 كود الدخول: 99 ثم #", engine.code_message(" 99 "))
+
+    def test_labels_verbatim(self):
+        self.assertEqual(engine.LABEL_SEND, "✅ وافق — أرسل الرمز")
+        self.assertEqual(engine.LABEL_MANUAL, "📝 أرسلته يدوياً")
+        self.assertEqual(engine.LABEL_UNDO, "↩️ تراجع")
+        self.assertEqual(engine.VERDICT_LABEL, {"yes": "✅ كتب «أوافق»",
+                                                "unclear": "⚠️ رد بس مو واضح",
+                                                "none": "⏳ ما رد بعد"})
+        self.assertEqual(engine.CONFIRM_SEND,
+                         "يرسل البوت الرمز للضيف الحين من Hostaway. متأكد إنه كتب «أوافق»؟")
+        self.assertEqual(engine.CONFIRM_MANUAL, "سجّل إنك أرسلت الرمز بنفسك من Hostaway؟")
+        self.assertTrue(engine.CONFIRM_SEND_UNCLEAR.startswith("⚠️ ما لقيت «أوافق» واضحة"))
+
+    def test_deprecated_names_keep_old_text_until_r3(self):
+        # bot.py (revision 1) still imports these and hardcodes the old button label; R3 deletes both
+        self.assertEqual(engine.LABEL_RELEASE, "✅ وافق وأرسلت الرمز")
+        self.assertTrue(engine.CONFIRM_TEXT)
 
 
 class TestTexts(unittest.TestCase):
