@@ -9706,22 +9706,53 @@ def _cg_send_code(res_id, conversation_id, lid=None):
     try:
         api_post(f"/conversations/{conversation_id}/messages",
                  {"body": body, "communicationType": "email"})
-    except requests.exceptions.ConnectTimeout:     # never reached Hostaway: surely not sent
-        _once_release(claim)
-        print("[codegate] code send failed: ConnectTimeout")
-        return False, "error"
-    except requests.exceptions.Timeout as e:       # the post went out, no answer: maybe sent —
-        print("[codegate] code send unconfirmed:", type(e).__name__)   # KEEP the claim
-        return False, "unknown"
     except Exception as e:
-        _once_release(claim)
-        print("[codegate] code send failed:", type(e).__name__)
-        return False, "error"
+        why = _cg_post_outcome(e)
+        if why == "unknown":            # maybe sent: KEEP the claim, flow keeps the release
+            print("[codegate] code send unconfirmed:", type(e).__name__)
+        else:                           # surely not sent: free the claim for a retry
+            _once_release(claim)
+            print("[codegate] code send failed:", type(e).__name__)
+        return False, why
     try:
         log_event("guest", f"تسليم الرموز · أُرسل الرمز · حجز {res_id}")
     except Exception:
         pass
     return True, "sent"
+
+
+def _cg_post_outcome(e):
+    """What a failed api_post (→ _api_request: one Session request, max_retries=0, then
+    raise_for_status and r.json()) means for the guest: "error" = surely NOT sent (the claim is
+    freed), "unknown" = maybe sent (the claim is kept, so nobody can send twice).
+      ConnectTimeout                      → error   (never connected)
+      ConnectionError(MaxRetryError/...)  → error   (refused, DNS, TLS handshake, proxy: urllib3
+                                                     wraps every pre-send failure in MaxRetryError)
+      ConnectionError(ProtocolError/OSError) → unknown (dropped after the request went out)
+      other Timeout (ReadTimeout)         → unknown
+      HTTPError 5xx                       → unknown (Hostaway may have queued it)
+      HTTPError 4xx                       → error   (rejected; 429/401/403 already retried)
+      JSONDecodeError on a 2xx            → unknown (it answered OK, just not in JSON)
+      anything else                       → error"""
+    try:
+        from urllib3.exceptions import ClosedPoolError, MaxRetryError
+    except Exception:                   # pragma: no cover — urllib3 ships with requests
+        ClosedPoolError = MaxRetryError = ()
+    if isinstance(e, requests.exceptions.ConnectTimeout):
+        return "error"
+    if isinstance(e, requests.exceptions.Timeout):
+        return "unknown"
+    if isinstance(e, requests.exceptions.HTTPError):
+        status = getattr(getattr(e, "response", None), "status_code", None) or 0
+        return "unknown" if int(status) >= 500 else "error"
+    if isinstance(e, requests.exceptions.ConnectionError):
+        inner = e.args[0] if e.args else None
+        if MaxRetryError and isinstance(inner, (MaxRetryError, ClosedPoolError)):
+            return "error"
+        return "unknown"
+    if isinstance(e, (requests.exceptions.JSONDecodeError, json.JSONDecodeError)):
+        return "unknown"
+    return "error"
 
 
 def _cg_release_send_claim(res_id):

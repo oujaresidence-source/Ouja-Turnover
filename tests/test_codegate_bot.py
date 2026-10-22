@@ -658,6 +658,7 @@ class TestSendCode(_Fx, unittest.TestCase):
                 raise self.post_error
             self.posts.append((path, body))
             return {"status": "success"}
+        self._orig_api_post = bot.api_post
         self.swap("api_get", get)
         self.swap("api_post", post)
         self.swap("log_event", lambda cat, text: self.events.append((cat, text)))
@@ -723,6 +724,68 @@ class TestSendCode(_Fx, unittest.TestCase):
         self.post_error = None
         self.assertEqual(self.send(), (False, "duplicate"))         # claim kept: no 2nd send
         self.assertEqual(self.posts, [])
+
+    def _through_real_request(self, outcome):
+        """api_post → the REAL _api_request, with only the HTTP session faked: `outcome` is a
+        requests.Response to return, or the exception requests' adapter would raise."""
+        self.swap("api_post", self._orig_api_post)
+        self.swap("_api_request", _REAL_API_REQUEST)
+        self.swap("get_token", lambda force=False: "t")
+        self.swap("_ha_throttle_acquire", lambda *a, **k: None)
+
+        def request(method, url, **kw):
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        self.swap("request", request, owner=bot._ha_session)
+
+    @staticmethod
+    def _response(status, body):
+        import requests
+        r = requests.models.Response()
+        r.status_code = status
+        r._content = body.encode("utf-8")
+        r.url = "https://api.hostaway.invalid/v1/conversations/c77/messages"
+        return r
+
+    def _post_outcome(self, outcome, rid):
+        self._through_real_request(outcome)
+        return self.send(res_id=rid)
+
+    def test_refused_or_dns_before_sending_is_error_and_frees_claim(self):
+        import requests
+        from urllib3.exceptions import MaxRetryError, NewConnectionError, NameResolutionError
+        for i, reason in enumerate((NewConnectionError(None, "refused"),
+                                    NameResolutionError("api.hostaway.com", None, "dns"))):
+            err = requests.exceptions.ConnectionError(MaxRetryError(None, "/x", reason))
+            self.assertEqual(self._post_outcome(err, "pre-%d" % i), (False, "error"))
+            self.assertTrue(bot._once_claim(bot._cg_send_claim("pre-%d" % i)))   # was freed
+
+    def test_disconnect_after_sending_is_unknown_and_keeps_claim(self):
+        import http.client
+        import requests
+        from urllib3.exceptions import ProtocolError
+        err = requests.exceptions.ConnectionError(ProtocolError(
+            "Connection aborted.", http.client.RemoteDisconnected("closed 1234")))
+        self.assertEqual(self._post_outcome(err, "mid"), (False, "unknown"))
+        self.assertFalse(bot._once_claim(bot._cg_send_claim("mid")))            # kept
+        self.assertNotIn("1234", self.printed)
+
+    def test_5xx_is_unknown_4xx_is_error(self):
+        self.assertEqual(self._post_outcome(self._response(502, "bad gateway"), "s5"),
+                         (False, "unknown"))
+        self.assertFalse(bot._once_claim(bot._cg_send_claim("s5")))
+        self.assertEqual(self._post_outcome(self._response(400, "{}"), "s4"), (False, "error"))
+        self.assertTrue(bot._once_claim(bot._cg_send_claim("s4")))
+
+    def test_200_with_broken_json_is_unknown(self):
+        self.assertEqual(self._post_outcome(self._response(200, "<html>ok</html>"), "j"),
+                         (False, "unknown"))
+        self.assertFalse(bot._once_claim(bot._cg_send_claim("j")))
+
+    def test_200_with_json_is_sent(self):
+        self.assertEqual(self._post_outcome(self._response(200, '{"status": "success"}'), "ok"),
+                         (True, "sent"))
 
     def test_connect_timeout_never_reached_hostaway_releases_claim(self):
         import requests
