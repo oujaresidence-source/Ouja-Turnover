@@ -243,3 +243,37 @@ in the Hostaway-switch sitting (§5 step 2), right after automation 427132 is tu
 - Touching Hostaway's rental-agreement settings or the agreement status.
 - The 12 listings with neither message, and Al-Nuzha's 273042.
 - Collecting guest IDs (Shomoos), a separate legal question.
+
+## 9. Revision 2 (owner, 2026-10-22) — cards live in the turnover room, one button sends the code
+
+The owner replaced §4.2's dedicated channel and the "bot never sends a code" rule with this:
+
+1. **No new channel.** The card is posted INSIDE the apartment's turnover room for that day (found by
+   `oujact-key:<lid>:<arrival day>` across the Turnovers category family, `_cw_channels_in`). If the
+   apartment has no turnover that day (vacant the night before), codegate opens a **code-only room in the
+   Turnovers category** (`_make_channel_spill`), topic `codegate-room:1 codegate-res:<res_id>` — no
+   `oujact:1`, `oujact-key:` or `hostaway-res:` so no existing sweep touches it — named `<unit>-code`
+   (never `channel_name(unit)`, `-oujact`, `-oujact-checkin`, and nothing the tidy rules key on).
+   If the unit DOES have a departure today but its turnover room doesn't exist yet (rooms open ~12h before
+   checkout), codegate waits for it and only falls back to a code-only room at check-in − 2h.
+   The «تسليم-الرموز» channel and the per-person header messages are dropped; the card mentions the coverer.
+2. **The turnover room stays open until the code is sent** (owner decision). The three automatic delete
+   paths — Discord Approve (bot.py ~15813), dashboard approve (~58156) and `_ready_close_channel` (~16208,
+   both ready-notice buttons) — skip the delete for a live gated arrival whose code is unsent and record a
+   "close pending" flag; once the code is sent, codegate deletes that room. Manual admin deletes are untouched.
+3. **Code-only rooms delete themselves once the code is sent** (owner decision): immediately after a
+   bot-sent code; after a manual record only once the honesty check sees the code; and any code-only room
+   for a cancelled booking or a past day is removed by the next tick. Every room close writes one audit
+   line to `#oujact-review` (CLEANING_REVIEW_CHANNEL), as the ready notice does.
+4. **One button sends the code: «✅ وافق — أرسل الرمز».** After the confirm step it (a) records the release
+   first-wins, (b) reads `doorCode` from a FRESH `GET /reservations/{id}`, (c) sends the bilingual code
+   message through a dedicated sender that honours `ASSISTANT_SEND_KILL`, keeps the persisted dedupe
+   claim and never logs the body, and (d) undoes the record if the send fails. The outbound firewall stays
+   exactly as is for every other path (Musaed, approvals, notices); only this staff-pressed path is exempt.
+   Empty `doorCode` → the button refuses and says to send it by hand; **«📝 أرسلته يدوياً»** records a
+   manual send (manual-code units). Admin «↩️ تراجع» only corrects the record (it cannot unsend).
+5. **The card shows what the guest wrote:** ✅ «كتب أوافق» · ⚠️ «رد بس مو واضح» (his words shown) · ⏳ «ما رد».
+   A deterministic word list (أوافق/اوافق/موافق/agree …) with negation guard (ما/لا/مو/don't/not …); it is an
+   indicator only — a person still presses the button, and the confirm step warns when it isn't ✅.
+6. **Soak mode** (switch OFF) only posts cards into turnover rooms that already exist: no code-only rooms,
+   no holds, no re-posts, no alerts, and the send button is disabled (Hostaway still auto-sends).
