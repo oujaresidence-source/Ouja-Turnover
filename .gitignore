@@ -9,3 +9,6 @@ ouja-redesign-v3.html
 
 # «التصاريح» — the raw permits spreadsheet holds owners' national IDs. Never commit it.
 permits/seed/source/
+
+# «طلبات سام» history study — raw Discord exports stay local, never committed (PDPL)
+.rrdesk_study/
