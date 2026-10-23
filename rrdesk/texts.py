@@ -41,6 +41,7 @@ OUR_FOOTERS = (FOOTER_AR2EN, FOOTER_EN2AR, CARD_FOOTER)
 BTN = {
     "ack": ("استلمت · On it", "rd:ack"),
     "deliver": ("سلّمت · Delivered", "rd:deliver"),
+    "unavailable": ("ما عندنا · Not available", "rd:unavail"),
     "got_it": ("Got it ✓", "rd:gotit"),
     "not_what": ("Not what I asked", "rd:notwhat"),
     "cancel": ("Cancel", "rd:cancel"),
@@ -87,6 +88,7 @@ def done_line(event, who_name):
     return {
         "ack": "🔵 %s استلم الطلب." % who_name,
         "deliver": "🟢 %s سلّم المطلوب — Sam, please confirm." % who_name,
+        "unavailable": "🟡 %s: ما عندنا هذا · Not available — Sam, please confirm." % who_name,
         "got_it": "✅ Sam confirmed. شكراً %s." % who_name,
         "not_what": "↩️ Sam: not what he asked — رجع الطلب للتنفيذ.",
         "cancel": "⚪ Cancelled by %s." % who_name,
@@ -121,6 +123,9 @@ def card(req, now):
         fields.append({"name": "Delivery due · التسليم قبل",
                        "value": "%s · %s" % (engine.fmt_due_en(ddue, now), engine.fmt_due_ar(ddue, now)),
                        "inline": True})
+    if req.get("delivered_note") and st == "delivered":
+        fields.append({"name": "Not available · ما عندنا", "value": req["delivered_note"][:1000],
+                       "inline": False})
     if req.get("urgent"):
         fields.append({"name": "⚡ Urgent · مستعجل", "value": urgent_why(req.get("urgent_why")),
                        "inline": False})
@@ -142,13 +147,14 @@ def urgent_why(code):
 
 def card_buttons(state):
     if state in ("open", "acknowledged"):
-        keys = (["ack"] if state == "open" else []) + ["deliver", "cancel", "reassign"]
+        keys = (["ack"] if state == "open" else []) + ["deliver", "unavailable", "cancel", "reassign"]
     elif state == "delivered":
         keys = ["got_it", "not_what", "reassign"]
     else:
         keys = []
     return [{"label": BTN[k][0], "custom_id": BTN[k][1],
              "style": "success" if k in ("ack", "deliver", "got_it") else
+             "secondary" if k == "unavailable" else
              ("danger" if k in ("not_what", "cancel") else "secondary")} for k in keys]
 
 

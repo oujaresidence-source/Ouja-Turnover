@@ -276,6 +276,8 @@ _TRANSITIONS = {
     ("ack", OPEN): ACK,
     ("deliver", OPEN): DELIVERED,
     ("deliver", ACK): DELIVERED,
+    ("unavailable", OPEN): DELIVERED,         # «ما عندنا» — an honest answer is a delivery
+    ("unavailable", ACK): DELIVERED,
     ("got_it", DELIVERED): CONFIRMED,
     ("auto_confirm", DELIVERED): CONFIRMED_AUTO,
     ("not_what", DELIVERED): ACK,
@@ -393,6 +395,20 @@ def reask_of(asks, live):
         return None
     for rid, have, state in live or ():
         if state in LIVE and want & set(have or ()):
+            return rid
+    return None
+
+
+BURST_MIN = 15
+
+
+def burst_of(asked_at, live, window_min=BURST_MIN):
+    """The OPEN request Sam asked within the last 15 minutes in this room, or None. Sam often
+    types one ask as two or three lines ('carpet invoice' / 'and any other photos?'); one late
+    reply must not become two misses. live: [(request_id, asked_at, state)]."""
+    for rid, at, state in live or ():
+        gap = (asked_at - at) if at is not None else None
+        if state == OPEN and gap is not None and datetime.timedelta(0) <= gap <= datetime.timedelta(minutes=window_min):
             return rid
     return None
 
@@ -549,15 +565,14 @@ def choose_threshold(samples, target=0.95, floor_precision=0.90, start=0.40, min
     {threshold, mode, table}. mode 'auto' = detected requests open by themselves; 'confirm'
     = they only ask Sam; 'explicit' = the classifier never reaches 90% precision."""
     table = []
-    t = start
-    while t <= 0.99 + 1e-9:
+    for k in range(int(round(start * 100)), 100, 5):      # integer steps: no 0.8000000003
+        t = k / 100.0
         pred = [(c, y) for c, p, y in samples if p and c is not None and c >= t]
         tp = sum(1 for _c, y in pred if y)
         prec = (tp / float(len(pred))) if pred else None
         pos = sum(1 for _c, _p, y in samples if y)
         rec = (tp / float(pos)) if pos else None
         table.append({"t": round(t, 2), "n": len(pred), "precision": prec, "recall": rec})
-        t += 0.05
     ok = [r for r in table if r["precision"] is not None and r["n"] >= min_positive
           and r["precision"] >= target]
     if ok:

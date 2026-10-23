@@ -53,6 +53,7 @@
                5: ['قائد العمليات — بدون مسؤول', 'Ops lead — unowned'] };
   var EV = { request_opened: ['انفتح الطلب', 'Request opened'], owner_chosen: ['تحدد المسؤول', 'Owner chosen'],
              acknowledged: ['استلم', 'Acknowledged'], ack: ['استلمت', 'On it'], deliver: ['سلّمت', 'Delivered'],
+             unavailable: ['ما عندنا', 'Not available'], merged: ['سطر إضافي من سام', 'Sam added a line'],
              got_it: ['سام أكّد', 'Sam confirmed'], not_what: ['مو المطلوب', 'Not what I asked'],
              cancel: ['ألغي', 'Cancelled'], reassigned: ['انتقل', 'Reassigned'], covered: ['غطّاه زميل', 'Covered'],
              ladder_R1: ['تذكير ١', 'Reminder R1'], ladder_R2: ['تذكير ٢ + رسالة خاصة', 'Reminder R2 + DM'],
@@ -60,7 +61,8 @@
              ladder_MISS: ['تأخير', 'Miss'], miss: ['انسجّل تأخير', 'Miss recorded'], judged: ['الحكم', 'Judged'],
              excused: ['انعذر', 'Excused'], press_refused: ['ضغطة مرفوضة', 'Refused press'],
              confirmed_auto: ['تأكد تلقائياً', 'Auto-confirmed'], closed_with_ticket: ['انقفل مع التذكرة', 'Closed with ticket'],
-             source_deleted: ['رسالة سام انحذفت', 'Source deleted'] };
+             source_deleted: ['رسالة سام انحذفت', 'Source deleted'],
+             sam_followup: ['سام لاحق على الطلب', 'Sam followed up'], sam_reask: ['سام طلبها مرة ثانية', 'Sam asked again'] };
 
   function lab(map, k) { var v = map[k]; return v ? T(v[0], v[1]) : esc(k); }
   function asks(a) { return arr(a).map(function (k) { return lab(ASK, k); }).join('، '); }

@@ -522,9 +522,30 @@ def _maybe_request(room_id, rec, m, at, classify, rep):
     if _reask(room_id, c, m["id"], m.get("text")):
         rep["reask"] = True
         return
+    if _merge_burst(room_id, c, m["id"], m.get("text"), at):
+        rep["merged"] = True
+        return
     req, created = open_request(room_id, rec, m["id"], m["channel_id"], at, engine.PATH_DETECTED,
                                 m.get("text") or "", c, m)
     rep["request"] = req["id"] if req else None
+
+
+def _merge_burst(room_id, c, message_id, text, at):
+    """Sam's second line within 15 minutes joins the open request it continues: its asks are
+    added to that request (one owner, one clock, one possible miss) and the card is refreshed."""
+    live = [(r["id"], db.parse(r["asked_at"]), r["state"]) for r in db.live_requests(room_id)]
+    rid = engine.burst_of(at, live)
+    if not rid:
+        return None
+    r = db.request(rid)
+    asks = list(dict.fromkeys([a for a in (r["asks"] or []) + list(c.get("asks") or []) if a != "other"]
+                              or ["other"]))
+    extra = (c.get("summary_en") or text or "")[:160]
+    db.update_request(rid, asks_json=json.dumps(asks), summary_en=((r.get("summary_en") or "") + " · " + extra)[:300],
+                      summary_ar=((r.get("summary_ar") or "") + (" · " + c["summary_ar"] if c.get("summary_ar") else ""))[:300])
+    db.log("merged", rid, room_id, message_id, "Sam", {"asks": asks, "text": (text or "")[:160]})
+    _refresh_card(db.request(rid))
+    return rid
 
 
 def _reask(room_id, c, message_id, text):
@@ -591,7 +612,8 @@ def open_request(room_id, rec, source_id, channel_id, asked_at, path, text, clas
         m["mention_ids"] = [str(who_did)]
     owner = _choose_owner(rec, m, enrich, asked_at.date())
     rdue, ddue = engine.dues(asked_at, urgent, sla_cfg())
-    fields = {"ticket_seq": str(rec.get("seq") or ""), "ticket_code": rec.get("code") or "",
+    fields = {"ticket_seq": str(rec.get("seq") or ("عام" if rec.get("general") else "")),
+              "ticket_code": rec.get("code") or "",
               "lid": str(rec.get("lid") or enrich.get("lid") or ""), "text": (text or "")[:2000],
               "summary_en": c.get("summary_en") or (text or "")[:200],
               "summary_ar": c.get("summary_ar") or "", "asks_json": c.get("asks") or ["other"],
@@ -721,7 +743,7 @@ def press(kind, message_id, presser, extra=None, now=None):
                {"kind": kind, "why": why, "did": did})
         return False, text
     sam = is_sam(did)
-    if kind in ("ack", "deliver"):
+    if kind in ("ack", "deliver", "unavailable"):
         if sam and not admin:
             return refuse("sam_cannot", texts.REFUSE["not_owner"])
     elif kind in ("got_it", "not_what", "cancel"):
@@ -747,6 +769,14 @@ def press(kind, message_id, presser, extra=None, now=None):
         if not req.get("acked_at"):
             f.update({"acked_at": now, "acked_by": name})
         moved, row = db.move_request(rid, [engine.OPEN, engine.ACK], engine.DELIVERED, **f)
+    elif kind == "unavailable":
+        note = (extra.get("note") or extra.get("reason") or "").strip()
+        if len(note) < 3:
+            return refuse("no_note", "اكتب سطر: ليش ما هو متوفر؟")
+        f = {"delivered_at": now, "delivered_by": name, "delivered_note": note[:500]}
+        if not req.get("acked_at"):
+            f.update({"acked_at": now, "acked_by": name})
+        moved, row = db.move_request(rid, [engine.OPEN, engine.ACK], engine.DELIVERED, **f)
     elif kind == "got_it":
         moved, row = db.move_request(rid, [engine.DELIVERED], engine.CONFIRMED, confirmed_at=now,
                                      confirmed_by=name)
@@ -756,7 +786,7 @@ def press(kind, message_id, presser, extra=None, now=None):
             return refuse("no_note", "Please write one line: what is missing?")
         moved, row = db.move_request(rid, [engine.DELIVERED], engine.ACK,
                                      rework=int(req.get("rework") or 0) + 1, rework_note=note[:500],
-                                     delivered_at=None, delivered_by=None)
+                                     delivered_at=None, delivered_by=None, delivered_note=None)
     elif kind == "cancel":
         reason = (extra.get("reason") or "").strip()
         if not reason:
@@ -771,10 +801,25 @@ def press(kind, message_id, presser, extra=None, now=None):
            {"did": did, "note": extra.get("note"), "reason": extra.get("reason"),
             "proof": extra.get("proof")})
     _refresh_card(row)
+    line = texts.done_line(kind, name)
+    if kind == "unavailable":
+        line = line.replace(engine.INVISIBLE_MARK, "") + NL + "> " + _for_sam(row.get("delivered_note")) + engine.INVISIBLE_MARK
     enqueue("line:%d:%s:%s" % (rid, kind, db.iso(now)), "post", {
-        "channel_id": str(_card_channel(row)), "content": texts.done_line(kind, name),
+        "channel_id": str(_card_channel(row)), "content": line,
         "reply_to": row.get("card_message_id"), "mentions": "none"})
     return True, texts.done_line(kind, name).replace(engine.INVISIBLE_MARK, "")
+
+
+def _for_sam(note):
+    """The staff's reason, with an English line under it when it is Arabic (our own posts are
+    never auto-translated, so this one is translated here, once)."""
+    note = (note or "").strip()
+    if engine.direction(note) != "ar2en":
+        return note
+    try:
+        return note + " — " + translate.translate_text(note, "ar2en")["translation"]
+    except Exception:
+        return note
 
 
 def _already(row):

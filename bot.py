@@ -10696,8 +10696,26 @@ async def oncall_loop():
 # Blocking work runs on rrdesk's OWN pool; every listener swallows its own errors.
 
 def _rd_rr_record(cid):
+    """The RR ticket behind a channel — or, for a NON-ticket room in the RR family (rr-general),
+    a stand-in record so it is translated and Sam's asks there are tracked too. Panels, closed
+    rooms and the «sp-» notes room are never RR rooms. A dict lookup + one cached channel read:
+    cheap enough for the event loop."""
     rec = _dtk["tickets"].get(str(cid))
-    return rec if isinstance(rec, dict) and rec.get("kind") == "rr" else None
+    if isinstance(rec, dict):
+        return rec if rec.get("kind") == "rr" else None
+    try:
+        ch = bot.get_channel(int(cid))
+    except (TypeError, ValueError):
+        return None
+    cat = getattr(ch, "category", None)
+    if ch is None or cat is None or getattr(ch, "parent_id", None) and not hasattr(ch, "topic"):
+        return None
+    fam = {_tk_cat_norm(RR_CATEGORY)} | {_tk_cat_norm("%s %s" % (RR_CATEGORY, x)) for x in _TK_OVERFLOW_SUFFIXES}
+    name = str(getattr(ch, "name", "") or "")
+    if (_tk_cat_norm(cat.name) not in fam or name.startswith(("مغلق", "sp-"))
+            or name in (RR_PANEL_CHANNEL, "rr-tickets") or ops_tidy.R.PANEL_RE.search(name)):
+        return None
+    return {"kind": "rr", "seq": "", "code": "", "status": "new", "general": True}
 
 
 def _rd_rr_records():

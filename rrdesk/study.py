@@ -255,7 +255,9 @@ def report_text(rep):
         "• وسيط أول رد: %s دقيقة عمل" % (r.get("p50") if r.get("p50") is not None else "—"),
         "• المقترح: رد خلال %s دقيقة، تسليم خلال %s ساعة (معروض في الإعدادات — ما يتطبق تلقائياً)"
         % (c.get("resp_min"), int((c.get("deliv_min") or 480) / 60)),
-    ]) + engine.INVISIBLE_MARK
+    ] + (["• فحص الاكتشاف على %s رسالة: الوضع المقترح %s (حد %s)"
+          % ((rep.get("eval") or {}).get("n"), (rep.get("eval") or {}).get("mode"),
+             (rep.get("eval") or {}).get("threshold"))] if rep.get("eval") else [])) + engine.INVISIBLE_MARK
 
 
 # ------------------------------------------------------------------ redaction (PDPL)

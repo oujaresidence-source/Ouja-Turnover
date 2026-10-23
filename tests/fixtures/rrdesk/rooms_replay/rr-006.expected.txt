@@ -1,0 +1,144 @@
+06-25 14:36  bot      @موظف-4 فتح طلب تعويض جديد
+06-25 14:36  → post   room     [translated] 4
+06-25 14:38  bot       ما لقيت حجز برقم «ОНХ8rWZIW» في Hostaway — تأكدوا من الرقم. النسخة الإنجليزية بتطلع بدون بيانات الحجز.
+06-25 14:38  → post   room     [translated] 8
+06-25 14:38  bot       النسخة الإنجليزية — انسخها كاملة للباك أوفيس:
+06-25 14:38  → post   room     [translated]
+06-25 14:38  bot      RR TICKET — #006  Reservation code: ОНХ8rWZIW Date issue discovered: Not provided Issue type: Other  WHAT HAPP
+06-25 14:38  bot       الترجمة الآلية تعطلت فحطيت النص العربي داخل القالب — اضغطوا  إعادة توليد الإنجليزي بعد شوي.
+06-25 14:38  → post   room     [translated]
+06-25 17:09  Sam      details for this?
+06-25 17:09  → post   room     [translated]
+06-25 17:09  → post   room     <@103> طلب جديد من سام
+06-25 17:54  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #6 🙏
+06-25 18:13  موظف-3   @موظف-4
+06-25 18:13  → edit   room     📌 Sam's request #1 · RR #6
+06-25 20:09  → post   room     <@103> باقي وقت قليل على تسليم طلب سام (معلومة) — RR #6.
+06-25 21:09  → post   room     <@103> فات موعد تسليم طلب سام (معلومة) — RR #6. سلّمه واضغط «سلّمت».
+06-25 21:09  → room   غرفة-المراقبة 🟠 RR #6 — طلب سام (معلومة) فات موعد تسليمه · المسؤول: موظف-4 · https://discord.com/channels/1/900/p:card:1
+06-26 01:09  → post   room     <@103> طلب سام (معلومة) — RR #6 ما انسلّم بوقته. انسجّل تأخير.
+06-26 01:09  → dm     dm       🔴 طلب سام في RR #6 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chann
+06-26 01:09  → dm     dm       🔴 تأخير على طلب سام — RR #6 (معلومة) · المسؤول: موظف-4. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المراق
+06-26 01:09  → room   غرفة-المراقبة 🔴 تأخير: RR #6 — طلب سام (معلومة) · المسؤول: موظف-4 · https://discord.com/channels/1/900/p:card:1
+06-26 01:09  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W26). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+06-26 14:22  موظف-4   We need to issue a full refund to the guest using the booking number OHX8rWZIW  The guest did not enter the ap
+06-26 14:22  [simulated: موظف-4 presses سلّمت on #1]
+06-26 14:22  → post   room     [translated] 8
+06-26 14:22  → edit   room     📌 Sam's request #1 · RR #6
+06-26 14:22  → post   room     🟢 موظف-4 سلّم المطلوب — Sam, please confirm.
+06-26 22:00  Sam      i only have access to airbnb reseration
+06-26 22:00  → post   room     [translated]
+06-28 14:22  → edit   room     📌 Sam's request #1 · RR #6
+07-01 08:25  موظف-4   Yes, I requested a full refund from airbnb for this reservation number .
+07-01 08:25  → post   room     [translated]
+07-01 08:27  موظف-4   Please mention/tag me whenever you need something from me, so I get notified
+07-01 08:27  → post   room     [translated]
+07-01 17:49  Sam      hi @موظف-4 this is not an airbnb code - ОНХ8rWZIW
+07-01 17:49  → post   room     [translated] 4 8
+07-01 17:49  → post   room     <@103> طلب جديد من سام
+07-01 18:34  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #6 🙏
+07-01 19:19  → post   room     <@103> فات وقت الرد على طلب سام (معلومة) — RR #6. رد عليه الحين الله يعافيك.
+07-01 19:19  → dm     dm       ⏰ طلب سام في RR #6 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p:
+07-01 20:49  → post   room     <@103> طلب سام (معلومة) — RR #6 ما انسلّم بوقته. انسجّل تأخير.
+07-01 20:49  → dm     dm       🔴 طلب سام في RR #6 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chann
+07-01 20:49  → dm     dm       🔴 تأخير على طلب سام — RR #6 (معلومة) · المسؤول: موظف-4. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المراق
+07-01 20:49  → room   غرفة-المراقبة 🔴 تأخير: RR #6 — طلب سام (معلومة) · المسؤول: موظف-4 · https://discord.com/channels/1/900/p:card:2
+07-01 20:49  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W27). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+07-02 13:38  موظف-1   @موظف-4
+07-02 13:38  → edit   room     📌 Sam's request #2 · RR #6
+07-06 04:52  موظف-1   موظف-4 وش رقم الحجز بالله @موظف-4
+07-06 04:52  [simulated: موظف-1 presses سلّمت on #2]
+07-06 04:52  → post   room     [translated] 4 4
+07-06 04:52  → edit   room     📌 Sam's request #2 · RR #6
+07-06 04:52  → post   room     🟢 موظف-1 سلّم المطلوب — Sam, please confirm.
+07-06 05:01  موظف-4   مارديت لاني جالسه احاول اتذكر
+07-06 05:01  → post   room     [translated]
+07-06 05:01  موظف-4   اذكر اسمه «الضيف» مدري «الضيف»
+07-06 05:01  → post   room     [translated]
+07-06 05:02  موظف-4   هو مو من طرفي اذكر بس فتحت له
+07-06 05:02  → post   room     [translated]
+07-06 05:03  موظف-4   [2 file]
+07-06 05:03  → post   room     📎
+07-06 05:03  موظف-4   إذا ما خاب ضنّي إن شاء الله
+07-06 05:03  → post   room     [translated]
+07-06 05:04  موظف-4   I think this is it
+07-06 05:04  → post   room     [translated]
+07-06 05:04  موظف-4   @Sam
+07-08 04:52  → edit   room     📌 Sam's request #2 · RR #6
+07-09 17:21  Sam      is this a full refund @موظف-4
+07-09 17:21  → post   room     [translated] 4
+07-09 17:21  → post   room     <@103> طلب جديد من سام
+07-09 18:06  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #6 🙏
+07-09 18:51  → post   room     <@103> فات وقت الرد على طلب سام (معلومة) — RR #6. رد عليه الحين الله يعافيك.
+07-09 18:51  → dm     dm       ⏰ طلب سام في RR #6 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p:
+07-09 20:00  موظف-4   Yes
+07-09 20:00  → edit   room     📌 Sam's request #3 · RR #6
+07-09 20:00  → post   room     نعم
+07-09 20:21  → post   room     <@103> باقي وقت قليل على تسليم طلب سام (معلومة) — RR #6.
+07-09 21:21  → post   room     <@103> فات موعد تسليم طلب سام (معلومة) — RR #6. سلّمه واضغط «سلّمت».
+07-09 21:21  → room   غرفة-المراقبة 🟠 RR #6 — طلب سام (معلومة) فات موعد تسليمه · المسؤول: موظف-4 · https://discord.com/channels/1/900/p:card:3
+07-09 22:11  Sam      [2 file]
+07-09 22:11  → post   room     📎
+07-10 01:21  → post   room     <@103> طلب سام (معلومة) — RR #6 ما انسلّم بوقته. انسجّل تأخير.
+07-10 01:21  → dm     dm       🔴 طلب سام في RR #6 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chann
+07-10 01:21  → dm     dm       🔴 تأخير على طلب سام — RR #6 (معلومة) · المسؤول: موظف-4. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المراق
+07-10 01:21  → room   غرفة-المراقبة 🔴 تأخير: RR #6 — طلب سام (معلومة) · المسؤول: موظف-4 · https://discord.com/channels/1/900/p:card:3
+07-10 01:21  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W28). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+08-30 20:28  موظف-1   @موظف-3 هذا تكت «الضيف»
+08-30 20:28  [simulated: موظف-1 presses سلّمت on #3]
+08-30 20:28  → post   room     [translated] 3
+08-30 20:28  → edit   room     📌 Sam's request #3 · RR #6
+08-30 20:28  → post   room     🟢 موظف-1 سلّم المطلوب — Sam, please confirm.
+08-30 20:52  موظف-3   What happened
+08-30 20:52  → post   room     [translated]
+08-30 20:52  موظف-3   @Sam
+08-30 20:52  موظف-3   This ticket
+08-30 20:52  → post   room     [translated]
+08-30 20:52  موظف-3   The client is messaging us on Airbnb
+08-30 20:52  → post   room     [translated]
+08-30 21:03  Sam      Sorry, i wasnt aware that access was provided, as i dont have on first attempt
+08-30 21:03  → post   room     [translated]
+08-30 21:03  Sam      on it
+08-30 21:03  → post   room     أبشر
+08-30 21:05  Sam      I remember this
+08-30 21:05  → post   room     [translated]
+08-30 21:05  Sam      i trid this but since its way back on april
+08-30 21:05  → post   room     [translated]
+08-30 21:05  Sam      we can no longer send or request money
+08-30 21:05  → post   room     [translated]
+08-30 21:06  Sam      let me communicate with airbnb again
+08-30 21:06  → post   room     [translated]
+08-30 21:07  Sam      @موظف-3 can you confirm sir that this is the right guest?
+08-30 21:07  → post   room     [translated] 3
+08-30 21:07  → post   room     <@102> طلب جديد من سام
+08-30 21:21  Sam      sir @موظف-3 im with airbnb now, is that the correct guest?
+08-30 21:21  → post   room     [translated] 3
+08-30 21:52  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #6 🙏
+08-30 22:00  موظف-3   @موظف-3 can you confirm sir that this is the right guest?
+08-30 22:00  [simulated: موظف-3 presses سلّمت on #4]
+08-30 22:00  → edit   room     📌 Sam's request #4 · RR #6
+08-30 22:00  → post   room     [translated] 3
+08-30 22:00  → edit   room     📌 Sam's request #4 · RR #6
+08-30 22:00  → post   room     🟢 موظف-3 سلّم المطلوب — Sam, please confirm.
+08-30 22:33  Sam      done
+08-30 22:33  → post   room     تم
+08-30 22:33  Sam      [2 file]
+08-30 22:33  → post   room     📎
+08-30 22:53  موظف-3   The guest says that he didn’t put an email can they text him and help him?
+08-30 22:53  → post   room     [translated]
+08-30 23:03  Sam      in airbnb
+08-30 23:03  → post   room     [translated]
+08-31 00:16  موظف-3   Yes
+08-31 00:16  → post   room     نعم
+08-31 00:27  Sam      they processed the refund alrady via airbnb sir
+08-31 00:27  → post   room     [translated]
+09-01 20:28  → edit   room     📌 Sam's request #3 · RR #6
+09-01 22:00  → edit   room     📌 Sam's request #4 · RR #6
+
+request #1: confirmed_auto · path detected · owner موظف-4 (rule 3) · rework 0
+request #2: confirmed_auto · path detected · owner موظف-4 (rule 1) · rework 0
+request #3: confirmed_auto · path detected · owner موظف-4 (rule 1) · rework 0
+request #4: confirmed_auto · path detected · owner موظف-3 (rule 1) · rework 0
+miss: request #1 gen 1 · eligible 1 · verdict notice
+miss: request #2 gen 1 · eligible 1 · verdict notice
+miss: request #3 gen 1 · eligible 1 · verdict notice

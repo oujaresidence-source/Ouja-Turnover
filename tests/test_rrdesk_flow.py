@@ -142,18 +142,22 @@ class Requests(unittest.TestCase):
         r = db.request(sam_asks(self, mid="a", mentions=(), asks=["photos"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.ASEEL, 3))
         # 2: a role mention → the apartment's responsible person today
+        self.clock.t += datetime.timedelta(minutes=20)        # not a burst
         r = db.request(sam_asks(self, mid="b", mentions=(), role_mentioned=True, asks=["video"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.NOURA, 2))
         # 4: opener not in the calendar → responsible
         self.state["rec"]["opener_id"] = "424242"
+        self.clock.t += datetime.timedelta(minutes=20)        # not a burst
         r = db.request(sam_asks(self, mid="c", mentions=(), asks=["invoice"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.NOURA, 4))
         # 5: nobody → the ops lead, flagged unowned
         self.state["resp"] = ("", "", "unknown")
+        self.clock.t += datetime.timedelta(minutes=20)        # not a burst
         r = db.request(sam_asks(self, mid="d", mentions=(), asks=["receipt"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"], r["unowned"]), (F.ASEEL, 5, 1))
         # Sam mentioning himself / the bot is not an owner
         self.state["resp"] = ("نورة", F.NOURA, "owner")
+        self.clock.t += datetime.timedelta(minutes=20)        # not a burst
         r = db.request(sam_asks(self, mid="e", mentions=(F.SAM, F.BOT), asks=["quote"])["request"])
         self.assertEqual(r["owner_rule"], 4)
 
@@ -164,6 +168,13 @@ class Requests(unittest.TestCase):
         self.assertNotIn("request", rep)
         self.assertEqual(len(db.recent_requests()), 1)
         self.assertTrue([e for e in db.events(request_id=rid) if e["kind"] == "sam_reask"])
+
+    def test_two_lines_in_a_burst_are_one_request(self):
+        rid = sam_asks(self, asks=["invoice"], text="carpet invoice")["request"]
+        rep = sam_asks(self, mid="s2", asks=["photos"], text="and any other photos?")
+        self.assertTrue(rep.get("merged"))
+        self.assertEqual(db.request(rid)["asks"], ["invoice", "photos"])
+        self.assertEqual(len(db.recent_requests()), 1)
 
     def test_owner_on_leave_goes_to_coverer(self):
         self.state["off"].add("ناصر")
@@ -238,6 +249,17 @@ class Presses(unittest.TestCase):
         ok, _ = flow.press("deliver", self.card, {"did": F.NASSER, "name": "Nasser"}, {"proof": None})
         self.assertTrue(ok)
         self.assertEqual(db.request(self.rid)["proof_unchecked"], 1)
+
+    def test_not_available_needs_a_reason_and_skips_the_file_rule(self):
+        ok, _ = flow.press("unavailable", self.card, {"did": F.NASSER, "name": "Nasser"}, {"note": ""})
+        self.assertFalse(ok)
+        ok, _ = flow.press("unavailable", self.card, {"did": F.NASSER, "name": "Nasser"},
+                           {"note": "no invoice — bought in cash"})
+        self.assertTrue(ok)
+        r = db.request(self.rid)
+        self.assertEqual((r["state"], r["delivered_note"]), ("delivered", "no invoice — bought in cash"))
+        ok, _ = flow.press("unavailable", self.card, {"did": F.SAM, "name": "Sam"}, {"note": "xx yy"})
+        self.assertFalse(ok)
 
     def test_first_final_wins(self):
         flow.press("deliver", self.card, {"did": F.NASSER, "name": "Nasser"}, {"proof": True})

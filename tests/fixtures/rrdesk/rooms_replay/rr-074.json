@@ -108,7 +108,9 @@
      "photos",
      "invoice"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -144,7 +146,9 @@
     "asks": [
      "invoice"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": true,
+    "by": "hand"
    }
   },
   {
@@ -158,7 +162,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -170,9 +176,13 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": false,
-    "asks": [],
-    "confidence": 0.1
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -188,7 +198,9 @@
     "asks": [
      "invoice"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -204,9 +216,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "action"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -220,7 +234,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -236,7 +252,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -259,7 +277,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -287,7 +307,9 @@
     "asks": [
      "invoice"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -301,9 +323,13 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": false,
-    "asks": [],
-    "confidence": 0.1
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -317,7 +343,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -329,11 +357,11 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": true,
-    "asks": [
-     "invoice"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -347,7 +375,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -435,11 +465,11 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": true,
-    "asks": [
-     "other"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -453,7 +483,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -467,7 +499,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -483,7 +517,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -508,9 +544,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "photos"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -524,11 +562,11 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": true,
-    "asks": [
-     "photos"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -551,9 +589,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "info"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -567,7 +607,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -581,7 +623,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -597,9 +641,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "info"
+     "photos"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -620,11 +666,11 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": true,
-    "asks": [
-     "photos"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -638,7 +684,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -679,11 +727,11 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": true,
-    "asks": [
-     "other"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -697,7 +745,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -709,12 +759,11 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": true,
-    "asks": [
-     "photos",
-     "info"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -726,11 +775,11 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": true,
-    "asks": [
-     "photos"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -744,7 +793,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -758,7 +809,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -772,9 +825,13 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": false,
-    "asks": [],
-    "confidence": 0.1
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -786,12 +843,11 @@
    "voice": false,
    "mentions": [],
    "label": {
-    "is_request": true,
-    "asks": [
-     "photos",
-     "info"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -808,9 +864,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "info"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -833,11 +891,11 @@
     "موظف-5"
    ],
    "label": {
-    "is_request": true,
-    "asks": [
-     "other"
-    ],
-    "confidence": 0.9
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -851,7 +909,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -865,7 +925,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -890,7 +952,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -915,9 +979,11 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "photos"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -931,7 +997,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -945,7 +1013,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -968,7 +1038,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -982,7 +1054,9 @@
    "label": {
     "is_request": false,
     "asks": [],
-    "confidence": 0.1
+    "confidence": 0.1,
+    "urgent": false,
+    "by": "hand"
    }
   },
   {
@@ -1016,11 +1090,16 @@
    "label": {
     "is_request": true,
     "asks": [
-     "other"
+     "info"
     ],
-    "confidence": 0.9
+    "confidence": 0.9,
+    "urgent": false,
+    "by": "hand"
    }
   }
  ],
- "presses": []
+ "presses": [],
+ "simulate_delivery": true,
+ "simulation_note": "The team pressed no buttons in history. simulate_delivery presses «سلّمت» when they really delivered (files after a file request, a 3+ word answer to a question).",
+ "label_note": "Sam's labels are by hand (2026-10-24 study), standing in for the classifier."
 }

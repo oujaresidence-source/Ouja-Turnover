@@ -1,0 +1,240 @@
+10-15 18:53  bot      @موظف-5 فتح طلب تعويض جديد
+10-15 18:53  → post   room     [translated] 5
+10-15 18:53  bot      bot  pinned a message to this channel. See all pinned messages.  —  10/15/26, 6:53 PM Thursday, October 15, 20
+10-15 18:54  موظف-5   [6 file]
+10-15 18:54  → post   room     📎
+10-15 18:55  موظف-5   [2 file]
+10-15 18:55  → post   room     📎
+10-15 18:56  موظف-5   [2 file]
+10-15 18:56  → post   room     📎
+10-15 18:57  bot       لقيت الحجز في Hostaway: الضيف «الضيف» · شقة DAMAC Towers · من 2026-09-30 إلى 2026-10-02 · القناة: airbnbOffic
+10-15 18:57  → post   room     [translated] 2026-09-30 2026-10-02 1
+10-15 18:57  bot       النسخة الإنجليزية — انسخها كاملة للباك أوفيس:
+10-15 18:57  → post   room     [translated]
+10-15 18:57  bot      RR TICKET — #074  Reservation code: HMXXXX Guest: «الضيف» Unit: DAMAC Towers Stay: 2026-09-30 → 2026-10-02 (ai
+10-15 19:01  Sam      Can you also shasre the before check-in photo of the table and dresser and invoice s
+10-15 19:01  → post   room     [translated]
+10-15 19:01  → post   room     <@103> طلب جديد من سام
+10-15 19:02  موظف-5   [2 file]
+10-15 19:02  [simulated: موظف-5 presses سلّمت on #1]
+10-15 19:02  → edit   room     📌 Sam's request #1 · RR #74
+10-15 19:02  → post   room     📎
+10-15 19:02  → edit   room     📌 Sam's request #1 · RR #74
+10-15 19:02  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-15 19:02  موظف-5   [6 file]
+10-15 19:02  → post   room     📎
+10-15 22:05  Sam      hi @موظف-5 i saw here that check-out was last oct. 2, we need to file it by tomorrow before 11:00 AM or tonnig
+10-15 22:05  → post   room     [translated] 5 2 11:00
+10-15 22:05  → post   room     <@103> طلب جديد من سام
+10-15 22:05  Sam      we cant submit a claim with just photos
+10-15 22:05  → post   room     [translated]
+10-15 22:05  Sam      deep cleaning invoices
+10-15 22:05  → post   room     [translated]
+10-15 22:06  Sam      and complete invoices for this, please?
+10-15 22:06  → post   room     [translated]
+10-15 22:07  Sam      sir @المالك need access please
+10-15 22:07  → post   room     [translated]
+10-15 22:07  → edit   room     <@103> طلب جديد من سام
+10-15 22:07  Sam      [email]
+10-15 22:07  → post   room     [translated]
+10-15 22:11  Sam      sir @موظف-1
+10-15 22:11  → post   room     [translated] 1
+10-15 22:12  موظف-1   Ok
+10-15 22:12  → edit   room     📌 Sam's request #2 · RR #74
+10-15 22:12  → post   room     تمام
+10-15 22:12  Sam      this is due tomorrow
+10-15 22:12  → post   room     [translated]
+10-15 22:12  موظف-1   Ok now
+10-15 22:12  → post   room     [translated]
+10-15 22:18  Sam      i need the invoices on this, please @موظف-5 @موظف-1
+10-15 22:18  → post   room     [translated] 5 1
+10-15 22:23  Sam      @موظف-5 photo of the table that shows the damaged
+10-15 22:23  → post   room     [translated] 5
+10-15 22:23  → post   room     <@103> طلب جديد من سام
+10-15 22:29  Sam      dresser 2988/3 = 996 based on the report only 1 is affected should be 996 not 2988
+10-15 22:29  → post   room     [translated] 2988/3 996 1 996 2988
+10-15 22:32  Sam      i will someone it now but need to have the invoices
+10-15 22:32  → post   room     [translated]
+10-15 22:37  Sam      [2 file]
+10-15 22:37  → post   room     📎
+10-15 22:49  موظف-5   I will send it to you deep clean invoice (edited) Thursday, October 15, 2026 at 11:24 PM
+10-15 22:49  → edit   room     📌 Sam's request #3 · RR #74
+10-15 22:49  → post   room     [translated] 15 2026 11:24
+10-15 22:51  موظف-5   And the photo before I sent it already
+10-15 22:51  → post   room     [translated]
+10-15 23:24  موظف-5   [3 file]
+10-15 23:24  [simulated: موظف-5 presses سلّمت on #2]
+10-15 23:24  [simulated: موظف-5 presses سلّمت on #3]
+10-15 23:24  → post   room     📎
+10-15 23:24  → edit   room     📌 Sam's request #2 · RR #74
+10-15 23:24  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-15 23:24  → edit   room     📌 Sam's request #3 · RR #74
+10-15 23:24  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-15 23:25  موظف-5   This is the invoice
+10-15 23:25  → post   room     [translated]
+10-15 23:25  موظف-5   For deep cleaning
+10-15 23:25  → post   room     [translated]
+10-15 23:28  موظف-5   [2 file]
+10-15 23:28  → post   room     📎
+10-16 12:16  موظف-5   dresser 2988/3 = 996 based on the report only 1 is affected should be 996 not 2988
+10-16 12:16  → post   room     [translated] 2988/3 996 1 996 2988
+10-17 19:02  → edit   room     📌 Sam's request #1 · RR #74
+10-17 23:24  → edit   room     📌 Sam's request #2 · RR #74
+10-17 23:24  → edit   room     📌 Sam's request #3 · RR #74
+10-22 09:33  موظف-5   Any update? @Sam
+10-22 09:33  → post   room     [translated]
+10-22 09:34  Sam      I will send an update here @موظف-5
+10-22 09:34  → post   room     [translated] 5
+10-22 09:34  Sam      Once I received a decision from airbnb
+10-22 09:34  → post   room     [translated]
+10-22 09:35  Sam      Like on the other cases
+10-22 09:35  → post   room     [translated]
+10-22 09:36  Sam      @موظف-5 sometimes the entire process takes 14days just , don't worry I'm on top of everything
+10-22 09:36  → post   room     [translated] 5 14
+10-22 09:37  موظف-5   Ok ok thank you so much
+10-22 09:37  → post   room     [translated]
+10-23 00:40  Sam      hi @موظف-5 do we have closer view of the damage on the table?
+10-23 00:40  → post   room     [translated] 5
+10-23 00:40  → post   room     <@103> طلب جديد من سام
+10-23 01:08  Sam      hi @موظف-5 do we have photo or closer photo of the damaged table?
+10-23 01:08  → post   room     [translated] 5
+10-23 01:25  → post   room     <@103> سام ينتظر ردك على طلبه (صور) — RR #74 🙏
+10-23 04:28  موظف-5   [2 file]
+10-23 04:28  [simulated: موظف-5 presses سلّمت on #4]
+10-23 04:28  → edit   room     📌 Sam's request #4 · RR #74
+10-23 04:28  → post   room     📎
+10-23 04:28  → edit   room     📌 Sam's request #4 · RR #74
+10-23 04:28  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-23 05:14  Sam      is that table or commode?
+10-23 05:14  → post   room     [translated]
+10-23 05:14  → post   room     <@103> طلب جديد من سام
+10-23 05:15  Sam      i have that approved
+10-23 05:15  → post   room     [translated]
+10-23 05:15  Sam      but i ned the table
+10-23 05:15  → post   room     [translated]
+10-23 05:15  Sam      where's the damaged table @موظف-5
+10-23 05:15  → post   room     [translated] 5
+10-23 05:15  → edit   room     <@103> طلب جديد من سام
+10-23 05:59  موظف-5   It’s burn not damage
+10-23 05:59  → edit   room     📌 Sam's request #5 · RR #74
+10-23 05:59  → post   room     [translated]
+10-23 05:59  Sam      Any photo that shows that?
+10-23 05:59  → post   room     [translated]
+10-23 05:59  Sam      I zoom in and out but I can't find
+10-23 05:59  → post   room     [translated]
+10-23 06:00  موظف-5   Isn't the smoking obvious in the picture?
+10-23 06:00  → post   room     [translated]
+10-23 06:01  موظف-5   [4 file]
+10-23 06:01  [simulated: موظف-5 presses سلّمت on #5]
+10-23 06:01  → post   room     📎
+10-23 06:01  → edit   room     📌 Sam's request #5 · RR #74
+10-23 06:01  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-23 06:02  موظف-5   [2 file]
+10-23 06:02  → post   room     📎
+10-23 06:12  Sam      @موظف-5 please focus on the table
+10-23 06:12  → post   room     [translated] 5
+10-23 06:12  Sam      you listed that table is broken
+10-23 06:12  → post   room     [translated]
+10-23 06:12  Sam      where is the photo of the broken table (edited) Friday, October 23, 2026 at 7:05 AM
+10-23 06:12  → post   room     [translated] 23 2026 7:05
+10-23 06:18  Sam      i have that additioal cleaning approved as well as that commone , just need to have the photo of broken/ burnt
+10-23 06:18  → post   room     [translated] 23 2026 6:22
+10-23 06:18  Sam      [2 file]
+10-23 06:18  → post   room     📎
+10-23 06:18  Sam      those that you submitted , didint show broken table
+10-23 06:18  → post   room     [translated]
+10-23 06:18  Sam      do you have photo or none @موظف-5
+10-23 06:18  → post   room     [translated] 5
+10-23 06:18  → post   room     <@103> طلب جديد من سام
+10-23 06:20  Sam      dresser approved, cleaning approved, where is the photo of the table?
+10-23 06:20  → post   room     [translated]
+10-23 11:45  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #74 🙏
+10-23 12:29  Sam      @موظف-5 is this something that can be provided or can I close this @موظف-5
+10-23 12:29  → post   room     [translated] 5 5
+10-23 12:29  → post   room     <@103> طلب جديد من سام
+10-23 12:30  → post   room     <@103> فات وقت الرد على طلب سام (معلومة) — RR #74. رد عليه الحين الله يعافيك.
+10-23 12:30  → dm     dm       ⏰ طلب سام في RR #74 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+10-23 13:14  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #74 🙏
+10-23 13:59  → post   room     <@103> فات وقت الرد على طلب سام (معلومة) — RR #74. رد عليه الحين الله يعافيك.
+10-23 13:59  → dm     dm       ⏰ طلب سام في RR #74 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+10-23 14:00  → post   room     <@103> طلب سام (معلومة) — RR #74 ما انسلّم بوقته. انسجّل تأخير.
+10-23 14:00  → dm     dm       🔴 طلب سام في RR #74 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chan
+10-23 14:00  → dm     dm       🔴 تأخير على طلب سام — RR #74 (معلومة) · المسؤول: موظف-5. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المرا
+10-23 14:00  → room   غرفة-المراقبة 🔴 تأخير: RR #74 — طلب سام (معلومة) · المسؤول: موظف-5 · https://discord.com/channels/1/900/p:card:6
+10-23 14:00  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W43). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+10-23 15:29  → post   room     <@103> طلب سام (معلومة) — RR #74 ما انسلّم بوقته. انسجّل تأخير.
+10-23 15:29  → dm     dm       🔴 طلب سام في RR #74 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chan
+10-23 15:29  → dm     dm       🔴 تأخير على طلب سام — RR #74 (معلومة) · المسؤول: موظف-5. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المرا
+10-23 15:29  → room   غرفة-المراقبة 🔴 تأخير: RR #74 — طلب سام (معلومة) · المسؤول: موظف-5 · https://discord.com/channels/1/900/p:card:7
+10-23 15:43  موظف-5   ok
+10-23 15:43  → edit   room     📌 Sam's request #6 · RR #74
+10-23 15:43  → edit   room     📌 Sam's request #7 · RR #74
+10-23 15:43  → post   room     تمام
+10-23 19:30  Sam      i mean @موظف-5 can you still provide or i can ask them to proceed on processing without the one for table
+10-23 19:30  → post   room     [translated] 5
+10-23 21:29  Sam      full payout for the dresser and cleaning,
+10-23 21:29  → post   room     [translated]
+10-23 21:30  Sam      we can get back to them once photo for the table is avaailable
+10-23 21:30  → post   room     [translated]
+10-23 21:30  المالك   @موظف-5  صوره الطاوله
+10-23 21:30  → post   room     [translated] 5
+10-23 21:32  Sam      [2 file]
+10-23 21:32  → post   room     📎
+10-23 22:54  موظف-5   ارسلتها
+10-23 22:54  → post   room     [translated]
+10-23 23:00  Sam      do you have closer view of the damage table @موظف-5 ?
+10-23 23:00  → post   room     [translated] 5
+10-23 23:00  → post   room     <@103> طلب جديد من سام
+10-23 23:00  Sam      you sent this, but no damaged captured
+10-23 23:00  → post   room     [translated]
+10-23 23:00  Sam      this is paid already. all good
+10-23 23:00  → post   room     [translated]
+10-23 23:44  موظف-5   thank you so much
+10-23 23:44  [simulated: موظف-5 presses سلّمت on #6]
+10-23 23:44  [simulated: موظف-5 presses سلّمت on #7]
+10-23 23:44  → edit   room     📌 Sam's request #8 · RR #74
+10-23 23:44  → post   room     شكراً جزيلاً
+10-23 23:44  → edit   room     📌 Sam's request #6 · RR #74
+10-23 23:44  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-23 23:44  → edit   room     📌 Sam's request #7 · RR #74
+10-23 23:44  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-23 23:45  Sam      i mean, the dresser and the cleaning
+10-23 23:45  → post   room     [translated]
+10-23 23:45  Sam      but table is not as we are waitng for photos
+10-23 23:45  → post   room     [translated]
+10-23 23:57  موظف-5   [4 file]
+10-23 23:57  [simulated: موظف-5 presses سلّمت on #8]
+10-23 23:57  → post   room     📎
+10-23 23:57  → edit   room     📌 Sam's request #8 · RR #74
+10-23 23:57  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-23 23:57  موظف-5   This is the photo what we have
+10-23 23:57  → post   room     [translated]
+10-24 00:06  Sam      so, table is not damaged @موظف-5 ?
+10-24 00:06  → post   room     [translated] 5
+10-24 00:06  → post   room     <@103> طلب جديد من سام
+10-24 00:51  → post   room     <@103> سام ينتظر ردك على طلبه (معلومة) — RR #74 🙏
+10-24 11:06  → post   room     <@103> فات وقت الرد على طلب سام (معلومة) — RR #74. رد عليه الحين الله يعافيك.
+10-24 11:06  → dm     dm       ⏰ طلب سام في RR #74 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+10-24 12:36  → post   room     <@103> طلب سام (معلومة) — RR #74 ما انسلّم بوقته. انسجّل تأخير.
+10-24 12:36  → dm     dm       🔴 طلب سام في RR #74 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chan
+10-24 12:36  → dm     dm       🔴 تأخير على طلب سام — RR #74 (معلومة) · المسؤول: موظف-5. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المرا
+10-24 12:36  → room   غرفة-المراقبة 🔴 تأخير: RR #74 — طلب سام (معلومة) · المسؤول: موظف-5 · https://discord.com/channels/1/900/p:card:9
+10-25 04:28  → edit   room     📌 Sam's request #4 · RR #74
+10-25 06:01  → edit   room     📌 Sam's request #5 · RR #74
+10-25 23:44  → edit   room     📌 Sam's request #6 · RR #74
+10-25 23:44  → edit   room     📌 Sam's request #7 · RR #74
+10-25 23:57  → edit   room     📌 Sam's request #8 · RR #74
+
+request #1: confirmed_auto · path detected · owner موظف-5 (rule 3) · rework 0
+request #2: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #3: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #4: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #5: confirmed_auto · path detected · owner موظف-5 (rule 3) · rework 0
+request #6: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #7: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #8: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #9: open · path detected · owner موظف-5 (rule 1) · rework 0
+miss: request #6 gen 1 · eligible 1 · verdict notice
+miss: request #7 gen 1 · eligible 1 · verdict warn
+miss: request #9 gen 1 · eligible 1 · verdict kpi
+would-be warning: RR-2026-W43 would have issued an RR warning to موظف-5 for 2026-W43; commission would become ٩٠٪

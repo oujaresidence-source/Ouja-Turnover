@@ -15,10 +15,11 @@ from .host import HOST
 
 NL = chr(10)
 PIN = "📌"
-MODAL_KINDS = ("not_what", "cancel", "reassign", "excuse")
+MODAL_KINDS = ("not_what", "cancel", "reassign", "excuse", "unavailable")
 CID_TO_KIND = {"rd:ack": "ack", "rd:deliver": "deliver", "rd:gotit": "got_it",
                "rd:notwhat": "not_what", "rd:cancel": "cancel", "rd:reassign": "reassign",
-               "rd:qyes": "q_yes", "rd:qno": "q_no", "rd:img": "image", "rd:excuse": "excuse"}
+               "rd:qyes": "q_yes", "rd:qno": "q_no", "rd:img": "image", "rd:excuse": "excuse",
+               "rd:unavail": "unavailable"}
 
 
 def _d():
@@ -204,7 +205,8 @@ async def _reply(interaction, text):
 def _modal(kind, message_id):
     d = _d()
     titles = {"not_what": "Not what I asked", "cancel": "Cancel request",
-              "reassign": "نقل الطلب · Reassign", "excuse": "عذر · Excuse"}
+              "reassign": "نقل الطلب · Reassign", "excuse": "عذر · Excuse",
+              "unavailable": "ما عندنا · Not available"}
 
     class _M(d.ui.Modal):
         def __init__(self):
@@ -214,7 +216,8 @@ def _modal(kind, message_id):
                 self.who = d.ui.TextInput(label="لمين؟ (منشن أو الاسم)", max_length=100, required=True)
                 self.add_item(self.who)
             labels = {"not_what": "What is missing? (one line)", "cancel": "Reason",
-                      "reassign": "السبب", "excuse": "السبب (١٠ أحرف على الأقل)"}
+                      "reassign": "السبب", "excuse": "السبب (١٠ أحرف على الأقل)",
+                      "unavailable": "ليش ما هو متوفر؟ (يوصل لسام بالإنجليزي)"}
             self.box = d.ui.TextInput(label=labels[kind], max_length=500, required=True,
                                       min_length=10 if kind == "excuse" else 2,
                                       style=d.TextStyle.paragraph)
@@ -495,11 +498,20 @@ def _study_msg(m):
             "emb": [(e.title or "") + NL + (e.description or "") for e in m.embeds or []]}
 
 
-async def run_study(post=True):
+async def run_study(post=True, grade=True):
     rooms = await collect_rooms()
     sams = flow.sam_ids()
     rep = await outbox.run_blocking(study.analyze, rooms, sams)
     await outbox.run_blocking(study.store_suggestions, rep)
+    if grade:
+        # grade the real classifier on the golden set (~120 calls, a few cents). The result is a
+        # SUGGESTION in the settings view — detection mode is only ever changed by the owner.
+        try:
+            from . import evalset
+            ev = await outbox.run_blocking(evalset.run_live)
+            rep["eval"] = {k: ev.get(k) for k in ("mode", "threshold", "n")}
+        except Exception as e:
+            print("[rrdesk] golden eval failed:", e)
     if post:
         db.enqueue("study:%s" % _tz_now().isoformat(timespec="minutes"), "room",
                    {"channel_name": flow._watchdog(), "content": study.report_text(rep)})

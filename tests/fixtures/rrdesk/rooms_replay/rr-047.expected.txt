@@ -1,0 +1,30 @@
+09-11 14:39  bot      @موظف-1 فتح طلب تعويض جديد
+09-11 14:39  → post   room     [translated] 1
+09-11 14:42  bot       لقيت الحجز في Hostaway: الضيف «الضيف» · شقة 11B Royal · من 2026-06-05 إلى 2026-06-06 · القناة: airbnbOfficial
+09-11 14:42  → post   room     [translated] 11 2026-06-05 2026-06-06
+09-11 14:42  bot       النسخة الإنجليزية — انسخها كاملة للباك أوفيس:
+09-11 14:42  → post   room     [translated]
+09-11 14:42  bot      RR TICKET — #047  Reservation code: HMXXXX Guest: «الضيف» Unit: 11B Royal Stay: 2026-06-05 → 2026-06-06 (airbn
+09-11 14:43  موظف-1   [2 file]
+09-11 14:43  → post   room     📎
+09-11 19:44  Sam      hi @موظف-1 how can I help on thi?
+09-11 19:44  → post   room     [translated] 1
+09-11 19:51  موظف-1   Please create a message to send to the owner.
+09-11 19:51  → post   room     [translated]
+09-11 20:42  Sam      like the report for closing and all these repairs are done by  Ouja @موظف-1
+09-11 20:42  → post   room     [translated] 1
+09-11 20:44  موظف-1   By the owner.
+09-11 20:44  → post   room     [translated]
+09-11 20:53  bot      @موظف-1 — رسالة المالك جاهزة 
+09-11 20:53  → post   room     [translated] 1
+09-11 20:53  bot       انسخ هذا النص كامل وأرسله للمالك على واتساب:
+09-11 20:53  → post   room     [translated]
+09-11 20:53  bot      السلام عليكم *موظف-4 الحساوي* 👋  تحديث عن حادثة صارت في شقة *11B Royal*.  *الحجز:* «الضيف» · من 05/06/2026 إلى
+09-11 20:53  → post   room     [translated] 4 11 05/06/2026 06/06/2026 3,722 3,722 1
+09-11 20:53  bot       النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».  الطلب ما ينقفل إلا من المالك.
+09-11 20:53  → post   room     [translated]
+09-11 21:06  bot       النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».  الطلب ما ينقفل إلا من المالك.
+09-11 21:06  → post   room     [translated]
+09-12 21:11  bot       ملخص إغلاق RR #47 صار له 24 ساعة ينتظر الاعتماد — راجعه واضغط « اعتمد وأقفل».
+09-12 21:11  → post   room     [translated] 47 24
+

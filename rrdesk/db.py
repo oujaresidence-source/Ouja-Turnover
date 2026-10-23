@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS rrdesk_requests (
     acked_by           TEXT,
     delivered_at       TEXT,
     delivered_by       TEXT,
+    delivered_note     TEXT,                 -- «ما عندنا»: why it cannot be delivered
     proof_unchecked    INTEGER NOT NULL DEFAULT 0,
     confirmed_at       TEXT,
     confirmed_by       TEXT,
@@ -518,7 +519,8 @@ def voice_counts(since, until):
 REQ_FIELDS = ("ticket_seq", "ticket_code", "lid", "text", "summary_en", "summary_ar",
               "asks_json", "urgent", "urgent_why", "path", "confidence", "owner_did",
               "owner_name", "owner_rule", "unowned", "gen", "clock_at", "resp_due", "deliv_due",
-              "state", "acked_at", "acked_by", "delivered_at", "delivered_by", "proof_unchecked",
+              "state", "acked_at", "acked_by", "delivered_at", "delivered_by", "delivered_note",
+              "proof_unchecked",
               "confirmed_at", "confirmed_by", "rework", "rework_note", "cancel_reason",
               "cancelled_by", "card_message_id", "leave_checked_day")
 

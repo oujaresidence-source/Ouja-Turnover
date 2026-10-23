@@ -1,0 +1,226 @@
+09-16 15:03  bot      @موظف-5 فتح طلب تعويض جديد
+09-16 15:03  → post   room     [translated] 5
+09-16 15:05  موظف-5   [8 file]
+09-16 15:05  → post   room     📎
+09-16 15:06  bot       لقيت الحجز في Hostaway: الضيف «الضيف» · شقة 11B Royal · من 2026-09-15 إلى 2026-09-16 · القناة: airbnbOfficial
+09-16 15:06  → post   room     [translated] 11 2026-09-15 2026-09-16 14
+09-16 15:06  bot       النسخة الإنجليزية — انسخها كاملة للباك أوفيس:
+09-16 15:06  → post   room     [translated]
+09-16 15:06  bot      RR TICKET — #055  Reservation code: HMXXXX Guest: «الضيف» Unit: 11B Royal Stay: 2026-09-15 → 2026-09-16 (airbn
+09-16 15:06  bot       الترجمة الآلية تعطلت فحطيت النص العربي داخل القالب — اضغطوا  إعادة توليد الإنجليزي بعد شوي.
+09-16 15:06  → post   room     [translated]
+09-16 15:08  موظف-5   sofa invoice
+09-16 15:08  → post   room     [translated]
+09-16 15:11  موظف-5   carpet invoice
+09-16 15:11  → post   room     [translated]
+09-16 17:24  Sam      where is the photo of the access card before check-in, can i have plase @موظف-5 ?
+09-16 17:24  → post   room     [translated] 5
+09-16 17:24  → post   room     <@102> طلب جديد من سام
+09-16 17:31  موظف-5   [2 file]
+09-16 17:31  [simulated: موظف-5 presses سلّمت on #1]
+09-16 17:31  → edit   room     📌 Sam's request #1 · RR #55
+09-16 17:31  → post   room     📎
+09-16 17:31  → edit   room     📌 Sam's request #1 · RR #55
+09-16 17:31  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-16 17:37  موظف-5   [2 file]
+09-16 17:37  → post   room     📎
+09-16 17:39  موظف-5   Carpet 417.39 Sofa 5,467 Access card 50 Total:5.934.39
+09-16 17:39  → post   room     [translated] 417.39 5,467 50 5.934.39
+09-16 17:42  Sam      where's the invoince for  access crd @موظف-5
+09-16 17:42  → post   room     [translated] 5
+09-16 17:42  → post   room     <@102> طلب جديد من سام
+09-16 17:54  موظف-5   we dont have
+09-16 17:54  [simulated: موظف-5 presses ما عندنا on #2]
+09-16 17:54  → edit   room     📌 Sam's request #2 · RR #55
+09-16 17:54  → post   room     [translated]
+09-16 17:54  → edit   room     📌 Sam's request #2 · RR #55
+09-16 17:54  → post   room     🟡 موظف-5: ما عندنا هذا · Not available — Sam, please confirm. > we dont have
+09-16 18:03  Sam      noted on this, thank you
+09-16 18:03  → post   room     [translated]
+09-16 18:10  موظف-5   welcome
+09-16 18:10  → post   room     [translated]
+09-16 18:12  Sam      sir @موظف-5 do we have another photo or angle of the sofa, or thats the only damaged part
+09-16 18:12  → post   room     [translated] 5
+09-16 18:12  → post   room     <@102> طلب جديد من سام
+09-16 18:14  موظف-5   burn and dirty
+09-16 18:14  → edit   room     📌 Sam's request #3 · RR #55
+09-16 18:14  → post   room     [translated]
+09-16 18:15  موظف-5   [2 file]
+09-16 18:15  [simulated: موظف-5 presses سلّمت on #3]
+09-16 18:15  → post   room     📎
+09-16 18:15  → edit   room     📌 Sam's request #3 · RR #55
+09-16 18:15  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-18 09:00  Sam      [2 file]
+09-18 09:00  → post   room     📎
+09-18 17:31  → edit   room     📌 Sam's request #1 · RR #55
+09-18 17:54  → edit   room     📌 Sam's request #2 · RR #55
+09-18 18:15  → edit   room     📌 Sam's request #3 · RR #55
+09-20 22:40  Sam      carpet invoice
+09-20 22:40  → post   room     [translated]
+09-20 22:40  → post   room     <@102> طلب جديد من سام
+09-20 22:40  Sam      and any other photos?
+09-20 22:40  → post   room     [translated]
+09-20 22:40  → edit   room     <@102> طلب جديد من سام
+09-20 22:41  Sam      of sofa and carpet, airbnb is asking
+09-20 22:41  → post   room     [translated]
+09-20 23:25  → post   room     <@102> سام ينتظر ردك على طلبه (الفاتورة، صور) — RR #55 🙏
+09-21 00:10  → post   room     <@102> فات وقت الرد على طلب سام (الفاتورة، صور) — RR #55. رد عليه الحين الله يعافيك.
+09-21 00:10  → dm     dm       ⏰ طلب سام في RR #55 (الفاتورة، صور) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/
+09-21 11:10  → post   room     <@102> طلب سام (الفاتورة، صور) — RR #55 ما انسلّم بوقته. انسجّل تأخير.
+09-21 11:10  → dm     dm       🔴 طلب سام في RR #55 (الفاتورة، صور) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.c
+09-21 11:10  → dm     dm       🔴 تأخير على طلب سام — RR #55 (الفاتورة، صور) · المسؤول: موظف-5. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرف
+09-21 11:10  → room   غرفة-المراقبة 🔴 تأخير: RR #55 — طلب سام (الفاتورة، صور) · المسؤول: موظف-5 · https://discord.com/channels/1/900/p:card:4
+09-21 11:10  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W39). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+09-21 16:59  موظف-2   hi sam
+09-21 16:59  → edit   room     📌 Sam's request #4 · RR #55
+09-21 16:59  → post   room     [translated]
+09-21 16:59  موظف-2   I will contact the person in charge to get the invoice.
+09-21 16:59  → post   room     [translated]
+09-21 17:00  Sam      Thank you
+09-21 17:00  → post   room     شكراً لك
+09-21 17:01  موظف-2   welcome
+09-21 17:01  → post   room     [translated]
+09-21 17:05  موظف-5   [3 file]
+09-21 17:05  [simulated: موظف-5 presses سلّمت on #4]
+09-21 17:05  → post   room     📎
+09-21 17:05  → edit   room     📌 Sam's request #4 · RR #55
+09-21 17:05  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-21 17:06  موظف-5   This is PDF file for the bill
+09-21 17:06  → post   room     [translated]
+09-21 17:08  موظف-5   [6 file]
+09-21 17:08  → post   room     📎
+09-21 17:08  موظف-5   This is all what we have for sofa and carpet
+09-21 17:08  → post   room     [translated]
+09-23 17:05  → edit   room     📌 Sam's request #4 · RR #55
+09-23 19:39  Sam      hello @موظف-5 do we have the phone number
+09-23 19:39  → post   room     [translated] 5
+09-23 19:39  → post   room     <@102> طلب جديد من سام
+09-23 20:24  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #55 🙏
+09-23 21:09  → post   room     <@102> فات وقت الرد على طلب سام (معلومة) — RR #55. رد عليه الحين الله يعافيك.
+09-23 21:09  → dm     dm       ⏰ طلب سام في RR #55 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+09-23 21:18  Sam      sir @موظف-2 do we have phone number? they wanting to call the company
+09-23 21:18  → post   room     [translated] 2
+09-23 21:18  موظف-5   Which company ?
+09-23 21:18  [simulated: موظف-5 presses سلّمت on #5]
+09-23 21:18  → edit   room     📌 Sam's request #5 · RR #55
+09-23 21:18  → post   room     [translated]
+09-23 21:18  → edit   room     📌 Sam's request #5 · RR #55
+09-23 21:18  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-23 21:22  Sam      Arya Carpet
+09-23 21:22  → post   room     [translated]
+09-23 21:24  موظف-5   I will check naw
+09-23 21:24  → post   room     [translated]
+09-23 21:35  موظف-5   I contacted the owner directly, and he will look for it and send it to me.
+09-23 21:35  → post   room     [translated]
+09-23 21:42  Sam      thanks and airbnb might call them, so, better to give heads up too.
+09-23 21:42  → post   room     [translated]
+09-23 21:42  Sam      thank you @موظف-5
+09-23 21:42  → post   room     [translated] 5
+09-24 15:56  Sam      Hello, do we have update @موظف-5
+09-24 15:56  → post   room     [translated] 5
+09-24 16:34  موظف-5   not yet
+09-24 16:34  → post   room     [translated]
+09-24 17:21  Sam      thanks, if we can follow up as airbnb is following up, thank you Miss @موظف-5
+09-24 17:21  → post   room     [translated] 5
+09-24 17:32  موظف-5   [3 file]
+09-24 17:32  → post   room     📎
+09-24 17:33  موظف-5   Find it
+09-24 17:33  → post   room     [translated]
+09-24 17:38  موظف-5   Just received now from the owner
+09-24 17:38  → post   room     [translated]
+09-24 17:42  Sam      Miss @موظف-5 is that same as this , the one we originally submitted?
+09-24 17:42  → post   room     [translated] 5
+09-24 17:42  → post   room     <@102> طلب جديد من سام
+09-24 17:45  Sam      they just looking for a contact details or website of ary
+09-24 17:45  → post   room     [translated]
+09-24 17:45  Sam      to check the company existence @موظف-5 thank you
+09-24 17:45  → post   room     [translated] 5
+09-24 18:27  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #55 🙏
+09-24 18:31  موظف-5   Ok  Welcome
+09-24 18:31  → edit   room     📌 Sam's request #6 · RR #55
+09-24 18:31  → post   room     [translated]
+09-24 18:36  موظف-5   If you can close the request close it
+09-24 18:36  [simulated: موظف-5 presses سلّمت on #6]
+09-24 18:36  → post   room     [translated]
+09-24 18:36  → edit   room     📌 Sam's request #6 · RR #55
+09-24 18:36  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-24 18:57  Sam      hi @موظف-5 i mean, my question is actually if the new invoice and this arya invoice are same company?
+09-24 18:57  → post   room     [translated] 5
+09-24 18:57  → post   room     <@102> طلب جديد من سام
+09-24 19:42  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #55 🙏
+09-24 19:54  موظف-5   yes , same
+09-24 19:54  [simulated: موظف-5 presses سلّمت on #7]
+09-24 19:54  → edit   room     📌 Sam's request #7 · RR #55
+09-24 19:54  → post   room     [translated]
+09-24 19:54  → edit   room     📌 Sam's request #7 · RR #55
+09-24 19:54  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-24 20:01  Sam      okay, i then provide that docs to airbnb
+09-24 20:01  → post   room     [translated]
+09-25 21:18  → edit   room     📌 Sam's request #5 · RR #55
+09-26 18:36  → edit   room     📌 Sam's request #6 · RR #55
+09-26 19:00  Sam      hi @موظف-5 @المالك update on this, they only offered 3000SAR but im still negotiating with supervisor and they
+09-26 19:00  → post   room     [translated] 5 3000 26 2026 7:00
+09-26 19:54  → edit   room     📌 Sam's request #7 · RR #55
+09-27 21:25  Sam      Got this for 4000
+09-27 21:25  → post   room     [translated] 4000
+09-27 21:26  Sam      who handles the repair/ replacement @موظف-5  @موظف-2
+09-27 21:26  → post   room     [translated] 5 2
+09-27 21:26  → post   room     <@102> طلب جديد من سام
+09-27 22:11  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #55 🙏
+09-27 22:41  Sam      [2 file]
+09-27 22:41  → post   room     📎
+09-27 22:42  موظف-5   Yes sam
+09-27 22:42  → edit   room     📌 Sam's request #8 · RR #55
+09-27 22:42  → post   room     [translated]
+09-27 22:42  موظف-5   Its me
+09-27 22:42  → post   room     [translated]
+09-27 22:43  موظف-5   Sorry for late reply I will check with my boss tomorrow
+09-27 22:43  [simulated: موظف-5 presses سلّمت on #8]
+09-27 22:43  → post   room     [translated]
+09-27 22:43  → edit   room     📌 Sam's request #8 · RR #55
+09-27 22:43  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+09-28 00:08  Sam      Thank you Miss @موظف-5
+09-28 00:08  → post   room     [translated] 5
+09-28 05:32  Sam      Hi miss was it ouja or the owner for the repair and replacement?
+09-28 05:32  → post   room     [translated]
+09-28 05:32  → post   room     <@102> طلب جديد من سام
+09-28 11:45  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #55 🙏
+09-28 12:30  → post   room     <@102> فات وقت الرد على طلب سام (معلومة) — RR #55. رد عليه الحين الله يعافيك.
+09-28 12:30  → dm     dm       ⏰ طلب سام في RR #55 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+09-28 14:00  → post   room     <@102> طلب سام (معلومة) — RR #55 ما انسلّم بوقته. انسجّل تأخير.
+09-28 14:00  → dm     dm       🔴 طلب سام في RR #55 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chan
+09-28 14:00  → dm     dm       🔴 تأخير على طلب سام — RR #55 (معلومة) · المسؤول: موظف-5. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المرا
+09-28 14:00  → room   غرفة-المراقبة 🔴 تأخير: RR #55 — طلب سام (معلومة) · المسؤول: موظف-5 · https://discord.com/channels/1/900/p:card:9
+09-28 14:00  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W40). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+09-29 18:27  Sam      Hi Miss  @موظف-5  was it ouja or the owner for the repair and replacement?
+09-29 18:27  → post   room     [translated] 5
+09-29 22:43  → edit   room     📌 Sam's request #8 · RR #55
+10-02 09:28  موظف-5   hi sam .. yes ouja
+10-02 09:28  [simulated: موظف-5 presses سلّمت on #9]
+10-02 09:28  → edit   room     📌 Sam's request #9 · RR #55
+10-02 09:28  → post   room     [translated]
+10-02 09:28  → edit   room     📌 Sam's request #9 · RR #55
+10-02 09:28  → post   room     🟢 موظف-5 سلّم المطلوب — Sam, please confirm.
+10-03 22:52  bot      @موظف-5 — رسالة المالك جاهزة 
+10-03 22:52  → post   room     [translated] 5
+10-03 22:52  bot       انسخ هذا النص كامل وأرسله للمالك على واتساب:
+10-03 22:52  → post   room     [translated]
+10-03 22:52  bot      السلام عليكم *موظف-4 الحساوي* 👋  تحديث عن حادثة صارت في شقة *11B Royal*.  *الحجز:* «الضيف» · من 15/09/2026 إلى
+10-03 22:52  → post   room     [translated] 4 11 15/09/2026 16/09/2026 ٥٤٦٧ ٥٠ 5,517 4,024.35 1,492.65 1
+10-03 22:52  bot       النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».  الطلب ما ينقفل إلا من المالك.
+10-03 22:52  → post   room     [translated]
+10-04 09:28  → edit   room     📌 Sam's request #9 · RR #55
+10-04 23:37  bot       ملخص إغلاق RR #55 صار له 25 ساعة ينتظر الاعتماد — راجعه واضغط « اعتمد وأقفل».
+10-04 23:37  → post   room     [translated] 55 25
+
+request #1: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #2: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #3: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #4: confirmed_auto · path detected · owner موظف-5 (rule 3) · rework 0
+request #5: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #6: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #7: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #8: confirmed_auto · path detected · owner موظف-5 (rule 1) · rework 0
+request #9: confirmed_auto · path detected · owner موظف-5 (rule 3) · rework 0
+miss: request #4 gen 1 · eligible 1 · verdict notice
+miss: request #9 gen 1 · eligible 1 · verdict notice

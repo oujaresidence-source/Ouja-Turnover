@@ -1,0 +1,76 @@
+06-03 21:25  bot      [0 file]
+06-03 21:26  موظف-1   ارفع لجود ١٣ عن الكنب @موظف-2
+06-03 21:26  → post   room     [translated] ١٣ 2
+06-04 13:26  المالك   @موظف-2
+06-04 13:38  موظف-2   ابي التكت مقفل موظف-1
+06-04 13:38  → post   room     [translated] 1
+06-04 13:38  موظف-2   ولا موجوده بالصور بالقروب
+06-04 13:38  → post   room     [translated]
+06-04 13:47  موظف-2   @موظف-1
+06-04 13:59  موظف-2   RR TICKET — [Unit name]     •    Reservation code: HMXXXX     •    Listing:  Not provided     •    Guest name:
+06-04 13:59  → post   room     [translated] 1,100
+06-04 13:59  موظف-2   [12 file]
+06-04 13:59  → post   room     📎
+06-04 16:07  Sam      Kindy share the before check-in photo and invoice
+06-04 16:07  → post   room     [translated]
+06-04 16:07  → post   room     <@102> طلب جديد من سام
+06-04 16:19  موظف-2   After reviewing the prices, it was found that the price is 1800
+06-04 16:19  → edit   room     📌 Sam's request #1 · RR #70
+06-04 16:19  → post   room     [translated] 1800
+06-04 16:19  موظف-2   https://www.homecentre.com/sa/en/buy-eddard-3-seater-fabric-sofa/p/RES-1
+06-04 19:07  → post   room     <@102> باقي وقت قليل على تسليم طلب سام (صور، الفاتورة) — RR #70.
+06-04 20:07  → post   room     <@102> فات موعد تسليم طلب سام (صور، الفاتورة) — RR #70. سلّمه واضغط «سلّمت».
+06-04 20:07  → room   غرفة-المراقبة 🟠 RR #70 — طلب سام (صور، الفاتورة) فات موعد تسليمه · المسؤول: موظف-1 · https://discord.com/channels/1/900/p:ca
+06-05 00:07  → post   room     <@102> طلب سام (صور، الفاتورة) — RR #70 ما انسلّم بوقته. انسجّل تأخير.
+06-05 00:07  → dm     dm       🔴 طلب سام في RR #70 (صور، الفاتورة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.c
+06-05 00:07  → room   غرفة-المراقبة 🔴 تأخير: RR #70 — طلب سام (صور، الفاتورة) · المسؤول: موظف-1 · https://discord.com/channels/1/900/p:card:1
+06-05 00:07  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W23). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+06-05 07:09  Sam      hello, can i have the before check-in photos? and do we have photos of the damages too - both with dates. than
+06-05 07:09  → post   room     [translated]
+06-05 18:00  موظف-1   @موظف-2
+06-06 17:24  Sam      hi @موظف-2 @موظف-1 following up on this
+06-06 17:24  → post   room     [translated] 2 1
+06-07 17:02  Sam      hello
+06-07 17:02  → post   room     [translated]
+06-07 17:02  موظف-2   Yes @Sam
+06-07 17:02  → post   room     [translated]
+06-07 17:02  موظف-2   I contacted him yesterday and today, but he still hasn't sent it to me.
+06-07 17:02  → post   room     [translated]
+06-08 17:36  Sam      following up on this
+06-08 17:36  → post   room     [translated]
+06-14 06:35  Sam      any update on this @موظف-2
+06-14 06:35  → post   room     [translated] 2
+06-14 06:56  موظف-1   [8 file]
+06-14 06:56  [simulated: موظف-1 presses سلّمت on #1]
+06-14 06:56  → post   room     📎
+06-14 06:56  → edit   room     📌 Sam's request #1 · RR #70
+06-14 06:56  → post   room     🟢 موظف-1 سلّم المطلوب — Sam, please confirm.
+06-14 18:04  Sam      hi @موظف-1 the before check-in?
+06-14 18:04  → post   room     [translated] 1
+06-14 18:04  → post   room     <@102> طلب جديد من سام
+06-14 18:49  → post   room     <@102> سام ينتظر ردك على طلبه (صور) — RR #70 🙏
+06-14 19:34  → post   room     <@102> فات وقت الرد على طلب سام (صور) — RR #70. رد عليه الحين الله يعافيك.
+06-14 19:34  → dm     dm       ⏰ طلب سام في RR #70 (صور) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p:ca
+06-14 21:04  → post   room     <@102> طلب سام (صور) — RR #70 ما انسلّم بوقته. انسجّل تأخير.
+06-14 21:04  → dm     dm       🔴 طلب سام في RR #70 (صور) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/channel
+06-14 21:04  → room   غرفة-المراقبة 🔴 تأخير: RR #70 — طلب سام (صور) · المسؤول: موظف-1 · https://discord.com/channels/1/900/p:card:2
+06-14 21:04  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W24). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+06-15 12:56  موظف-1   [2 file]
+06-15 12:56  [simulated: موظف-1 presses سلّمت on #2]
+06-15 12:56  → edit   room     📌 Sam's request #2 · RR #70
+06-15 12:56  → post   room     📎
+06-15 12:56  → edit   room     📌 Sam's request #2 · RR #70
+06-15 12:56  → post   room     🟢 موظف-1 سلّم المطلوب — Sam, please confirm.
+06-15 16:54  Sam      thanks
+06-15 16:54  → post   room     شكراً
+06-16 06:56  → edit   room     📌 Sam's request #1 · RR #70
+06-16 17:35  Sam      [2 file]
+06-16 17:35  → post   room     📎
+06-17 12:56  → edit   room     📌 Sam's request #2 · RR #70
+06-24 00:51  Sam      This is denied due to insufficient docs, still discussing with them
+06-24 00:51  → post   room     [translated]
+
+request #1: confirmed_auto · path detected · owner موظف-1 (rule 4) · rework 0
+request #2: confirmed_auto · path detected · owner موظف-1 (rule 1) · rework 0
+miss: request #1 gen 1 · eligible 1 · verdict notice
+miss: request #2 gen 1 · eligible 1 · verdict notice

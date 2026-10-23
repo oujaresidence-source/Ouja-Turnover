@@ -412,7 +412,9 @@ report; plan must be < 24h old) → `!ouja-tidy undo` (word **رجّع**) / `!ou
 - **TRAP — `_directpay_known_rooms` must scan the archive categories too.** Closed collection
   rooms live in «📦 أرشيف N» after a run; if the scan only looked at the collection category the
   poller would open a SECOND room for an already-handled reservation. Same rule for any future
-  code that finds rooms by topic inside a category.
+  code that finds rooms by topic inside a category — `rrdesk.study.is_history_room` (the RR
+  history study) scans the archive too; rrdesk's LIVE path finds rooms by `_dtk` record or RR
+  category family, so an archived (closed) RR room is ignored until reopened, by design.
 - **TRAP — never put `manage_permissions`/`manage_channels` in the bot's OWN overwrite.** Only a
   guild Administrator may set Manage Permissions inside a channel overwrite; the bot is admin only
   during the owner's run, so every later archive/collection-category create would 403. Moves also
@@ -623,6 +625,54 @@ Three design skills live in `.claude/skills/` and MUST be applied to any UI work
 The locked design system already lives in `DASHBOARD_HTML`'s `:root` (tinted warm neutrals +
 gold accent scale, IBM Plex Sans Arabic / Inter / JetBrains Mono). Reuse those tokens; don't
 invent per-view colors.
+
+## RR Desk «طلبات سام» — `rrdesk/`
+Every message in an open RR room (and its threads, and non-ticket RR-family rooms like
+`rr-general`) gets one reply translated AR⇄EN; Sam's requests become tracked rows with an owner,
+working-hour SLAs, a reminder ladder, misses, and ops warnings. Spec
+`docs/superpowers/specs/2026-10-24-rrdesk-design.md`, study `docs/rrdesk/history_study.md`,
+runbook **`rrdesk/DEBUG.md`** (read it before debugging anything here).
+- **The system accuses, humans only forgive (same as ops/).** `flow._warn()` is the package's
+  ONLY `ops.db.issue_warning` call (a line-for-line mirror of `oncall/notify.py::_warn`); misses
+  are recorded only by the ladder (`flow._fire`). No route, button or command creates either —
+  `tests/test_rrdesk_structure.py` greps it. Mercy: «عذر» (lead/admin, ≤48 h, reason ≥10 chars),
+  reassign, «ما عندنا», cancel, ticket close; an issued warning → the ops appeal chain.
+- **Money is dry-run on deploy.** `warn_live` = 0 → `ops_dryrun_log` (kind `rr_warning`) says what
+  would have happened. Only the owner flips it: `/rrdesk-warnings-on` + «تشغيل». Period key
+  `RR-YYYY-Www` (never collides with `wr` weeks or `OC-` nights). 1st miss in an ISO week = private
+  notice, 2nd = ONE warning, 3rd+ = KPI only.
+- **Detection safety.** Only `/rr-ask`, Sam's 📌, Sam's «Yes» under a translation, or a detected
+  request in `auto` mode can ever produce a miss. Ships in **`confirm`** mode (detected → asks
+  Sam «Is this a request?») because the Haiku classifier could not be graded where this was built;
+  `/rrdesk-study` grades it on the 122-message golden set and SUGGESTS a mode — never auto-applied.
+- **Fairness rules learned from the history (keep them):** Sam re-asking for the same file
+  (`engine.reask_of`) is a `sam_reask` event on the open request, never a second request; lines
+  Sam sends within 15 min (`engine.burst_of`) merge into one request; «ما عندنا» is an honest
+  answer, not a failure; owner off/on leave → the apartment's coverer, else the lead as UNOWNED
+  (never warned); Faisal/admins are reminded, never warned.
+- **SLAs** = working minutes 11:00 → 01:30 (`ops.engine.worked_minutes`; `engine.add_work_minutes`
+  is its tested inverse). Shipped defaults are the calibrated `flow.CALIBRATED_SLA` 90 min / 4 h
+  (urgent 30 min / 3 h; urgent = Sam's flag or AirCover deadline ≤ 3 days). Dashboard edits win.
+- **Idempotency is schema:** UNIQUE translation per source message (+ `once_claim`), request per
+  source, ladder step per (request, step#gen), miss per (request, gen), outbox `ref` with an
+  atomic claim and 1/5/15/60 backoff — two bot copies during a redeploy post once.
+- **Traps:** zero backslashes in `rrdesk/**` (structure test); never `import bot`; blocking work on
+  rrdesk's own pool (`outbox.run_blocking`), never `asyncio.to_thread`; buttons are ONE listener
+  with static `rd:*` custom_ids, rows found by message id; our posts carry `chr(0x2063)` so our
+  own `on_message` never translates them; staff wording (`texts.py`) has no money figures and no
+  per-person numbers outside DMs / غرفة-المراقبة; slash names ASCII (Arabic on `!ouja ترجمة`,
+  `طلب-سام`, `ليش`, `دراسة-rr`). The `_tk_close` hook is time-boxed (5 s) and can never block a close.
+- **Commands:** `/rr-ask`, `/translate on|off`, `/rrdesk-why`, `/rrdesk-sam`, `/rrdesk-switch`,
+  `/rrdesk-off` / `/rrdesk-on` (emergency mute), `/rrdesk-warnings-on|off`, `/rrdesk-study`,
+  `/rrdesk-setup` (creates the «متابعة-طلبات-سام» board). Public `GET /rrdesk/health` (counts only).
+- **Env** (stored switches win; defaults are correct as shipped): `RRDESK_TRANSLATE`(1),
+  `RRDESK_REQUESTS`(1), `RRDESK_LADDER`(1), `RRDESK_WARN_LIVE`(0), `RRDESK_FORCE_OFF`(0),
+  `RRDESK_DETECT_MODE`(confirm), `RRDESK_DAILY_CALLS`(1500), `RRDESK_PRICE_IN_USD`(1.0) /
+  `RRDESK_PRICE_OUT_USD`(5.0) (Haiku 4.5 published price), `RRDESK_SAM_IDS`, `RRDESK_BOARD_CHANNEL`.
+- **Tests:** `tests/test_rrdesk_{engine,translate,flow,warn,golden,replay,structure,bot_wiring}.py`;
+  replay snapshots in `tests/fixtures/rrdesk/rooms_replay/` (regenerate with
+  `python3 -m rrdesk.replay <room>.json > <room>.expected.txt` and say why). Fixtures are redacted
+  (`study.redact`); raw exports live only in git-ignored `.rrdesk_study/`.
 
 ## Working style for this repo
 - **Audit before changing.** When asked for something big, first read the relevant code and

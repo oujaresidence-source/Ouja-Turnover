@@ -1,0 +1,72 @@
+10-17 16:42  bot      @موظف-2 فتح طلب تعويض جديد
+10-17 16:42  → post   room     [translated] 2
+10-17 16:42  bot      bot  pinned a message to this channel. See all pinned messages.  —  10/17/26, 4:42 PM Saturday, October 17, 20
+10-17 16:42  bot       لقيت الحجز في Hostaway: الضيف «الضيف» · شقة Jood12 · من 2026-10-06 إلى 2026-10-07 · القناة: airbnbOfficial · 
+10-17 16:42  → post   room     [translated] 12 2026-10-06 2026-10-07 4
+10-17 16:42  bot       النسخة الإنجليزية — انسخها كاملة للباك أوفيس:
+10-17 16:42  → post   room     [translated]
+10-17 16:42  bot      RR TICKET — #077  Reservation code: HMXXXX Guest: «الضيف» Unit: Jood12 Stay: 2026-10-06 → 2026-10-07 (airbnbOf
+10-17 16:49  موظف-2   [4 file]
+10-17 16:49  → post   room     📎
+10-17 17:36  Sam      before photo and invoice please
+10-17 17:36  → post   room     [translated]
+10-17 17:36  → post   room     <@102> طلب جديد من سام
+10-17 18:21  → post   room     <@102> سام ينتظر ردك على طلبه (صور، الفاتورة) — RR #77 🙏
+10-17 19:06  → post   room     <@102> فات وقت الرد على طلب سام (صور، الفاتورة) — RR #77. رد عليه الحين الله يعافيك.
+10-17 19:06  → dm     dm       ⏰ طلب سام في RR #77 (صور، الفاتورة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/
+10-17 20:36  → post   room     <@102> طلب سام (صور، الفاتورة) — RR #77 ما انسلّم بوقته. انسجّل تأخير.
+10-17 20:36  → dm     dm       🔴 طلب سام في RR #77 (صور، الفاتورة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.c
+10-17 20:36  → dm     dm       🔴 تأخير على طلب سام — RR #77 (صور، الفاتورة) · المسؤول: موظف-2. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرف
+10-17 20:36  → room   غرفة-المراقبة 🔴 تأخير: RR #77 — طلب سام (صور، الفاتورة) · المسؤول: موظف-2 · https://discord.com/channels/1/900/p:card:1
+10-17 20:36  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W42). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+10-19 08:03  Sam      also this @موظف-2 2 days
+10-19 08:03  → post   room     [translated] 2 2
+10-19 09:18  موظف-1   @موظف-2
+10-19 09:18  → edit   room     📌 Sam's request #1 · RR #77
+10-19 14:22  موظف-2   715.3+485.3
+10-19 14:22  [simulated: موظف-2 presses سلّمت on #1]
+10-19 14:22  → post   room     📎
+10-19 14:22  → edit   room     📌 Sam's request #1 · RR #77
+10-19 14:22  → post   room     🟢 موظف-2 سلّم المطلوب — Sam, please confirm.
+10-19 14:22  موظف-2   [2 file]
+10-19 14:22  → post   room     📎
+10-19 16:56  Sam      @موظف-2 wheres the before chek-in photo
+10-19 16:56  → post   room     [translated] 2
+10-19 16:56  → post   room     <@102> طلب جديد من سام
+10-19 16:57  موظف-2   I seed WhatsApp
+10-19 16:57  → edit   room     📌 Sam's request #2 · RR #77
+10-19 16:57  → post   room     [translated]
+10-19 16:59  Sam      invoice and before of parking card
+10-19 16:59  → post   room     [translated]
+10-19 17:00  موظف-2   Unfortunately, there is no invoice.
+10-19 17:00  [simulated: موظف-2 presses ما عندنا on #2]
+10-19 17:00  → post   room     [translated]
+10-19 17:00  → edit   room     📌 Sam's request #2 · RR #77
+10-19 17:00  → post   room     🟡 موظف-2: ما عندنا هذا · Not available — Sam, please confirm. > Unfortunately, there is no invoice.
+10-19 18:25  Sam      @موظف-2  what is the 715.3 and 485. 3?
+10-19 18:25  → post   room     [translated] 2 715.3 485 3
+10-19 18:25  → post   room     <@102> طلب جديد من سام
+10-19 18:26  Sam      can you clarify @موظف-2 @موظف-1 i need to submit this now you sent 2 screennshots with price
+10-19 18:26  → post   room     [translated] 2 1 2
+10-19 18:26  → edit   room     <@102> طلب جديد من سام
+10-19 19:10  → post   room     <@102> سام ينتظر ردك على طلبه (معلومة) — RR #77 🙏
+10-19 19:10  Sam      hello @موظف-2
+10-19 19:10  → post   room     [translated] 2
+10-19 19:10  Sam      @موظف-1
+10-19 19:55  → post   room     <@102> فات وقت الرد على طلب سام (معلومة) — RR #77. رد عليه الحين الله يعافيك.
+10-19 19:55  → dm     dm       ⏰ طلب سام في RR #77 (معلومة) ينتظر ردك من فترة. اضغط «استلمت» أو رد عليه: https://discord.com/channels/1/900/p
+10-19 21:25  → post   room     <@102> طلب سام (معلومة) — RR #77 ما انسلّم بوقته. انسجّل تأخير.
+10-19 21:25  → dm     dm       🔴 طلب سام في RR #77 (معلومة) فات وقته مرتين وانسجّل عليك تأخير. لو عندك عذر كلم أصيل. https://discord.com/chan
+10-19 21:25  → dm     dm       🔴 تأخير على طلب سام — RR #77 (معلومة) · المسؤول: موظف-2. تقدر تعطيه عذر خلال ٤٨ ساعة من زر «عذر» في غرفة المرا
+10-19 21:25  → room   غرفة-المراقبة 🔴 تأخير: RR #77 — طلب سام (معلومة) · المسؤول: موظف-2 · https://discord.com/channels/1/900/p:card:3
+10-19 21:25  → dm     dm       تنبيه — تأخرت على طلب من سام هالأسبوع (2026-W43). ما ينحسب إنذار هالمرة، بس التأخير الثاني بنفس الأسبوع ينحسب 
+10-19 22:26  Sam      [2 file]
+10-19 22:26  → post   room     📎
+10-21 14:22  → edit   room     📌 Sam's request #1 · RR #77
+10-21 17:00  → edit   room     📌 Sam's request #2 · RR #77
+
+request #1: confirmed_auto · path detected · owner موظف-2 (rule 3) · rework 0
+request #2: confirmed_auto · path detected · owner موظف-2 (rule 1) · rework 0
+request #3: open · path detected · owner موظف-2 (rule 1) · rework 0
+miss: request #1 gen 1 · eligible 1 · verdict notice
+miss: request #3 gen 1 · eligible 1 · verdict notice

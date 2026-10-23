@@ -153,6 +153,33 @@ def replay(room, now=None, auto=False):
         cands = [c for c in cands if c > after]
         return min(cands) if cands else None
 
+    def _simulate_delivery(d, m, ids_):
+        """History has no button presses. With simulate_delivery the replay presses «سلّمت» for
+        the team when they actually delivered: files posted after a file request, or a real
+        text answer (3+ words) to a question-only request. The misses left are genuine."""
+        from . import engine as _e
+        words = len([w for w in (m.get("text") or "").split() if not w.startswith("@")])
+        low = (m.get("text") or "").lower()
+        none = any(k in low for k in ("there is no", "dont have", "don't have", "not available",
+                                      "ما عندنا", "مافي", "ما فيه"))
+        for r in db.live_requests("900"):
+            if r["state"] not in _e.LIVE or not r.get("card_message_id"):
+                continue
+            if none:
+                ok, _t = flow.press("unavailable", r["card_message_id"],
+                                    {"did": d["author_id"], "name": m["who"]}, {"note": m.get("text")}, clock["t"])
+                if ok:
+                    lines.append("%s  [simulated: %s presses ما عندنا on #%d]"
+                                 % (clock["t"].strftime("%m-%d %H:%M"), m["who"], r["id"]))
+                continue
+            files = bool(set(r["asks"]) & _e.FILE_ASKS)
+            if (files and int(m.get("media") or 0) > 0) or (not files and words >= 3):
+                ok, _t = flow.press("deliver", r["card_message_id"],
+                                    {"did": d["author_id"], "name": m["who"]}, {"proof": True}, clock["t"])
+                if ok:
+                    lines.append("%s  [simulated: %s presses سلّمت on #%d]"
+                                 % (clock["t"].strftime("%m-%d %H:%M"), m["who"], r["id"]))
+
     mi = pi = 0
     t_ = start
     while t_ is not None and t_ <= end:
@@ -161,7 +188,8 @@ def replay(room, now=None, auto=False):
             clock["t"] = datetime.datetime.fromisoformat(m["at"]).astimezone(tz)
             role = people.get(m["who"], "team")
             if role == "sam" and m.get("label") is not None:
-                labels[(m.get("text") or "").strip()] = m["label"]
+                # keyed by the MASKED text — that is what the model call sees
+                labels[translate.protect((m.get("text") or "").strip())[0]] = m["label"]
             d = {"id": str(m["id"]), "channel_id": "900", "parent_id": None,
                  "author_id": ids.get(m["who"], "0"), "author_name": m["who"],
                  "is_bot": role == "bot", "is_self": False, "text": m.get("text") or "",
@@ -176,6 +204,8 @@ def replay(room, now=None, auto=False):
                                           (m.get("text") or ("[voice]" if m.get("voice") else "[%d file]" % int(m.get("media") or 0)))
                                           .replace(NL, " ")[:110]))
             flow.on_message(d)
+            if room.get("simulate_delivery") and role == "team":
+                _simulate_delivery(d, m, ids)
             if role == "sam" and m.get("pin"):
                 flow.on_pin("900", None, d["id"], "555", "555", d["text"], clock["t"])
             drain_log()

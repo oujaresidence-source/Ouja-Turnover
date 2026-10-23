@@ -125,6 +125,8 @@ class StateMachine(unittest.TestCase):
 
     def test_deliver_straight_from_open(self):
         self.assertEqual(e.transition(e.OPEN, "deliver"), e.DELIVERED)
+        self.assertEqual(e.transition(e.ACK, "unavailable"), e.DELIVERED)
+        self.assertIsNone(e.transition(e.DELIVERED, "unavailable"))
 
 
 class Ladder(unittest.TestCase):
@@ -210,6 +212,15 @@ class Reask(unittest.TestCase):
         self.assertIsNone(e.reask_of(["info"], live))          # two questions = two requests
         self.assertIsNone(e.reask_of(["video"], live))
         self.assertIsNone(e.reask_of(["photos"], [(1, ["photos"], e.DELIVERED)]))
+
+
+class Burst(unittest.TestCase):
+    def test_second_line_within_15_minutes_joins(self):
+        t = at(2026, 10, 20, 22, 40)
+        live = [(1, t, e.OPEN)]
+        self.assertEqual(e.burst_of(t + datetime.timedelta(minutes=1), live), 1)
+        self.assertIsNone(e.burst_of(t + datetime.timedelta(minutes=16), live))
+        self.assertIsNone(e.burst_of(t + datetime.timedelta(minutes=1), [(1, t, e.ACK)]))
 
 
 class Owner(unittest.TestCase):
