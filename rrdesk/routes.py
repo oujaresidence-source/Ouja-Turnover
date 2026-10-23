@@ -186,6 +186,9 @@ SLA_KEYS = tuple(engine.DEFAULT_SLA)
 
 
 def save_settings(b, by):
+    # refuse BEFORE writing anything: a half-saved form is worse than none
+    if (b.get("switches") or {}).get("warn_live") and (b.get("confirm") or "").strip() != "تشغيل":
+        return False, "اكتب «تشغيل» لتأكيد تشغيل الإنذارات الفعلية."
     for k in SLA_KEYS:
         if k in b:
             v = int(b[k])
@@ -207,8 +210,6 @@ def save_settings(b, by):
     if "daily_calls" in b:
         db.set_setting("daily_calls", str(max(0, int(b["daily_calls"]))), by)
     for k, v in (b.get("switches") or {}).items():
-        if k == "warn_live" and v and (b.get("confirm") or "").strip() != "تشغيل":
-            return False, "اكتب «تشغيل» لتأكيد تشغيل الإنذارات الفعلية."
         if k in flow.SWITCH_DEFAULTS:
             flow.set_switch(k, bool(v), by)
     db.log("settings", actor=by, detail={k: b.get(k) for k in b if k != "confirm"})

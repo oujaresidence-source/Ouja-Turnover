@@ -98,7 +98,8 @@ and phrase table only lower it. The daily cap (1,500 calls) is a safety net, not
 1. **ticket-70.** Before: Sam asked for the before-check-in photo and invoice on 06-04 at 16:07; a
    price came back 12 minutes later, the photos only on 06-14, after four follow-ups. After: the
    price reply acknowledges the request, D1/D2 remind the owner that evening, and at 00:07 (twice
-   the 4-hour delivery time) it is a miss → a private notice, no warning. Sam's «can i have the
+   the 4-hour delivery time, after the 20:07 reminder) it is a miss → DMs to the owner and the lead,
+   and, once the 48-hour excuse window has passed, a private notice — no warning. Sam's «can i have the
    before check-in photos?» next morning is logged as a re-ask on the same request, not a second one.
 2. **rr-077.** Before: «what is the 715.3 and 485.3?» and «I need to submit this now» got no
    answer. After: both tracked, the owner pinged twice, a miss each; «Unfortunately, there is no

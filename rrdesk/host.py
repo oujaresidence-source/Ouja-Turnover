@@ -41,6 +41,7 @@ class _Host:
     on_leave = None          # (name, day) -> bool
     employees = None         # () -> [{name, did}]       ops.notify.employees()
     off_today = None         # (name, day) -> bool       weekly day off OR recorded leave
+    admin_ids = None         # () -> [discord id]         never warned (RR closers, final approver)
 
     # --- model ---
     api_key = None           # () -> ANTHROPIC_API_KEY

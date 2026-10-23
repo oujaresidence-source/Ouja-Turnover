@@ -162,7 +162,8 @@ def owner_is_admin_did(did):
     """Faisal / server admins are tracked and reminded, never warned. bridge records who is an
     admin as it sees them; the stored list is the fallback for the tick (no member objects)."""
     ids = [x.strip() for x in str(db.setting("admin_ids") or "").split(",") if x.strip()]
-    return str(did or "") in ids
+    ids += [str(x) for x in (_call("admin_ids", default=[]) or []) if x]
+    return bool(did) and str(did) in ids
 
 
 def remember_admin(did, is_admin):
@@ -263,6 +264,12 @@ def on_message(m):
     except Exception as e:
         print(LOG, "translate hook failed:", e)
         db.log("error", channel_id=room_id, message_id=m["id"], detail={"where": "translate", "e": str(e)})
+    # --- translation off / failed must not blind request tracking: classify on its own ---
+    if sam and classify is None and rep.get("translation") in ("off", "failed") and active("requests"):
+        try:
+            classify = _classify_only(room_id, m, at, rep)
+        except Exception as e:
+            print(LOG, "classify-only failed:", e)
     # --- Sam nudging an earlier ask: logged on every open request in the room (KPI + timeline) ---
     if sam:
         try:
@@ -285,7 +292,42 @@ def on_message(m):
     return rep
 
 
+def _classify_only(room_id, m, at, rep):
+    """Sam's message got no translation (room/switch off, or the call failed): one classification
+    call so detection keeps working. If Sam must confirm, the «Is this a request?» question is
+    posted on its own. Respects the cap (cap = explicit-only, by rule)."""
+    if detect_mode() == "explicit" or translate.cap_reached(at):
+        return None
+    text = m.get("text") or ""
+    if engine.meaningful_letters(text) < 2:
+        return None
+    r = translate.translate_text(text, engine.direction(text) or "en2ar", classify=True, now=at)
+    c = r.get("classify") or {}
+    rep["classified"] = True
+    if not c.get("is_request"):
+        return c
+    conf = c.get("confidence") or 0.0
+    if detect_mode() == "auto" and conf >= threshold():
+        return c
+    if conf < QUESTION_FLOOR:
+        return c
+    if db.translation(m["id"]) is None and not db.claim_translation(m["id"], room_id, m.get("author_id"),
+                                                                     False, "classify", at):
+        return c
+    db.update_translation(m["id"], state="done", source="none", question="asked", classify_json=c,
+                          tokens_in=r.get("tokens_in", 0), tokens_out=r.get("tokens_out", 0),
+                          cost_usd=r.get("cost_usd", 0.0))
+    enqueue("q:" + m["id"], "post", {
+        "channel_id": m["channel_id"], "content": "📌?" + engine.INVISIBLE_MARK, "reply_to": m["id"],
+        "buttons": [_btn("q_yes", "success"), _btn("q_no", "secondary")], "mentions": "none",
+        "on_done": {"type": "translation", "source": m["id"]}})
+    return c
+
+
 def _team_message(room_id, m, at):
+    prev = db.parse(db.setting("teamat:" + str(room_id)))
+    if prev is None or at > prev:
+        db.set_setting("teamat:" + str(room_id), db.iso(at), "flow")
     n = 0
     for r in db.live_requests(room_id):
         if r["state"] != engine.OPEN:
@@ -467,12 +509,18 @@ def on_edit(m):
     if switch("force_off") or not active("translate"):
         return None
     tr = db.translation(m["id"])
-    if not tr or tr["state"] != "done" or not tr["our_message_ids"] or tr.get("source") == "none":
-        return None
     hit = ticket_for(m)
     if not hit:
         return None
     room_id, _rec = hit
+    if tr is None:
+        # the first try failed and released its claim: the edit is the retry (DEBUG.md)
+        rep = {}
+        _translate_message(room_id, m, m.get("at") or _now(), False, rep)
+        db.log("tr_retried_on_edit", channel_id=room_id, message_id=m["id"], detail=rep)
+        return rep.get("translation")
+    if tr["state"] != "done" or not tr["our_message_ids"] or tr.get("source") == "none":
+        return None
     text = m.get("text") or ""
     if engine.skip_reason(text, is_bot=m.get("is_bot"), is_ours=_is_ours(m),
                           has_embeds=bool(m.get("embeds"))) and not m.get("is_bot"):
@@ -583,13 +631,20 @@ def _choose_owner(rec, m, enrich, today):
     opener = str(rec.get("opener_id") or "")
     lead = str(_call("lead_id", default="") or "")
     excluded = set(sam_ids()) | {str(x) for x in (m.get("bot_ids") or [])}
-    choice = engine.choose_owner(mentioned=m.get("mention_ids") or [],
-                                 replied=m.get("reference_author_id"),
+    # rule 1 only names people in the Employee Calendar: a mention of Faisal, an outsider or an
+    # unknown account must never make them the owner (they cannot be judged fairly)
+    mentioned = [str(x) for x in (m.get("mention_ids") or []) if str(x) in set(cal)]
+    replied = m.get("reference_author_id") if str(m.get("reference_author_id") or "") in set(cal) else None
+    choice = engine.choose_owner(mentioned=mentioned,
+                                 replied=replied,
                                  role_mentioned=bool(m.get("role_mentioned")),
                                  opener=(opener, name_for(opener)) if opener else None,
                                  responsible=resp_pair, lead=(lead, name_for(lead)),
                                  excluded=excluded, calendar_dids=cal)
     choice["name"] = choice.get("name") or name_for(choice["did"])
+    skipped = [x for x in (m.get("mention_ids") or []) if str(x) not in set(cal)]
+    if skipped:
+        choice["skipped_mentions"] = skipped
     # off today / on leave → the apartment's coverer (responsible_for already resolves cover)
     if not choice["unowned"] and choice["name"] and _call("off_today", choice["name"], today, default=False):
         if resp_pair and resp_pair[0] != choice["did"]:
@@ -602,16 +657,24 @@ def _choose_owner(rec, m, enrich, today):
 
 
 def open_request(room_id, rec, source_id, channel_id, asked_at, path, text, classify, m,
-                 urgent_flag=False, who_did=None):
+                 urgent_flag=False, who_did=None, opened_at=None):
+    """`asked_at` is when Sam asked; `opened_at` when it became a request (a 📌 or a «Yes» can
+    come hours later). The clock starts at the LATER of the two — nobody is late for a request
+    that did not exist yet — and a team reply already in the room counts as acknowledged."""
     c = classify or {}
+    clock = max(asked_at, opened_at or asked_at)
     enrich = _enrich(rec)
     urgent = engine.is_urgent(urgent_flag or c.get("urgent"), enrich)
     why = "flag" if (urgent_flag or c.get("urgent")) else ("aircover" if urgent else None)
     m = dict(m or {})
     if who_did:
         m["mention_ids"] = [str(who_did)]
-    owner = _choose_owner(rec, m, enrich, asked_at.date())
-    rdue, ddue = engine.dues(asked_at, urgent, sla_cfg())
+    owner = _choose_owner(rec, m, enrich, engine.work_day(clock))
+    rdue, ddue = engine.dues(clock, urgent, sla_cfg())
+    team_at = db.parse(db.setting("teamat:" + str(room_id)))
+    state, acked = engine.OPEN, None
+    if team_at is not None and team_at > asked_at:
+        state, acked = engine.ACK, team_at
     fields = {"ticket_seq": str(rec.get("seq") or ("عام" if rec.get("general") else "")),
               "ticket_code": rec.get("code") or "",
               "lid": str(rec.get("lid") or enrich.get("lid") or ""), "text": (text or "")[:2000],
@@ -619,8 +682,10 @@ def open_request(room_id, rec, source_id, channel_id, asked_at, path, text, clas
               "summary_ar": c.get("summary_ar") or "", "asks_json": c.get("asks") or ["other"],
               "urgent": 1 if urgent else 0, "urgent_why": why, "confidence": c.get("confidence"),
               "owner_did": owner["did"], "owner_name": owner["name"], "owner_rule": owner["rule"],
-              "unowned": 1 if owner["unowned"] else 0, "clock_at": asked_at,
-              "resp_due": rdue, "deliv_due": ddue, "state": engine.OPEN}
+              "unowned": 1 if owner["unowned"] else 0, "clock_at": clock,
+              "resp_due": rdue, "deliv_due": ddue, "state": state}
+    if acked is not None:
+        fields.update({"acked_at": acked, "acked_by": "team (before it was opened)"})
     req, created = db.open_request(source_id, room_id, asked_at, path, fields)
     if not created:
         return req, False
@@ -629,8 +694,9 @@ def open_request(room_id, rec, source_id, channel_id, asked_at, path, text, clas
             "urgent": urgent, "why": why})
     db.log("owner_chosen", req["id"], room_id, source_id, "flow",
            {"did": owner["did"], "name": owner["name"], "rule": owner["rule"],
-            "unowned": owner["unowned"], "covered_for": owner.get("covered_for")})
-    content, embed = texts.card(req, asked_at)
+            "unowned": owner["unowned"], "covered_for": owner.get("covered_for"),
+            "skipped_mentions": owner.get("skipped_mentions")})
+    content, embed = texts.card(req, clock)
     payload = {"channel_id": str(channel_id or room_id), "content": content, "embeds": [embed],
                "buttons": texts.card_buttons(req["state"]),
                "mentions": [owner["did"]] if owner["did"] else "none",
@@ -677,7 +743,7 @@ def _guess_asks(text):
     return list(dict.fromkeys(out)) or ["other"]
 
 
-def on_pin(channel_id, parent_id, message_id, reactor_did, author_did, text, at):
+def on_pin(channel_id, parent_id, message_id, reactor_did, author_did, text, at, opened_at=None):
     """📌 by Sam on his own message → always a request."""
     if switch("force_off") or not active("requests"):
         return None
@@ -695,7 +761,8 @@ def on_pin(channel_id, parent_id, message_id, reactor_did, author_did, text, at)
         c.setdefault("summary_en", (text or "")[:200])
     c["confidence"] = 1.0
     req, _created = open_request(room_id, rec, str(message_id), channel_id, at, engine.PATH_PIN,
-                                 text, c, {})
+                                 text, c, db.loads(db.setting("msgctx:" + str(message_id)), {}) or {},
+                                 opened_at=opened_at or at)
     return req
 
 
@@ -784,9 +851,12 @@ def press(kind, message_id, presser, extra=None, now=None):
         note = (extra.get("note") or "").strip()
         if not note:
             return refuse("no_note", "Please write one line: what is missing?")
+        # the original delivery due stays (brief §5.B.4); a new ladder generation means the next
+        # thing the owner hears is a reminder, and a miss can only follow it (MISS_GRACE_MIN)
         moved, row = db.move_request(rid, [engine.DELIVERED], engine.ACK,
                                      rework=int(req.get("rework") or 0) + 1, rework_note=note[:500],
-                                     delivered_at=None, delivered_by=None, delivered_note=None)
+                                     delivered_at=None, delivered_by=None, delivered_note=None,
+                                     gen=int(req.get("gen") or 1) + 1)
     elif kind == "cancel":
         reason = (extra.get("reason") or "").strip()
         if not reason:
@@ -887,7 +957,8 @@ def _press_translation(kind, message_id, did, name, admin, now):
         return True, "Already tracked as request #%d — logged as a follow-up." % again
     req, _created = open_request(room_id, rec, tr["source_message_id"], tr["channel_id"], src_at,
                                  engine.PATH_CONFIRMED, c.get("summary_en") or "", c,
-                                 db.loads(db.setting("msgctx:" + tr["source_message_id"]), {}) or {})
+                                 db.loads(db.setting("msgctx:" + tr["source_message_id"]), {}) or {},
+                                 opened_at=now)
     return True, "Tracked as request #%d." % req["id"]
 
 
@@ -923,7 +994,7 @@ def proof_known(req_message_id):
         return None
     if not (set(req["asks"]) & engine.FILE_ASKS):
         return True
-    n = db.files_since(_thread_ids(req["channel_id"]), db.parse(req["asked_at"]))
+    n = db.files_since(_thread_ids(req["channel_id"]), db.parse(req["asked_at"]), sam_ids())
     return True if n else None
 
 
@@ -986,7 +1057,7 @@ def tick(now=None):
         rep["skipped"] = "force_off"
         return rep
     for name, step in (("sam", _derive_sam), ("auto_confirm", _auto_confirm),
-                       ("leave", _leave_check), ("ladder", _ladder),
+                       ("leave", _leave_check), ("rooms", _reconcile_rooms), ("ladder", _ladder),
                        ("judge", _judge), ("digests", _digests), ("board", _board),
                        ("janitor", _janitor)):
         try:
@@ -1025,15 +1096,16 @@ def _auto_confirm(now):
 def _leave_check(now):
     """Once a working day per request: an owner who is off / on leave today hands it to the
     apartment's coverer (the request's clock does NOT restart — routing, not a new ask)."""
-    today = now.date().isoformat()
+    wday = engine.work_day(now)
+    today = wday.isoformat()
     n = 0
     for r in db.live_requests():
         if r["state"] not in engine.LIVE or r.get("leave_checked_day") == today or r.get("unowned"):
             continue
         db.update_request(r["id"], leave_checked_day=today)
-        if not r.get("owner_name") or not _call("off_today", r["owner_name"], now.date(), default=False):
+        if not r.get("owner_name") or not _call("off_today", r["owner_name"], wday, default=False):
             continue
-        resp = (_call("responsible_for", r.get("lid"), now.date(), default=("", "", "unknown"))
+        resp = (_call("responsible_for", r.get("lid"), wday, default=("", "", "unknown"))
                 if r.get("lid") else ("", "", "unknown"))
         to_did, to_name = (resp[1], resp[0]) if resp and resp[1] else ("", "")
         rule, unowned = 4, 0
@@ -1043,12 +1115,37 @@ def _leave_check(now):
             to_name, rule, unowned = name_for(to_did), 5, 1
         if not to_did:
             continue
+        # a hand-over is a reassignment: the coverer gets a fresh clock and a fresh ladder
+        gen = int(r.get("gen") or 1) + 1
+        rdue, ddue = engine.dues(now, bool(r.get("urgent")), sla_cfg())
         db.update_request(r["id"], owner_did=to_did, owner_name=to_name, owner_rule=rule,
-                          unowned=unowned)
+                          unowned=unowned, gen=gen, clock_at=now, resp_due=rdue, deliv_due=ddue)
         db.log("covered", r["id"], r["channel_id"], None, "tick",
-               {"from": r["owner_name"], "to": to_name, "why": "off_or_leave"})
+               {"from": r["owner_name"], "to": to_name, "why": "off_or_leave", "gen": gen})
         _refresh_card(db.request(r["id"]))
         n += 1
+    return n
+
+
+def _reconcile_rooms(now):
+    """A request whose room is closed, deleted or archived ends with it (never a miss) — the
+    _tk_close hook is time-boxed and may not have run, so the tick re-checks every minute."""
+    if HOST.rr_record is None:
+        return 0
+    n = 0
+    for r in db.live_requests():
+        try:
+            rec = HOST.rr_record(str(r["channel_id"]))
+        except Exception:
+            continue                       # cannot tell → leave it alone
+        if rec and rec.get("kind") == "rr" and (rec.get("status") or "") != "closed":
+            continue
+        moved, row = db.move_request(r["id"], [engine.OPEN, engine.ACK, engine.DELIVERED],
+                                     engine.CLOSED_WITH_TICKET)
+        if moved:
+            n += 1
+            db.log("closed_with_ticket", r["id"], r["channel_id"], None, "tick", {"why": "room gone or closed"})
+            _refresh_card(row)
     return n
 
 
@@ -1074,12 +1171,32 @@ def _ladder(now):
                                _gen_sent(r["id"], gen), cfg)
         if not step:
             continue
-        key = engine.step_key(step["step"], gen)
+        name = step["step"]
+        if name == "MISS":
+            name = _miss_or_reminder(r, gen, now)
+            if not name:
+                continue
+        key = engine.step_key(name, gen)
         if not db.record_step(r["id"], key, r.get("owner_did"), now):
             continue
         n += 1
-        _fire(step["step"], r, gen, key, now)
+        _fire(name, r, gen, key, now)
     return n
+
+
+def _miss_or_reminder(r, gen, now):
+    """Nobody's first notice is a miss. After a restart, an un-mute, a late-opened request or a
+    rework, the ladder may jump straight to MISS — then the owner gets the 100% reminder first,
+    and the miss only follows MISS_GRACE_MIN working minutes after it."""
+    rows = [x for x in db.ladder_rows(r["id"])
+            if int((x["step"].partition("#")[2]) or 1) == gen and not x["step"].startswith("MISS")]
+    last = max([db.parse(x["sent_at"]) for x in rows if x.get("sent_at")] or [None], key=lambda t: t or now)
+    if last is None:
+        sub = "R2" if r["state"] == engine.OPEN else "D2"
+        return sub if engine.step_key(sub, gen) not in db.ladder_sent(r["id"]) else None
+    if engine.worked_minutes(last, now) < engine.MISS_GRACE_MIN:
+        return None
+    return "MISS"
 
 
 def _fire(step, r, gen, key, now):
@@ -1099,16 +1216,17 @@ def _fire(step, r, gen, key, now):
                                                                "content": texts.watchdog_d2(r, link)})
         return
     # --- MISS ---
+    wday = engine.work_day(now)
     admin = owner_is_admin_did(owner)
-    leave = bool(r.get("owner_name")) and bool(_call("on_leave", r["owner_name"], now.date(), default=False))
-    eligible = engine.miss_eligible(r["path"], r["state"], owner, bool(r.get("unowned")), admin, leave)
-    db.record_miss(r["id"], gen, r.get("owner_name"), owner, engine.week_key(now.date()), now, eligible)
+    leave = bool(r.get("owner_name")) and bool(_call("on_leave", r["owner_name"], wday, default=False))
+    repeat = any(str(x.get("owner_did") or "") == str(owner) for x in db.misses_for(r["id"]))
+    eligible = (engine.miss_eligible(r["path"], r["state"], owner, bool(r.get("unowned")), admin, leave)
+                and bool(r.get("owner_name")) and not repeat)
+    db.record_miss(r["id"], gen, r.get("owner_name"), owner, engine.week_key(wday), now, eligible)
     db.log("miss", r["id"], r["channel_id"], None, "tick",
            {"eligible": eligible, "admin": admin, "leave": leave, "unowned": bool(r.get("unowned")),
-            "path": r["path"], "gen": gen})
-    enqueue("ladder:%d:%s" % (r["id"], key), "post", {
-        "channel_id": ch, "content": texts.ladder_room("MISS", r),
-        "reply_to": r.get("card_message_id"), "mentions": mentions})
+            "path": r["path"], "gen": gen, "repeat_for_owner": repeat, "named": bool(r.get("owner_name"))})
+    # no line in the shared room: a miss names a person, and names go to DMs / غرفة-المراقبة only
     if owner:
         enqueue("missdm:%d:%d" % (r["id"], gen), "dm", {"did": owner, "text": texts.ladder_dm("MISS", r, link)})
     lead = str(_call("lead_id", default="") or "")
@@ -1125,6 +1243,12 @@ def _fire(step, r, gen, key, now):
 def _judge(now):
     n = 0
     for ms in db.unjudged_misses():
+        missed = db.parse(ms["missed_at"])
+        if not ms.get("excused_at") and missed and now - missed < datetime.timedelta(hours=engine.EXCUSE_WINDOW_H):
+            continue                       # «عذر» can still be pressed — judge after the window
+        if not ms.get("owner_name"):
+            db.set_miss(ms["request_id"], ms["gen"], verdict="unnamed", judged_at=now)
+            continue
         if ms.get("excused_at"):
             db.set_miss(ms["request_id"], ms["gen"], verdict="excused", judged_at=now)
             continue
@@ -1253,7 +1377,7 @@ def _board(now):
     if db.setting("board_hash") == h:
         return 0
     db.set_setting("board_hash", h, "tick")
-    enqueue("board:" + h, "board", {"channel_name": board_channel(), "content": texts.board(rows, now),
+    enqueue("board:%s:%d" % (h, db.incr("board_seq")), "board", {"channel_name": board_channel(), "content": texts.board(rows, now),
                                     "message_id": db.setting("board_mid") or "",
                                     "on_done": {"type": "board"}})
     return 1

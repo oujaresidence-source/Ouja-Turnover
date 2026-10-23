@@ -126,7 +126,7 @@ def _replay(room, now=None, auto=False):
         return ["(empty room)"]
     start = datetime.datetime.fromisoformat(msgs[0]["at"]).astimezone(tz)
     end = datetime.datetime.fromisoformat(now).astimezone(tz) if now else (
-        datetime.datetime.fromisoformat(msgs[-1]["at"]).astimezone(tz) + datetime.timedelta(days=2))
+        datetime.datetime.fromisoformat(msgs[-1]["at"]).astimezone(tz) + datetime.timedelta(days=3))
     lines = []
     seen_outbox = set()
 
@@ -164,11 +164,15 @@ def _replay(room, now=None, auto=False):
             for st in _e.ladder(r["state"], db.parse(r["clock_at"]), bool(r["urgent"]), cfg):
                 if st["at"] > after:
                     cands.append(st["at"])
+            if r["state"] in _e.LIVE:                 # a gated miss: reminder + 30 working min
+                cands.append(after + datetime.timedelta(minutes=_e.MISS_GRACE_MIN + 1))
             if r["state"] == _e.DELIVERED and db.parse(r.get("delivered_at")):
                 cands.append(db.parse(r["delivered_at"]) + datetime.timedelta(hours=_e.AUTO_CONFIRM_HOURS))
         if not _e.in_work_hours(after):           # a due step waits for 11:00
             d0 = after.date() if after.hour >= 11 else after.date()
             cands.append(datetime.datetime(d0.year, d0.month, d0.day, 11, 0, 30, tzinfo=tz))
+        for ms in db.unjudged_misses():                # the judge waits out the excuse window
+            cands.append(db.parse(ms["missed_at"]) + datetime.timedelta(hours=_e.EXCUSE_WINDOW_H, minutes=1))
         cands = [c for c in cands if c > after]
         return min(cands) if cands else None
 

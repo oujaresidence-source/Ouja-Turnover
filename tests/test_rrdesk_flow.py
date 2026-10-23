@@ -276,6 +276,14 @@ class Presses(unittest.TestCase):
         r = db.request(self.rid)
         self.assertEqual((r["state"], r["rework"], r["deliv_due"]), ("acknowledged", 1, due))
 
+    def test_rework_reminds_before_any_miss(self):
+        flow.press("deliver", self.card, {"did": F.NASSER, "name": "Nasser"}, {"proof": True})
+        self.clock.t = F.at(2026, 10, 22, 12, 0)            # rework long after the original due
+        flow.press("not_what", self.card, {"did": F.SAM, "name": "Sam"}, {"note": "wrong room"})
+        flow.tick()
+        self.assertIsNone(db.miss(self.rid))
+        self.assertTrue([s for s in db.ladder_sent(self.rid) if s.startswith("D2")])
+
     def test_reassign_restarts_the_clock(self):
         self.clock.t = F.at(2026, 10, 20, 13, 0)
         ok, _ = flow.press("reassign", self.card, {"did": F.ASEEL, "name": "Aseel"},
@@ -310,12 +318,24 @@ class Ladder(unittest.TestCase):
         self.tick_at(2026, 10, 20, 13, 1)
         self.assertEqual(len(F.queued("dm", "ladderdm:")), 1)        # R2 also DMs the owner
 
-    def test_downtime_sends_only_the_latest(self):
-        self.tick_at(2026, 10, 20, 15, 0)                  # asleep through R1 and R2
+    def test_downtime_sends_one_reminder_then_the_miss(self):
+        self.tick_at(2026, 10, 20, 15, 0)                  # asleep through R1, R2 and the miss time
         refs = [r["ref"] for r in F.queued("post", "ladder:")]
-        self.assertEqual(refs, ["ladder:%d:MISS" % self.rid])
+        self.assertEqual(refs, ["ladder:%d:R2" % self.rid])  # no backlog burst, and no miss first
+        self.assertIsNone(db.miss(self.rid))
+        self.tick_at(2026, 10, 20, 15, 20)
+        self.assertIsNone(db.miss(self.rid))               # 30 working minutes after the reminder
+        self.tick_at(2026, 10, 20, 15, 31)
         m = db.miss(self.rid)
         self.assertEqual((m["owner_did"], m["eligible"]), (F.NASSER, 1))
+        self.assertEqual(F.queued("post", "ladder:%d:MISS" % self.rid), [])   # never in the shared room
+        self.assertTrue(F.queued("dm", "missdm:"))
+
+    def test_closed_or_deleted_room_ends_requests_without_a_miss(self):
+        self.state["rec"]["status"] = "closed"             # the close hook timed out / never ran
+        self.tick_at(2026, 10, 22, 12, 0)
+        self.assertEqual(db.request(self.rid)["state"], "closed_with_ticket")
+        self.assertEqual(db.q("SELECT * FROM rrdesk_misses"), [])
 
     def test_silent_outside_working_hours(self):
         self.tick_at(2026, 10, 21, 3, 0)
@@ -330,8 +350,100 @@ class Ladder(unittest.TestCase):
 
     def test_admin_owner_is_reminded_never_missed_eligible(self):
         flow.remember_admin(F.NASSER, True)
-        self.tick_at(2026, 10, 20, 15, 0)
+        self.tick_at(2026, 10, 20, 15, 0)                  # the reminder
+        self.tick_at(2026, 10, 20, 15, 31)                 # the miss
         self.assertEqual(db.miss(self.rid)["eligible"], 0)
+
+
+class LateOpen(unittest.TestCase):
+    """Reviewer finding 1: a request opened hours after Sam asked must not start overdue."""
+
+    def setUp(self):
+        F.setup(self)
+
+    def test_yes_hours_later_starts_the_clock_at_the_press_and_counts_earlier_replies(self):
+        sam_asks(self, mode="confirm")                      # 12:00 — Sam is asked «Is this a request?»
+        F.fake_model(self)
+        self.clock.t = F.at(2026, 10, 20, 12, 5)
+        flow.on_message(F.msg("t1", "ابشر", author=F.NASSER, name="Nasser", at_=self.clock.t))
+        F.deliver_all()
+        self.clock.t = F.at(2026, 10, 20, 16, 0)
+        ok, _ = flow.press("q_yes", "p:tr:s1", {"did": F.SAM, "name": "Sam"}, {}, self.clock.t)
+        self.assertTrue(ok)
+        r = db.request_by_source("s1")
+        self.assertEqual(db.parse(r["clock_at"]), F.at(2026, 10, 20, 16, 0))
+        self.assertEqual(r["state"], "acknowledged")        # Nasser's 12:05 reply counts
+        F.deliver_all()
+        self.clock.t = F.at(2026, 10, 20, 16, 1)
+        flow.tick()
+        self.assertEqual(db.ladder_sent(r["id"]), set())     # nothing overdue
+        self.assertIsNone(db.miss(r["id"]))
+
+    def test_pin_on_an_old_message(self):
+        F.fake_model(self, classify=dict(F.REQ_CLASSIFY, is_request=False, confidence=0.1))
+        flow.on_message(F.msg("p1", "need the invoice", at_=F.at(2026, 10, 18, 12, 0)))
+        req = flow.on_pin(F.ROOM, None, "p1", F.SAM, F.SAM, "need the invoice",
+                          F.at(2026, 10, 18, 12, 0), F.at(2026, 10, 20, 12, 0))
+        self.assertEqual(db.parse(req["clock_at"]), F.at(2026, 10, 20, 12, 0))
+
+
+class Shift(unittest.TestCase):
+    def setUp(self):
+        F.setup(self)
+
+    def test_midnight_hand_over_uses_the_shift_and_restarts_the_clock(self):
+        self.clock.t = F.at(2026, 10, 20, 22, 0)
+        rid = sam_asks(self, at_=self.clock.t)["request"]
+        F.deliver_all()
+        from rrdesk.host import HOST
+        HOST.off_today = lambda name, day: name == "ناصر" and day.isoformat() == "2026-10-21"
+        self.clock.t = F.at(2026, 10, 21, 0, 5)            # still the 20th's shift
+        flow.tick()
+        self.assertEqual(db.request(rid)["owner_did"], F.NASSER)
+        self.clock.t = F.at(2026, 10, 21, 11, 0)           # the 21st's shift: hand-over
+        flow.tick()
+        r = db.request(rid)
+        self.assertEqual((r["owner_did"], r["gen"]), (F.NOURA, 2))
+        self.assertEqual(db.parse(r["clock_at"]), F.at(2026, 10, 21, 11, 0))
+        self.assertIsNone(db.miss(rid))
+
+    def test_work_day(self):
+        from rrdesk import engine as E
+        self.assertEqual(E.work_day(F.at(2026, 10, 21, 1, 20)).isoformat(), "2026-10-20")
+        self.assertEqual(E.work_day(F.at(2026, 10, 21, 1, 30)).isoformat(), "2026-10-21")
+
+
+class DetectionWithoutTranslation(unittest.TestCase):
+    def setUp(self):
+        F.setup(self)
+
+    def test_translation_off_still_detects(self):
+        flow.set_translate(F.ROOM, None, False, F.SAM, "Sam", False)
+        rep = sam_asks(self, mode="auto")
+        self.assertTrue(rep.get("classified"))
+        self.assertTrue(rep.get("request"))
+        self.assertEqual(F.queued("post", "tr:"), [])
+
+    def test_translation_off_confirm_mode_posts_the_question(self):
+        flow.set_translate(F.ROOM, None, False, F.SAM, "Sam", False)
+        sam_asks(self, mode="confirm")
+        q = F.queued("post", "q:")
+        self.assertEqual([b["custom_id"] for b in q[0]["payload"]["buttons"]], ["rd:qyes", "rd:qno"])
+        F.deliver_all()
+        ok, _ = flow.press("q_yes", "p:q:s1", {"did": F.SAM, "name": "Sam"})
+        self.assertTrue(ok)
+
+    def test_failed_translation_is_retried_by_an_edit(self):
+        from rrdesk import translate as T
+
+        def boom(*a, **k):
+            raise T.TranslateFailed("timeout")
+        T.call_model = boom
+        flow.on_message(F.msg("m9", "الفاتورة بالطريق", author=F.NASSER))
+        self.assertIsNone(db.translation("m9"))
+        F.fake_model(self)
+        self.assertEqual(flow.on_edit(F.msg("m9", "الفاتورة بالطريق الحين", author=F.NASSER)), "model")
+        self.assertTrue(F.queued("post", "tr:m9"))
 
 
 class OutboxAndBoard(unittest.TestCase):
@@ -374,20 +486,33 @@ class OutboxAndBoard(unittest.TestCase):
         t = F.at(2026, 10, 20, 12, 0)
         self.assertTrue(db.claim_outbox(oid, t))
         self.assertFalse(db.claim_outbox(oid, t))
-        self.assertTrue(db.claim_outbox(oid, t + datetime.timedelta(minutes=6)))   # crashed worker
+        self.assertFalse(db.claim_outbox(oid, t + datetime.timedelta(minutes=6)))  # maybe just slow
+        self.assertTrue(db.claim_outbox(oid, t + datetime.timedelta(minutes=31)))  # crashed worker
 
     def test_board_is_edited_in_place(self):
         sam_asks(self)
         self.clock.t = F.at(2026, 10, 20, 12, 1)
         flow._board(self.clock.t)
         F.deliver_all()
-        self.assertEqual(db.setting("board_mid"), "p:board:" + db.setting("board_hash"))
         first = db.setting("board_mid")
+        self.assertTrue(first.startswith("p:board:" + db.setting("board_hash")))
         self.assertEqual(flow._board(self.clock.t), 0)      # nothing changed → nothing sent
         flow.press("ack", db.request(1)["card_message_id"], {"did": F.NASSER, "name": "Nasser"})
         flow._board(self.clock.t)
         b = F.queued("board")[-1]["payload"]
         self.assertEqual(b["message_id"], first)
+
+    def test_board_refreshes_when_it_returns_to_an_earlier_state(self):
+        empty = flow._board(F.at(2026, 10, 20, 12, 0))
+        F.deliver_all()
+        rid = sam_asks(self)["request"]
+        F.deliver_all()
+        self.assertEqual(flow._board(F.at(2026, 10, 20, 12, 1)), 1)
+        flow.ticket_closed(F.ROOM)
+        self.assertEqual(flow._board(F.at(2026, 10, 20, 12, 2)), 1)   # empty again → re-published
+        self.assertEqual(len(F.queued("board")), 3)
+        self.assertEqual(empty, 1)
+        self.assertTrue(rid)
 
 
 class Defaults(unittest.TestCase):

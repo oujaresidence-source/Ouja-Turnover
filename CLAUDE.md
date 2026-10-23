@@ -640,7 +640,14 @@ runbook **`rrdesk/DEBUG.md`** (read it before debugging anything here).
 - **Money is dry-run on deploy.** `warn_live` = 0 → `ops_dryrun_log` (kind `rr_warning`) says what
   would have happened. Only the owner flips it: `/rrdesk-warnings-on` + «تشغيل». Period key
   `RR-YYYY-Www` (never collides with `wr` weeks or `OC-` nights). 1st miss in an ISO week = private
-  notice, 2nd = ONE warning, 3rd+ = KPI only.
+  notice, 2nd = ONE warning, 3rd+ = KPI only — judged only after the 48 h excuse window.
+- **Nobody's first notice is a miss** (`flow._miss_or_reminder`): if the ladder jumps straight to
+  MISS (restart, un-mute, a 📌/«Yes» hours later, rework) the owner gets the 100% reminder and the
+  miss needs 30 more working minutes. A late-opened request's clock starts when it was OPENED and a
+  team reply already in the room counts as acknowledged. Closed/deleted rooms end their requests
+  every tick (`_reconcile_rooms`). Leave/day-off use the SHIFT day (`engine.work_day`, to 01:30) and
+  a hand-over restarts the clock. Only Employee-Calendar people can become owners from a mention;
+  `HOST.admin_ids` (RR closers + final approver) are never warned; a miss never posts in the room.
 - **Detection safety.** Only `/rr-ask`, Sam's 📌, Sam's «Yes» under a translation, or a detected
   request in `auto` mode can ever produce a miss. Ships in **`confirm`** mode (detected → asks
   Sam «Is this a request?») because the Haiku classifier could not be graded where this was built;

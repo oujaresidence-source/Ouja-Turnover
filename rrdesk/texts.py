@@ -71,13 +71,13 @@ def mention(did):
 VOICE_REPLY = "سام ما يقدر يسمع الفويس — اكتبها نص الله يعافيك 🙏" + MARK
 
 REFUSE = {
-    "not_owner": "هذا الزر لصاحب الطلب أو للفريق.",
+    "not_owner": "هذا الزر لصاحب الطلب أو للفريق. · This button is for the team.",
     "not_sam": "This button is for Sam or an admin.",
     "not_lead": "هذا الزر لقائد العمليات أو الإدارة.",
     "need_file": ("ما شفت أي ملف أو صورة بالروم بعد طلب سام — ارفع المطلوب أول، بعدين اضغط «سلّمت»."),
-    "already": "انحفظت قبلك من {who}.",
-    "closed": "الطلب انقفل — ما يحتاج شي.",
-    "gone": "ما لقيت هذا الطلب.",
+    "already": "انحفظت قبلك من {who}. · Already recorded by {who}.",
+    "closed": "الطلب انقفل — ما يحتاج شي. · This request is closed.",
+    "gone": "ما لقيت هذا الطلب. · Request not found.",
     "excuse_late": "فات وقت العذر (٤٨ ساعة). الإنذار — لو صار — يُراجع من رابط الاعتراض.",
     "excuse_short": "اكتب سبب واضح (١٠ أحرف على الأقل).",
     "off": "النظام موقف الحين.",

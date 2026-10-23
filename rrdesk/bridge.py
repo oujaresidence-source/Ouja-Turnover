@@ -165,7 +165,7 @@ async def on_raw_reaction_add(payload):
         req = await outbox.run_blocking(
             flow.on_pin, str(ch.id), str(ch.parent_id) if getattr(ch, "parent_id", None) else None,
             str(msg.id), str(payload.user_id), str(msg.author.id), msg.content or "",
-            _local(msg.created_at))
+            _local(msg.created_at), _tz_now())
         if req:
             await drain()
     except Exception as e:
@@ -173,9 +173,10 @@ async def on_raw_reaction_add(payload):
 
 
 def _log_async(kind, message, detail):
+    """Fire-and-forget on rrdesk's pool — never a database call on the event loop."""
     try:
-        db.log(kind, channel_id=getattr(message.channel, "id", None),
-               message_id=getattr(message, "id", None), detail=detail)
+        outbox._pool.submit(db.log, kind, None, getattr(message.channel, "id", None),
+                            getattr(message, "id", None), None, detail)
     except Exception:
         pass
 
@@ -249,10 +250,11 @@ async def _proof(interaction, message_id):
     try:
         since = db.parse(req["asked_at"])
         ids = await outbox.run_blocking(flow._thread_ids, req["channel_id"])
+        sams = set(flow.sam_ids())
         for cid in ids:
             ch = _bot().get_channel(int(cid)) or await _bot().fetch_channel(int(cid))
             async for m in ch.history(limit=200, after=since):
-                if m.attachments:
+                if m.attachments and str(m.author.id) not in sams:
                     await outbox.run_blocking(db.record_file, str(m.id), str(cid), str(m.author.id),
                                               len(m.attachments), _local(m.created_at))
                     return True
@@ -444,8 +446,8 @@ async def execute(kind, p):
 async def tick_once():
     rep = await outbox.run_blocking(flow.tick)
     await drain()
-    if db.setting("study_due") == "1":
-        db.set_setting("study_due", "0", "tick")
+    if await outbox.run_blocking(db.setting, "study_due") == "1":
+        await outbox.run_blocking(db.set_setting, "study_due", "0", "tick")
         try:
             await run_study(post=True)
         except Exception as e:
@@ -513,8 +515,8 @@ async def run_study(post=True, grade=True):
         except Exception as e:
             print("[rrdesk] golden eval failed:", e)
     if post:
-        db.enqueue("study:%s" % _tz_now().isoformat(timespec="minutes"), "room",
-                   {"channel_name": flow._watchdog(), "content": study.report_text(rep)})
+        await outbox.run_blocking(db.enqueue, "study:%s" % _tz_now().isoformat(timespec="minutes"), "room",
+                                  {"channel_name": flow._watchdog(), "content": study.report_text(rep)})
         await drain()
     return rep
 
@@ -547,6 +549,7 @@ async def cmd_ask(interaction, what, who=None, urgent=False):
 
 
 async def cmd_translate(interaction, on):
+    await interaction.response.defer(ephemeral=True, thinking=True)
     ch = interaction.channel
     ok, text = await outbox.run_blocking(flow.set_translate, str(ch.id), _parent(ch), bool(on),
                                          str(interaction.user.id),
@@ -556,6 +559,10 @@ async def cmd_translate(interaction, on):
 
 
 async def cmd_why(interaction):
+    """Disciplinary detail (owners, verdicts, excuses) — admins and the ops lead only."""
+    if not (_admin(interaction.user) or flow.is_lead(interaction.user.id)):
+        await _reply(interaction, "🚫 للإدارة وقائد العمليات فقط. · Admins and the ops lead only.")
+        return
     await interaction.response.defer(ephemeral=True, thinking=True)
     ch = interaction.channel
     lines = await outbox.run_blocking(flow.why, str(ch.id), _parent(ch))
@@ -570,6 +577,7 @@ async def cmd_why(interaction):
 
 
 async def cmd_sam(interaction, user):
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not _admin(interaction.user):
         await _reply(interaction, "🚫 للإدارة فقط.")
         return
@@ -579,6 +587,7 @@ async def cmd_sam(interaction, user):
 
 
 async def cmd_switch(interaction, name, on):
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not _admin(interaction.user):
         await _reply(interaction, "🚫 للإدارة فقط.")
         return
@@ -590,6 +599,7 @@ async def cmd_switch(interaction, name, on):
 
 
 async def cmd_warnings(interaction, on, confirm=""):
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not _admin(interaction.user):
         await _reply(interaction, "🚫 للإدارة فقط.")
         return
@@ -612,6 +622,7 @@ async def cmd_study(interaction):
 
 async def cmd_setup(interaction):
     """Create the board room under the RR category (same permissions). Admin, never automatic."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
     if not _admin(interaction.user):
         await _reply(interaction, "🚫 للإدارة فقط.")
         return

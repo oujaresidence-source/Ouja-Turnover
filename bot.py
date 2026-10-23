@@ -10712,7 +10712,8 @@ def _rd_rr_record(cid):
         return None
     fam = {_tk_cat_norm(RR_CATEGORY)} | {_tk_cat_norm("%s %s" % (RR_CATEGORY, x)) for x in _TK_OVERFLOW_SUFFIXES}
     name = str(getattr(ch, "name", "") or "")
-    if (_tk_cat_norm(cat.name) not in fam or name.startswith(("مغلق", "sp-"))
+    board = os.environ.get("RRDESK_BOARD_CHANNEL", "متابعة-طلبات-سام")
+    if (_tk_cat_norm(cat.name) not in fam or name.startswith(("مغلق", "sp-")) or name == board
             or name in (RR_PANEL_CHANNEL, "rr-tickets") or ops_tidy.R.PANEL_RE.search(name)):
         return None
     return {"kind": "rr", "seq": "", "code": "", "status": "new", "general": True}
@@ -10742,6 +10743,9 @@ def _rd_wire():
             "is_admin": _can_delete_channels, "rr_category_name": RR_CATEGORY,
             "rr_record": _rd_rr_record, "rr_records": _rd_rr_records, "enrich": _rr_enrich,
             "off_today": _rd_off_today, "once_claim": _once_claim,
+            # never warned: the RR closers (Faisal) + the final appeal approver
+            "admin_ids": lambda: [str(i) for i in _rr_close_ids()] + (
+                [_ops.notify.approver_ids().get("s3") or ""] if _HAS_OPS else []),
             "watchdog_channel": lambda: WATCHDOG_CHANNEL,
             "api_key": lambda: ANTHROPIC_API_KEY, "model": lambda: CLAUDE_MODEL,
             "public_base": _dispatch_base_url,
@@ -71104,7 +71108,8 @@ async def cmd_rd_ask(ctx, *, what: str = ""):
 
 @bot.command(name="rrdesk-why-text", aliases=["ليش"])
 async def cmd_rd_why(ctx):
-    """!ouja ليش — /rrdesk-why for people who prefer typing (admins; posted in the room)."""
+    """!ouja ليش — /rrdesk-why by typing (admins). Sent by DM: it names owners and verdicts,
+    which never go in a shared room."""
     if not _HAS_RRDESK or not _can_delete_channels(ctx.author):
         return
     _rd_ready()
@@ -71112,8 +71117,12 @@ async def cmd_rd_why(ctx):
     lines = await _rrdesk.outbox.run_blocking(_rrdesk.flow.why, str(ch.id),
                                               str(getattr(ch, "parent_id", "") or "") or None)
     body = chr(10).join(lines)
-    for i in range(0, len(body), 1900):
-        await ctx.send("```" + chr(10) + body[i:i + 1900] + "```")
+    try:
+        for i in range(0, len(body), 1900):
+            await ctx.author.send("```" + chr(10) + body[i:i + 1900] + "```")
+        await ctx.message.add_reaction("📬")
+    except Exception:
+        await ctx.reply("افتح الرسائل الخاصة عشان أرسل لك التفاصيل.", mention_author=False)
 
 
 @bot.command(name="rrdesk-study-text", aliases=["دراسة-rr"])

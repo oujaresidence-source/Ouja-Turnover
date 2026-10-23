@@ -202,6 +202,20 @@ def worked_minutes(start, end, cfg=None):
     return oeng.worked_minutes(start, end, **work_kwargs(cfg))
 
 
+def work_day(t, cfg=None):
+    """The working day a moment belongs to: 00:05 is still yesterday's shift (it runs to
+    01:30). Leave, day-off and «who is responsible today» must use this, not the calendar date."""
+    kw = work_kwargs(cfg)
+    end_min = kw["work_end_hour"] * 60 + kw["work_end_min"] - 24 * 60
+    if t.hour * 60 + t.minute < end_min:
+        return t.date() - datetime.timedelta(days=1)
+    return t.date()
+
+
+MISS_GRACE_MIN = 30           # a miss must follow a reminder by at least this many working minutes
+EXCUSE_WINDOW_H = 48          # the judge waits this long so «عذر» can still stop a warning
+
+
 def in_work_hours(now, cfg=None):
     kw = work_kwargs(cfg)
     for day in (now.date() - datetime.timedelta(days=1), now.date()):

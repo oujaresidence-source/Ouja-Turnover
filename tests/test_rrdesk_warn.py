@@ -11,6 +11,7 @@ warning restores 1.0; an excused miss does not count; leave / admin / unowned ne
 Run: python3 -m unittest tests.test_rrdesk_warn
 """
 
+import datetime
 import os
 import re
 import sys
@@ -42,10 +43,23 @@ def make_request(tc, mid, at, mentions=(F.NASSER,)):
 
 
 def miss_it(tc, rid, at):
+    """Nobody's first notice is a miss: at `at` the overdue owner gets the reminder, and the
+    miss is recorded 40 minutes later (MISS_GRACE_MIN = 30 working minutes)."""
+    for t in (at, at + datetime.timedelta(minutes=40)):
+        tc.clock.t = t
+        flow.tick()
+        F.deliver_all()
+    return db.miss(rid)
+
+
+def judge(tc, at):
+    """The judge waits out the 48-hour excuse window, then rules."""
     tc.clock.t = at
     flow.tick()
     F.deliver_all()
-    return db.miss(rid)
+
+
+AFTER_W43 = F.at(2026, 10, 24, 12, 0)                 # Saturday, still ISO week 43, > 48 h later
 
 
 class Grep(unittest.TestCase):
@@ -81,15 +95,31 @@ class Judge(unittest.TestCase):
         miss_it(self, r2, F.at(2026, 10, 20, 16, 0))
         return r1, r2
 
+    def test_a_reminder_comes_before_any_miss(self):
+        r1 = make_request(self, "a1", F.at(2026, 10, 19, 12, 0))
+        self.clock.t = F.at(2026, 10, 19, 16, 0)            # overdue at the first look
+        flow.tick()
+        self.assertIsNone(db.miss(r1))
+        self.assertIn("R2", db.ladder_sent(r1))
+        self.assertIsNotNone(miss_it(self, r1, F.at(2026, 10, 19, 16, 1)))
+
+    def test_judging_waits_for_the_excuse_window(self):
+        self.two_misses(live=True)
+        self.assertEqual(odb.all_warnings(), [])           # nothing before 48 h
+        judge(self, AFTER_W43)
+        self.assertEqual(len(odb.all_warnings()), 1)
+
     def test_first_miss_is_a_notice_only(self):
         r1 = make_request(self, "a1", F.at(2026, 10, 19, 12, 0))
-        m = miss_it(self, r1, F.at(2026, 10, 19, 16, 0))
-        self.assertEqual(m["verdict"], "notice")
+        miss_it(self, r1, F.at(2026, 10, 19, 16, 0))
+        judge(self, AFTER_W43)
+        self.assertEqual(db.miss(r1)["verdict"], "notice")
         self.assertTrue(F.queued("dm", "notice:"))
         self.assertEqual(odb.all_warnings(), [])
 
     def test_second_miss_is_one_live_warning_and_commission_drops(self):
         self.two_misses(live=True)
+        judge(self, AFTER_W43)
         ws = odb.all_warnings()
         self.assertEqual(len(ws), 1)
         self.assertEqual(ws[0]["id"], "wn_ناصر_RR-2026-W43")
@@ -104,17 +134,22 @@ class Judge(unittest.TestCase):
     def test_third_miss_is_kpi_only(self):
         self.two_misses(live=True)
         r3 = make_request(self, "a3", F.at(2026, 10, 21, 12, 0))
-        m = miss_it(self, r3, F.at(2026, 10, 21, 16, 0))
-        self.assertEqual(m["verdict"], "kpi")
+        miss_it(self, r3, F.at(2026, 10, 21, 16, 0))
+        judge(self, AFTER_W43)
+        self.assertEqual(db.miss(r3)["verdict"], "kpi")
         self.assertEqual(len(odb.all_warnings()), 1)
 
     def test_new_week_resets(self):
         self.two_misses(live=True)
+        judge(self, AFTER_W43)
         r = make_request(self, "b1", F.at(2026, 10, 26, 12, 0))     # Monday, week 44
-        self.assertEqual(miss_it(self, r, F.at(2026, 10, 26, 16, 0))["verdict"], "notice")
+        miss_it(self, r, F.at(2026, 10, 26, 16, 0))
+        judge(self, F.at(2026, 10, 28, 18, 0))
+        self.assertEqual(db.miss(r)["verdict"], "notice")
 
     def test_dry_run_writes_only_the_dry_log(self):
         self.two_misses(live=False)
+        judge(self, AFTER_W43)
         self.assertEqual(odb.all_warnings(), [])
         self.assertIsNone(odb.commission("ناصر", "2026-10"))
         dry = odb.dry_rows(kind="rr_warning")
@@ -126,13 +161,14 @@ class Judge(unittest.TestCase):
 
     def test_voided_warning_restores_commission(self):
         self.two_misses(live=True)
+        judge(self, AFTER_W43)
         w = odb.all_warnings()[0]
         odb.void_warning(w["id"], "ريم", "appeal accepted")
         self.assertEqual(odb.recompute_commission("ناصر", "2026-10")["multiplier"], 1.0)
 
-    def test_excused_miss_does_not_count(self):
-        r1 = make_request(self, "a1", F.at(2026, 10, 19, 12, 0))
-        miss_it(self, r1, F.at(2026, 10, 19, 16, 0))
+    def test_excuse_inside_the_window_prevents_the_warning(self):
+        flow.set_switch("warn_live", True, "test")
+        r1, r2 = self.two_misses(live=True)
         line = db.miss(r1)["line_message_id"]
         self.assertTrue(line)
         ok, _ = flow.press("excuse", line, {"did": F.NASSER, "name": "Nasser"}, {"reason": "كنت عند الضيف"})
@@ -142,9 +178,8 @@ class Judge(unittest.TestCase):
         ok, _ = flow.press("excuse", line, {"did": F.ASEEL, "name": "Aseel"},
                            {"reason": "كان عنده دخول ضيف مستعجل"})
         self.assertTrue(ok)
-        flow.set_switch("warn_live", True, "test")
-        r2 = make_request(self, "a2", F.at(2026, 10, 20, 12, 0))
-        self.assertEqual(miss_it(self, r2, F.at(2026, 10, 20, 16, 0))["verdict"], "notice")
+        judge(self, AFTER_W43)
+        self.assertEqual(db.miss(r2)["verdict"], "notice")      # the excused one no longer counts
         self.assertEqual(odb.all_warnings(), [])
 
     def test_excuse_window_is_48_hours(self):
@@ -155,19 +190,32 @@ class Judge(unittest.TestCase):
                               {"reason": "reason long enough here"})
         self.assertFalse(ok)
 
-    def test_leave_admin_unowned_never_count(self):
+    def test_leave_admin_outsiders_unowned_never_count(self):
         flow.set_switch("warn_live", True, "test")
-        # on leave and nobody to cover: the request goes to the lead as UNOWNED — no one pays
+        # on leave and nobody to cover: the lead holds it as UNOWNED with a fresh clock — no one pays
         self.state["resp"] = ("ناصر", F.NASSER, "owner")
         r1 = make_request(self, "a1", F.at(2026, 10, 19, 12, 0))
         self.state["leave"].add("ناصر")
-        m = miss_it(self, r1, F.at(2026, 10, 19, 16, 0))
-        self.assertEqual((m["eligible"], db.request(r1)["owner_did"]), (0, F.ASEEL))
+        miss_it(self, r1, F.at(2026, 10, 19, 16, 0))
+        r = db.request(r1)
+        self.assertEqual((r["owner_did"], r["unowned"], r["gen"]), (F.ASEEL, 1, 2))
+        self.assertFalse([m for m in db.misses_for(r1) if m["eligible"]])
         self.state["leave"].clear()
-        flow.remember_admin(F.NASSER, True)
+        # an admin (known up front through HOST.admin_ids) is reminded, never eligible
+        from rrdesk.host import HOST
+        HOST.admin_ids = lambda: [F.NASSER]
+        self.addCleanup(lambda: setattr(HOST, "admin_ids", None))
         r2 = make_request(self, "a2", F.at(2026, 10, 20, 12, 0))
         self.assertEqual(miss_it(self, r2, F.at(2026, 10, 20, 16, 0))["eligible"], 0)
+        judge(self, AFTER_W43)
         self.assertEqual(odb.all_warnings(), [])
+
+    def test_mentioning_someone_outside_the_calendar_never_makes_them_owner(self):
+        r = make_request(self, "o1", F.at(2026, 10, 19, 12, 0), mentions=(F.FAISAL,))
+        req = db.request(r)
+        self.assertNotEqual(req["owner_did"], F.FAISAL)
+        ev = [e for e in db.events(request_id=r) if e["kind"] == "owner_chosen"][0]
+        self.assertEqual(ev["detail"]["skipped_mentions"], [F.FAISAL])
 
     def test_reassigned_miss_stops_counting(self):
         r1 = make_request(self, "a1", F.at(2026, 10, 19, 12, 0))

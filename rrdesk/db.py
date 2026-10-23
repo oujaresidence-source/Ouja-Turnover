@@ -491,12 +491,15 @@ def record_file(message_id, channel_id, author_id, n, at):
                                   int(n or 1), iso(at)))
 
 
-def files_since(channel_ids, since):
+def files_since(channel_ids, since, exclude_authors=()):
+    """Files posted in these channels since `since`, NOT counting Sam's own attachments."""
     ids = [str(c) for c in (channel_ids or ()) if c]
     if not ids:
         return 0
-    r = q1("SELECT COUNT(*) n FROM rrdesk_files WHERE channel_id IN (%s) AND at>=?"
-           % ",".join("?" * len(ids)), ids + [iso(since)])
+    ex = [str(a) for a in (exclude_authors or ()) if a] or ["-"]
+    r = q1("SELECT COUNT(*) n FROM rrdesk_files WHERE channel_id IN (%s) AND at>=? "
+           "AND IFNULL(author_id,'') NOT IN (%s)" % (",".join("?" * len(ids)), ",".join("?" * len(ex))),
+           ids + [iso(since)] + ex)
     return int((r or {}).get("n") or 0)
 
 
@@ -713,7 +716,7 @@ def outbox(ref):
 def outbox_due(at, limit=20):
     rows = q("SELECT * FROM rrdesk_outbox WHERE state='queued' AND (next_at IS NULL OR next_at<=?) "
              "ORDER BY id LIMIT ?", (iso(at), int(limit)))
-    stale = iso(at - datetime.timedelta(minutes=5))
+    stale = iso(at - datetime.timedelta(minutes=STALE_CLAIM_MIN))
     rows += q("SELECT * FROM rrdesk_outbox WHERE state='claimed' AND claimed_at<? ORDER BY id "
               "LIMIT ?", (stale, int(limit)))
     for r in rows:
@@ -721,10 +724,13 @@ def outbox_due(at, limit=20):
     return rows
 
 
+STALE_CLAIM_MIN = 30
+
+
 def claim_outbox(oid, at):
-    """Atomic: exactly one bot copy wins a row. A claim older than 5 minutes is a crashed
-    worker and may be taken over."""
-    stale = iso(at - datetime.timedelta(minutes=5))
+    """Atomic: exactly one bot copy wins a row. A claim older than 30 minutes is a crashed
+    worker and may be taken over (long enough that a slow, rate-limited send is not re-sent)."""
+    stale = iso(at - datetime.timedelta(minutes=STALE_CLAIM_MIN))
     _lid, n = execute("UPDATE rrdesk_outbox SET state='claimed', claimed_at=?, attempts=attempts+1"
                       " WHERE id=? AND (state='queued' OR (state='claimed' AND claimed_at<?))",
                       (iso(at), int(oid), stale))
