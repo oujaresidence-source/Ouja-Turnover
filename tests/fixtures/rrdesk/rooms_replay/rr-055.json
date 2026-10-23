@@ -1,0 +1,853 @@
+{
+ "name": "rr-055",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 55,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": "موظف-5"
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-5": "team",
+  "موظف-2": "team"
+ },
+ "messages": [
+  {
+   "id": "2709970",
+   "at": "2026-09-16T15:03:01+03:00",
+   "who": "bot",
+   "text": "@موظف-5 فتح طلب تعويض جديد",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "embeds": [
+    " طلب تعويض RR #055\nحرق في السجاد والكنب وفقدان بطاقة الدخول\n رقم الحجز\nHMXXXX\n النوع\n تلفيات بالشقة أو الأثاث\n تاريخ الاكتشاف\n—\n المبلغ المطلوب\n5,517 ر.س\n فاتح الطلب\n@موظف-5\n الأدلة المتوفرة\n•  صور للمشكلة\n المطالبة (كما كتبتها)\nالكنب ٥٤٦٧\nالكرت ٥٠\nارفعوا الصور والفواتير والسكرينات هنا بالروم 📎"
+   ]
+  },
+  {
+   "id": "1832761",
+   "at": "2026-09-16T15:05:56+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 8,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4394022",
+   "at": "2026-09-16T15:06:27+03:00",
+   "who": "bot",
+   "text": " لقيت الحجز في Hostaway: الضيف «الضيف» · شقة 11B Royal · من 2026-09-15 إلى 2026-09-16 · القناة: airbnbOfficial ·  باقي 14 يوم على مهلة AirCover",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "1071673",
+   "at": "2026-09-16T15:06:28+03:00",
+   "who": "bot",
+   "text": " النسخة الإنجليزية — انسخها كاملة للباك أوفيس:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "0422204",
+   "at": "2026-09-16T15:06:28+03:00",
+   "who": "bot",
+   "text": "RR TICKET — #055\n\nReservation code: HMXXXX\nGuest: «الضيف»\nUnit: 11B Royal\nStay: 2026-09-15 → 2026-09-16 (airbnbOfficial)\nDate issue discovered: Not provided\nIssue type: Damage to property\n\nWHAT HAPPENED\n(Automatic translation unavailable — original Arabic report below)\nحرق في السجاد والكنب وفقدان بطاقة الدخول\n\nITEMIZED CLAIM (SAR)\n\n(as written by the team, Arabic)\nالكنب ٥٤٦٧\nالكرت ٥٠\n\nTOTAL: 5,517 SAR\n\nEVIDENCE AVAILABLE\n\n- Photos of the issue\n\nREQUESTED ACTION\nReimbursement of 5,517 SAR via the booking channel's resolution process (Damage to property).\n\nFILING WINDOW\nCheckout was 2026-09-16 —",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "5420275",
+   "at": "2026-09-16T15:06:28+03:00",
+   "who": "bot",
+   "text": " الترجمة الآلية تعطلت فحطيت النص العربي داخل القالب — اضغطوا  إعادة توليد الإنجليزي بعد شوي.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "8535246",
+   "at": "2026-09-16T15:08:34+03:00",
+   "who": "موظف-5",
+   "text": "sofa invoice",
+   "media": 3,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "2418627",
+   "at": "2026-09-16T15:11:08+03:00",
+   "who": "موظف-5",
+   "text": "carpet invoice",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4402878",
+   "at": "2026-09-16T17:24:47+03:00",
+   "who": "Sam",
+   "text": "where is the photo of the access card before check-in, can i have plase @موظف-5 ?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "5138339",
+   "at": "2026-09-16T17:31:51+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "45023610",
+   "at": "2026-09-16T17:37:38+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "15424311",
+   "at": "2026-09-16T17:39:36+03:00",
+   "who": "موظف-5",
+   "text": "Carpet 417.39\nSofa 5,467\nAccess card 50\nTotal:5.934.39",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "30395312",
+   "at": "2026-09-16T17:42:45+03:00",
+   "who": "Sam",
+   "text": "where's the invoince for  access crd @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "48746213",
+   "at": "2026-09-16T17:54:50+03:00",
+   "who": "موظف-5",
+   "text": "we dont have",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "95145014",
+   "at": "2026-09-16T18:03:39+03:00",
+   "who": "Sam",
+   "text": "noted on this, thank you",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "43056915",
+   "at": "2026-09-16T18:10:50+03:00",
+   "who": "موظف-5",
+   "text": "welcome",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "73763316",
+   "at": "2026-09-16T18:12:04+03:00",
+   "who": "Sam",
+   "text": "sir @موظف-5 do we have another photo or angle of the sofa, or thats the only damaged part",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "77664217",
+   "at": "2026-09-16T18:14:36+03:00",
+   "who": "موظف-5",
+   "text": "burn and dirty",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "65840118",
+   "at": "2026-09-16T18:15:46+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "95177019",
+   "at": "2026-09-18T09:00:39+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "66108920",
+   "at": "2026-09-20T22:40:46+03:00",
+   "who": "Sam",
+   "text": "carpet invoice",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "30907121",
+   "at": "2026-09-20T22:40:57+03:00",
+   "who": "Sam",
+   "text": "and any other photos?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "03728622",
+   "at": "2026-09-20T22:41:27+03:00",
+   "who": "Sam",
+   "text": "of sofa and carpet, airbnb is asking",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "33336423",
+   "at": "2026-09-21T16:59:22+03:00",
+   "who": "موظف-2",
+   "text": "hi sam",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "45200024",
+   "at": "2026-09-21T16:59:59+03:00",
+   "who": "موظف-2",
+   "text": "I will contact the person in charge to get the invoice.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "61420925",
+   "at": "2026-09-21T17:00:23+03:00",
+   "who": "Sam",
+   "text": "Thank you",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "92341226",
+   "at": "2026-09-21T17:01:11+03:00",
+   "who": "موظف-2",
+   "text": "welcome",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "16262227",
+   "at": "2026-09-21T17:05:16+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 3,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "27877228",
+   "at": "2026-09-21T17:06:17+03:00",
+   "who": "موظف-5",
+   "text": "This is PDF file for the bill",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "98708529",
+   "at": "2026-09-21T17:08:29+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 6,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "70199930",
+   "at": "2026-09-21T17:08:48+03:00",
+   "who": "موظف-5",
+   "text": "This is all what we have for sofa and carpet",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "91021831",
+   "at": "2026-09-23T19:39:30+03:00",
+   "who": "Sam",
+   "text": "hello @موظف-5 do we have the phone number",
+   "media": 2,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "18709932",
+   "at": "2026-09-23T21:18:19+03:00",
+   "who": "Sam",
+   "text": "sir @موظف-2 do we have phone number? they wanting to call the company",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "79727933",
+   "at": "2026-09-23T21:18:53+03:00",
+   "who": "موظف-5",
+   "text": "Which company ?",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "38715834",
+   "at": "2026-09-23T21:22:22+03:00",
+   "who": "Sam",
+   "text": "Arya Carpet",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "68377835",
+   "at": "2026-09-23T21:24:14+03:00",
+   "who": "موظف-5",
+   "text": "I will check naw",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "71858336",
+   "at": "2026-09-23T21:35:15+03:00",
+   "who": "موظف-5",
+   "text": "I contacted the owner directly, and he will look for it and send it to me.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "21684037",
+   "at": "2026-09-23T21:42:00+03:00",
+   "who": "Sam",
+   "text": "thanks and airbnb might call them, so, better to give heads up too.",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "26573638",
+   "at": "2026-09-23T21:42:05+03:00",
+   "who": "Sam",
+   "text": "thank you @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "15590339",
+   "at": "2026-09-24T15:56:51+03:00",
+   "who": "Sam",
+   "text": "Hello, do we have update @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "52312340",
+   "at": "2026-09-24T16:34:28+03:00",
+   "who": "موظف-5",
+   "text": "not yet",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "05793041",
+   "at": "2026-09-24T17:21:21+03:00",
+   "who": "Sam",
+   "text": "thanks, if we can follow up as airbnb is following up, thank you Miss @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "86600542",
+   "at": "2026-09-24T17:32:58+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 3,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "01113443",
+   "at": "2026-09-24T17:33:33+03:00",
+   "who": "موظف-5",
+   "text": "Find it",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "18756044",
+   "at": "2026-09-24T17:38:23+03:00",
+   "who": "موظف-5",
+   "text": "Just received now from the owner",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "44617645",
+   "at": "2026-09-24T17:42:26+03:00",
+   "who": "Sam",
+   "text": "Miss @موظف-5 is that same as this , the one we originally submitted?",
+   "media": 2,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "76425846",
+   "at": "2026-09-24T17:45:05+03:00",
+   "who": "Sam",
+   "text": "they just looking for a contact details or website of ary",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "37988847",
+   "at": "2026-09-24T17:45:19+03:00",
+   "who": "Sam",
+   "text": "to check the company existence @موظف-5 thank you",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "95608948",
+   "at": "2026-09-24T18:31:22+03:00",
+   "who": "موظف-5",
+   "text": "Ok \nWelcome",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "51091049",
+   "at": "2026-09-24T18:36:27+03:00",
+   "who": "موظف-5",
+   "text": "If you can close the request close it",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "92332750",
+   "at": "2026-09-24T18:57:30+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-5 i mean, my question is actually if the new invoice and this arya invoice are same company?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "63451851",
+   "at": "2026-09-24T19:54:59+03:00",
+   "who": "موظف-5",
+   "text": "yes , same",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "77023752",
+   "at": "2026-09-24T20:01:47+03:00",
+   "who": "Sam",
+   "text": "okay, i then provide that docs to airbnb",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "51627753",
+   "at": "2026-09-26T19:00:17+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-5 @المالك update on this, they only offered 3000SAR but im still negotiating with supervisor and they will provide final update tomorrow (edited)\nSaturday, September 26, 2026 at 7:00 PM",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5",
+    "المالك"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "56544054",
+   "at": "2026-09-27T21:25:56+03:00",
+   "who": "Sam",
+   "text": "Got this for 4000",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "18384955",
+   "at": "2026-09-27T21:26:33+03:00",
+   "who": "Sam",
+   "text": "who handles the repair/ replacement @موظف-5  @موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5",
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "81468956",
+   "at": "2026-09-27T22:41:26+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "16349057",
+   "at": "2026-09-27T22:42:23+03:00",
+   "who": "موظف-5",
+   "text": "Yes sam",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "68716858",
+   "at": "2026-09-27T22:42:28+03:00",
+   "who": "موظف-5",
+   "text": "Its me",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "94090559",
+   "at": "2026-09-27T22:43:13+03:00",
+   "who": "موظف-5",
+   "text": "Sorry for late reply I will check with my boss tomorrow",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "21079460",
+   "at": "2026-09-28T00:08:50+03:00",
+   "who": "Sam",
+   "text": "Thank you Miss @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "18527961",
+   "at": "2026-09-28T05:32:20+03:00",
+   "who": "Sam",
+   "text": "Hi miss was it ouja or the owner for the repair and replacement?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "77593462",
+   "at": "2026-09-29T18:27:38+03:00",
+   "who": "Sam",
+   "text": "Hi Miss  @موظف-5  was it ouja or the owner for the repair and replacement?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "33684063",
+   "at": "2026-10-02T09:28:30+03:00",
+   "who": "موظف-5",
+   "text": "hi sam .. yes ouja",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "95645464",
+   "at": "2026-10-03T22:52:53+03:00",
+   "who": "bot",
+   "text": "@موظف-5 — رسالة المالك جاهزة ",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "embeds": [
+    " ملخص إغلاق RR #055\n طالبنا\n5,517 ر.س\n استلمنا\n4,024.35 ر.س\n النتيجة\n أقل من المطلوب\n المالك\nموظف-4 الحساوي\n جواله\nغير مسجّل\n مين دفع الإصلاح\n عوجا (على حسابنا)\n سبب النقص/الرفض\nPrice approved base on the published market price\n مرجع القضية\nCLSF-RES-1\nسجّلها sam271989 · نسخة 1"
+   ]
+  },
+  {
+   "id": "36686665",
+   "at": "2026-10-03T22:52:53+03:00",
+   "who": "bot",
+   "text": " انسخ هذا النص كامل وأرسله للمالك على واتساب:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "47041466",
+   "at": "2026-10-03T22:52:53+03:00",
+   "who": "bot",
+   "text": "السلام عليكم *موظف-4 الحساوي* 👋\n\nتحديث عن حادثة صارت في شقة *11B Royal*.\n\n*الحجز:* «الضيف» · من 15/09/2026 إلى 16/09/2026\n\n*وش صار:* تبيّن وجود حرق في السجاد والكنبة، إضافةً إلى فقدان بطاقة الدخول.\n\n*الأضرار:*\n• الكنب ٥٤٦٧\n• الكرت ٥٠\n\n*طالبنا Airbnb بـ:* 5,517 ر.س\n*اللي استلمناه:* 4,024.35 ر.س\n*الفرق:* 1,492.65 ر.س\n*سبب Airbnb:* تمت الموافقة على المبلغ بناءً على أسعار السوق المعتمدة والمنشورة.\n\nالإصلاح كان على حساب عوجا، والمبلغ المسترد يعوّض اللي صرفناه.\n\n*مرجع القضية:* CLSF-RES-1\n\nالصور والتفاصيل كاملة عندنا — نرسلها لك إذا تحب.\n\nتحياتنا — فريق عوجا 🏡",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "83925667",
+   "at": "2026-10-03T22:52:54+03:00",
+   "who": "bot",
+   "text": " النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».\n الطلب ما ينقفل إلا من المالك.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "09392068",
+   "at": "2026-10-04T23:37:28+03:00",
+   "who": "bot",
+   "text": " ملخص إغلاق RR #55 صار له 25 ساعة ينتظر الاعتماد — راجعه واضغط « اعتمد وأقفل».",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  }
+ ],
+ "presses": []
+}

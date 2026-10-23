@@ -60,8 +60,14 @@ def active(name):
     return switch(name) and not switch("force_off")
 
 
+# The history study's numbers (docs/rrdesk/history_study.md §Calibration, 2026-10-24): p60 of
+# 234 first replies = 90.6 working minutes → 90; p60 of 218 deliveries = 115.5 → 2 h → the 4 h
+# floor. Urgent stays 30 min / 3 h by rule. The dashboard settings override these.
+CALIBRATED_SLA = {"resp_min": 90, "deliv_min": 240, "urg_resp_min": 30, "urg_deliv_min": 180}
+
+
 def sla_cfg():
-    out = {}
+    out = dict(CALIBRATED_SLA)
     for k in engine.DEFAULT_SLA:
         v = db.setting("sla:" + k)
         if v is not None:
@@ -69,7 +75,7 @@ def sla_cfg():
     return engine.sla(out)
 
 
-DEFAULT_SAM_IDS = ()        # filled from the history study when it yields an id
+DEFAULT_SAM_IDS = ("1494059651032158409",)   # Sam1989 — found by the 2026-10-24 history study
 
 
 def sam_ids():
@@ -257,6 +263,18 @@ def on_message(m):
     except Exception as e:
         print(LOG, "translate hook failed:", e)
         db.log("error", channel_id=room_id, message_id=m["id"], detail={"where": "translate", "e": str(e)})
+    # --- Sam nudging an earlier ask: logged on every open request in the room (KPI + timeline) ---
+    if sam:
+        try:
+            from . import study as _study
+            if _study.is_followup(m.get("text")):
+                for r in db.live_requests(room_id):
+                    if r["state"] in engine.LIVE:
+                        db.log("sam_followup", r["id"], room_id, m["id"], "Sam",
+                               {"text": (m.get("text") or "")[:120]})
+                rep["followup"] = True
+        except Exception as e:
+            print(LOG, "follow-up hook failed:", e)
     # --- request half (Sam only) ---
     if sam and active("requests"):
         try:
@@ -501,9 +519,23 @@ def _maybe_request(room_id, rec, m, at, classify, rep):
         return
     if (c.get("confidence") or 0) < threshold():
         return
+    if _reask(room_id, c, m["id"], m.get("text")):
+        rep["reask"] = True
+        return
     req, created = open_request(room_id, rec, m["id"], m["channel_id"], at, engine.PATH_DETECTED,
                                 m.get("text") or "", c, m)
     rep["request"] = req["id"] if req else None
+
+
+def _reask(room_id, c, message_id, text):
+    """Sam asked again for what an open request already asks → a re-ask event on THAT request
+    (KPI + timeline + the card's owner pinged again), never a second request."""
+    live = [(r["id"], r["asks"], r["state"]) for r in db.live_requests(room_id)]
+    rid = engine.reask_of(c.get("asks"), live)
+    if not rid:
+        return None
+    db.log("sam_reask", rid, room_id, message_id, "Sam", {"text": (text or "")[:160]})
+    return rid
 
 
 def _enrich(rec):
@@ -805,6 +837,9 @@ def _press_translation(kind, message_id, did, name, admin, now):
     room_id, rec = hit
     src_at = db.parse(tr.get("created_at")) or now
     c = dict(tr.get("classify") or {})
+    again = _reask(room_id, c, tr["source_message_id"], c.get("summary_en"))
+    if again:
+        return True, "Already tracked as request #%d — logged as a follow-up." % again
     req, _created = open_request(room_id, rec, tr["source_message_id"], tr["channel_id"], src_at,
                                  engine.PATH_CONFIRMED, c.get("summary_en") or "", c,
                                  db.loads(db.setting("msgctx:" + tr["source_message_id"]), {}) or {})

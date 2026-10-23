@@ -1,0 +1,181 @@
+{
+ "name": "rr-047",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 47,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": "موظف-1"
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-1": "team"
+ },
+ "messages": [
+  {
+   "id": "1083530",
+   "at": "2026-09-11T14:39:16+03:00",
+   "who": "bot",
+   "text": "@موظف-1 فتح طلب تعويض جديد",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "embeds": [
+    " طلب تعويض RR #047\nهذا تعويض سابق وصلنا احتاج رساله للمالك\n رقم الحجز\nHMXXXX\n النوع\n أخرى\n تاريخ الاكتشاف\n—\n المبلغ المطلوب\n3,722 ر.س\n فاتح الطلب\n@موظف-1\n الأدلة المتوفرة\n— (حدّدوها لاحقاً)\n المطالبة (كما كتبتها)\n.\nارفعوا الصور والفواتير والسكرينات هنا بالروم 📎"
+   ]
+  },
+  {
+   "id": "8595431",
+   "at": "2026-09-11T14:42:54+03:00",
+   "who": "bot",
+   "text": " لقيت الحجز في Hostaway: الضيف «الضيف» · شقة 11B Royal · من 2026-06-05 إلى 2026-06-06 · القناة: airbnbOfficial ·  مهلة AirCover خلصت!",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "7409472",
+   "at": "2026-09-11T14:42:54+03:00",
+   "who": "bot",
+   "text": " النسخة الإنجليزية — انسخها كاملة للباك أوفيس:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4629003",
+   "at": "2026-09-11T14:42:55+03:00",
+   "who": "bot",
+   "text": "RR TICKET — #047\n\nReservation code: HMXXXX\nGuest: «الضيف»\nUnit: 11B Royal\nStay: 2026-06-05 → 2026-06-06 (airbnbOfficial)\nDate issue discovered: Not provided\nIssue type: Other\n\nWHAT HAPPENED\nThis claim relates to reservation HMXXXX for guest «الضيف» in unit 11B Royal, with a checkout date of June 6, 2026. According to the operations team, this is a previously received compensation amount for which a formal letter addressed to the property owner is required.\n\nITEMIZED CLAIM (SAR)\n\n(as written by the team, Arabic)\n.\n\nTOTAL: 3,722 SAR\n\nEVIDENCE AVAILABLE\n\n- Not specified (evidence will be attached",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "5082444",
+   "at": "2026-09-11T14:43:22+03:00",
+   "who": "موظف-1",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "1583215",
+   "at": "2026-09-11T19:44:28+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-1 how can I help on thi?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "8180436",
+   "at": "2026-09-11T19:51:03+03:00",
+   "who": "موظف-1",
+   "text": "Please create a message to send to the owner.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "5940327",
+   "at": "2026-09-11T20:42:20+03:00",
+   "who": "Sam",
+   "text": "like the report for closing and all these repairs are done by  Ouja @موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "6107238",
+   "at": "2026-09-11T20:44:33+03:00",
+   "who": "موظف-1",
+   "text": "By the owner.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "7060369",
+   "at": "2026-09-11T20:53:52+03:00",
+   "who": "bot",
+   "text": "@موظف-1 — رسالة المالك جاهزة ",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "embeds": [
+    " ملخص إغلاق RR #047\n طالبنا\n3,722 ر.س\n استلمنا\n3,722 ر.س\n النتيجة\n كامل المبلغ\n المالك\nموظف-4 الحساوي\n جواله\nغير مسجّل\n مين دفع الإصلاح\n المالك (على حسابه)\n مرجع القضية\nCLSF-RES-1\nسجّلها sam271989 · نسخة 1"
+   ]
+  },
+  {
+   "id": "61632310",
+   "at": "2026-09-11T20:53:53+03:00",
+   "who": "bot",
+   "text": " انسخ هذا النص كامل وأرسله للمالك على واتساب:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "35444711",
+   "at": "2026-09-11T20:53:53+03:00",
+   "who": "bot",
+   "text": "السلام عليكم *موظف-4 الحساوي* 👋\n\nتحديث عن حادثة صارت في شقة *11B Royal*.\n\n*الحجز:* «الضيف» · من 05/06/2026 إلى 06/06/2026\n\n*وش صار:* وصلنا تعويض سابق يخص شقتك ونودّ إطلاعك عليه.\n\n*الأضرار:*\n• .\n\n*طالبنا Airbnb بـ:* 3,722 ر.س\n*اللي استلمناه:* 3,722 ر.س ✅ (كامل المبلغ)\n\nالإصلاح كان على حسابك، والمبلغ المسترد من نصيبك.\n\n*مرجع القضية:* CLSF-RES-1\n\nتحياتنا — فريق عوجا 🏡",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "15126912",
+   "at": "2026-09-11T20:53:53+03:00",
+   "who": "bot",
+   "text": " النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».\n الطلب ما ينقفل إلا من المالك.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "61528413",
+   "at": "2026-09-11T21:06:43+03:00",
+   "who": "bot",
+   "text": " النص جاهز للنسخ. بعد ما ترسله للمالك اضغط « أرسلتها للمالك».  الطلب ما ينقفل إلا من المالك.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "05847214",
+   "at": "2026-09-12T21:11:55+03:00",
+   "who": "bot",
+   "text": " ملخص إغلاق RR #47 صار له 24 ساعة ينتظر الاعتماد — راجعه واضغط « اعتمد وأقفل».",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  }
+ ],
+ "presses": []
+}

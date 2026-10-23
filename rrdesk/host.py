@@ -28,7 +28,7 @@ class _Host:
     discord = None           # the discord module
     guild_id = None          # int
     is_admin = None          # (member) -> bool   bot.py's _can_delete_channels
-    rr_categories = None     # (guild) -> [category]  RR family + overflow + «📦 أرشيف N»
+    rr_category_name = "RR"  # where /rrdesk-setup opens the board room
 
     # --- RR tickets (bot.py owns discord_tickets.json) ---
     rr_record = None         # (channel_id) -> ticket dict | None   (kind == 'rr' only)

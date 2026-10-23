@@ -1,0 +1,1026 @@
+{
+ "name": "rr-074",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 74,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": "موظف-5"
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-5": "team",
+  "موظف-1": "team",
+  "المالك": "team"
+ },
+ "messages": [
+  {
+   "id": "4618430",
+   "at": "2026-10-15T18:53:30+03:00",
+   "who": "bot",
+   "text": "@موظف-5 فتح طلب تعويض جديد",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "embeds": [
+    " طلب تعويض RR #074\nحروق وكسر مزهريه زجاجيه وبقع قهوة وعصير عالكنب والفرشة\n رقم الحجز\nHMXXXX\n النوع\n تلفيات بالشقة أو الأثاث\n تاريخ الاكتشاف\n—\n المبلغ المطلوب\n6,134 ر.س\n فاتح الطلب\n@موظف-5\n الأدلة المتوفرة\n— (حدّدوها لاحقاً)\n المطالبة (كما كتبتها)\n750 ديب كلين\n2,396طاولة تزيين\n2,988 كومدينه\nارفعوا الصور والفواتير والسكرينات هنا بالروم 📎"
+   ]
+  },
+  {
+   "id": "7067991",
+   "at": "2026-10-15T18:53:31+03:00",
+   "who": "bot",
+   "text": "bot\n pinned a message to this channel. See all pinned messages.\n — \n10/15/26, 6:53 PM\nThursday, October 15, 2026 at 6:53 PM",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "5057132",
+   "at": "2026-10-15T18:54:58+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 6,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "6844943",
+   "at": "2026-10-15T18:55:56+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "2379754",
+   "at": "2026-10-15T18:56:54+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "7548215",
+   "at": "2026-10-15T18:57:47+03:00",
+   "who": "bot",
+   "text": " لقيت الحجز في Hostaway: الضيف «الضيف» · شقة DAMAC Towers · من 2026-09-30 إلى 2026-10-02 · القناة: airbnbOfficial ·  باقي 1 يوم على مهلة AirCover",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "7522576",
+   "at": "2026-10-15T18:57:48+03:00",
+   "who": "bot",
+   "text": " النسخة الإنجليزية — انسخها كاملة للباك أوفيس:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "6985607",
+   "at": "2026-10-15T18:57:48+03:00",
+   "who": "bot",
+   "text": "RR TICKET — #074\n\nReservation code: HMXXXX\nGuest: «الضيف»\nUnit: DAMAC Towers\nStay: 2026-09-30 → 2026-10-02 (airbnbOfficial)\nDate issue discovered: Not provided\nIssue type: Damage to property\n\nWHAT HAPPENED\nFollowing the checkout of guest Dr. MD «الضيف» (Reservation: HMXXXX) from the DAMAC Towers unit on October 2, 2026, the operations team discovered multiple instances of damage to the property. The sofa and mattress were found to have burn marks as well as stains from coffee and juice, and a glass vase was found broken.\n\nITEMIZED CLAIM (SAR)\n\nItem | Qty | Description | Cost (SAR)\nDeep Cleanin",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "0326518",
+   "at": "2026-10-15T19:01:28+03:00",
+   "who": "Sam",
+   "text": "Can you also shasre the before check-in photo of the table and dresser and invoice s",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "6801599",
+   "at": "2026-10-15T19:02:03+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "17465510",
+   "at": "2026-10-15T19:02:16+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 6,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "80406411",
+   "at": "2026-10-15T22:05:21+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-5 i saw here that check-out was last oct. 2, we need to file it by tomorrow before 11:00 AM or tonnight, can i have the invoices for each?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "25440512",
+   "at": "2026-10-15T22:05:50+03:00",
+   "who": "Sam",
+   "text": "we cant submit a claim with just photos",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "19526313",
+   "at": "2026-10-15T22:05:56+03:00",
+   "who": "Sam",
+   "text": "deep cleaning invoices",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "20259314",
+   "at": "2026-10-15T22:06:33+03:00",
+   "who": "Sam",
+   "text": "and complete invoices for this, please?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "12789215",
+   "at": "2026-10-15T22:07:22+03:00",
+   "who": "Sam",
+   "text": "sir @المالك need access please",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "المالك"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "98342616",
+   "at": "2026-10-15T22:07:30+03:00",
+   "who": "Sam",
+   "text": "[email]",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "91333317",
+   "at": "2026-10-15T22:11:17+03:00",
+   "who": "Sam",
+   "text": "sir @موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "43581218",
+   "at": "2026-10-15T22:12:03+03:00",
+   "who": "موظف-1",
+   "text": "Ok",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "67244919",
+   "at": "2026-10-15T22:12:17+03:00",
+   "who": "Sam",
+   "text": "this is due tomorrow",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "28951920",
+   "at": "2026-10-15T22:12:51+03:00",
+   "who": "موظف-1",
+   "text": "Ok now",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "78639121",
+   "at": "2026-10-15T22:18:42+03:00",
+   "who": "Sam",
+   "text": "i need the invoices on this, please @موظف-5 @موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5",
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "77602422",
+   "at": "2026-10-15T22:23:13+03:00",
+   "who": "Sam",
+   "text": "@موظف-5 photo of the table that shows the damaged",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "47898723",
+   "at": "2026-10-15T22:29:55+03:00",
+   "who": "Sam",
+   "text": "dresser 2988/3 = 996 based on the report only 1 is affected should be 996 not 2988",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "24578124",
+   "at": "2026-10-15T22:32:12+03:00",
+   "who": "Sam",
+   "text": "i will someone it now but need to have the invoices",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "83775125",
+   "at": "2026-10-15T22:37:27+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "76753026",
+   "at": "2026-10-15T22:49:55+03:00",
+   "who": "موظف-5",
+   "text": "I will send it to you deep clean invoice (edited)\nThursday, October 15, 2026 at 11:24 PM",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "18428327",
+   "at": "2026-10-15T22:51:13+03:00",
+   "who": "موظف-5",
+   "text": "And the photo before I sent it already",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "66218028",
+   "at": "2026-10-15T23:24:30+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 3,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "15096029",
+   "at": "2026-10-15T23:25:02+03:00",
+   "who": "موظف-5",
+   "text": "This is the invoice",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "53337430",
+   "at": "2026-10-15T23:25:13+03:00",
+   "who": "موظف-5",
+   "text": "For deep cleaning",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "95791831",
+   "at": "2026-10-15T23:28:41+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "06627032",
+   "at": "2026-10-16T12:16:08+03:00",
+   "who": "موظف-5",
+   "text": "dresser 2988/3 = 996 based on the report only 1 is affected should be 996 not 2988",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "35902133",
+   "at": "2026-10-22T09:33:57+03:00",
+   "who": "موظف-5",
+   "text": "Any update? @Sam",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "Sam"
+   ]
+  },
+  {
+   "id": "71962334",
+   "at": "2026-10-22T09:34:31+03:00",
+   "who": "Sam",
+   "text": "I will send an update here @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "77659735",
+   "at": "2026-10-22T09:34:50+03:00",
+   "who": "Sam",
+   "text": "Once I received a decision from airbnb",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "30188736",
+   "at": "2026-10-22T09:35:16+03:00",
+   "who": "Sam",
+   "text": "Like on the other cases",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "87450737",
+   "at": "2026-10-22T09:36:27+03:00",
+   "who": "Sam",
+   "text": "@موظف-5 sometimes the entire process takes 14days just , don't worry I'm on top of everything",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "47591538",
+   "at": "2026-10-22T09:37:23+03:00",
+   "who": "موظف-5",
+   "text": "Ok ok thank you so much",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "64928239",
+   "at": "2026-10-23T00:40:58+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-5 do we have closer view of the damage on the table?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "11754540",
+   "at": "2026-10-23T01:08:34+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-5 do we have photo or closer photo of the damaged table?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "83096341",
+   "at": "2026-10-23T04:28:25+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "89551942",
+   "at": "2026-10-23T05:14:07+03:00",
+   "who": "Sam",
+   "text": "is that table or commode?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "86572143",
+   "at": "2026-10-23T05:15:32+03:00",
+   "who": "Sam",
+   "text": "i have that approved",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "93026044",
+   "at": "2026-10-23T05:15:39+03:00",
+   "who": "Sam",
+   "text": "but i ned the table",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "30137845",
+   "at": "2026-10-23T05:15:59+03:00",
+   "who": "Sam",
+   "text": "where's the damaged table @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "04030346",
+   "at": "2026-10-23T05:59:01+03:00",
+   "who": "موظف-5",
+   "text": "It’s burn not damage",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "20073747",
+   "at": "2026-10-23T05:59:31+03:00",
+   "who": "Sam",
+   "text": "Any photo that shows that?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "49789348",
+   "at": "2026-10-23T05:59:45+03:00",
+   "who": "Sam",
+   "text": "I zoom in and out but I can't find",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "96844949",
+   "at": "2026-10-23T06:00:32+03:00",
+   "who": "موظف-5",
+   "text": "Isn't the smoking obvious in the picture?",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "23556150",
+   "at": "2026-10-23T06:01:38+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 4,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "17912251",
+   "at": "2026-10-23T06:02:55+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "97837552",
+   "at": "2026-10-23T06:12:41+03:00",
+   "who": "Sam",
+   "text": "@موظف-5 please focus on the table",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "17882353",
+   "at": "2026-10-23T06:12:50+03:00",
+   "who": "Sam",
+   "text": "you listed that table is broken",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "73907654",
+   "at": "2026-10-23T06:12:59+03:00",
+   "who": "Sam",
+   "text": "where is the photo of the broken table (edited)\nFriday, October 23, 2026 at 7:05 AM",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "07933155",
+   "at": "2026-10-23T06:18:14+03:00",
+   "who": "Sam",
+   "text": "i have that additioal cleaning approved as well as that commone , just need to have the photo of broken/ burnt table (edited)\nFriday, October 23, 2026 at 6:22 AM",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "10283456",
+   "at": "2026-10-23T06:18:17+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "48795457",
+   "at": "2026-10-23T06:18:30+03:00",
+   "who": "Sam",
+   "text": "those that you submitted , didint show broken table",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "50505958",
+   "at": "2026-10-23T06:18:45+03:00",
+   "who": "Sam",
+   "text": "do you have photo or none @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "13096459",
+   "at": "2026-10-23T06:20:07+03:00",
+   "who": "Sam",
+   "text": "dresser approved, cleaning approved, where is the photo of the table?",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "15152960",
+   "at": "2026-10-23T12:29:37+03:00",
+   "who": "Sam",
+   "text": "@موظف-5 is this something that can be provided or can I close this @موظف-5",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5",
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "78844961",
+   "at": "2026-10-23T15:43:18+03:00",
+   "who": "موظف-5",
+   "text": "ok",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "06837962",
+   "at": "2026-10-23T19:30:54+03:00",
+   "who": "Sam",
+   "text": "i mean @موظف-5 can you still provide or i can ask them to proceed on processing without the one for table",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "48577663",
+   "at": "2026-10-23T21:29:51+03:00",
+   "who": "Sam",
+   "text": "full payout for the dresser and cleaning,",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "13761464",
+   "at": "2026-10-23T21:30:22+03:00",
+   "who": "Sam",
+   "text": "we can get back to them once photo for the table is avaailable",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "00336565",
+   "at": "2026-10-23T21:30:31+03:00",
+   "who": "المالك",
+   "text": "@موظف-5 \nصوره الطاوله",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ]
+  },
+  {
+   "id": "38803466",
+   "at": "2026-10-23T21:32:53+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "81427167",
+   "at": "2026-10-23T22:54:39+03:00",
+   "who": "موظف-5",
+   "text": "ارسلتها",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "14529768",
+   "at": "2026-10-23T23:00:07+03:00",
+   "who": "Sam",
+   "text": "do you have closer view of the damage table @موظف-5 ?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "53581669",
+   "at": "2026-10-23T23:00:41+03:00",
+   "who": "Sam",
+   "text": "you sent this, but no damaged captured",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "82439270",
+   "at": "2026-10-23T23:00:56+03:00",
+   "who": "Sam",
+   "text": "this is paid already. all good",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "79662271",
+   "at": "2026-10-23T23:44:55+03:00",
+   "who": "موظف-5",
+   "text": "thank you so much",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "97800172",
+   "at": "2026-10-23T23:45:16+03:00",
+   "who": "Sam",
+   "text": "i mean, the dresser and the cleaning",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "10108973",
+   "at": "2026-10-23T23:45:33+03:00",
+   "who": "Sam",
+   "text": "but table is not as we are waitng for photos",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "60005374",
+   "at": "2026-10-23T23:57:38+03:00",
+   "who": "موظف-5",
+   "text": "",
+   "media": 4,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "15418875",
+   "at": "2026-10-23T23:57:56+03:00",
+   "who": "موظف-5",
+   "text": "This is the photo what we have",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "51792976",
+   "at": "2026-10-24T00:06:10+03:00",
+   "who": "Sam",
+   "text": "so, table is not damaged @موظف-5 ?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-5"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  }
+ ],
+ "presses": []
+}

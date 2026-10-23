@@ -63,6 +63,10 @@ def setup(testcase, now=None, ticket=None):
     OPS_HOST.public_base = lambda: "https://ouja.test"
     OPS_HOST.discord_ids = lambda: {e["name"]: e["did"] for e in EMPLOYEES}
     db.set_setting("sam_ids", SAM)
+    # the tests read the brief's round numbers (60 min / 8 h); the shipped defaults are the
+    # calibrated ones and are locked separately in test_rrdesk_flow.Defaults
+    db.set_setting("sla:resp_min", "60")
+    db.set_setting("sla:deliv_min", "480")
     testcase.clock, testcase.state, testcase.tmp = clock, state, tmp
     testcase._orig_call = translate.call_model
     testcase.addCleanup(lambda: setattr(translate, "call_model", testcase._orig_call))

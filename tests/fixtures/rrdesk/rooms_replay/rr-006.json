@@ -1,0 +1,540 @@
+{
+ "name": "rr-006",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 6,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": "موظف-4"
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-3": "team",
+  "موظف-4": "team",
+  "موظف-1": "team"
+ },
+ "messages": [
+  {
+   "id": "3191690",
+   "at": "2026-06-25T14:36:53+03:00",
+   "who": "bot",
+   "text": "@موظف-4 فتح طلب تعويض جديد",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ],
+   "embeds": [
+    " طلب تعويض RR #006\nالضيف حجز ولا دخل الشقه والغى الحجز وبلغه احد أفراد التيم راح يرفع له تيكت استرجاع بالكامل\n رقم الحجز\nОНХ8rWZIW\n النوع\n أخرى\n تاريخ الاكتشاف\n—\n المبلغ المطلوب\nمبلغ الحجز كامل\n فاتح الطلب\n@موظف-4\n الأدلة المتوفرة\n•  صور للمشكلة\n المطالبة (كما كتبتها)\nمبلغ الحجز كامل\nارفعوا الصور والفواتير والسكرينات هنا بالروم 📎"
+   ]
+  },
+  {
+   "id": "4000001",
+   "at": "2026-06-25T14:38:21+03:00",
+   "who": "bot",
+   "text": " ما لقيت حجز برقم «ОНХ8rWZIW» في Hostaway — تأكدوا من الرقم. النسخة الإنجليزية بتطلع بدون بيانات الحجز.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "8449902",
+   "at": "2026-06-25T14:38:21+03:00",
+   "who": "bot",
+   "text": " النسخة الإنجليزية — انسخها كاملة للباك أوفيس:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "9650853",
+   "at": "2026-06-25T14:38:21+03:00",
+   "who": "bot",
+   "text": "RR TICKET — #006\n\nReservation code: ОНХ8rWZIW\nDate issue discovered: Not provided\nIssue type: Other\n\nWHAT HAPPENED\n(Automatic translation unavailable — original Arabic report below)\nالضيف حجز ولا دخل الشقه والغى الحجز وبلغه احد أفراد التيم راح يرفع له تيكت استرجاع بالكامل\n\nITEMIZED CLAIM (SAR)\n\n(as written by the team, Arabic)\nمبلغ الحجز كامل\n\nTOTAL: مبلغ الحجز كامل\n\nEVIDENCE AVAILABLE\n\n- Photos of the issue\n\nREQUESTED ACTION\nReimbursement of via the booking channel's resolution process (Other).",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4843814",
+   "at": "2026-06-25T14:38:22+03:00",
+   "who": "bot",
+   "text": " الترجمة الآلية تعطلت فحطيت النص العربي داخل القالب — اضغطوا  إعادة توليد الإنجليزي بعد شوي.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "1587225",
+   "at": "2026-06-25T17:09:35+03:00",
+   "who": "Sam",
+   "text": "details for this?",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "0632046",
+   "at": "2026-06-25T18:13:01+03:00",
+   "who": "موظف-3",
+   "text": "@موظف-4",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ]
+  },
+  {
+   "id": "7299847",
+   "at": "2026-06-26T14:22:51+03:00",
+   "who": "موظف-4",
+   "text": "We need to issue a full refund to the guest using the booking number OHX8rWZIW\n\nThe guest did not enter the apartment and cancelled his reservation.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4957218",
+   "at": "2026-06-26T22:00:05+03:00",
+   "who": "Sam",
+   "text": "i only have access to airbnb reseration",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "1795889",
+   "at": "2026-07-01T08:25:19+03:00",
+   "who": "موظف-4",
+   "text": "Yes, I requested a full refund from airbnb for this reservation number .",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "21450610",
+   "at": "2026-07-01T08:27:36+03:00",
+   "who": "موظف-4",
+   "text": "Please mention/tag me whenever you need something from me, so I get notified",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "54260811",
+   "at": "2026-07-01T17:49:12+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-4 this is not an airbnb code - ОНХ8rWZIW",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "28318312",
+   "at": "2026-07-02T13:38:09+03:00",
+   "who": "موظف-1",
+   "text": "@موظف-4",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ]
+  },
+  {
+   "id": "22652713",
+   "at": "2026-07-06T04:52:51+03:00",
+   "who": "موظف-1",
+   "text": "موظف-4 وش رقم الحجز بالله @موظف-4",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ]
+  },
+  {
+   "id": "20210414",
+   "at": "2026-07-06T05:01:33+03:00",
+   "who": "موظف-4",
+   "text": "مارديت لاني جالسه احاول اتذكر",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "76549315",
+   "at": "2026-07-06T05:01:44+03:00",
+   "who": "موظف-4",
+   "text": "اذكر اسمه «الضيف» مدري «الضيف»",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "30337016",
+   "at": "2026-07-06T05:02:01+03:00",
+   "who": "موظف-4",
+   "text": "هو مو من طرفي اذكر بس فتحت له",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "41857817",
+   "at": "2026-07-06T05:03:15+03:00",
+   "who": "موظف-4",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "05579118",
+   "at": "2026-07-06T05:03:30+03:00",
+   "who": "موظف-4",
+   "text": "إذا ما خاب ضنّي إن شاء الله",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "32454119",
+   "at": "2026-07-06T05:04:43+03:00",
+   "who": "موظف-4",
+   "text": "I think this is it",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "73673420",
+   "at": "2026-07-06T05:04:49+03:00",
+   "who": "موظف-4",
+   "text": "@Sam",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "Sam"
+   ]
+  },
+  {
+   "id": "14821921",
+   "at": "2026-07-09T17:21:05+03:00",
+   "who": "Sam",
+   "text": "is this a full refund @موظف-4",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-4"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "44255922",
+   "at": "2026-07-09T20:00:48+03:00",
+   "who": "موظف-4",
+   "text": "Yes",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "42822123",
+   "at": "2026-07-09T22:11:40+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "48336824",
+   "at": "2026-08-30T20:28:34+03:00",
+   "who": "موظف-1",
+   "text": "@موظف-3 هذا تكت «الضيف»",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-3"
+   ]
+  },
+  {
+   "id": "63730825",
+   "at": "2026-08-30T20:52:03+03:00",
+   "who": "موظف-3",
+   "text": "What happened",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "01891226",
+   "at": "2026-08-30T20:52:06+03:00",
+   "who": "موظف-3",
+   "text": "@Sam",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "Sam"
+   ]
+  },
+  {
+   "id": "21391927",
+   "at": "2026-08-30T20:52:12+03:00",
+   "who": "موظف-3",
+   "text": "This ticket",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "81750028",
+   "at": "2026-08-30T20:52:26+03:00",
+   "who": "موظف-3",
+   "text": "The client is messaging us on Airbnb",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "96385029",
+   "at": "2026-08-30T21:03:47+03:00",
+   "who": "Sam",
+   "text": "Sorry, i wasnt aware that access was provided, as i dont have on first attempt",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "02025030",
+   "at": "2026-08-30T21:03:50+03:00",
+   "who": "Sam",
+   "text": "on it",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "50126931",
+   "at": "2026-08-30T21:05:25+03:00",
+   "who": "Sam",
+   "text": "I remember this",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "76543232",
+   "at": "2026-08-30T21:05:42+03:00",
+   "who": "Sam",
+   "text": "i trid this but since its way back on april",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "40984433",
+   "at": "2026-08-30T21:05:52+03:00",
+   "who": "Sam",
+   "text": "we can no longer send or request money",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "88134034",
+   "at": "2026-08-30T21:06:03+03:00",
+   "who": "Sam",
+   "text": "let me communicate with airbnb again",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "51970935",
+   "at": "2026-08-30T21:07:33+03:00",
+   "who": "Sam",
+   "text": "@موظف-3 can you confirm sir that this is the right guest?",
+   "media": 2,
+   "voice": false,
+   "mentions": [
+    "موظف-3"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "25247236",
+   "at": "2026-08-30T21:21:44+03:00",
+   "who": "Sam",
+   "text": "sir @موظف-3 im with airbnb now, is that the correct guest?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-3"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "51729737",
+   "at": "2026-08-30T22:00:33+03:00",
+   "who": "موظف-3",
+   "text": "@موظف-3 can you confirm sir that this is the right guest?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-3"
+   ]
+  },
+  {
+   "id": "44813438",
+   "at": "2026-08-30T22:33:19+03:00",
+   "who": "Sam",
+   "text": "done",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "19874839",
+   "at": "2026-08-30T22:33:22+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "13838940",
+   "at": "2026-08-30T22:53:43+03:00",
+   "who": "موظف-3",
+   "text": "The guest says that he didn’t put an email can they text him and help him?",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "26538141",
+   "at": "2026-08-30T23:03:54+03:00",
+   "who": "Sam",
+   "text": "in airbnb",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "04252342",
+   "at": "2026-08-31T00:16:55+03:00",
+   "who": "موظف-3",
+   "text": "Yes",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "16388143",
+   "at": "2026-08-31T00:27:45+03:00",
+   "who": "Sam",
+   "text": "they processed the refund alrady via airbnb sir",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  }
+ ],
+ "presses": []
+}

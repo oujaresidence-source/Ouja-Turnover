@@ -29,9 +29,13 @@ D = datetime.timedelta
 
 
 def sam_asks(tc, mid="s1", text="@Nasser please send the check-in photos", mentions=(F.NASSER,),
-             mode="auto", classify=None, **kw):
+             mode="auto", classify=None, asks=None, **kw):
     db.set_setting("detect_mode", mode)
-    F.fake_model(tc, classify=classify or F.REQ_CLASSIFY)
+    c = dict(classify or F.REQ_CLASSIFY)
+    if asks:
+        c["asks"] = list(asks)
+        text = "%s — %s" % (text, " ".join(asks))     # distinct text: the cache keys on it
+    F.fake_model(tc, classify=c)
     return flow.on_message(F.msg(mid, text, mentions=mentions, **kw))
 
 
@@ -135,23 +139,31 @@ class Requests(unittest.TestCase):
 
     def test_owner_order(self):
         # 3: opener in the calendar
-        r = db.request(sam_asks(self, mid="a", mentions=())["request"])
+        r = db.request(sam_asks(self, mid="a", mentions=(), asks=["photos"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.ASEEL, 3))
         # 2: a role mention → the apartment's responsible person today
-        r = db.request(sam_asks(self, mid="b", mentions=(), role_mentioned=True)["request"])
+        r = db.request(sam_asks(self, mid="b", mentions=(), role_mentioned=True, asks=["video"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.NOURA, 2))
         # 4: opener not in the calendar → responsible
         self.state["rec"]["opener_id"] = "424242"
-        r = db.request(sam_asks(self, mid="c", mentions=())["request"])
+        r = db.request(sam_asks(self, mid="c", mentions=(), asks=["invoice"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"]), (F.NOURA, 4))
         # 5: nobody → the ops lead, flagged unowned
         self.state["resp"] = ("", "", "unknown")
-        r = db.request(sam_asks(self, mid="d", mentions=())["request"])
+        r = db.request(sam_asks(self, mid="d", mentions=(), asks=["receipt"])["request"])
         self.assertEqual((r["owner_did"], r["owner_rule"], r["unowned"]), (F.ASEEL, 5, 1))
         # Sam mentioning himself / the bot is not an owner
         self.state["resp"] = ("نورة", F.NOURA, "owner")
-        r = db.request(sam_asks(self, mid="e", mentions=(F.SAM, F.BOT))["request"])
+        r = db.request(sam_asks(self, mid="e", mentions=(F.SAM, F.BOT), asks=["quote"])["request"])
         self.assertEqual(r["owner_rule"], 4)
+
+    def test_reask_is_logged_not_a_second_request(self):
+        rid = sam_asks(self)["request"]
+        rep = sam_asks(self, mid="s2", text="hello, can i have the before check-in photos?")
+        self.assertTrue(rep.get("reask"))
+        self.assertNotIn("request", rep)
+        self.assertEqual(len(db.recent_requests()), 1)
+        self.assertTrue([e for e in db.events(request_id=rid) if e["kind"] == "sam_reask"])
 
     def test_owner_on_leave_goes_to_coverer(self):
         self.state["off"].add("ناصر")
@@ -354,6 +366,41 @@ class OutboxAndBoard(unittest.TestCase):
         flow._board(self.clock.t)
         b = F.queued("board")[-1]["payload"]
         self.assertEqual(b["message_id"], first)
+
+
+class Defaults(unittest.TestCase):
+    def test_shipped_sla_is_the_calibrated_one(self):
+        F.setup(self)
+        db.set_setting("sla:resp_min", None)
+        db.set_setting("sla:deliv_min", None)
+        self.assertEqual(flow.sla_cfg(), {"resp_min": 90, "deliv_min": 240, "urg_resp_min": 30,
+                                          "urg_deliv_min": 180})
+
+    def test_switch_defaults_are_correct_as_shipped(self):
+        F.setup(self)
+        for k in ("RRDESK_TRANSLATE", "RRDESK_WARN_LIVE", "RRDESK_FORCE_OFF"):
+            os.environ.pop(k, None)
+        self.assertTrue(flow.switch("translate"))
+        self.assertTrue(flow.switch("requests"))
+        self.assertTrue(flow.switch("ladder"))
+        self.assertFalse(flow.switch("warn_live"))       # money is dry-run on deploy
+        self.assertFalse(flow.switch("force_off"))
+        self.assertEqual(flow.detect_mode(), "confirm")
+        os.environ["RRDESK_WARN_LIVE"] = "1"
+        try:
+            self.assertTrue(flow.switch("warn_live"))
+            flow.set_switch("warn_live", False, "t")      # the stored switch wins over env
+            self.assertFalse(flow.switch("warn_live"))
+        finally:
+            os.environ.pop("RRDESK_WARN_LIVE", None)
+
+    def test_sam_follow_up_is_logged_on_the_open_request(self):
+        F.setup(self)
+        rid = sam_asks(self)["request"]
+        F.fake_model(self, classify=dict(F.REQ_CLASSIFY, is_request=False, confidence=0.1))
+        rep = flow.on_message(F.msg("f1", "following up on this @Nasser", mentions=(F.NASSER,)))
+        self.assertTrue(rep.get("followup"))
+        self.assertTrue([e for e in db.events(request_id=rid) if e["kind"] == "sam_followup"])
 
 
 class WhyAndHealth(unittest.TestCase):

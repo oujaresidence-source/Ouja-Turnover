@@ -1,0 +1,324 @@
+{
+ "name": "ticket-70",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 70,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": ""
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-1": "team",
+  "المالك": "team",
+  "موظف-2": "team"
+ },
+ "messages": [
+  {
+   "id": "5811090",
+   "at": "2026-06-03T21:25:46+03:00",
+   "who": "bot",
+   "text": "",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "embeds": [
+    " Thank you for creating a ticket @موظف-1. Please provide all information relevant to your query. Please do not spam, or ping staff directly."
+   ]
+  },
+  {
+   "id": "1899701",
+   "at": "2026-06-03T21:26:03+03:00",
+   "who": "موظف-1",
+   "text": "ارفع لجود ١٣ عن الكنب @موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ]
+  },
+  {
+   "id": "1755372",
+   "at": "2026-06-04T13:26:24+03:00",
+   "who": "المالك",
+   "text": "@موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ]
+  },
+  {
+   "id": "3005853",
+   "at": "2026-06-04T13:38:00+03:00",
+   "who": "موظف-2",
+   "text": "ابي التكت مقفل موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "9731704",
+   "at": "2026-06-04T13:38:06+03:00",
+   "who": "موظف-2",
+   "text": "ولا موجوده بالصور بالقروب",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "4822575",
+   "at": "2026-06-04T13:47:16+03:00",
+   "who": "موظف-2",
+   "text": "@موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ]
+  },
+  {
+   "id": "0962666",
+   "at": "2026-06-04T13:59:09+03:00",
+   "who": "موظف-2",
+   "text": "RR TICKET — [Unit name]\n    •    Reservation code: HMXXXX\n    •    Listing:  Not provided\n    •    Guest name: «الضيف»\n    •    Check-in → Check-out:  Not provided\n    •    Date issue discovered: After guest checkout\n    •    Issue type: Damage\n\nWHAT HAPPENED\n\nAfter the guest checked out, the team discovered burn damage on the mattress during the post-checkout inspection. The damage was not present prior to the reservation and requires replacement of the affected mattress. The replacement cost is 1,100 SAR.\n\nITEMIZED CLAIM (SAR)\n\nItem    Qty    Description    Cost (SAR)\nMattress replacement   ",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "1219727",
+   "at": "2026-06-04T13:59:41+03:00",
+   "who": "موظف-2",
+   "text": "",
+   "media": 12,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "0345448",
+   "at": "2026-06-04T16:07:23+03:00",
+   "who": "Sam",
+   "text": "Kindy share the before check-in photo and invoice",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "5837389",
+   "at": "2026-06-04T16:19:38+03:00",
+   "who": "موظف-2",
+   "text": "After reviewing the prices, it was found that the price is 1800",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "65545410",
+   "at": "2026-06-04T16:19:41+03:00",
+   "who": "موظف-2",
+   "text": "https://www.homecentre.com/sa/en/buy-eddard-3-seater-fabric-sofa/p/RES-1",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "98532111",
+   "at": "2026-06-05T07:09:49+03:00",
+   "who": "Sam",
+   "text": "hello, can i have the before check-in photos? and do we have photos of the damages too - both with dates. thanks",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "57768712",
+   "at": "2026-06-05T18:00:06+03:00",
+   "who": "موظف-1",
+   "text": "@موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ]
+  },
+  {
+   "id": "95150213",
+   "at": "2026-06-06T17:24:35+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-2 @موظف-1 following up on this",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2",
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "33568614",
+   "at": "2026-06-07T17:02:27+03:00",
+   "who": "Sam",
+   "text": "hello",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "24406615",
+   "at": "2026-06-07T17:02:38+03:00",
+   "who": "موظف-2",
+   "text": "Yes @Sam",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "Sam"
+   ]
+  },
+  {
+   "id": "65952216",
+   "at": "2026-06-07T17:02:57+03:00",
+   "who": "موظف-2",
+   "text": "I contacted him yesterday and today, but he still hasn't sent it to me.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "41910217",
+   "at": "2026-06-08T17:36:43+03:00",
+   "who": "Sam",
+   "text": "following up on this",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "76201218",
+   "at": "2026-06-14T06:35:27+03:00",
+   "who": "Sam",
+   "text": "any update on this @موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "81699419",
+   "at": "2026-06-14T06:56:24+03:00",
+   "who": "موظف-1",
+   "text": "",
+   "media": 8,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "91358720",
+   "at": "2026-06-14T18:04:19+03:00",
+   "who": "Sam",
+   "text": "hi @موظف-1 the before check-in?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "other"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "26580221",
+   "at": "2026-06-15T12:56:47+03:00",
+   "who": "موظف-1",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "63263222",
+   "at": "2026-06-15T16:54:40+03:00",
+   "who": "Sam",
+   "text": "thanks",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "26473323",
+   "at": "2026-06-16T17:35:43+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "28069024",
+   "at": "2026-06-24T00:51:11+03:00",
+   "who": "Sam",
+   "text": "This is denied due to insufficient docs, still discussing with them",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  }
+ ],
+ "presses": []
+}

@@ -1,0 +1,276 @@
+{
+ "name": "rr-077",
+ "source": "real RR room, redacted (PDPL) 2026-10-24",
+ "ticket": {
+  "seq": 77,
+  "code": "HMXXXX",
+  "lid": 1,
+  "opener": "موظف-2"
+ },
+ "lead": "موظف-1",
+ "detect_mode": "auto",
+ "people": {
+  "Sam": "sam",
+  "bot": "bot",
+  "موظف-2": "team",
+  "موظف-1": "team"
+ },
+ "messages": [
+  {
+   "id": "1443480",
+   "at": "2026-10-17T16:42:07+03:00",
+   "who": "bot",
+   "text": "@موظف-2 فتح طلب تعويض جديد",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "embeds": [
+    " طلب تعويض RR #077\nبعد خروج الضيف تبين وجود حرق بالسجاده و كرت الموقف غير متواجد بالوحدة\n رقم الحجز\nHMXXXX\n النوع\n تلفيات بالشقة أو الأثاث\n تاريخ الاكتشاف\n7/10\n المبلغ المطلوب\n==\n فاتح الطلب\n@موظف-2\n الأدلة المتوفرة\n— (حدّدوها لاحقاً)\n المطالبة (كما كتبتها)\nسعر السجاد-\nسعر البطاقه ٣٠٠\nارفعوا الصور والفواتير والسكرينات هنا بالروم 📎"
+   ]
+  },
+  {
+   "id": "5362301",
+   "at": "2026-10-17T16:42:07+03:00",
+   "who": "bot",
+   "text": "bot\n pinned a message to this channel. See all pinned messages.\n — \n10/17/26, 4:42 PM\nSaturday, October 17, 2026 at 4:42 PM",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "9637942",
+   "at": "2026-10-17T16:42:12+03:00",
+   "who": "bot",
+   "text": " لقيت الحجز في Hostaway: الضيف «الضيف» · شقة Jood12 · من 2026-10-06 إلى 2026-10-07 · القناة: airbnbOfficial ·  باقي 4 يوم على مهلة AirCover",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "6163673",
+   "at": "2026-10-17T16:42:13+03:00",
+   "who": "bot",
+   "text": " النسخة الإنجليزية — انسخها كاملة للباك أوفيس:",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "3537804",
+   "at": "2026-10-17T16:42:13+03:00",
+   "who": "bot",
+   "text": "RR TICKET — #077\n\nReservation code: HMXXXX\nGuest: «الضيف»\nUnit: Jood12\nStay: 2026-10-06 → 2026-10-07 (airbnbOfficial)\nDate issue discovered: Oct 7, 2026\nIssue type: Damage to property\n\nWHAT HAPPENED\nFollowing the checkout of guest موظف-3 «الضيف» from unit Jood12 on October 7, 2026, a post-stay inspection revealed burn damage to the carpet inside the unit. Additionally, the parking access card assigned to the unit was found to be missing upon the guest's departure.\n\nITEMIZED CLAIM (SAR)\n\nItem | Qty | Description | Cost (SAR)\nCarpet | 1 | Burn damage to carpet discovered after guest checkout | 0",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "3605445",
+   "at": "2026-10-17T16:49:38+03:00",
+   "who": "موظف-2",
+   "text": "",
+   "media": 4,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "0017196",
+   "at": "2026-10-17T17:36:02+03:00",
+   "who": "Sam",
+   "text": "before photo and invoice please",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "invoice"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "0894497",
+   "at": "2026-10-19T08:03:39+03:00",
+   "who": "Sam",
+   "text": "also this @موظف-2 2 days",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "4894278",
+   "at": "2026-10-19T09:18:01+03:00",
+   "who": "موظف-1",
+   "text": "@موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ]
+  },
+  {
+   "id": "2382159",
+   "at": "2026-10-19T14:22:08+03:00",
+   "who": "موظف-2",
+   "text": "715.3+485.3",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "91858410",
+   "at": "2026-10-19T14:22:39+03:00",
+   "who": "موظف-2",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "78458811",
+   "at": "2026-10-19T16:56:38+03:00",
+   "who": "Sam",
+   "text": "@موظف-2 wheres the before chek-in photo",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "photos",
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "28286912",
+   "at": "2026-10-19T16:57:36+03:00",
+   "who": "موظف-2",
+   "text": "I seed WhatsApp",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "10957113",
+   "at": "2026-10-19T16:59:08+03:00",
+   "who": "Sam",
+   "text": "invoice and before of parking card",
+   "media": 0,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "21146314",
+   "at": "2026-10-19T17:00:07+03:00",
+   "who": "موظف-2",
+   "text": "Unfortunately, there is no invoice.",
+   "media": 0,
+   "voice": false,
+   "mentions": []
+  },
+  {
+   "id": "15856915",
+   "at": "2026-10-19T18:25:20+03:00",
+   "who": "Sam",
+   "text": "@موظف-2  what is the 715.3 and 485. 3?",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "45348216",
+   "at": "2026-10-19T18:26:36+03:00",
+   "who": "Sam",
+   "text": "can you clarify @موظف-2 @موظف-1 i need to submit this now you sent 2 screennshots with price",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2",
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": true,
+    "asks": [
+     "info"
+    ],
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "89518617",
+   "at": "2026-10-19T19:10:24+03:00",
+   "who": "Sam",
+   "text": "hello @موظف-2",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-2"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "82947418",
+   "at": "2026-10-19T19:10:27+03:00",
+   "who": "Sam",
+   "text": "@موظف-1",
+   "media": 0,
+   "voice": false,
+   "mentions": [
+    "موظف-1"
+   ],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "74264419",
+   "at": "2026-10-19T22:26:02+03:00",
+   "who": "Sam",
+   "text": "",
+   "media": 2,
+   "voice": false,
+   "mentions": [],
+   "label": {
+    "is_request": false,
+    "asks": [],
+    "confidence": 0.1
+   }
+  }
+ ],
+ "presses": []
+}

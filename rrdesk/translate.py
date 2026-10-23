@@ -206,7 +206,9 @@ SYSTEM = NL.join((
 
 CLASSIFY = (
     "Also decide whether Sam is ASKING the team for something (a request they must act on or "
-    "answer), as opposed to informing, thanking, or chatting. Return these keys too: "
+    "answer), as opposed to informing, thanking, or chatting. A bare ping ('hello', '@name', "
+    "'following up', 'any update?') is NOT a new request: it nudges an earlier one, so return "
+    "is_request false for it. Return these keys too: "
     "is_request (true/false), confidence (0..1, how sure you are), asks (list, any of: photos, "
     "video, invoice, quote, guest_chat, airbnb_screens, ops_report, receipt, info, action, "
     "other), urgent (true only if Sam says it is urgent / now / asap / today deadline), "

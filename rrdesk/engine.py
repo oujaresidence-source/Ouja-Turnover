@@ -143,6 +143,8 @@ def normalize(text):
     out = []
     for c in (text or "").lower():
         c = fold.get(c, c)
+        if not c:
+            continue                          # tatweel «ـ» folds to nothing
         cat = unicodedata.category(c)
         if cat.startswith("L") or cat.startswith("N"):
             out.append(c)
@@ -378,6 +380,21 @@ def period_key(d):
     """The ops period key. 'RR-' keeps it apart from 'wr' (bare week) and 'OC-' (night) —
     the warning id is wn_<employee>_<period_key>, so keys must be unique across kinds."""
     return "RR-" + week_key(d)
+
+
+def reask_of(asks, live):
+    """The open request this NEW detected ask repeats, or None. Sam asking again for the same
+    photos is the clearest sign of being ignored — it must show up as a re-ask on the request
+    that is already late, not as a second request that could cost the owner a second miss.
+    Only FILE asks are compared: two different questions ('info') are two requests.
+    live: [(request_id, asks, state)]."""
+    want = set(asks or ()) & FILE_ASKS
+    if not want:
+        return None
+    for rid, have, state in live or ():
+        if state in LIVE and want & set(have or ()):
+            return rid
+    return None
 
 
 # ------------------------------------------------------------------ who owns it

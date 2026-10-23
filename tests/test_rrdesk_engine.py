@@ -54,6 +54,10 @@ class Language(unittest.TestCase):
         self.assertIsNone(e.phrase_lookup("please send the invoice", "en2ar"))
         self.assertEqual(e.phrase_lookup("roger", "en2ar", {"en2ar": {"roger": "تمام"}}), "تمام")
 
+    def test_tatweel_does_not_crash_and_folds(self):
+        self.assertEqual(e.normalize("تمـــام"), e.normalize("تمام"))
+        self.assertEqual(e.phrase_lookup("تمـام", "ar2en"), "OK.")
+
     def test_cache_key_depends_on_direction_and_glossary(self):
         a = e.cache_key("Send it", "en2ar", 1)
         self.assertEqual(a, e.cache_key("send it!", "en2ar", 1))
@@ -197,6 +201,15 @@ class JudgeAndMercy(unittest.TestCase):
         self.assertFalse(e.miss_eligible("pin", e.OPEN, "11", unowned=True))
         self.assertFalse(e.miss_eligible("pin", e.OPEN, "11", owner_is_admin=True))
         self.assertFalse(e.miss_eligible("pin", e.OPEN, "11", owner_on_leave=True))
+
+
+class Reask(unittest.TestCase):
+    def test_same_file_ask_is_a_reask(self):
+        live = [(1, ["photos", "invoice"], e.ACK), (2, ["info"], e.OPEN)]
+        self.assertEqual(e.reask_of(["photos"], live), 1)
+        self.assertIsNone(e.reask_of(["info"], live))          # two questions = two requests
+        self.assertIsNone(e.reask_of(["video"], live))
+        self.assertIsNone(e.reask_of(["photos"], [(1, ["photos"], e.DELIVERED)]))
 
 
 class Owner(unittest.TestCase):

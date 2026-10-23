@@ -372,6 +372,17 @@ except Exception as _oc_err:            # pragma: no cover
     _oncall = None
     _HAS_ONCALL = False
 
+# «طلبات سام» RR Desk — every RR-room message translated (AR⇄EN), Sam's requests tracked with an
+# owner, working-hour SLAs, a reminder ladder, and misses → ops warnings (money dry-run until
+# /rrdesk-warnings-on). Spec: docs/superpowers/specs/2026-10-24-rrdesk-design.md. Additive.
+try:
+    import rrdesk as _rrdesk
+    _HAS_RRDESK = True
+except Exception as _rd_err:            # pragma: no cover
+    print("[rrdesk] import failed (RR Desk disabled, bot unaffected):", _rd_err)
+    _rrdesk = None
+    _HAS_RRDESK = False
+
 # Ops Watchdog «الرقيب التشغيلي» — read-only ops monitor; additive, never takes down the bot.
 try:
     import watchdog as _watchdog
@@ -10677,6 +10688,84 @@ async def oncall_loop():
             print("[oncall] tick:", rep)
     except Exception as e:
         print("[oncall] loop error:", e)
+
+
+# ==== «طلبات سام» RR Desk (rrdesk/ package) ===================================================
+# The package never imports bot.py: everything it needs crosses here as a capability. Five
+# listeners (message, edit, delete, 📌, buttons), one minute loop, the commands below /rr-close.
+# Blocking work runs on rrdesk's OWN pool; every listener swallows its own errors.
+
+def _rd_rr_record(cid):
+    rec = _dtk["tickets"].get(str(cid))
+    return rec if isinstance(rec, dict) and rec.get("kind") == "rr" else None
+
+
+def _rd_rr_records():
+    return {k: v for k, v in list(_dtk["tickets"].items()) if isinstance(v, dict) and v.get("kind") == "rr"}
+
+
+def _rd_off_today(name, day):
+    """Weekly day off (Employee Calendar, 0=الأحد) OR recorded leave."""
+    try:
+        from schedule import owners as _sowners
+        emp = next((e for e in (_sowners.permanent_map() or {}).get("employees", [])
+                    if e["name"] == name), None)
+        if emp is not None and emp.get("off_day") is not None and int(emp["off_day"]) == (day.weekday() + 1) % 7:
+            return True
+    except Exception as e:
+        print("[rrdesk] off-day lookup failed:", e)
+    return bool(_HAS_OPS and _ops.notify.on_leave(name, day))
+
+
+def _rd_wire():
+    if not _HAS_RRDESK:
+        return False
+    caps = {"now": now_riyadh, "bot": bot, "discord": discord, "guild_id": GUILD_ID,
+            "is_admin": _can_delete_channels, "rr_category_name": RR_CATEGORY,
+            "rr_record": _rd_rr_record, "rr_records": _rd_rr_records, "enrich": _rr_enrich,
+            "off_today": _rd_off_today, "once_claim": _once_claim,
+            "watchdog_channel": lambda: WATCHDOG_CHANNEL,
+            "api_key": lambda: ANTHROPIC_API_KEY, "model": lambda: CLAUDE_MODEL,
+            "public_base": _dispatch_base_url,
+            "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+            "json_response": _json, "web": web, "web_thread": web_thread}
+    if _HAS_OPS:
+        caps.update({"responsible_for": _ops.capture.responsible_for, "lead_id": _ops.notify.lead_id,
+                     "on_leave": _ops.notify.on_leave, "employees": _ops.notify.employees})
+    _rrdesk.wire(caps)
+    return True
+
+
+def _rd_ready():
+    """Usable the moment Discord is — hand brain.db its folder, then wire (the _oc_ready fix)."""
+    if not _HAS_RRDESK:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[rrdesk] brain path hand-over failed:", e)
+    if _rrdesk.HOST.bot is None:
+        _rd_wire()
+    return True
+
+
+@tasks.loop(minutes=1)
+async def rrdesk_loop():
+    """«طلبات سام» — one tick a minute: auto-confirm, leave hand-over, the reminder ladder, the
+    judge, Sam's 13:00 digest, the board, then the outbox. Idempotent by database facts."""
+    if not _HAS_RRDESK:
+        return
+    await bot.wait_until_ready()
+    try:
+        _rd_ready()
+        rep = await _rrdesk.bridge.tick_once()
+        if any(rep.get(k) for k in ("ladder", "judge", "auto_confirm", "leave")):
+            print("[rrdesk] tick:", rep)
+    except Exception as e:
+        print("[rrdesk] loop error:", e)
 
 
 # ==== «رفع التقييم» Review Push (reviewask/ package) ==========================================
@@ -24619,6 +24708,20 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         <div id="ocBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «طلبات سام» RR Desk (translation · Sam's requests · SLAs · KPIs) ============ -->
+      <section class="view" id="view_rrdesk">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📌 طلبات سام</div>
+            <div class="page-sub">كل طلب من سام له مسؤول ووقت · الترجمة تلقائية في غرف RR</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadRrdesk(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="rdBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -28067,6 +28170,7 @@ function go(id){
   if(id==='aqd') loadAqd();
   if(id==='rvpush') loadRvpush();
   if(id==='oncall') loadOncall();
+  if(id==='rrdesk') loadRrdesk();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -38152,6 +38256,17 @@ function loadOncall(force){
   s.onerror=function(){ window.__ocLoading=0; putHtml('ocBody', errorState('loadOncall(1)')); };
   document.head.appendChild(s);
 }
+/* «طلبات سام» — the tab's code is the real file /rrdesk/static/rrdesk_tab.js (no backslash trap here) */
+function loadRrdesk(force){
+  if(window.__rdJs){ return window.RrdeskTab.load(force); }
+  if(window.__rdLoading){ return; }
+  window.__rdLoading=1;
+  var s=document.createElement('script');
+  s.src='/rrdesk/static/rrdesk_tab.js?v=__RRDESK_JS_V__';
+  s.onload=function(){ window.__rdJs=1; window.RrdeskTab.load(force); };
+  s.onerror=function(){ window.__rdLoading=0; putHtml('rdBody', errorState('loadRrdesk(1)')); };
+  document.head.appendChild(s);
+}
 /* OWNER MEETING «اجتماع المالك» — the tab's code is the real file /meet/static/owner_meet_tab.js (no backslash trap here) */
 function loadMeet(force){
   if(window.__meetJs){ return window.MeetTab.load(force); }
@@ -46985,7 +47100,7 @@ async def _api_apply(request):
 NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
-        {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "clean",
+        {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "rrdesk", "clean",
                                   "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote", "aqd"]},
@@ -47016,6 +47131,7 @@ NAV_DEF = {
         {"id": "permits", "ic": "tickets", "tk": "permits", "badge": "permits"},   # PERMITS «التصاريح»
         {"id": "rvpush", "ic": "reviews", "tk": "rvpush"},                          # «رفع التقييم»
         {"id": "oncall", "ic": "calendar", "tk": "oncall"},                         # «المناوبة»
+        {"id": "rrdesk", "ic": "tickets", "tk": "rrdesk"},                          # «طلبات سام»
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -47060,7 +47176,7 @@ NAV_DEF = {
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح", "rvpush": "رفع التقييم",
-            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة",
+            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة", "rrdesk": "طلبات سام",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار", "aqd": "العقود",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
@@ -47084,7 +47200,7 @@ NAV_DEF = {
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits", "rvpush": "Review Push",
-            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call",
+            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call", "rrdesk": "Sam's requests",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations", "aqd": "Contracts",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "onb": "Unit onboarding", "mot": "Tourism compliance",
@@ -47142,6 +47258,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace(
 # «المناوبة»: same pattern — the tab script lives in oncall/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__ONCALL_JS_V__", (_oncall.routes.js_version() if _oncall is not None else "0"), 1)
+# «طلبات سام»: same pattern — the tab script lives in rrdesk/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__RRDESK_JS_V__", (_rrdesk.routes.js_version() if _rrdesk is not None else "0"), 1)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
@@ -65573,6 +65692,7 @@ _ROLE_WRITE_RULES = [
     ("/api/meet/", "meet"),                  # «اجتماع المالك» — no public door; owner links live outside /api/meet/
     ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
     ("/api/oncall/", "oncall"),              # «المناوبة» — writes re-check admin/ops inside
+    ("/api/rrdesk/", "rrdesk"),              # «طلبات سام» — settings re-check admin inside
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
 # data lives here — ambient/bootstrap reads (overview, today, log, inbox badge poll is
@@ -65635,6 +65755,8 @@ _ROLE_READ_RULES = [
     ("/api/reviewask/", "rvpush"),
     # «المناوبة»: who missed a check-in, warnings. The tab script is /oncall/static/ (outside /api/).
     ("/api/oncall/", "oncall"),
+    # «طلبات سام»: per-person KPIs + Sam's request text. Public door is /rrdesk/health (counts only).
+    ("/api/rrdesk/", "rrdesk"),
 ]
 
 def _perm_403(tab, action):
@@ -66919,6 +67041,17 @@ async def start_web_server():
                       % _oncall.notify.enabled())
             except Exception as _oce:
                 print("[oncall] wiring failed (on-call disabled, bot unaffected):", _oce)
+
+        # ---- «طلبات سام» RR Desk — additive; reuses brain.db + ops warnings ----
+        if _HAS_RRDESK:
+            try:
+                _rd_ready()
+                _rd_wire()
+                _rrdesk.bootstrap()
+                _rrdesk.register_routes(app)
+                print("[rrdesk] wired + routes registered (/api/rrdesk/*, /rrdesk/health)")
+            except Exception as _rdw:
+                print("[rrdesk] wiring failed (RR Desk disabled, bot unaffected):", _rdw)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
@@ -69630,6 +69763,15 @@ async def _tk_close(interaction):
                                         str(interaction.user))
             except Exception as _ock:
                 print("[oncall] close hook skipped:", _ock)
+        if rec.get("kind") == "rr" and _HAS_RRDESK:
+            # «طلبات سام»: the room's open requests end with the ticket (never a miss). Wrapped
+            # and time-boxed — rrdesk can NEVER block a close.
+            try:
+                _rd_ready()
+                await asyncio.wait_for(_rrdesk.outbox.run_blocking(
+                    _rrdesk.flow.ticket_closed, str(ch.id)), timeout=5)
+            except Exception as _rdk:
+                print("[rrdesk] close hook skipped:", _rdk)
         try:
             opened = datetime.fromisoformat(rec.get("created_at"))
             hrs = (now - opened).total_seconds() / 3600
@@ -70822,6 +70964,149 @@ async def slash_rr_close(interaction: discord.Interaction, payer: app_commands.C
         return
     # A modal must be the FIRST response to the interaction — never defer before it.
     await interaction.response.send_modal(RRCloseoutModal(payer.value))
+
+# ---- «طلبات سام» RR Desk commands — ASCII slash names (one rejected name kills the whole tree
+# sync); the Arabic names live on the !ouja prefix versions. Logic lives in rrdesk/bridge.py.
+async def _rd_guard(interaction):
+    if not _HAS_RRDESK:
+        await interaction.response.send_message("RR Desk is not running on this server.", ephemeral=True)
+        return False
+    _rd_ready()
+    return True
+
+
+@bot.tree.command(name="rr-ask", description="Sam: open a tracked request in this RR room")
+@app_commands.describe(what="What do you need?", who="Who should do it (optional)",
+                       urgent="Mark as urgent")
+async def slash_rr_ask(interaction: discord.Interaction, what: str,
+                       who: discord.Member = None, urgent: bool = False):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_ask(interaction, what, who, urgent)
+
+
+@bot.tree.command(name="translate", description="RR room auto-translation on/off · الترجمة التلقائية")
+@app_commands.choices(mode=[app_commands.Choice(name="on", value="on"),
+                            app_commands.Choice(name="off", value="off")])
+async def slash_rd_translate(interaction: discord.Interaction, mode: app_commands.Choice[str]):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_translate(interaction, mode.value == "on")
+
+
+@bot.tree.command(name="rrdesk-why", description="RR Desk: why each request here did or didn't remind (only you see it)")
+async def slash_rd_why(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_why(interaction)
+
+
+@bot.tree.command(name="rrdesk-sam", description="RR Desk: set who Sam is (admin)")
+async def slash_rd_sam(interaction: discord.Interaction, user: discord.Member):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_sam(interaction, user)
+
+
+@bot.tree.command(name="rrdesk-switch", description="RR Desk: turn one part on/off (admin)")
+@app_commands.choices(part=[app_commands.Choice(name=n, value=n)
+                            for n in ("translate", "requests", "ladder", "force_off")],
+                      mode=[app_commands.Choice(name="on", value="on"),
+                            app_commands.Choice(name="off", value="off")])
+async def slash_rd_switch(interaction: discord.Interaction, part: app_commands.Choice[str],
+                          mode: app_commands.Choice[str]):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_switch(interaction, part.value, mode.value == "on")
+
+
+@bot.tree.command(name="rrdesk-off", description="RR Desk: emergency mute — everything stops at once (admin)")
+async def slash_rd_off(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_switch(interaction, "force_off", True)
+
+
+@bot.tree.command(name="rrdesk-on", description="RR Desk: undo the emergency mute (admin)")
+async def slash_rd_on(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_switch(interaction, "force_off", False)
+
+
+@bot.tree.command(name="rrdesk-warnings-on", description="RR Desk: misses become REAL ops warnings (admin, type تشغيل)")
+@app_commands.describe(confirm="اكتب: تشغيل")
+async def slash_rd_warn_on(interaction: discord.Interaction, confirm: str):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_warnings(interaction, True, confirm)
+
+
+@bot.tree.command(name="rrdesk-warnings-off", description="RR Desk: warnings back to dry-run (admin)")
+async def slash_rd_warn_off(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_warnings(interaction, False)
+
+
+@bot.tree.command(name="rrdesk-study", description="RR Desk: re-read every RR room and suggest SLAs (admin, read-only)")
+async def slash_rd_study(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_study(interaction)
+
+
+@bot.tree.command(name="rrdesk-setup", description="RR Desk: create the «متابعة-طلبات-سام» board room (admin)")
+async def slash_rd_setup(interaction: discord.Interaction):
+    if await _rd_guard(interaction):
+        await _rrdesk.bridge.cmd_setup(interaction)
+
+
+@bot.command(name="rrdesk-translate", aliases=["ترجمة"])
+async def cmd_rd_translate(ctx, mode: str = "on"):
+    """!ouja ترجمة on|off — the same switch as /translate."""
+    if not _HAS_RRDESK:
+        return
+    _rd_ready()
+    ch = ctx.channel
+    ok, text = await _rrdesk.outbox.run_blocking(
+        _rrdesk.flow.set_translate, str(ch.id), str(getattr(ch, "parent_id", "") or "") or None,
+        mode.strip().lower() not in ("off", "0", "لا", "ايقاف", "إيقاف"), str(ctx.author.id),
+        getattr(ctx.author, "display_name", ""), _can_delete_channels(ctx.author))
+    await ctx.reply(text, mention_author=False)
+
+
+@bot.command(name="rrdesk-ask", aliases=["طلب-سام"])
+async def cmd_rd_ask(ctx, *, what: str = ""):
+    """!ouja طلب-سام <النص> — the same as /rr-ask (Sam or an admin)."""
+    if not _HAS_RRDESK or not what.strip():
+        return
+    _rd_ready()
+    if not (_rrdesk.flow.is_sam(ctx.author.id) or _can_delete_channels(ctx.author)):
+        await ctx.reply("هذا لسام أو للإدارة.", mention_author=False)
+        return
+    ch = ctx.channel
+    ok, text = await _rrdesk.outbox.run_blocking(
+        _rrdesk.flow.ask_command, str(ch.id), str(getattr(ch, "parent_id", "") or "") or None,
+        str(ctx.author.id), getattr(ctx.author, "display_name", ""), what, None, False,
+        ctx.message.created_at.astimezone(TZ), str(ctx.message.id))
+    await _rrdesk.bridge.drain()
+    await ctx.reply(text, mention_author=False)
+
+
+@bot.command(name="rrdesk-why-text", aliases=["ليش"])
+async def cmd_rd_why(ctx):
+    """!ouja ليش — /rrdesk-why for people who prefer typing (admins; posted in the room)."""
+    if not _HAS_RRDESK or not _can_delete_channels(ctx.author):
+        return
+    _rd_ready()
+    ch = ctx.channel
+    lines = await _rrdesk.outbox.run_blocking(_rrdesk.flow.why, str(ch.id),
+                                              str(getattr(ch, "parent_id", "") or "") or None)
+    body = chr(10).join(lines)
+    for i in range(0, len(body), 1900):
+        await ctx.send("```" + chr(10) + body[i:i + 1900] + "```")
+
+
+@bot.command(name="rrdesk-study-text", aliases=["دراسة-rr"])
+async def cmd_rd_study(ctx):
+    """!ouja دراسة-rr — the read-only study (admins)."""
+    if not _HAS_RRDESK or not _can_delete_channels(ctx.author):
+        return
+    _rd_ready()
+    rep = await _rrdesk.bridge.run_study(post=True)
+    await ctx.reply("✅ الدراسة خلصت — %d غرفة، %d طلب. التقرير في غرفة المراقبة."
+                    % (rep.get("rooms", 0), rep.get("requests", 0)), mention_author=False)
 
 async def _rr_run_nudges():
     """ONE reminder per waiting close-out, never a stream. The stamp is stored on the
@@ -76415,6 +76700,15 @@ async def on_ready():
         bot.add_listener(_oc_interaction, "on_interaction")
         bot.add_listener(_oc_on_message, "on_message")
         bot._oc_listener = True
+    if _HAS_RRDESK and not getattr(bot, "_rd_listener", False):
+        # «طلبات سام»: five listeners, static custom_ids (rd:*), rows found by message id
+        _rd_ready()
+        bot.add_listener(_rrdesk.bridge.on_message, "on_message")
+        bot.add_listener(_rrdesk.bridge.on_raw_message_edit, "on_raw_message_edit")
+        bot.add_listener(_rrdesk.bridge.on_raw_message_delete, "on_raw_message_delete")
+        bot.add_listener(_rrdesk.bridge.on_raw_reaction_add, "on_raw_reaction_add")
+        bot.add_listener(_rrdesk.bridge.on_interaction, "on_interaction")
+        bot._rd_listener = True
     bot.add_view(CleaningDoneView())   # re-bind button handlers after a restart
     bot.add_view(ClaimView())          # re-bind escalation claim buttons after a restart
     bot.add_view(EarlyCheckinDecisionView())  # early check-in approve/reject
@@ -76586,6 +76880,11 @@ async def on_ready():
             _loop_guard(oncall_loop, "oncall_loop")
             oncall_loop._error_guarded = True
         _pending.append(oncall_loop)            # «المناوبة»: publish/lock/«موجود؟»/ladder, every minute
+    if _HAS_RRDESK and not rrdesk_loop.is_running():
+        if not getattr(rrdesk_loop, "_error_guarded", False):
+            _loop_guard(rrdesk_loop, "rrdesk_loop")
+            rrdesk_loop._error_guarded = True
+        _pending.append(rrdesk_loop)            # «طلبات سام»: ladder, judge, digests, board, outbox
     if _HAS_CHECKOUT and not checkout_watch_loop.is_running():
         _pending.append(checkout_watch_loop)    # «متابعة الخروج»: returns at once until /checkout-start
     if _HAS_CODEGATE and not codegate_loop.is_running():

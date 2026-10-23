@@ -25,11 +25,18 @@ from ops import db as odb                           # noqa: E402
 from rrdesk import db, engine, flow                 # noqa: E402
 
 
+_ASKS = ["photos", "invoice", "video", "receipt", "quote", "guest_chat"]
+
+
 def make_request(tc, mid, at, mentions=(F.NASSER,)):
+    """Each request asks for something different — the same ask again would (rightly) be a
+    re-ask of the open one, not a new request."""
     tc.clock.t = at
     db.set_setting("detect_mode", "auto")
-    F.fake_model(tc, classify=F.REQ_CLASSIFY)
-    rid = flow.on_message(F.msg(mid, "send the photos please", mentions=mentions, at_=at))["request"]
+    n = len(db.recent_requests())
+    ask = _ASKS[n % len(_ASKS)]
+    F.fake_model(tc, classify=dict(F.REQ_CLASSIFY, asks=[ask]))
+    rid = flow.on_message(F.msg(mid, "send the %s please" % ask, mentions=mentions, at_=at))["request"]
     F.deliver_all()
     return rid
 
