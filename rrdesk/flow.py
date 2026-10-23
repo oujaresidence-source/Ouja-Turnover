@@ -265,7 +265,7 @@ def on_message(m):
         print(LOG, "translate hook failed:", e)
         db.log("error", channel_id=room_id, message_id=m["id"], detail={"where": "translate", "e": str(e)})
     # --- translation off / failed must not blind request tracking: classify on its own ---
-    if sam and classify is None and rep.get("translation") in ("off", "failed") and active("requests"):
+    if sam and classify is None and rep.get("translation") == "off" and active("requests"):
         try:
             classify = _classify_only(room_id, m, at, rep)
         except Exception as e:
@@ -363,7 +363,7 @@ def _is_ours(m):
     return any((e.get("footer") or "") in texts.OUR_FOOTERS for e in m.get("embeds") or [])
 
 
-def _translate_message(room_id, m, at, sam, rep):
+def _translate_message(room_id, m, at, sam, rep, once_suffix=""):
     """Post the translation reply. Returns Sam's classification (or None)."""
     if not active("translate") or not db.translate_on(room_id):
         rep["translation"] = "off"
@@ -393,8 +393,9 @@ def _translate_message(room_id, m, at, sam, rep):
         rep["translation"] = "claimed_elsewhere"
         tr = db.translation(m["id"])
         return (tr or {}).get("classify") or None
-    once = _call("once_claim", "rrdesk:tr:" + m["id"], default=True)
+    once = _call("once_claim", "rrdesk:tr:" + m["id"] + once_suffix, default=True)
     if once is False:
+        db.release_translation(m["id"])        # never leave a row stuck in 'claimed'
         rep["translation"] = "claimed_elsewhere"
         return None
     try:
@@ -513,12 +514,18 @@ def on_edit(m):
     if not hit:
         return None
     room_id, _rec = hit
+    text_key = ":" + hashlib.sha256((m.get("text") or "").encode("utf-8")).hexdigest()[:10]
     if tr is None:
-        # the first try failed and released its claim: the edit is the retry (DEBUG.md)
+        # the first try failed and released its claim: the edit is the retry (DEBUG.md). The
+        # once-key carries the text so the first attempt's 6-hour marker does not block it.
         rep = {}
-        _translate_message(room_id, m, m.get("at") or _now(), False, rep)
+        _translate_message(room_id, m, m.get("at") or _now(), False, rep, once_suffix=text_key)
         db.log("tr_retried_on_edit", channel_id=room_id, message_id=m["id"], detail=rep)
         return rep.get("translation")
+    if (tr["state"] == "done" and tr.get("source") == "none" and not tr.get("has_media")
+            and engine.meaningful_letters(m.get("text") or "") >= 2 and active("translate")
+            and db.translate_on(room_id)):
+        return _translate_late(room_id, m, tr, text_key)
     if tr["state"] != "done" or not tr["our_message_ids"] or tr.get("source") == "none":
         return None
     text = m.get("text") or ""
@@ -540,6 +547,26 @@ def on_edit(m):
                           cost_usd=round((tr.get("cost_usd") or 0) + meta["cost_usd"], 6))
     db.log("tr_edited", channel_id=room_id, message_id=m["id"])
     return h
+
+
+def _translate_late(room_id, m, tr, text_key):
+    """A message that only got the «Is this a request?» question (translation was off or failed)
+    is edited: post its translation now, as a new reply, once per text."""
+    text = m.get("text") or ""
+    dir_ = engine.direction(text) or "en2ar"
+    try:
+        embeds, meta, _c = _do_translate(text, [], dir_, False, m.get("at") or _now())
+    except Exception as e:
+        db.log("tr_edit_failed", channel_id=room_id, message_id=m["id"], detail={"e": str(e)[:200]})
+        return None
+    enqueue("trlate:%s%s" % (m["id"], text_key), "post", {
+        "channel_id": m["channel_id"], "content": engine.INVISIBLE_MARK, "embeds": embeds,
+        "reply_to": m["id"], "mentions": "none", "on_done": {"type": "translation", "source": m["id"]}})
+    db.update_translation(m["id"], source=meta["source"], tokens_in=(tr.get("tokens_in") or 0) + meta["tokens_in"],
+                          tokens_out=(tr.get("tokens_out") or 0) + meta["tokens_out"],
+                          cost_usd=round((tr.get("cost_usd") or 0) + meta["cost_usd"], 6))
+    db.log("tr_late", channel_id=room_id, message_id=m["id"])
+    return meta["source"]
 
 
 def on_delete(channel_id, message_id):
@@ -642,9 +669,15 @@ def _choose_owner(rec, m, enrich, today):
                                  responsible=resp_pair, lead=(lead, name_for(lead)),
                                  excluded=excluded, calendar_dids=cal)
     choice["name"] = choice.get("name") or name_for(choice["did"])
-    skipped = [x for x in (m.get("mention_ids") or []) if str(x) not in set(cal)]
+    skipped = [x for x in (m.get("mention_ids") or []) if str(x) not in set(cal) and str(x) not in excluded]
     if skipped:
         choice["skipped_mentions"] = skipped
+        if not mentioned:
+            # Sam asked Faisal / an outsider: nobody on the team was asked, so nobody on the team
+            # can be late — the lead holds it as UNOWNED (routing, never a warning)
+            choice = {"did": lead, "name": name_for(lead), "rule": 5, "unowned": True,
+                      "skipped_mentions": skipped}
+            return choice
     # off today / on leave → the apartment's coverer (responsible_for already resolves cover)
     if not choice["unowned"] and choice["name"] and _call("off_today", choice["name"], today, default=False):
         if resp_pair and resp_pair[0] != choice["did"]:
@@ -1138,7 +1171,9 @@ def _reconcile_rooms(now):
             rec = HOST.rr_record(str(r["channel_id"]))
         except Exception:
             continue                       # cannot tell → leave it alone
-        if rec and rec.get("kind") == "rr" and (rec.get("status") or "") != "closed":
+        if not rec:
+            continue                       # unknown (empty store, cache not warm) → never close on a guess
+        if (rec.get("status") or "") != "closed" and not rec.get("gone"):
             continue
         moved, row = db.move_request(r["id"], [engine.OPEN, engine.ACK, engine.DELIVERED],
                                      engine.CLOSED_WITH_TICKET)
@@ -1166,6 +1201,12 @@ def _ladder(now):
     for r in db.live_requests():
         if r["state"] not in engine.LIVE:
             continue
+        if HOST.rr_record is not None:
+            try:
+                if not HOST.rr_record(str(r["channel_id"])):
+                    continue               # room unknown right now: never remind or accuse blind
+            except Exception:
+                continue
         gen = int(r.get("gen") or 1)
         step = engine.due_step(r["state"], db.parse(r["clock_at"]), bool(r["urgent"]), now,
                                _gen_sent(r["id"], gen), cfg)
@@ -1377,7 +1418,9 @@ def _board(now):
     if db.setting("board_hash") == h:
         return 0
     db.set_setting("board_hash", h, "tick")
-    enqueue("board:%s:%d" % (h, db.incr("board_seq")), "board", {"channel_name": board_channel(), "content": texts.board(rows, now),
+    mid = db.setting("board_mid") or ""
+    ref = ("board:%s:%d" % (h, db.incr("board_seq"))) if mid else "board:first"
+    enqueue(ref, "board", {"channel_name": board_channel(), "content": texts.board(rows, now),
                                     "message_id": db.setting("board_mid") or "",
                                     "on_done": {"type": "board"}})
     return 1

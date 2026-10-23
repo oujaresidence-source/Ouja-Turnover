@@ -210,10 +210,14 @@ class Judge(unittest.TestCase):
         judge(self, AFTER_W43)
         self.assertEqual(odb.all_warnings(), [])
 
-    def test_mentioning_someone_outside_the_calendar_never_makes_them_owner(self):
+    def test_asking_someone_outside_the_calendar_makes_it_unowned(self):
+        """Sam asked Faisal: nobody on the team was asked, so nobody on the team can be late —
+        not even the ticket opener (reviewer re-check, new finding 1)."""
         r = make_request(self, "o1", F.at(2026, 10, 19, 12, 0), mentions=(F.FAISAL,))
         req = db.request(r)
-        self.assertNotEqual(req["owner_did"], F.FAISAL)
+        self.assertEqual((req["owner_did"], req["owner_rule"], req["unowned"]), (F.ASEEL, 5, 1))
+        miss_it(self, r, F.at(2026, 10, 19, 16, 0))
+        self.assertFalse([m for m in db.misses_for(r) if m["eligible"]])
         ev = [e for e in db.events(request_id=r) if e["kind"] == "owner_chosen"][0]
         self.assertEqual(ev["detail"]["skipped_mentions"], [F.FAISAL])
 

@@ -319,7 +319,7 @@ async def on_interaction(interaction):
     except Exception as e:
         print("[rrdesk] button error:", e)
         try:
-            await _reply(interaction, "صار خطأ — جرب مرة ثانية.")
+            await _reply(interaction, "صار خطأ — جرب مرة ثانية. · Something went wrong — please try again.")
         except Exception:
             pass
 
@@ -443,7 +443,29 @@ async def execute(kind, p):
 
 # ------------------------------------------------------------------ the loop
 
+async def _refresh_admins():
+    """Owners of live requests: learn who is a server admin BEFORE they ever press a button, so
+    an admin owner is never judged (REST fetch — works without the members intent). Daily."""
+    guild = _bot().get_guild(int(HOST.guild_id or 0))
+    if guild is None:
+        return
+    owners = await outbox.run_blocking(lambda: sorted({str(r.get("owner_did") or "") for r in db.live_requests()} - {""}))
+    for did in owners[:25]:
+        key = "admchk:%s:%s" % (did, _tz_now().date().isoformat())
+        if not await outbox.run_blocking(db.latch, key):
+            continue
+        try:
+            m = guild.get_member(int(did)) or await guild.fetch_member(int(did))
+            await outbox.run_blocking(flow.remember_admin, did, bool(HOST.is_admin(m)) if HOST.is_admin else False)
+        except Exception:
+            pass
+
+
 async def tick_once():
+    try:
+        await _refresh_admins()
+    except Exception as e:
+        print("[rrdesk] admin refresh failed:", e)
     rep = await outbox.run_blocking(flow.tick)
     await drain()
     if await outbox.run_blocking(db.setting, "study_due") == "1":

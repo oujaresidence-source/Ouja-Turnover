@@ -434,7 +434,17 @@ class DetectionWithoutTranslation(unittest.TestCase):
         self.assertTrue(ok)
 
     def test_failed_translation_is_retried_by_an_edit(self):
+        """With a REAL once-marker (6 hours), not one that always says yes."""
         from rrdesk import translate as T
+        from rrdesk.host import HOST
+        marks = set()
+
+        def once(name, ttl=None):
+            if name in marks:
+                return False
+            marks.add(name)
+            return True
+        HOST.once_claim = once
 
         def boom(*a, **k):
             raise T.TranslateFailed("timeout")
@@ -444,6 +454,27 @@ class DetectionWithoutTranslation(unittest.TestCase):
         F.fake_model(self)
         self.assertEqual(flow.on_edit(F.msg("m9", "الفاتورة بالطريق الحين", author=F.NASSER)), "model")
         self.assertTrue(F.queued("post", "tr:m9"))
+
+
+class RoomKnowledge(unittest.TestCase):
+    def setUp(self):
+        F.setup(self)
+        self.rid = sam_asks(self)["request"]
+        F.deliver_all()
+
+    def test_unknown_room_is_never_closed_and_never_reminded(self):
+        from rrdesk.host import HOST
+        HOST.rr_record = lambda cid: None                 # empty / unreadable ticket store
+        self.clock.t = F.at(2026, 10, 22, 12, 0)
+        flow.tick()
+        self.assertEqual(db.request(self.rid)["state"], "open")
+        self.assertEqual(db.ladder_sent(self.rid), set())
+
+    def test_deleted_room_is_closed(self):
+        self.state["rec"] = dict(self.state["rec"], gone=True)
+        self.clock.t = F.at(2026, 10, 22, 12, 0)
+        flow.tick()
+        self.assertEqual(db.request(self.rid)["state"], "closed_with_ticket")
 
 
 class OutboxAndBoard(unittest.TestCase):
@@ -495,7 +526,7 @@ class OutboxAndBoard(unittest.TestCase):
         flow._board(self.clock.t)
         F.deliver_all()
         first = db.setting("board_mid")
-        self.assertTrue(first.startswith("p:board:" + db.setting("board_hash")))
+        self.assertEqual(first, "p:board:first")       # the first publish has ONE ref for both bot copies
         self.assertEqual(flow._board(self.clock.t), 0)      # nothing changed → nothing sent
         flow.press("ack", db.request(1)["card_message_id"], {"did": F.NASSER, "name": "Nasser"})
         flow._board(self.clock.t)

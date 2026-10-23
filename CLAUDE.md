@@ -646,8 +646,11 @@ runbook **`rrdesk/DEBUG.md`** (read it before debugging anything here).
   miss needs 30 more working minutes. A late-opened request's clock starts when it was OPENED and a
   team reply already in the room counts as acknowledged. Closed/deleted rooms end their requests
   every tick (`_reconcile_rooms`). Leave/day-off use the SHIFT day (`engine.work_day`, to 01:30) and
-  a hand-over restarts the clock. Only Employee-Calendar people can become owners from a mention;
-  `HOST.admin_ids` (RR closers + final approver) are never warned; a miss never posts in the room.
+  a hand-over restarts the clock. Only Employee-Calendar people can become owners from a mention —
+  Sam asking Faisal/an outsider makes the request UNOWNED (lead), never the opener's; admins
+  (`HOST.admin_ids` + a daily REST permission check of live owners) are never warned; a miss never
+  posts in the room. A room the bot cannot see right now (empty store, cold cache) is never closed
+  and never reminded — requests close only on a confirmed `closed` / `gone` ticket.
 - **Detection safety.** Only `/rr-ask`, Sam's 📌, Sam's «Yes» under a translation, or a detected
   request in `auto` mode can ever produce a miss. Ships in **`confirm`** mode (detected → asks
   Sam «Is this a request?») because the Haiku classifier could not be graded where this was built;

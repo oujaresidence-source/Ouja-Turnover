@@ -10702,7 +10702,14 @@ def _rd_rr_record(cid):
     cheap enough for the event loop."""
     rec = _dtk["tickets"].get(str(cid))
     if isinstance(rec, dict):
-        return rec if rec.get("kind") == "rr" else None
+        if rec.get("kind") != "rr":
+            return None
+        try:   # deleted by hand: only trusted once the guild's channels are cached
+            if bot.is_ready() and bot.get_guild(GUILD_ID) is not None and bot.get_channel(int(cid)) is None:
+                return dict(rec, gone=True)
+        except (TypeError, ValueError):
+            pass
+        return rec
     try:
         ch = bot.get_channel(int(cid))
     except (TypeError, ValueError):
