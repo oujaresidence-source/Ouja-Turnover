@@ -1,0 +1,24 @@
+{
+ "ok": true,
+ "switches": {
+  "translate": true,
+  "requests": true,
+  "ladder": true,
+  "warn_live": false,
+  "force_off": false
+ },
+ "last_tick": "2026-10-23T20:29:00+03:00",
+ "tick_lag_s": 60,
+ "tick_gap_s": 678540,
+ "translations_today": 5,
+ "translation_failures_1h": 0,
+ "cache_hit_rate": 0.0,
+ "calls_today": 5,
+ "cap_remaining": 1495,
+ "open_requests": 4,
+ "sam_resolved": true,
+ "detect_mode": "auto",
+ "outbox_backlog": 0,
+ "outbox_failed": 0,
+ "last_error_class": null
+}
