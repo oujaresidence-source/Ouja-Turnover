@@ -61,6 +61,7 @@ class Base(unittest.TestCase):
 
     def tearDown(self):
         for k, v in self.env.items():
+            os.environ.pop(k, None)               # a value set INSIDE a test must not leak
             if v is not None:
                 os.environ[k] = v
 

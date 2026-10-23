@@ -42,6 +42,25 @@ def _ids(people):
 
 
 def replay(room, now=None, auto=False):
+    """Run the room; every global this swaps (the model call, digests, board, HOST
+    capabilities) is put back afterwards, so a replay never leaks into the caller."""
+    from . import flow, translate
+    from .host import HOST
+    saved = {"call_model": translate.call_model, "_digests": flow._digests, "_board": flow._board,
+             "host": dict(vars(HOST))}
+    try:
+        return _replay(room, now, auto)
+    finally:
+        translate.call_model = saved["call_model"]
+        flow._digests, flow._board = saved["_digests"], saved["_board"]
+        for k in list(vars(HOST)):
+            if k not in saved["host"]:
+                delattr(HOST, k)
+        for k, v in saved["host"].items():
+            setattr(HOST, k, v)
+
+
+def _replay(room, now=None, auto=False):
     from brain import db as bdb
     from ops import db as odb, engine as oeng
     from ops.host import HOST as OPS_HOST
