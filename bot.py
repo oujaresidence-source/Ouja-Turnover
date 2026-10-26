@@ -15587,7 +15587,7 @@ class EarlyDecisionConfirmView(discord.ui.View):
             await interaction.response.edit_message(
                 content="⚠️ ما قدرت أسجل القرار. السبب مطلوب عند الرفض.", view=None)
             return
-        reply = _early_guest_reply(row, self.decision, row.get("reason"))
+        reply = await asyncio.to_thread(_early_guest_reply, row, self.decision, row.get("reason"))
         if not reply:
             _permanent_once_release(decision_claim)
             await interaction.response.edit_message(
@@ -15637,7 +15637,7 @@ class EarlyCustomRejectModal(discord.ui.Modal, title="سبب رفض الدخول
     async def on_submit(self, interaction: discord.Interaction):
         row = _early_checkin_decisions.get(self.message_id) or {}
         reason = _early_reject_reason(row, "custom", str(self.reason.value))
-        preview = _early_guest_reply(row, "reject", reason) or "—"
+        preview = await asyncio.to_thread(_early_guest_reply, row, "reject", reason) or "—"
         await interaction.response.send_message(
             "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
@@ -15665,7 +15665,7 @@ class EarlyRejectReasonSelect(discord.ui.Select):
             return
         row = _early_checkin_decisions.get(self.message_id) or {}
         reason = _early_reject_reason(row, code)
-        preview = _early_guest_reply(row, "reject", reason) or "—"
+        preview = await asyncio.to_thread(_early_guest_reply, row, "reject", reason) or "—"
         await interaction.response.send_message(
             "متأكد تبي ترفض وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(self.message_id, "reject", reason),
@@ -15696,7 +15696,7 @@ class EarlyCheckinDecisionView(discord.ui.View):
                 f"تم اتخاذ القرار مسبقاً بواسطة {row.get('decided_by') or 'أحد الفريق'}.",
                 ephemeral=True)
             return
-        preview = _early_guest_reply(row, "approve") or "—"
+        preview = await asyncio.to_thread(_early_guest_reply, row, "approve") or "—"
         await interaction.response.send_message(
             "متأكد تبي تعتمد وترسل هذا الرد للضيف؟\n\n" + preview[:1500],
             view=EarlyDecisionConfirmView(interaction.message.id, "approve"),
@@ -16351,7 +16351,8 @@ async def _cleanproof_send_discord_review(report_id, target_channel=None):
             except Exception:
                 ch = None
     if ch is None:
-        ch = _oujact_find_cleaning_channel(guild, report.get("apartment_id"))
+        await get_listings_map_async()
+        ch = _oujact_find_cleaning_channel(guild, report.get("apartment_id"))  # loop-safe: listings prewarmed
     if ch is None:
         ch = await ensure_channel(guild, CLEANING_REVIEW_CHANNEL, await get_assistant_category(guild))
     if ch is None:
@@ -17042,7 +17043,8 @@ async def post_assistant_card(channel, item, result, guide=None, confirmed=False
             except Exception as _oce:
                 print("[ops.capture] escalation open skipped:", _oce)
             try:
-                tkt = _ticket_from_escalation(msg.id, _escalations[msg.id])
+                await get_listings_map_async()
+                tkt = _ticket_from_escalation(msg.id, _escalations[msg.id])  # loop-safe: listings prewarmed
                 _escalations[msg.id]["ticket_id"] = tkt["id"]
             except Exception as _e:
                 print("ticket-from-escalation error:", _e)
@@ -17361,6 +17363,7 @@ async def _post_early_decision_card(channel, item, record):
     mention = op_role.mention if op_role else f"@{OPERATION_ROLE_NAME}"
     proposed = record.get("proposed_unit")
     title_unit = proposed or record.get("original_unit") or "—"
+    approve_preview = await asyncio.to_thread(_early_guest_reply, record, "approve")
     embed = discord.Embed(
         title=f"⏰ قرار دخول مبكر · {record.get('guest')} · {title_unit}",
         color=0xF0A431,
@@ -17376,7 +17379,7 @@ async def _post_early_decision_card(channel, item, record):
     embed.add_field(name="🔒 ملخص الحجوزات الداخلي", value=_early_internal_summary(record)[:1000],
                     inline=False)
     embed.add_field(name="📤 عند الاعتماد",
-                    value=(_early_guest_reply(record, "approve")
+                    value=(approve_preview
                            or "— (ما فيه وقت محدد؛ اسأل الضيف عن الساعة)")[:1000],
                     inline=False)
     embed.add_field(name="❌ عند الرفض", value="اختر سبباً جاهزاً أو اكتب سبباً؛ سيظهر للضيف بعد تأكيد ثانٍ.",
@@ -17437,9 +17440,9 @@ async def handle_early_checkin_item(item, channel):
                 await post_assistant_card(channel, item, result, confirmed=True)
             return True
 
-    request = _early_checkin_request(
-        item.get("guest_text"),
-        unit_checkin_minutes(item.get("listing_id")) if item.get("listing_id") else None)
+    official_min = (await asyncio.to_thread(unit_checkin_minutes, item.get("listing_id"))
+                    if item.get("listing_id") else None)
+    request = _early_checkin_request(item.get("guest_text"), official_min)
     if not request:
         return False
     # v3: a 00:00–05:59 arrival is a LATE-NIGHT ARRIVAL, not an early check-in.
@@ -17497,8 +17500,9 @@ async def handle_early_checkin_item(item, channel):
             item.get("comm_type") or "email", item)
         return True
     if context.get("alternatives_checked"):
+        unavailable = await asyncio.to_thread(_early_unavailable_reply, record)
         await asyncio.to_thread(
-            send_guest_message, item["conversation_id"], _early_unavailable_reply(record),
+            send_guest_message, item["conversation_id"], unavailable,
             item.get("comm_type") or "email", item)
         return True
     result = {
@@ -69532,8 +69536,9 @@ class _MaintGoBtn(discord.ui.Button):
         if not p.lid:
             await interaction.response.send_message("🙏 اختر الشقة أول من القائمة.", ephemeral=True)
             return
+        await get_listings_map_async()
         await interaction.response.send_modal(
-            MaintModal(p.lid, _tk_unit_name(p.lid), p.urgency, p.category))
+            MaintModal(p.lid, _tk_unit_name(p.lid), p.urgency, p.category))  # loop-safe: listings prewarmed
 
 class MaintPickView(discord.ui.View):
     """Ephemeral picker: apartment (paged — Discord caps a menu at 25) + priority
@@ -69614,7 +69619,8 @@ async def _maint_open_ticket(interaction, lid, unit_name, urgency, category,
         desc += f"\n🚪 الدخول: {access}"
     desc += f"\n\n(فُتحت من ديسكورد — روم التذكرة: #{ch.name})"
     from_review = origin == "review_call"
-    dash = _ticket_create(summary, description=desc, lid=lid, priority=uprio,
+    await get_listings_map_async()
+    dash = _ticket_create(summary, description=desc, lid=lid, priority=uprio,  # loop-safe: listings prewarmed
                           category=category, source="review" if from_review else "manual",
                           source_ref=(origin_ref or f"discord:{ch.id}") if from_review else f"discord:{ch.id}",
                           created_by=str(interaction.user), assignee=aname)
@@ -69936,7 +69942,8 @@ class MaintTicketView(discord.ui.View):
         if rows is None:
             await interaction.followup.send("⚠️ Hostaway ما رد عليّ — جرّب بعد دقيقة.")
             return
-        unit = (rec or {}).get("unit") or _tk_unit_name(lid)
+        await get_listings_map_async()
+        unit = (rec or {}).get("unit") or _tk_unit_name(lid)  # loop-safe: listings prewarmed
         await interaction.followup.send(
             embed=_avail_embed(unit, _avail_classify(rows, lid, today), today))
 
@@ -71532,7 +71539,8 @@ class _ProcGoBtn(discord.ui.Button):
         if not p.selected:
             await interaction.response.send_message("🙏 اختر شقة وحدة على الأقل أول.", ephemeral=True)
             return
-        await interaction.response.send_modal(ProcModal(p.selected_units(), p.reason))
+        await get_listings_map_async()
+        await interaction.response.send_modal(ProcModal(p.selected_units(), p.reason))  # loop-safe: listings prewarmed
 
 class ProcPickView(discord.ui.View):
     """Ephemeral picker: apartment(s) (paged multi-select) + reason, then modal."""
@@ -72128,7 +72136,8 @@ async def _maint_import_assignments(guild, attachment):
     for apt_raw, emp_raw in rows:
         if not apt_raw or not emp_raw:
             continue
-        matches = _tk_find_listings(apt_raw)
+        await get_listings_map_async()
+        matches = _tk_find_listings(apt_raw)  # loop-safe: listings prewarmed
         if len(matches) != 1:
             if _tk_norm_name(apt_raw) not in (_tk_norm_name(w) for w in header_words):
                 unmatched_apt.append(apt_raw)
@@ -72194,7 +72203,8 @@ async def maint_assign_cmd(ctx, *, args: str = ""):
             await ctx.reply(f"✅ **{member.display_name}** صار المسؤول الافتراضي "
                             "لكل الشقق اللي ما لها مسؤول مربوط.")
             return
-        matches = _tk_find_listings(rest)
+        await get_listings_map_async()
+        matches = _tk_find_listings(rest)  # loop-safe: listings prewarmed
         if not matches:
             await ctx.reply(f"ما لقيت شقة تطابق «{rest}».")
             return
@@ -72208,7 +72218,8 @@ async def maint_assign_cmd(ctx, *, args: str = ""):
         await ctx.reply(f"✅ ربطت **{nm}** ← **{member.display_name}**.")
         return
     lines = []
-    for lid, nm in _tk_listings():
+    await get_listings_map_async()
+    for lid, nm in _tk_listings():  # loop-safe: listings prewarmed
         a = _maint_assign["by_lid"].get(str(lid))
         lines.append(f"• {nm} ← {a['name'] if a else '⚠️ بدون مسؤول'}")
     d = _maint_assign.get("default")
