@@ -90,15 +90,27 @@ TEMPLATES = {
     ("individual", "ouja"): "operating_ouja_v2_2",
 }
 
+# «نسبة التنظيف» (owner ruling 2026-10-26): a contract-wide percentage replaces the per-unit monthly
+# fee. Own files, so the monthly text stays byte-identical and keeps its approval; AQD_TEMPLATE never
+# reaches these routes.
+TEMPLATES_PCT = {
+    ("individual", "owner"): "operating_pct_v2_2",
+    ("individual", "ouja"): "operating_ouja_pct_v2_2",
+}
+
 # The owner reads these names in Settings and on the list banner; each template is approved alone.
 TEMPLATE_LABELS = {
     "operating_v2_1": "نموذج (أ) — حساب المالك 2.1",
     "operating_v2_2": "نموذج (أ) — حساب المالك 2.2",
     "operating_ouja_v2_2": "نموذج (ب) — حساب عوجا 2.2",
+    "operating_pct_v2_2": "نموذج (أ) — حساب المالك 2.2 — نسبة تنظيف",
+    "operating_ouja_pct_v2_2": "نموذج (ب) — حساب عوجا 2.2 — نسبة تنظيف",
 }
 
 
-def template_for_key(kind, model):
+def template_for_key(kind, model, fee_model="monthly"):
+    if fee_model == "pct":
+        return TEMPLATES_PCT.get((kind, model))
     name = TEMPLATES.get((kind, model))
     if name and (kind, model) == ("individual", "owner") and (os.environ.get("AQD_TEMPLATE") or "").strip():
         return template_name()
@@ -106,12 +118,13 @@ def template_for_key(kind, model):
 
 
 def active_templates():
-    """The templates NEW contracts would use, in TEMPLATES order, without duplicates."""
+    """The templates NEW contracts would use, monthly then pct, in table order, without duplicates."""
     out = []
-    for kind, model in TEMPLATES:
-        name = template_for_key(kind, model)
-        if name and name not in out:
-            out.append(name)
+    for fee_model, table in (("monthly", TEMPLATES), ("pct", TEMPLATES_PCT)):
+        for kind, model in table:
+            name = template_for_key(kind, model, fee_model)
+            if name and name not in out:
+                out.append(name)
     return out
 
 
@@ -127,6 +140,11 @@ def known_templates():
 def template_model(name):
     """Which account model a template's legal text is written for: 'ouja' or 'owner'."""
     return "ouja" if str(name or "").startswith("operating_ouja") else "owner"
+
+
+def template_fee_model(name):
+    """How a template's legal text charges for cleaning: 'pct' («نسبة التنظيف») or 'monthly'."""
+    return "pct" if "_pct_" in str(name or "") else "monthly"
 
 
 def template_label(name):

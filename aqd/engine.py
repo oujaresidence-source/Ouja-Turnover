@@ -32,7 +32,8 @@ KEYS = ("font_css", "contract_css", "contract_ref", "template_version", "date_g"
         "version_banner", "op_pct", "owner_rows", "owner_refer", "op_rep_full", "op_cr_expiry",
         "op_fal_no", "op_fal_expiry", "unit_rows", "jamiya", "platform_proof", "sig_owner",
         "sig_operator", "brand_name", "brand_reg")
-EXTRA_KEYS = ("payout_period",)        # Model (B) only — a template without the placeholder ignores it
+EXTRA_KEYS = ("payout_period",         # Model (B) only — a template without the placeholder ignores it
+              "clean_pct")             # «نسبة التنظيف» templates only
 
 PAYOUT_PERIOD_AR = {
     "monthly": "شهرية (تنتهي في آخر يوم من كل شهر ميلادي)",
@@ -275,6 +276,7 @@ def _licence(u):
 
 def unit_rows(a):
     out = []
+    monthly = a.get("fee_model") != "pct"          # «نسبة التنظيف» tables have no fee column
     for i, u in enumerate(a.get("units") or []):
         fee = catalogue.fee_value(u)
         minp = u.get("min_price")
@@ -284,7 +286,7 @@ def unit_rows(a):
             "%s / %s" % (h(catalogue.UNIT_TYPE_AR.get(u.get("unit_type"), "—")), h(_rooms(u))),
             h(u.get("deed_no") or "—"),
             _licence(u),
-            ("%s ريال" % num(fee)) if fee is not None else "—",
+        ] + ([("%s ريال" % num(fee)) if fee is not None else "—"] if monthly else []) + [
             ("%s ريال" % num(minp)) if isinstance(minp, (int, float)) else (
                 catalogue.UNSET_AR if minp == catalogue.UNSET_AR else "—"),
             h(u.get("blocked_text")) if u.get("blocked") == "set" else "لا يوجد",
@@ -371,6 +373,7 @@ def build_context(a, *, ref, created, settings, font_css, contract_css, template
         "brand_name": h(s.get("brand_name") or "—"),
         "brand_reg": h(s.get("brand_reg") or "—"),
         "payout_period": h(payout_period(a)),
+        "clean_pct": h(pct(catalogue.clean_pct_value(a))),
     }
     if frozen:
         ctx.update({k: v for k, v in SLOT.items()})
@@ -450,7 +453,7 @@ def template_for(clean):
         return None, "اختر نوع العميل"
     if model not in ("owner", "ouja"):
         return None, catalogue.MODEL_MISSING_REASON
-    name = config.template_for_key(kind, model)
+    name = config.template_for_key(kind, model, (clean or {}).get("fee_model") or "monthly")
     return (name, None) if name else (None, catalogue.OUJA_REASON)
 
 
@@ -458,10 +461,13 @@ def template_fits(clean, sent_name):
     """Sign-time defence: the answers still route to a template written for the SAME account
     model as the one the contract was frozen on. A v2.1 contract on the owner's account still
     fits (v2.2 is the same model); an Ouja-account contract frozen on v2.1 (whose text says the
-    units run on the owner's account) never does — it must be re-issued on Model (B)."""
+    units run on the owner's account) never does — it must be re-issued on Model (B). The fee model
+    must match too: a monthly text is never signed under «نسبة التنظيف» answers, nor the reverse."""
     from . import config
     name, _why = template_for(clean)
-    return bool(name) and config.template_model(name) == config.template_model(sent_name or name)
+    sent = sent_name or name
+    return (bool(name) and config.template_model(name) == config.template_model(sent)
+            and config.template_fee_model(name) == config.template_fee_model(sent))
 
 
 # ------------------------------------------------------------------ state machine

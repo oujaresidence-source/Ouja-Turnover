@@ -131,7 +131,12 @@ VAT = [
 
 # ------------------------------------------------------------------ step 3 — الوحدات
 FEES = ("850", "950", "1050", "1250")
+FEE_FIELDS = ("monthly_fee", "monthly_fee_other")    # dropped from every unit under «نسبة التنظيف»
 UNITS = [
+    {"key": "fee_model", "type": "choice", "label_ar": "طريقة احتساب التنظيف",
+     "label_en": "Cleaning charge", "required": True, "default": "monthly",
+     "options": [opt("monthly", "رسوم تشغيل شهرية لكل وحدة", "Monthly fee per unit"),
+                 opt("pct", "نسبة تنظيف بدل الرسوم الشهرية", "Cleaning % instead of a monthly fee")]},
     {"key": "units_count", "type": "choice", "label_ar": "كم وحدة في هذا العقد؟",
      "label_en": "How many units?", "required": True, "default": "1",
      "options": [opt("1", "1"), opt("2", "2"), opt("3", "3"), opt("4", "4"), opt("5", "5"),
@@ -216,6 +221,12 @@ TERMS = [
                  opt("other", "أخرى", "Other")]},
     {"key": "op_pct_other", "type": "number", "label_ar": "النسبة %", "label_en": "Share %",
      "required": True, "min": 10, "max": 40, "step": 0.5, "show_if": {"op_pct": ["other"]}},
+    {"key": "clean_pct", "type": "choice", "label_ar": "نسبة التنظيف", "label_en": "Cleaning share",
+     "required": True, "default": "5", "show_if": {"fee_model": ["pct"]},
+     "options": [opt("3", "3%"), opt("5", "5%"), opt("7", "7%"), opt("other", "أخرى", "Other")]},
+    {"key": "clean_pct_other", "type": "number", "label_ar": "نسبة التنظيف %", "label_en": "Cleaning %",
+     "required": True, "min": 1, "max": 15, "step": 0.5,
+     "show_if": {"fee_model": ["pct"], "clean_pct": ["other"]}},
     {"key": "send_via", "type": "choice", "label_ar": "طريقة الإرسال", "label_en": "Send by",
      "required": True, "default": "whatsapp",
      "options": [opt("whatsapp", "واتساب", "WhatsApp"), opt("copy", "نسخ الرابط فقط", "Copy link only")]},
@@ -435,6 +446,8 @@ def validate(answers, today=None):
         u = raw_units[i] if i < len(raw_units) and isinstance(raw_units[i], dict) else {}
         cu = {}
         for f in UNIT_FIELDS:
+            if clean.get("fee_model") == "pct" and f["key"] in FEE_FIELDS:
+                continue
             if not visible(f, dict(u, **cu)):
                 continue
             v, err = _check_field(f, u.get(f["key"]), dict(u, **cu), today)
@@ -473,9 +486,18 @@ def warnings(clean):
 
 
 def op_pct_value(clean):
-    v = clean.get("op_pct")
+    return _pct_value(clean, "op_pct")
+
+
+def clean_pct_value(clean):
+    """«نسبة التنظيف» — None on a monthly-fee contract (the field is hidden, so never stored)."""
+    return _pct_value(clean, "clean_pct")
+
+
+def _pct_value(clean, key):
+    v = clean.get(key)
     if v == "other":
-        v = clean.get("op_pct_other")
+        v = clean.get(key + "_other")
     try:
         f = float(v)
     except (TypeError, ValueError):

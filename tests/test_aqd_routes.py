@@ -660,7 +660,8 @@ class TestModelB(Base):
     def test_each_template_has_its_own_approval(self):
         s = self.settings()
         names = [t["name"] for t in s["templates"]]
-        self.assertEqual(names, ["operating_v2_2", "operating_ouja_v2_2"])
+        self.assertEqual(names, ["operating_v2_2", "operating_ouja_v2_2",
+                                 "operating_pct_v2_2", "operating_ouja_pct_v2_2"])
         labels = {t["name"]: t["label_ar"] for t in s["templates"]}
         self.assertEqual(labels["operating_v2_2"], "نموذج (أ) — حساب المالك 2.2")
         self.assertEqual(labels["operating_ouja_v2_2"], "نموذج (ب) — حساب عوجا 2.2")
@@ -698,10 +699,12 @@ class TestModelB(Base):
     def test_list_banner_names_each_unapproved_template(self):
         lst = body(run(routes.api_list(_Req())))
         self.assertEqual([t["label_ar"] for t in lst["templates_pending"]],
-                         ["نموذج (أ) — حساب المالك 2.2", "نموذج (ب) — حساب عوجا 2.2"])
+                         ["نموذج (أ) — حساب المالك 2.2", "نموذج (ب) — حساب عوجا 2.2",
+                          "نموذج (أ) — حساب المالك 2.2 — نسبة تنظيف", "نموذج (ب) — حساب عوجا 2.2 — نسبة تنظيف"])
         self.approve("operating_v2_2")
         lst = body(run(routes.api_list(_Req())))
-        self.assertEqual([t["name"] for t in lst["templates_pending"]], ["operating_ouja_v2_2"])
+        self.assertEqual([t["name"] for t in lst["templates_pending"]],
+                         ["operating_ouja_v2_2", "operating_pct_v2_2", "operating_ouja_pct_v2_2"])
 
     def test_model_b_flow_send_read_refuse_approve_sign_countersign(self):
         self.approve("operating_v2_2")                     # the OTHER template: must not unlock B

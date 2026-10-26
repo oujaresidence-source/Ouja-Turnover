@@ -778,6 +778,7 @@ def core_public_get(token):
         "greeting": engine.greeting_name(a), "honorific": "" if engine.is_company(a) else engine.honorific(a),
         "gender": c.get("gender"), "client_kind": c.get("client_kind"),
         "units_count": c.get("units_count"), "op_pct": c.get("op_pct"),
+        "clean_pct": catalogue.clean_pct_value(a),
         "approved": is_approved(c.get("template_name")), "last4_kind": _last4_kind(a),
         "locked": _locked(c), "expires_at": c.get("expires_at"),
     }

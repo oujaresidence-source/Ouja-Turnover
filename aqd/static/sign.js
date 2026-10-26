@@ -78,7 +78,9 @@
       + '<p class="lede">هذا عقد تشغيل وحداتك مع عوجا. تحقق، اقرأ، ووقّع من نفس الصفحة.</p>'
       + '<ul class="facts">'
       + '<li><span class="v">' + esc(r.units_count) + '</span><span class="l">' + (Number(r.units_count) === 1 ? 'وحدة' : 'وحدات') + '</span></li>'
-      + '<li><span class="v">' + esc(num(r.op_pct)) + '%</span><span class="l">نسبة التشغيل</span></li>'
+      + (r.clean_pct !== null && r.clean_pct !== undefined
+        ? '<li><span class="v two" dir="ltr">' + esc(num(r.op_pct)) + '% + ' + esc(num(r.clean_pct)) + '%</span><span class="l">التشغيل + التنظيف</span></li>'
+        : '<li><span class="v">' + esc(num(r.op_pct)) + '%</span><span class="l">نسبة التشغيل</span></li>')
       + '<li><span class="v">12</span><span class="l">شهر مدة العقد</span></li>'
       + '</ul></section>';
   }

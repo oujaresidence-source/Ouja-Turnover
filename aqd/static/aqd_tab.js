@@ -321,6 +321,7 @@
       + kv(T('الجوال', 'Mobile'), '<span dir="ltr">' + esc(c.mobile || '—') + '</span>', true)
       + kv(T('الوحدات', 'Units'), String(n(c.units_count)))
       + kv(T('نسبة التشغيل', 'Operating share'), pct(c.op_pct))
+      + (a.fee_model === 'pct' ? kv(T('نسبة التنظيف', 'Cleaning share'), pct(pctOf(a, 'clean_pct'))) : '')
       + kv(T('نموذج العقد', 'Contract template'), c.template_label || '—')
       + kv(T('أنشأه', 'Created by'), (c.created_by || '—') + ' · ' + riyadh(c.created_at))
       + (c.expires_at && ['sent', 'opened', 'verified'].indexOf(c.status) >= 0 ? kv(T('ينتهي الرابط', 'Link expires'), riyadh(c.expires_at)) : '')
@@ -397,6 +398,11 @@
     if (f.cond && !cond(f.cond, a)) return false;
     return true;
   }
+  /* mirror of catalogue.FEE_FIELDS: «نسبة التنظيف» contracts carry no per-unit monthly fee */
+  function unitFieldOn(f, a) {
+    return !(a.fee_model === 'pct' && (f.key === 'monthly_fee' || f.key === 'monthly_fee_other'));
+  }
+  function pctOf(a, key) { return a[key] === 'other' ? a[key + '_other'] : a[key]; }
   function derive(a) {
     /* R1 mirror: VAT-registered = always the owner's account (the server forces the same) */
     if (a.vat_registered === 'yes') a.account_model = 'owner';
@@ -479,7 +485,7 @@
       if (cnt < 1 || cnt > 20) errs.units_count = errs.units_count || 'عدد الوحدات غير صحيح';
       arr(a.units).forEach(function (u, ui) {
         st.unit_fields.forEach(function (f) {
-          if (!visible(f, u)) return;
+          if (!unitFieldOn(f, a) || !visible(f, u)) return;
           var e = fieldError(f, u[f.key], u); if (e) errs['units.' + ui + '.' + f.key] = e;
         });
       });
@@ -583,7 +589,7 @@
           + (w.u < cnt - 1 ? '<button class="btn ghost sm" data-aq="unext">' + esc(T('التالية', 'Next unit')) + '</button>' : '') + '</span></div>';
         var uerr = {};
         Object.keys(errs).forEach(function (k) { var p = 'units.' + w.u + '.'; if (k.indexOf(p) === 0) uerr['u.' + k.slice(p.length)] = errs[k]; });
-        st.unit_fields.forEach(function (f) { h += fieldHtml(f, u, 'u.', uerr); });
+        st.unit_fields.forEach(function (f) { if (unitFieldOn(f, a)) h += fieldHtml(f, u, 'u.', uerr); });
         var bad = Object.keys(errs).filter(function (k) { return k.indexOf('units.') === 0; }).map(function (k) { return Number(k.split('.')[1]) + 1; });
         bad = bad.filter(function (x, i) { return bad.indexOf(x) === i && x !== w.u + 1; });
         if (bad.length) h += '<div class="aq-warn" style="margin-top:10px">' + esc(T('وحدات ناقصة: ', 'Units incomplete: ') + bad.map(function (x) { return 'A' + x; }).join('، ')) + '</div>';
@@ -625,13 +631,16 @@
   function summary() {
     var a = S.wz.a;
     var who = a.client_kind === 'company' ? a.company_name : a.full_name;
-    var p = a.op_pct === 'other' ? a.op_pct_other : a.op_pct;
+    var p = pctOf(a, 'op_pct');
     var fees = arr(a.units).map(function (u) { return u.monthly_fee === 'other' ? u.monthly_fee_other : u.monthly_fee; }).filter(Boolean);
+    var fourth = a.fee_model === 'pct'
+      ? '<div><b>' + esc(pct(pctOf(a, 'clean_pct'))) + '</b><span>' + esc(T('نسبة التنظيف', 'Cleaning share')) + '</span></div>'
+      : '<div><b>' + esc(fees.length ? fees.map(function (x) { return Number(x).toLocaleString('en-US'); }).join(' / ') : '—') + '</b><span>' + esc(T('الرسوم الشهرية (ريال)', 'Monthly fee (SAR)')) + '</span></div>';
     return '<div class="aq-sum">'
       + '<div><b>' + esc(who || '—') + '</b><span>' + esc(T('العميل', 'Client')) + '</span></div>'
       + '<div><b>' + n(arr(a.units).length) + '</b><span>' + esc(T('وحدات', 'Units')) + '</span></div>'
       + '<div><b>' + esc(pct(p)) + '</b><span>' + esc(T('نسبة التشغيل', 'Share')) + '</span></div>'
-      + '<div><b>' + esc(fees.length ? fees.map(function (x) { return Number(x).toLocaleString('en-US'); }).join(' / ') : '—') + '</b><span>' + esc(T('الرسوم الشهرية (ريال)', 'Monthly fee (SAR)')) + '</span></div>'
+      + fourth
       + '</div>';
   }
 

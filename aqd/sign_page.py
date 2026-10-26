@@ -50,6 +50,7 @@ input{caret-color:var(--gold-ink)}
 .facts li{background:var(--bg);border-radius:10px;padding:10px 8px;text-align:center}
 .facts .v{display:block;font-weight:700;font-size:19px;color:var(--ink);font-variant-numeric:tabular-nums}
 .facts .l{display:block;font-size:12.5px;color:var(--muted)}
+.facts .v.two{font-size:16px;white-space:nowrap}
 .gate h2{font-size:18px;margin-bottom:4px}
 .boxes{display:flex;gap:10px;justify-content:center;direction:ltr;margin:16px 0 8px}
 .boxes input{width:56px;height:64px;text-align:center;font-size:28px;font-weight:700;color:var(--ink);border:1.5px solid var(--border);border-radius:12px;background:#fff;caret-color:var(--gold)}
