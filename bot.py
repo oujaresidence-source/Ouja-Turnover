@@ -47308,8 +47308,19 @@ async def _api_nav(request):
         perms = _norm_perms(_auth_session(request) or {})
     return _json({"ok": True, "nav": NAV_DEF, "role": _req_role(request), "perms": perms})
 
+_DASHBOARD_ETAG = None
+
 async def _handle_dashboard(request):
-    return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+    # 1.3 MB that only changes on deploy: an ETag of its bytes lets a returning browser get an
+    # empty 304 instead of ~350 KB again. "no-cache" = revalidate on EVERY open, so a deploy
+    # still shows immediately. Substring match: Railway's edge may weaken it to W/"...".
+    global _DASHBOARD_ETAG
+    if _DASHBOARD_ETAG is None:
+        _DASHBOARD_ETAG = '"' + hashlib.sha1(DASHBOARD_HTML.encode("utf-8")).hexdigest()[:20] + '"'
+    headers = {"ETag": _DASHBOARD_ETAG, "Cache-Control": "no-cache"}
+    if _DASHBOARD_ETAG in (request.headers.get("If-None-Match") or ""):
+        return web.Response(status=304, headers=headers)
+    return web.Response(text=DASHBOARD_HTML, content_type="text/html", headers=headers)
 
 # =====================================================================
 # PWA (installable app) — ADDITIVE. Serves the web-app manifest and the
@@ -60403,6 +60414,10 @@ var V=document.getElementById('view');
 function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
 function sid(){try{var k='ouja_sid',v=localStorage.getItem(k);if(!v){v='s'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
 function qs(){return new URLSearchParams(location.search);}
+// Photos through the WebP proxy (/elite/img): ~4x lighter than Hostaway's originals and served from
+// our own disk after the first view. Absolute URLs only (an uploaded hero is a relative path);
+// the server turns it off with ELITE_IMG_PROXY=0, and the proxy itself 302s to the original on any error.
+function pimg(u,w){try{if(u&&STAY&&STAY.config&&STAY.config.imgproxy&&/^https?:/i.test(u))return '/elite/img?u='+encodeURIComponent(u)+(w?('&w='+w):'');}catch(e){}return u;}
 function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
 function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},utm(),extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
 function money(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US')+' ر.س';}catch(e){return n+' ر.س';}}
@@ -60424,7 +60439,7 @@ function viewLanding(){
   var nbs=(cfg.neighborhoods||[]);var nbopts='<option value="">كل الأحياء</option>'+nbs.map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('neighborhood')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+(o.count?(' ('+o.count+')'):'')+'</option>';}).join('');
   var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
   var fpos=({center:'center',top:'top center',bottom:'bottom center',left:'center left',right:'center right'})[hc.focal||'center']||'center';
-  var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(cfg.hero).replace(/"/g,'&quot;')+');background-position:'+fpos+'"></div>'):'';
+  var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(pimg(cfg.hero,1280)).replace(/"/g,'&quot;')+');background-position:'+fpos+'"></div>'):'';
   var ovOp=(hc.overlay!=null?(hc.overlay/100):1);
   var ro=(cfg.rating_overall||null);
   var ratingChip=(ro&&ro.avg)?('<span class="tchip">★ '+ro.avg+' · '+ro.count+' تقييم</span>'):'';
@@ -60481,7 +60496,7 @@ function viewLanding(){
 
 function card(l){
   var avail=(l.available===true);
-  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(pimg(l.cover,720))+'">'):'<div class="noimg">صورة غير متوفرة</div>';
   var ov=[];if(avail)ov.push('<span class="ov-chip ok">متاحة</span>');if(l.badge)ov.push('<span class="ov-chip gold">'+he(l.badge)+'</span>');
   var price;
   if(l.est_total!=null&&l.nights>0){
@@ -60652,7 +60667,7 @@ function mqLinkQS(){
 function mqCard(l){
   var why=(l.reasons||[]).map(function(r){return '<span>✓ '+he(r)+'</span>';}).join('');
   var tr=l.tradeoff?('<div class="mq-trade">⚠︎ '+he(l.tradeoff)+'</div>'):'';
-  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg">صورة غير متوفرة</div>';
+  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(pimg(l.cover,720))+'">'):'<div class="noimg">صورة غير متوفرة</div>';
   var price=(l.est_total!=null&&l.nights>0)
     ?('<div class="price"><b>من '+money(l.est_avg)+' / الليلة</b> · الإجمالي التقريبي '+money(l.est_total)+'</div>')
     :'<div class="price soft">السعر يظهر داخل Airbnb</div>';
@@ -60695,7 +60710,7 @@ function mqCompareTable(top,factsDef){
     return cols.some(function(l){return (l.facts||{})[f.key]===true;});
   });
   var head='<tr><th class="mq-cmp-attr"></th>'+cols.map(function(l){
-    var img=l.cover?('<img loading="lazy" width="200" height="150" alt="'+he(l.name_ar)+'" src="'+he(l.cover)+'">'):'<div class="noimg" style="height:70px">—</div>';
+    var img=l.cover?('<img loading="lazy" width="200" height="150" alt="'+he(l.name_ar)+'" src="'+he(pimg(l.cover,320))+'">'):'<div class="noimg" style="height:70px">—</div>';
     return '<th><a class="mq-cmp-unit" href="/apartments/'+he(l.slug)+mqLinkQS()+'">'+img+'<span>'+he(l.name_ar||l.name_en)+'</span></a></th>';
   }).join('')+'</tr>';
   var rows='<tr><th class="mq-cmp-attr">غرف · أسرّة</th>'+cols.map(function(l){return '<td>'+he(mqRoomsBeds(l))+'</td>';}).join('')+'</tr>'
@@ -60872,14 +60887,14 @@ function viewListing(){
     var imgs=(l.images||[]);
     var gallery;
     if(imgs.length){
-      var c1='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(imgs[0])+'" alt="'+he(l.name_ar)+'"></div>';
+      var c1='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(imgs[0],1080))+'" alt="'+he(l.name_ar)+'"></div>';
       var c2='';
       if(imgs.length>1){
         var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">🖼️ عرض كل الصور · '+imgs.length+'</button>'):'';
-        c2='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(imgs[1])+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
+        c2='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(imgs[1],1080))+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
       }
       gallery='<div class="gal2'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(l.cover)+'" alt="'+he(l.name_ar)+'"></div></div>';}
+    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(l.cover,1080))+'" alt="'+he(l.name_ar)+'"></div></div>';}
     else{gallery='<div class="card" style="padding:46px;text-align:center;color:var(--mut);margin:14px 0">لا توجد صور لهذه الوحدة</div>';}
     var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','ذاتي']);
     var kv=kvitems.length?('<div class="kv">'+kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
@@ -60938,7 +60953,7 @@ function viewListing(){
   function agHtml(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
   function openGallery(imgs,alt){
     var ov=document.createElement('div');ov.className='lb';
-    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(u)+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(pimg(u,1280))+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
     function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
     function esc(e){if(e.key==='Escape')close();}
     ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
@@ -61128,6 +61143,7 @@ def _stay_render(route="landing", listing=None, base=""):
     data = {"route": route, "listing": listing,
             "config": {"noo": _gw_noo_options(), "count": len(vis), "hero": (hcfg.get("url") or ""),
                        "hero_cfg": hcfg, "whatsapp": STAY_WHATSAPP,
+                       "imgproxy": bool(ELITE_IMG_PROXY),
                        "neighborhoods": _gw_neighborhoods_with_counts(),
                        "rating_overall": _gw_ratings_overall(),
                        "price_bands": _gw_price_bands(_gw_visible_prices()),
@@ -62373,7 +62389,7 @@ async def _handle_elite_img(request):
         im.save(out, format="WEBP", quality=82, method=5)
         return out.getvalue()
     try:
-        data = await asyncio.get_event_loop().run_in_executor(None, _work)
+        data = await web_thread(_work)                          # web lane: bot loops can't jam it
     except Exception:
         raise web.HTTPFound(u)                                  # transcode/fetch failed -> original
     if cpath:
