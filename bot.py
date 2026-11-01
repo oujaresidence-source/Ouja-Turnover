@@ -495,7 +495,10 @@ DISCOUNT_TIER2_PERCENT = float(os.environ.get("LM_STEP2_PERCENT", "20"))
 DISCOUNT_TIER2_HOUR    = int(os.environ.get("LM_STEP2_HOUR", "18"))    # 18:00 = 6 PM
 DISCOUNT_TIER3_PERCENT = float(os.environ.get("LM_STEP3_PERCENT", "30"))
 DISCOUNT_TIER3_HOUR    = int(os.environ.get("LM_STEP3_HOUR", "20"))    # 20:00 = 8 PM
-DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false", "False", "no")
+# Owner 2026-11-01: "remove test mode" — the ladder writes for real. A stale
+# DISCOUNT_DRY_RUN=1 on Railway kept it silent, so this reads a NEW name and is LIVE
+# unless LM_DRY_RUN=1 (the kill switch; the dashboard pause also stops it).
+DISCOUNT_DRY_RUN = os.environ.get("LM_DRY_RUN", "0") in ("1", "true", "True", "yes")
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
 DISCOUNT_STATE_FILE_NAME = "discount_state.json"                            # path resolved via _state_path() below (survives redeploys)
@@ -2143,7 +2146,7 @@ def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
     # pattern as compute_forward_calendar) — the sequential per-listing fetch made a
     # tier run take minutes across the portfolio. Writes below stay sequential.
     eligible = [lid for lid in listings
-                if not is_unit_skipped(lid) and strategy_enabled("last-minute", lid)]
+                if not is_unit_skipped(lid) and lm_unit_enabled(lid)]
     # A guest awaiting confirmation must not see tonight's price move under them.
     pending_lids = _pending_lids_for_date(today)
     prefetched = {}
@@ -2164,7 +2167,7 @@ def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
             print("discount tier prefetch pool error:", e)
     for lid, name in listings.items():
         item = {"lid": lid, "name": name, "target_date": today,
-                "strategy_enabled": bool(strategy_enabled("last-minute", lid)),
+                "strategy_enabled": bool(lm_unit_enabled(lid)),
                 "preview_only": bool(preview_only)}
         if is_unit_skipped(lid):
             item["status"] = "skipped"
@@ -2172,7 +2175,7 @@ def apply_discount_tier(pct, label="last-minute", trigger_source="scheduled",
             item["skip_until"] = unit_skip_until_iso(lid)
             run["items"].append(item); run["counts"]["unit_skipped"] += 1
             continue                                       # owner asked to hold price on this unit
-        if not strategy_enabled("last-minute", lid):
+        if not lm_unit_enabled(lid):
             item["status"] = "skipped"
             item["reason"] = "strategy_disabled"
             run["items"].append(item); run["counts"]["strategy_disabled"] += 1
@@ -44767,6 +44770,16 @@ def strategy_enabled(name, lid=None):
         if isinstance(u, dict) and u.get(name) is False:
             return False
     return True
+
+def lm_unit_enabled(lid):
+    """The same-day ladder covers EVERY unit (owner 2026-11-01), not only units activated
+    for the full pricing engine — activation also turns on strategies that rewrite future
+    nights, which must stay with Hostaway. The owner can still switch the ladder off
+    globally or for one unit (strategy toggle "last-minute"), or skip a unit for a while."""
+    if _strategy_toggles["global"].get("last-minute") is False:
+        return False
+    u = _strategy_toggles["by_unit"].get(str(lid))
+    return not (isinstance(u, dict) and u.get("last-minute") is False)
 
 # ---- Mission 2: frozen before/after baseline. The live Hostaway price the FIRST time the
 # engine sees an open (lid, night) is frozen as `baseline`. Previews/applies/strategies NEVER

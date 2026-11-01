@@ -45,8 +45,8 @@ class FakeHostaway:
 
 
 class LadderTest(unittest.TestCase):
-    PATCHED = ("api_get", "api_put", "get_listings_map", "strategy_enabled",
-               "is_unit_skipped", "_pending_lids_for_date", "_lm_floor_for",
+    PATCHED = ("api_get", "api_put", "get_listings_map", "_strategy_toggles",
+               "pricing_activated", "is_unit_skipped", "_pending_lids_for_date", "_lm_floor_for",
                "log_price_change", "_load_discount_state", "_save_discount_state")
 
     def setUp(self):
@@ -57,7 +57,8 @@ class LadderTest(unittest.TestCase):
         bot.api_get = self.fake.get
         bot.api_put = self.fake.put
         bot.get_listings_map = lambda: {EMPTY: "1 MLQ", BOOKED: "HUE 103"}
-        bot.strategy_enabled = lambda *a, **k: True
+        bot._strategy_toggles = {"global": {}, "by_unit": {}}
+        bot.pricing_activated = lambda lid: False     # nothing activated for full pricing
         bot.is_unit_skipped = lambda lid: False
         bot._pending_lids_for_date = lambda d: set()
         bot._lm_floor_for = lambda lid, ctx: {"final_floor": self.floor}
@@ -110,6 +111,24 @@ class LadderTest(unittest.TestCase):
             self._step(n)
         self.assertNotIn(BOOKED, [lid for lid, _p in self.fake.puts])
         self.assertEqual(self.fake.days[BOOKED]["price"], 618)
+
+    def test_live_by_default_without_any_env(self):
+        self.assertFalse(bot.DISCOUNT_DRY_RUN)
+
+    def test_unit_not_activated_for_full_pricing_still_drops(self):
+        self.assertFalse(bot.pricing_activated(EMPTY))
+        self._step(1)
+        self.assertEqual(self.fake.puts, [(EMPTY, 388)])
+
+    def test_owner_can_switch_one_unit_off(self):
+        bot._strategy_toggles["by_unit"][str(EMPTY)] = {"last-minute": False}
+        self._step(1)
+        self.assertEqual(self.fake.puts, [])
+
+    def test_owner_can_switch_the_ladder_off_globally(self):
+        bot._strategy_toggles["global"]["last-minute"] = False
+        self._step(1)
+        self.assertEqual(self.fake.puts, [])
 
     def test_late_deploy_never_raises_an_already_lower_price(self):
         self.fake.days[EMPTY]["price"] = 300          # something already dropped tonight
