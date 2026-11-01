@@ -483,13 +483,18 @@ ASSISTANT_CATEGORY   = os.environ.get("ASSISTANT_CATEGORY", "Operations")
 DEFAULT_CHECKOUT_HOUR = int(os.environ.get("DEFAULT_CHECKOUT_HOUR", "12"))
 
 # ---- last-minute tiered discount (all Riyadh time) ----
-# Tier 1 fires at midnight, Tier 2 deepens it at noon, Tier 3 deepens again at 4 PM.
-DISCOUNT_TIER1_PERCENT = float(os.environ.get("DISCOUNT_TIER1_PERCENT", "15"))
-DISCOUNT_TIER1_HOUR    = int(os.environ.get("DISCOUNT_TIER1_HOUR", "0"))    # 00:00 = midnight
-DISCOUNT_TIER2_PERCENT = float(os.environ.get("DISCOUNT_TIER2_PERCENT", "20"))
-DISCOUNT_TIER2_HOUR    = int(os.environ.get("DISCOUNT_TIER2_HOUR", "12"))   # 12:00 = noon
-DISCOUNT_TIER3_PERCENT = float(os.environ.get("DISCOUNT_TIER3_PERCENT", "30"))
-DISCOUNT_TIER3_HOUR    = int(os.environ.get("DISCOUNT_TIER3_HOUR", "18"))   # 18:00 = 6 PM
+# Owner ladder (2026-11-01): -10% at 3 PM, -20% at 6 PM, -30% at 8 PM, every day incl.
+# Thu/Fri, each % taken from tonight's ORIGINAL price (never compounding), never below
+# the unit's floor. Booking data: 43% of same-day bookings still arrive after 4 PM, 15%
+# after 8 PM — a morning drop mostly discounts guests who'd pay full price anyway.
+# Read from NEW env names (LM_STEP*) on purpose: stale DISCOUNT_TIER* values left on
+# Railway from the old midnight/noon ladder must not silently override this one.
+DISCOUNT_TIER1_PERCENT = float(os.environ.get("LM_STEP1_PERCENT", "10"))
+DISCOUNT_TIER1_HOUR    = int(os.environ.get("LM_STEP1_HOUR", "15"))    # 15:00 = 3 PM
+DISCOUNT_TIER2_PERCENT = float(os.environ.get("LM_STEP2_PERCENT", "20"))
+DISCOUNT_TIER2_HOUR    = int(os.environ.get("LM_STEP2_HOUR", "18"))    # 18:00 = 6 PM
+DISCOUNT_TIER3_PERCENT = float(os.environ.get("LM_STEP3_PERCENT", "30"))
+DISCOUNT_TIER3_HOUR    = int(os.environ.get("LM_STEP3_HOUR", "20"))    # 20:00 = 8 PM
 DISCOUNT_DRY_RUN = os.environ.get("DISCOUNT_DRY_RUN", "1") not in ("0", "false", "False", "no")
 DISCOUNT_FLOOR   = float(os.environ.get("DISCOUNT_FLOOR", "0") or "0")      # 0 = no floor
 DISCOUNT_CHANNEL = os.environ.get("DISCOUNT_CHANNEL", "pricing-log")        # summary channel
@@ -599,7 +604,11 @@ WEEKEND_DAYS = set(int(x) for x in os.environ.get("WEEKEND_DAYS", "3,4").split("
 WEEKEND_DISCOUNT_PERCENT = float(os.environ.get("WEEKEND_DISCOUNT_PERCENT", "20"))
 WEEKEND_DISCOUNT_HOUR    = int(os.environ.get("WEEKEND_DISCOUNT_HOUR", "17"))
 WEEKEND_DISCOUNT_MINUTE  = int(os.environ.get("WEEKEND_DISCOUNT_MINUTE", "30"))  # 17:30 = 5:30 PM
-DISCOUNT_WEEKEND_SKIP_TIERS = os.environ.get("DISCOUNT_WEEKEND_SKIP_TIERS", "0") in ("1", "true", "True", "yes")
+# Owner 2026-11-01: Thu/Fri run the SAME 3/6/8 PM ladder and nothing else. The extra
+# 5:30 PM step and the weekend-only mode are opt-in under new env names, so a stale
+# DISCOUNT_WEEKEND_SKIP_TIERS on Railway can't bring the old weekend rule back.
+LM_WEEKEND_EXTRA = os.environ.get("LM_WEEKEND_EXTRA", "0") in ("1", "true", "True", "yes")
+DISCOUNT_WEEKEND_SKIP_TIERS = os.environ.get("LM_WEEKEND_SKIP_TIERS", "0") in ("1", "true", "True", "yes")
 
 # ---- cleaning reminders: nag open turnover channels until work is submitted for review ----
 REMINDER_START_HOUR = int(os.environ.get("REMINDER_START_HOUR", "12"))  # start at 12 PM
@@ -3756,7 +3765,7 @@ def _dc_unblock_report_text(rep):
 def compute_tonight_empty():
     """For each unit empty TONIGHT, return its current price + the discount schedule the
     bot will apply if the unit stays empty. Weekends now use the normal Riyadh-time tiers
-    unless DISCOUNT_WEEKEND_SKIP_TIERS=1 restores the old weekend-only rule. Also includes
+    unless LM_WEEKEND_SKIP_TIERS=1 restores the old weekend-only rule. Also includes
     the owner-set skip status.
 
     Returned shape (one entry per empty unit):
@@ -3804,7 +3813,7 @@ def compute_tonight_empty():
                     ("T2", DISCOUNT_TIER2_HOUR, 0, DISCOUNT_TIER2_PERCENT),
                     ("T3", DISCOUNT_TIER3_HOUR, 0, DISCOUNT_TIER3_PERCENT),
                 ])
-                if weekend:
+                if weekend and LM_WEEKEND_EXTRA:
                     schedule.append(("Weekend", WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE,
                                      WEEKEND_DISCOUNT_PERCENT))
             for lab, hour, minute, pct in schedule:
@@ -6684,37 +6693,38 @@ async def _run_tier(pct, label, trigger_source="scheduled", force=False, preview
     finally:
         _lm_inflight.discard(slug)
 
+def _lm_tier_label(n):
+    """'Tier 1 (3 PM)' — named from the configured hour so a label can never lie about
+    when it fires. The step slug (run-once key) derives from it, so it must stay stable."""
+    hour = {1: DISCOUNT_TIER1_HOUR, 2: DISCOUNT_TIER2_HOUR, 3: DISCOUNT_TIER3_HOUR}[n]
+    return f"Tier {n} ({_fmt_hour(hour)})"
+
+async def _run_scheduled_tier(n, pct):
+    label = _lm_tier_label(n)
+    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
+        print(f"[{label}] Thu/Fri — skipping (weekend-only rule)")
+        _record_lm_run_skip(pct, label, f"scheduled_step{n}", "weekend_rule_skip")
+        return
+    await _run_tier(pct, label, f"scheduled_step{n}")
+
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER1_HOUR, tzinfo=TZ))
 async def discount_tier1_loop():
-    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
-        print("[Tier 1] Thu/Fri — skipping midnight discount (weekend rule)")
-        _record_lm_run_skip(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)",
-                            "scheduled_12am", "weekend_rule_skip")
-        return
-    await _run_tier(DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)", "scheduled_12am")
+    await _run_scheduled_tier(1, DISCOUNT_TIER1_PERCENT)
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER2_HOUR, tzinfo=TZ))
 async def discount_tier2_loop():
-    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
-        print("[Tier 2] Thu/Fri — skipping noon discount (weekend rule)")
-        _record_lm_run_skip(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)",
-                            "scheduled_12pm", "weekend_rule_skip")
-        return
-    await _run_tier(DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)", "scheduled_12pm")
+    await _run_scheduled_tier(2, DISCOUNT_TIER2_PERCENT)
 
 @tasks.loop(time=dt_time(hour=DISCOUNT_TIER3_HOUR, tzinfo=TZ))
 async def discount_tier3_loop():
-    if DISCOUNT_WEEKEND_SKIP_TIERS and is_weekend_today():
-        print("[Tier 3] Thu/Fri — skipping evening discount (weekend rule)")
-        _record_lm_run_skip(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)",
-                            "scheduled_6pm", "weekend_rule_skip")
-        return
-    await _run_tier(DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)", "scheduled_6pm")
+    await _run_scheduled_tier(3, DISCOUNT_TIER3_PERCENT)
 
 @tasks.loop(time=dt_time(hour=WEEKEND_DISCOUNT_HOUR, minute=WEEKEND_DISCOUNT_MINUTE, tzinfo=TZ))
 async def discount_weekend_loop():
     if not is_weekend_today():
         return                       # only fires on Thu/Fri
+    if not (LM_WEEKEND_EXTRA or DISCOUNT_WEEKEND_SKIP_TIERS):
+        return                       # owner: Thu/Fri run the normal ladder only
     await _run_tier(WEEKEND_DISCOUNT_PERCENT, "Weekend (Thu/Fri 5:30 PM)",
                     "scheduled_weekend")
 
@@ -6724,11 +6734,11 @@ def _lm_scheduled_steps_for(now=None):
         return [(WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE, WEEKEND_DISCOUNT_PERCENT,
                  "Weekend (Thu/Fri 5:30 PM)", "scheduled_weekend_late")]
     steps = [
-        (DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT, "Tier 1 (midnight)", "scheduled_12am_late"),
-        (DISCOUNT_TIER2_HOUR, 0, DISCOUNT_TIER2_PERCENT, "Tier 2 (noon)", "scheduled_12pm_late"),
-        (DISCOUNT_TIER3_HOUR, 0, DISCOUNT_TIER3_PERCENT, "Tier 3 (6 PM)", "scheduled_6pm_late"),
+        (DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT, _lm_tier_label(1), "scheduled_step1_late"),
+        (DISCOUNT_TIER2_HOUR, 0, DISCOUNT_TIER2_PERCENT, _lm_tier_label(2), "scheduled_step2_late"),
+        (DISCOUNT_TIER3_HOUR, 0, DISCOUNT_TIER3_PERCENT, _lm_tier_label(3), "scheduled_step3_late"),
     ]
-    if is_weekend_today(now):
+    if LM_WEEKEND_EXTRA and is_weekend_today(now):
         steps.append((WEEKEND_DISCOUNT_HOUR, WEEKEND_DISCOUNT_MINUTE, WEEKEND_DISCOUNT_PERCENT,
                       "Weekend (Thu/Fri 5:30 PM)", "scheduled_weekend_late"))
     return steps
@@ -6770,7 +6780,7 @@ def _headsup_table(items, weekend):
         note = (f"Prices auto-drop if still empty: **-{p1}% at {_fmt_hour(DISCOUNT_TIER1_HOUR)}** → "
                 f"**-{p2}% at {_fmt_hour(DISCOUNT_TIER2_HOUR)}** → "
                 f"**-{p3}% at {_fmt_hour(DISCOUNT_TIER3_HOUR)}**.")
-        if weekend:
+        if weekend and LM_WEEKEND_EXTRA:
             note += (f" Weekend extra check also runs at "
                      f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d}.")
     sep = "─" * len(header)
@@ -46707,7 +46717,7 @@ def _lm_current_manual_step(now=None):
     steps = _lm_scheduled_steps_for(now)
     chosen = steps[0] if steps else (
         DISCOUNT_TIER1_HOUR, 0, DISCOUNT_TIER1_PERCENT,
-        "Tier 1 (midnight)", "manual_preview")
+        _lm_tier_label(1), "manual_preview")
     for step in steps:
         fire = now.replace(hour=step[0], minute=step[1], second=0, microsecond=0)
         if now >= fire:
@@ -76849,7 +76859,8 @@ async def on_ready():
           f"{DISCOUNT_TIER3_PERCENT:.0f}% at {DISCOUNT_TIER3_HOUR:02d}:00 "
           f"{'(DRY-RUN)' if DISCOUNT_DRY_RUN else '(LIVE)'}")
     weekend_mode = ("weekend-only compatibility mode" if DISCOUNT_WEEKEND_SKIP_TIERS
-                    else "normal tiers also run on Thu/Fri")
+                    else "normal tiers also run on Thu/Fri"
+                    + (" + extra 5:30 PM step" if LM_WEEKEND_EXTRA else " (no extra step)"))
     print(f"Weekend rule (Thu/Fri): {WEEKEND_DISCOUNT_PERCENT:.0f}% at "
           f"{WEEKEND_DISCOUNT_HOUR:02d}:{WEEKEND_DISCOUNT_MINUTE:02d} · {weekend_mode}")
     print(f"Last-minute catch-up window: {DISCOUNT_CATCHUP_MINUTES} minutes")
