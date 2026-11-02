@@ -16,7 +16,7 @@
 - Window 15:00–23:59 Riyadh; target night = `pricing_target_date_riyadh(now)`.
 - Never raise a price. Never touch a booked/blocked night.
 - Minimum = max(sold-minimum, `_pe_floor_overrides[lid]`, `DISCOUNT_FLOOR`). The DNA/tier_min floor is NOT used.
-- Sold-minimum: same-night bookings (reservationDate UTC+3 date == arrivalDate), last 180 days, confirmed (`new`/`modified`), accommodation-only nightly (strip `cleaningFee`,`totalTax`,`cityTax`,`securityDepositFee`), drop < 50% of the unit median, need ≥ 5 samples else no minimum.
+- Sold-minimum: same-night bookings (reservationDate UTC+3 date == arrivalDate), last 180 days, confirmed (`new`/`modified`), accommodation-only nightly (strip `cleaningFee`,`totalTax`,`cityTax`,`securityDepositFee`), drop < 50% of the unit median, need ≥ 5 samples else no minimum; minimum = lowest − 10% (`LM_MINIMUM_MARGIN`, owner 2026-11-02).
 - Reservations come from `fetch_reservations_window` — never `get_reservations_cached()` (CLAUDE.md trap #4).
 - Hostaway calls only inside `asyncio.to_thread` (discord-loop-freeze lesson).
 - Report: once per night, first tick at/after 00:00, `#pricing-log` (`DISCOUNT_CHANNEL`), Arabic, ≤1,900 chars per message.

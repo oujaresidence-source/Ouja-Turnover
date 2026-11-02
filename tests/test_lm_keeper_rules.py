@@ -91,9 +91,17 @@ class Minimums(unittest.TestCase):
                 for d, p in zip(range(1, 8), (100, 400, 430, 450, 480, 500, 520))]
         rows.append(res(9, "2026-10-09", "2026-10-09 16:00:00", 380, status="cancelled"))
         rows.append(res(9, "2026-10-10", "2026-10-05 16:00:00", 300))   # booked days ahead
-        m = k.build_minimums(rows)
+        m = k.build_minimums(rows, margin_pct=0)
         self.assertEqual(m["9"]["min"], 400)
         self.assertEqual(m["9"]["n"], 6)
+
+    def test_minimum_sits_10_percent_under_the_lowest_sale(self):
+        # owner 2026-11-02: F2's lowest sale was 908 but it sold at 608 after the drop —
+        # "lowest that sold" alone would have blocked it and could never learn lower.
+        rows = [res(9, "2026-10-%02d" % d, "2026-10-%02d 16:00:00" % d, p)
+                for d, p in zip(range(1, 7), (400, 430, 450, 480, 500, 520))]
+        m = k.build_minimums(rows)
+        self.assertEqual((m["9"]["lowest"], m["9"]["min"]), (400, 360))
 
     def test_too_few_samples_means_no_minimum(self):
         rows = [res(5, "2026-10-%02d" % d, "2026-10-%02d 16:00:00" % d, 400) for d in range(1, 5)]

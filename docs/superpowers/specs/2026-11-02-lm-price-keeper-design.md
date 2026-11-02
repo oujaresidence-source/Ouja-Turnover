@@ -54,7 +54,10 @@ current step's target is not re-read until the next step boundary. Expected ≈ 
   Confirmed statuses only (`new`/`modified`).
 - Nightly price = (`totalPrice` − `cleaningFee` − tax) ÷ `nights`.
 - Per unit: drop prices below 50% of that unit's same-night median (data errors / family stays), then
-  `minimum = lowest remaining`.
+  `minimum = lowest remaining − 10%` (`LM_MINIMUM_MARGIN`). Owner decision 2026-11-02 after the
+  backtest: the bare lowest gave F2 a 908 minimum although it sold at 608 after the drop on 1 Nov
+  (HUE 202: 467 vs 304) — it would block, and never learn, cheaper sales. The −30% ladder still
+  bounds every drop.
 - Fewer than 5 same-night bookings → no sold-minimum (the unit may go the full −30%).
 - An owner-set manual floor in the dashboard (`_pe_floor_overrides`) still wins if it is higher —
   it is the owner's explicit choice. The DNA/tier_min floor is **not** used by the keeper.

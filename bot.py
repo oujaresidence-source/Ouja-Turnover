@@ -71,6 +71,16 @@ except Exception as _brain_err:        # pragma: no cover
     _brain = None
     _HAS_BRAIN = False
 
+# «حارس سعر الليلة» same-day price keeper — pure rules. If the import ever fails, the old
+# one-shot 3/6/8 PM loops start instead (see on_ready), so tonight's drops never just stop.
+try:
+    import lm_keeper
+    _HAS_LM_KEEPER = True
+except Exception as _lmk_err:          # pragma: no cover
+    print("[lm_keeper] import failed (falling back to the one-shot ladder):", _lmk_err)
+    lm_keeper = None
+    _HAS_LM_KEEPER = False
+
 # Employee Schedule & Coverage Calendar — additive, isolated, never takes down the bot/dashboard.
 try:
     import schedule as _schedule
@@ -6761,6 +6771,245 @@ async def discount_catchup_loop():
             continue
         print(f"[{label}] catch-up run {age_min:.0f} minutes late")
         await _run_tier(pct, label, source)
+
+# ---- «حارس سعر الليلة» same-day price keeper (owner 2026-11-02) ---------------------------
+# Every 5 min, 15:00–23:59 Riyadh: work out what tonight's price SHOULD be for every empty
+# unit and fix any that is wrong. A restart, a failed write or a guest mid-booking all heal on
+# a later tick — there are no one-shot "step done" flags (the 1 Nov dry-run trap). Decisions
+# live in lm_keeper.py (pure, tested); this block is only the Hostaway/Discord I/O.
+# Spec: docs/superpowers/specs/2026-11-02-lm-price-keeper-design.md
+LM_KEEPER_STATE_FILE = "lm_keeper.json"
+LM_MINIMUMS_FILE = "lm_minimums.json"
+LM_MINIMUM_DAYS = int(os.environ.get("LM_MINIMUM_DAYS", "180") or "180")
+LM_MINIMUM_MARGIN = float(os.environ.get("LM_MINIMUM_MARGIN", "10") or "10")  # % under the lowest sale
+LM_ALERT_AFTER_MIN = int(os.environ.get("LM_ALERT_AFTER_MIN", "30") or "30")
+LM_ALERT_MENTION = os.environ.get("LM_ALERT_MENTION", "")       # Discord user id; else FINCHAT_OWNER_MENTION
+LM_WEEK_TARGET = int(os.environ.get("LM_WEEK_TARGET", "43") or "43")
+LM_WEEK_BASELINE = int(os.environ.get("LM_WEEK_BASELINE", "37") or "37")
+_lm_keeper_lock = threading.Lock()
+
+def lm_keeper_steps():
+    return [(DISCOUNT_TIER1_HOUR, DISCOUNT_TIER1_PERCENT),
+            (DISCOUNT_TIER2_HOUR, DISCOUNT_TIER2_PERCENT),
+            (DISCOUNT_TIER3_HOUR, DISCOUNT_TIER3_PERCENT)]
+
+def lm_minimums(now=None, refresh=False):
+    """{lid(str): {"min","n","median"}} — the lowest price each unit really sold at for the same
+    night, rebuilt once a day from a TARGETED window (CLAUDE.md trap #4). A failed or degraded
+    pull keeps the last good copy and retries on the next tick — it never wipes the minimums."""
+    now = now or now_riyadh()
+    data = _load_json(LM_MINIMUMS_FILE, {})
+    if not isinstance(data, dict):
+        data = {}
+    today = now.date()
+    if refresh or data.get("built_for") != today.isoformat():
+        try:
+            rows, degraded = fetch_reservations_window_checked(
+                today - timedelta(days=LM_MINIMUM_DAYS), today, pad_days=0)
+        except Exception as e:
+            print("lm minimums fetch error:", e)
+            rows, degraded = [], True
+        if rows and not degraded:
+            data = {"built_for": today.isoformat(), "rows": len(rows),
+                    "units": lm_keeper.build_minimums(rows, margin_pct=LM_MINIMUM_MARGIN)}
+            _save_json(LM_MINIMUMS_FILE, data)
+    return data.get("units") or {}
+
+def lm_unit_minimum(lid, mins):
+    """max(lowest-that-sold, owner's manual floor, global floor). The DNA/tier_min floor that
+    held A5 MLQ at 572 on 2 Nov is deliberately NOT used here."""
+    sold = int((mins.get(str(lid)) or {}).get("min") or 0)
+    manual = int(round(float(_pe_floor_overrides.get(int(lid), 0) or 0)))
+    return max(sold, manual, int(round(DISCOUNT_FLOOR or 0)))
+
+def _lm_load_keeper_state(now):
+    st = _load_json(LM_KEEPER_STATE_FILE, {})
+    if not isinstance(st, dict):
+        st = {}
+    keep_from = (now.date() - timedelta(days=7)).isoformat()
+    return {k: v for k, v in st.items() if isinstance(v, dict) and k >= keep_from}
+
+def lm_due_alerts(rec, now):
+    """Units still not at tonight's target ≥ LM_ALERT_AFTER_MIN after their step began.
+    Marks each one so it is pinged at most ONCE per night."""
+    start = lm_keeper.step_started_at(now, lm_keeper_steps())
+    if not rec or start is None or (now - start).total_seconds() < LM_ALERT_AFTER_MIN * 60:
+        return []
+    out = []
+    for lid, u in (rec.get("units") or {}).items():
+        if u.get("alerted") or u.get("status") not in ("error", "waiting"):
+            continue
+        u["alerted"] = now.isoformat(timespec="seconds")
+        out.append({"lid": lid, "name": u.get("name"), "reason": u.get("reason"),
+                    "current": u.get("current")})
+    return out
+
+def lm_keeper_tick(now=None):
+    """One pass → (tonight's record, alerts due now). Never overlaps itself."""
+    now = now or now_riyadh()
+    if not _lm_keeper_lock.acquire(blocking=False):
+        return None, []                            # previous tick still running
+    try:
+        return _lm_keeper_tick(now)
+    finally:
+        _lm_keeper_lock.release()
+
+def _lm_keeper_tick(now):
+    pct = lm_keeper.step_pct(now, lm_keeper_steps())
+    night = pricing_target_date_riyadh(now)
+    st = _lm_load_keeper_state(now)
+    rec = st.setdefault(night, {"units": {}})
+    units = rec.setdefault("units", {})
+    if pct <= 0:
+        return rec, []
+    if is_discount_paused():
+        rec["paused"] = True
+        _save_json(LM_KEEPER_STATE_FILE, st)
+        return rec, []
+    mins = lm_minimums(now)
+    pending = None                                 # fetched lazily, once per tick
+    for lid, name in get_listings_map().items():
+        key = str(lid)
+        u = units.setdefault(key, {})
+        u["name"] = name
+        if u.get("status") == "booked":
+            continue
+        if is_unit_skipped(lid) or not lm_unit_enabled(lid):
+            u.update(status="skipped",
+                     reason="unit_skipped" if is_unit_skipped(lid) else "strategy_disabled")
+            continue
+        if u.get("confirmed_pct") == pct:
+            continue                               # already right for this step — no API call
+        try:
+            cal = api_get(f"/listings/{lid}/calendar", params={"startDate": night, "endDate": night})
+            day = (cal.get("result") or [None])[0]
+        except Exception as e:
+            u.update(status="error", reason="read_failed", error=str(e)[:160])
+            continue
+        if not day:
+            u.update(status="skipped", reason="no_calendar_day")
+            continue
+        if pending is None:
+            pending = _pending_lids_for_date(night)
+        orig = u.get("orig") or (_lm_orig_from_note(day.get("note"))
+                                 or _lm_baseline_from_log(lid, night)
+                                 or float(day.get("price") or 0))
+        minimum = lm_unit_minimum(lid, mins)
+        d = lm_keeper.decide(day, orig, pct, minimum, int(lid) in pending)
+        if d["action"] == "booked":
+            u["status"] = "booked"
+            continue
+        u.setdefault("seen_empty", True)
+        u.update(orig=int(round(orig)), minimum=minimum, current=d["current"], pct=pct)
+        if d["action"] == "wait_pending":
+            u.update(status="waiting", reason="pending_guest")
+            continue
+        if d["action"] == "hold":
+            u.update(status="ok", confirmed_pct=pct, final=d["current"], error="",
+                     reason="minimum" if d["floor_blocked"] else "")
+            continue
+        if DISCOUNT_DRY_RUN:
+            u.update(status="dry_run", reason="dry_run", would=d["target"])
+            continue                               # never confirmed: goes live on the next tick
+        try:
+            api_put(f"/listings/{lid}/calendar",
+                    {"startDate": night, "endDate": night, "isAvailable": 1,
+                     "price": d["target"], "note": "ouja-orig:%d" % int(round(orig))})
+            chk = (api_get(f"/listings/{lid}/calendar",
+                           params={"startDate": night, "endDate": night}).get("result") or [{}])[0]
+            actual = int(round(float(chk.get("price") or 0)))
+        except Exception as e:
+            u.update(status="error", reason="write_failed", error=str(e)[:160])
+            continue
+        if actual != d["target"]:
+            u.update(status="error", reason="not_stuck", current=actual)
+            continue
+        stamp = now.isoformat(timespec="seconds")
+        u.setdefault("first_drop_at", stamp)
+        u.setdefault("writes", []).append([stamp, actual, pct])
+        u.update(status="ok", confirmed_pct=pct, final=actual, current=actual, error="",
+                 reason="minimum" if d["floor_blocked"] else "")
+        log_price_change(lid, night, d["current"], actual, "last-minute",
+                         "حارس سعر الليلة: خصم %d٪ من السعر الأصلي %d" % (int(pct), int(round(orig))))
+    alerts = lm_due_alerts(rec, now)
+    _save_json(LM_KEEPER_STATE_FILE, st)
+    return rec, alerts
+
+def lm_report_text(night):
+    """The 12 AM report for `night` (the evening that just ended)."""
+    st = _load_json(LM_KEEPER_STATE_FILE, {})
+    rec = (st.get(night) if isinstance(st, dict) else None) or {}
+    units = rec.get("units") or {}
+    d = date.fromisoformat(night)
+    ws = lm_keeper.week_start(d)
+    rows_night = fetch_reservations_window(d, d, pad_days=0)
+    rows_week = fetch_reservations_window(ws, d, pad_days=0)
+    bookings = lm_keeper.night_bookings(rows_night, night, units, lm_keeper_steps())
+    week = lm_keeper.week_count(rows_week, ws.isoformat(), night)
+    txt = lm_keeper.render_report(night, units, bookings, week, LM_WEEK_TARGET, LM_WEEK_BASELINE)
+    if rec.get("paused"):
+        txt += "\n⏸️ الخصم كان موقوف من لوحة التحكم جزء من الليلة."
+    if DISCOUNT_DRY_RUN:
+        txt += "\n🧪 وضع التجربة شغّال (LM_DRY_RUN=1) — ما تغيّر أي سعر."
+    _save_json("lm_report_%s.json" % night,
+               {"night": night, "week": week, "text": txt,
+                "bookings": [dict(b, booked_at=b["booked_at"].isoformat()) for b in bookings]})
+    return txt
+
+async def _lm_post(text):
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return False
+    category = await get_category(guild)
+    channel = await ensure_channel(guild, DISCOUNT_CHANNEL, category)
+    if channel is None:
+        return False
+    for part in lm_keeper.chunk(text):
+        await channel.send(part)
+    return True
+
+async def _lm_maybe_post_report(now):
+    """Once per night, on the first tick after midnight (restart-safe: the sent mark is saved)."""
+    night = (now.date() - timedelta(days=1)).isoformat()
+    st = await asyncio.to_thread(_load_json, LM_KEEPER_STATE_FILE, {})
+    rec = st.get(night) if isinstance(st, dict) else None
+    if not rec or rec.get("report_sent"):
+        return
+    txt = await asyncio.to_thread(lm_report_text, night)
+    if not await _lm_post(txt):
+        return
+
+    def _mark():
+        s = _load_json(LM_KEEPER_STATE_FILE, {})
+        if isinstance(s, dict):
+            s.setdefault(night, {})["report_sent"] = now.isoformat(timespec="seconds")
+            _save_json(LM_KEEPER_STATE_FILE, s)
+    await asyncio.to_thread(_mark)
+
+_LM_ALERT_REASONS = {"read_failed": "خطأ من هوستواي", "write_failed": "خطأ من هوستواي",
+                     "not_stuck": "هوستواي ما ثبّت السعر", "pending_guest": "ضيف ينتظر تأكيد"}
+
+async def _lm_post_alert(a):
+    who = LM_ALERT_MENTION or FINCHAT_OWNER_MENTION
+    mention = f"<@{who}> " if who else ""
+    await _lm_post(f"{mention}⚠️ **{a['name']}** فاضية الليلة وسعرها ما نزل من {LM_ALERT_AFTER_MIN} دقيقة — "
+                   f"السبب: {_LM_ALERT_REASONS.get(a['reason'], a['reason'] or '—')} · "
+                   f"السعر الحين {a.get('current') or '؟'} ر.س. البوت يعيد المحاولة كل ٥ دقايق.")
+
+@tasks.loop(minutes=5)
+async def lm_keeper_loop():
+    now = now_riyadh()
+    if now.hour < 3:
+        await _lm_maybe_post_report(now)
+        return
+    if now.hour < 14:
+        return
+    if now.hour < 15:
+        await asyncio.to_thread(lm_minimums, now)  # ready before the 3 PM step
+        return
+    _rec, alerts = await asyncio.to_thread(lm_keeper_tick, now)
+    for a in alerts:
+        await _lm_post_alert(a)
 
 def _headsup_table(items, weekend):
     """Build a clean monospace table + an explanatory note for the heads-up preview."""
@@ -76889,6 +77138,7 @@ async def on_ready():
     # silently kill a business loop until the next redeploy (H2 lesson).
     for _lp, _nm in ((reminder_loop, "reminder_loop"),
                      (discount_catchup_loop, "discount_catchup_loop"),
+                     (lm_keeper_loop, "lm_keeper_loop"),
                      (escalation_reping_loop, "escalation_reping_loop"),
                      (revenue_loop, "revenue_loop"),
                      (price_opp_loop, "price_opp_loop"),
@@ -76915,16 +77165,22 @@ async def on_ready():
         _pending.append(dispatch_daily_loop)    # 9 PM: WhatsApp cleaning dispatch for tomorrow
     if not reminder_loop.is_running():
         _pending.append(reminder_loop)
-    if not discount_tier1_loop.is_running():
-        _pending.append(discount_tier1_loop)
-    if not discount_tier2_loop.is_running():
-        _pending.append(discount_tier2_loop)
-    if not discount_tier3_loop.is_running():
-        _pending.append(discount_tier3_loop)
-    if not discount_weekend_loop.is_running():
-        _pending.append(discount_weekend_loop)
-    if not discount_catchup_loop.is_running():
-        _pending.append(discount_catchup_loop)
+    if _HAS_LM_KEEPER:
+        # «حارس سعر الليلة» replaces the one-shot 3/6/8 PM steps (owner 2026-11-02); the old
+        # loops stay defined but are not started, so two writers never fight over tonight.
+        if not lm_keeper_loop.is_running():
+            _pending.append(lm_keeper_loop)
+    else:
+        if not discount_tier1_loop.is_running():
+            _pending.append(discount_tier1_loop)
+        if not discount_tier2_loop.is_running():
+            _pending.append(discount_tier2_loop)
+        if not discount_tier3_loop.is_running():
+            _pending.append(discount_tier3_loop)
+        if not discount_weekend_loop.is_running():
+            _pending.append(discount_weekend_loop)
+        if not discount_catchup_loop.is_running():
+            _pending.append(discount_catchup_loop)
     if not headsup_loop.is_running():
         _pending.append(headsup_loop)
     if _HAS_SCHEDULE and SCHEDULE_ENABLED and not schedule_digest_loop.is_running():

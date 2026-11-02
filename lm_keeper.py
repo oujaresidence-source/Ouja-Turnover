@@ -93,9 +93,12 @@ def _confirmed(res):
     return str(res.get("status") or "").lower() in CONFIRMED
 
 
-def build_minimums(reservations, min_samples=5):
-    """{lid: {"min", "n", "median"}} — the lowest price each unit actually sold at for the same
-    night. Prices under half the unit's median are data errors / family stays and are dropped;
+def build_minimums(reservations, min_samples=5, margin_pct=10):
+    """{lid: {"min", "lowest", "n", "median"}} — `min` sits `margin_pct`% under the lowest price
+    each unit actually sold at for the same night (owner 2026-11-02: F2's lowest sale was 908 yet
+    it sold at 608 after the drop, so the bare lowest would block — and never learn — cheaper
+    sales). Each cheaper sale lowers it next time; the −30% ladder still bounds every drop.
+    Prices under half the unit's median are data errors / family stays and are dropped;
     a unit with fewer than `min_samples` real sales gets no entry (= no sold-minimum)."""
     by = {}
     for r in reservations:
@@ -112,7 +115,8 @@ def build_minimums(reservations, min_samples=5):
         kept = [p for p in ps if p >= 0.5 * med]
         if len(kept) < int(min_samples):
             continue
-        out[lid] = {"min": int(round(kept[0])), "n": len(kept), "median": int(round(med))}
+        out[lid] = {"min": int(round(kept[0] * (100.0 - float(margin_pct)) / 100.0)),
+                    "lowest": int(round(kept[0])), "n": len(kept), "median": int(round(med))}
     return out
 
 
