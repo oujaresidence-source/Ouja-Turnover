@@ -309,6 +309,15 @@ class RefusedListingsAreRemembered(unittest.TestCase):
             bot.api_get("/listings/9/calendar", params={})
         self.assertEqual(len(self.calls), 1, "after the TTL Hostaway is asked again")
 
+    def test_a_refused_write_does_not_block_reads(self):
+        with self.assertRaises(bot.requests.HTTPError):
+            bot.api_put("/listings/9/calendar", {"price": 1})
+        self.assertEqual(bot.ha_forbidden_listings(), {}, "a refused PUT must not be remembered")
+        self.calls.clear()
+        with self.assertRaises(bot.requests.HTTPError):
+            bot.api_get("/listings/9/calendar", params={})
+        self.assertEqual(len(self.calls), 1, "the GET after a refused PUT must really be asked")
+
 
 class GuestSearchHasATimeCap(unittest.TestCase):
     """A dated /apartments search must answer within STAY_LIVE_BUDGET_S even when Hostaway
@@ -467,3 +476,87 @@ class LivenessSeesAJammedWebLane(unittest.TestCase):
         asyncio.run(main())
         self.assertTrue(exits, "a jammed web lane must trip the guard")
         self.assertIn("web lane", "\n".join(printed))
+
+
+class HostawayOutageIsNotRefusedListings(unittest.TestCase):
+    """A 403 on one listing is that listing. A 403 on most of the portfolio at once is
+    Hostaway itself — remembering those would hide every healthy unit for an hour after
+    Hostaway recovered (simulated 2026-11-05: 70/70 units, at any token age)."""
+
+    def setUp(self):
+        self.calls = []
+        self.outage = True
+        bot._ha_forbidden.clear()
+        bot._ha_forbidden_outage.update({"until": 0, "trips": 0})
+        self.addCleanup(bot._ha_forbidden.clear)
+        self.addCleanup(lambda: bot._ha_forbidden_outage.update({"until": 0, "trips": 0}))
+        saved_tok = dict(bot._token)
+        self.addCleanup(lambda: (bot._token.clear(), bot._token.update(saved_tok)))
+        bot._token.update({"value": "T", "expires_at": time.time() + 9999, "issued_at": time.time()})
+
+        def fake_request(method, url, **kw):
+            self.calls.append(url)
+            r = mock.Mock()
+            r.status_code = 403 if self.outage else 200
+            r.headers = {}
+            r.json = lambda: {"result": []}
+
+            def rfs():
+                if r.status_code >= 400:
+                    raise bot.requests.HTTPError("%d Client Error: Forbidden for url: %s" % (r.status_code, url))
+            r.raise_for_status = rfs
+            return r
+        for p in (mock.patch.object(bot._ha_session, "request", side_effect=fake_request),
+                  mock.patch.object(bot, "get_token", lambda force=False: "T"),
+                  mock.patch.object(bot, "_ha_throttle_acquire", lambda *a, **k: None),
+                  mock.patch("builtins.print")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def sweep(self, ids):
+        """Ask for every unit once; returns how many came back refused."""
+        refused = 0
+        for i in ids:
+            try:
+                bot.api_get("/listings/%d/calendar" % i, params={})
+            except bot.requests.HTTPError:
+                refused += 1
+        return refused
+
+    def test_a_portfolio_wide_403_leaves_nothing_blocked_after_recovery(self):
+        ids = list(range(1000, 1070))
+        self.assertEqual(self.sweep(ids), 70)
+        self.outage = False
+        self.calls.clear()
+        self.assertEqual(self.sweep(ids), 0, "healthy units must not stay blocked after the outage")
+        self.assertEqual(len(self.calls), 70, "every unit must really be asked again")
+        self.assertEqual(bot.ha_forbidden_listings(), {})
+        self.assertEqual(bot._ha_forbidden_outage["trips"], 1)
+
+    def test_the_real_refused_group_is_still_remembered(self):
+        ids = list(range(2000, 2021))             # the 21 units seen in the live logs
+        self.sweep(ids)
+        self.calls.clear()
+        self.assertEqual(self.sweep(ids), 21)
+        self.assertEqual(self.calls, [], "21 refused units are under the cap: no real calls")
+        self.assertEqual(bot._ha_forbidden_outage["trips"], 0)
+
+    def test_nothing_is_remembered_during_the_pause_then_it_works_again(self):
+        self.sweep(range(1000, 1070))
+        self.calls.clear()
+        self.sweep([5000, 5000])
+        self.assertEqual(len(self.calls), 2, "inside the pause a refusal is not remembered")
+        bot._ha_forbidden_outage["until"] = time.time() - 1
+        self.calls.clear()
+        self.sweep([5000, 5000])
+        self.assertEqual(len(self.calls), 1, "after the pause the memory works again")
+
+    def test_an_expired_refusal_does_not_count_toward_the_cap(self):
+        stale = time.time() - bot.HOSTAWAY_FORBIDDEN_TTL_S - 1
+        bot._ha_forbidden.update({str(i): stale for i in range(100)})
+        self.sweep([1])
+        self.assertEqual(bot._ha_forbidden_outage["trips"], 0)
+
+    def test_the_outage_shows_on_the_health_page(self):
+        self.sweep(range(1000, 1070))
+        self.assertEqual(bot.thread_health()["hostaway_refused_outage"]["trips"], 1)

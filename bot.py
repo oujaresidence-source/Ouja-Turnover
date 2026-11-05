@@ -1456,6 +1456,7 @@ def thread_health():
         "hostaway": {"in_10s_window": window, "cap": HOSTAWAY_MAX_PER_10S,
                      **_ha_throttle_stats},
         "hostaway_refused_listings": ha_forbidden_listings(),
+        "hostaway_refused_outage": dict(_ha_forbidden_outage),
         "liveness": {k: v for k, v in _liveness.items() if k != "boot"},
     }
 
@@ -1476,9 +1477,15 @@ async def _api_health_threads(request):
 # A 403 with a token issued minutes ago is the LISTING being off-limits, not the token:
 # skip the refresh, remember the id for HOSTAWAY_FORBIDDEN_TTL_S, and answer the next GET
 # for it instantly with the same 403 error — every caller already handles that error.
+# Outage cap: more than HOSTAWAY_FORBIDDEN_MAX refused at once is Hostaway itself, not that
+# many listings. Remembering them would hide every healthy unit for an hour after Hostaway
+# recovered, so the memory is wiped and nothing is remembered for HOSTAWAY_OUTAGE_PAUSE_S.
 HOSTAWAY_FORBIDDEN_TTL_S = int(os.environ.get("HOSTAWAY_FORBIDDEN_TTL_S", "3600"))
+HOSTAWAY_FORBIDDEN_MAX = int(os.environ.get("HOSTAWAY_FORBIDDEN_MAX", "45"))
+HOSTAWAY_OUTAGE_PAUSE_S = int(os.environ.get("HOSTAWAY_OUTAGE_PAUSE_S", "600"))
 _FRESH_TOKEN_S = 600
 _ha_forbidden = {}                      # listing id (str) -> ts of the last 403
+_ha_forbidden_outage = {"until": 0, "trips": 0}
 _ha_forbidden_lock = threading.Lock()
 _HA_LISTING_PATH = re.compile(r"^/listings/(\d+)(?:/|$)")
 
@@ -1497,8 +1504,19 @@ def _ha_forbidden_hit(lid):
         return True
 
 def _ha_forbidden_mark(lid):
+    now = time.time()
     with _ha_forbidden_lock:
-        _ha_forbidden[lid] = time.time()
+        if now < _ha_forbidden_outage["until"]:
+            return
+        _ha_forbidden[lid] = now
+        refused = sum(1 for ts in _ha_forbidden.values() if now - ts < HOSTAWAY_FORBIDDEN_TTL_S)
+        if refused <= HOSTAWAY_FORBIDDEN_MAX:
+            return
+        _ha_forbidden.clear()
+        _ha_forbidden_outage["until"] = now + HOSTAWAY_OUTAGE_PAUSE_S
+        _ha_forbidden_outage["trips"] += 1
+    print(f"hostaway: {refused} listings refused at once — that is Hostaway, not the listings: "
+          f"memory cleared, not remembering 403s for {HOSTAWAY_OUTAGE_PAUSE_S}s")
 
 def ha_forbidden_listings():
     """{listing id: seconds since Hostaway last refused it} — for /api/health/threads."""
@@ -1531,7 +1549,7 @@ def _api_request(method, path, *, params=None, body=None, _retry=0):
     if r.status_code in _AUTH_RETRY_CODES and _retry == 0 and not listing_refused:
         get_token(force=True)                                 # token expired -> refresh once
         return _api_request(method, path, params=params, body=body, _retry=_retry + 1)
-    if r.status_code == 403 and lid is not None:
+    if r.status_code == 403 and lid is not None and method == "GET":
         _ha_forbidden_mark(lid)                               # the listing, not the token
     if r.status_code == 429 and _retry < 3:                  # rate limited -> backoff
         _ha_throttle_stats["429s"] += 1
