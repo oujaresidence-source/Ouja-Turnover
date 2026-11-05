@@ -60083,12 +60083,36 @@ def _gw_discover_tags(snaps):
             ent["status"] = "unmapped"
     _gw_save_tax()
 
+# ---- the guest list refreshes itself (2026-11-05) -------------------------------------
+# This list used to change only when someone pressed the sync button, so 29 units deleted
+# from Hostaway on 2026-10-21 stayed on /apartments for two weeks: dead Airbnb links, and a
+# 403 on every dated search that kept «تعذر تحديث التوفر» on for every guest.
+# gw_autosync_loop syncs once per GW_AUTOSYNC_HOURS. A scheduled sync (force=False) keeps the
+# current list when Hostaway's reply is under GW_SYNC_MIN_KEEP of it, so a bad reply can't
+# empty the site; the button (force=True) still applies whatever Hostaway returns.
+GW_AUTOSYNC_ENABLED = os.environ.get("GW_AUTOSYNC_ENABLED", "1") == "1"
+GW_AUTOSYNC_HOURS = float(os.environ.get("GW_AUTOSYNC_HOURS", "24"))
+GW_SYNC_MIN_KEEP = float(os.environ.get("GW_SYNC_MIN_KEEP", "0.5"))
+
+def _gw_autosync_due(now=None):
+    """True when the last sync is older than GW_AUTOSYNC_HOURS, or its time is unreadable."""
+    now = now or datetime.now(TZ)
+    try:
+        age = (now - datetime.fromisoformat(_gw_cache.get("synced_at"))).total_seconds()
+    except (TypeError, ValueError):
+        return True
+    return age >= GW_AUTOSYNC_HOURS * 3600
+
 def _gw_sync(force=False):
     """Pull all listings from Hostaway, parse, cache, discover tags. READ-ONLY."""
     try:
         raw = _ha_fetch_all_listings()
     except Exception as e:
         return {"ok": False, "error": str(e)[:200], "synced_at": _gw_cache.get("synced_at")}
+    have = len(_gw_cache.get("listings") or [])
+    if not force and have and len(raw) < have * GW_SYNC_MIN_KEEP:
+        print(f"guest sync: Hostaway sent {len(raw)} listings, we hold {have} — kept the current list")
+        return {"ok": False, "error": "short_reply", "synced_at": _gw_cache.get("synced_at")}
     snaps, diag = [], {"missing_airbnb": [], "missing_images": [], "inactive": 0}
     for L in raw:
         s = _gw_parse_listing(L)
@@ -68209,6 +68233,22 @@ async def monthly_calendar_loop():
             )
     except Exception as e:
         print("monthly calendar loop error:", e)
+
+@tasks.loop(hours=1)
+async def gw_autosync_loop():
+    """Refresh the guest list when it is a day old. Ticks hourly and reads the stored sync
+    time, so a redeploy neither resets the clock nor costs an extra Hostaway pull."""
+    if not GW_AUTOSYNC_ENABLED or not _gw_autosync_due():
+        return
+    try:
+        res = await asyncio.to_thread(_gw_sync)
+        print("guest sync:", res)
+        if res.get("ok") and _HAS_MONTHLY_PUBLIC and MONTHLY_ENABLED:
+            await asyncio.to_thread(
+                lambda: _monthly_public_request_refresh("listing_cache")
+            )
+    except Exception as e:
+        print("guest sync loop error:", e)
 
 @tasks.loop(minutes=MONTHLY_ENGINE_REFRESH_MIN)
 async def monthly_engine_loop():
@@ -77682,6 +77722,8 @@ async def on_ready():
         _pending.append(cleaning_feedback_loop)
     if MONTHLY_ENABLED and not monthly_calendar_loop.is_running():
         _pending.append(monthly_calendar_loop)    # warms /monthly so no guest waits on Hostaway
+    if GW_AUTOSYNC_ENABLED and not gw_autosync_loop.is_running():
+        _pending.append(gw_autosync_loop)         # the guest list follows Hostaway once a day
     if MONTHLY_ENABLED and _HAS_MONTHLY and not monthly_engine_loop.is_running():
         _pending.append(monthly_engine_loop)      # precomputes the lab price the site publishes
     if DECOR_ENABLED and _HAS_DECOR and not decor_warn_loop.is_running():
