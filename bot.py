@@ -1068,6 +1068,7 @@ def get_token(force=False):
         r.raise_for_status()
         j = r.json()
         _token["value"] = j["access_token"]
+        _token["issued_at"] = now
         try:
             ttl = int(j.get("expires_in") or 0)
         except (TypeError, ValueError):
@@ -1261,6 +1262,7 @@ async def web_thread(fn, *args, **kwargs):
     return await loop.run_in_executor(_web_pool, lambda: ctx.run(fn, *args, **kwargs))
 
 
+
 def _pool_snapshot(pool):
     """Depth of a ThreadPoolExecutor without disturbing it. Private attributes,
     so every read is guarded — a diagnostic must never be able to break a page."""
@@ -1272,6 +1274,136 @@ def _pool_snapshot(pool):
     except Exception:
         pass
     return out
+
+# ---- liveness guard: a hang heals itself and leaves a fingerprint (2026-11-05) ----------
+# Every few days "something" froze (/apartments, a page, a button) and stayed frozen until
+# someone noticed and redeployed. This is the standard liveness probe (what Kubernetes and
+# every big platform do): an independent thread checks that the app is still MOVING —
+#   * LOOP:     the event loop answers a ping within LIVENESS_LOOP_STUCK_S
+#   * WEB LANE: a no-op handed to the guest/dashboard worker pool gets a worker within
+#               LIVENESS_WEB_STUCK_S (if not, every page that needs data is hanging)
+# When either is stuck it (1) prints a full fingerprint — what every thread is doing,
+# line by line, plus pool depths and the Hostaway throttle — so the NEXT hang names its
+# own cause in the Railway log, (2) saves state, (3) exits with code 1 so Railway restarts
+# the container (its default restart policy is on-failure). Safety rails: never during the
+# first LIVENESS_MIN_UPTIME_S after boot (warm-up is legitimately slow), and at most one
+# self-restart per LIVENESS_COOLDOWN_S (remembered on the volume), so it can never loop.
+# LIVENESS_AUTORESTART=0 keeps the detection + fingerprint but never restarts.
+LIVENESS_ENABLED       = os.environ.get("LIVENESS_ENABLED", "1") == "1"
+LIVENESS_AUTORESTART   = os.environ.get("LIVENESS_AUTORESTART", "1") == "1"
+LIVENESS_LOOP_STUCK_S  = float(os.environ.get("LIVENESS_LOOP_STUCK_S", "90"))
+LIVENESS_WEB_STUCK_S   = float(os.environ.get("LIVENESS_WEB_STUCK_S", "180"))
+LIVENESS_MIN_UPTIME_S  = float(os.environ.get("LIVENESS_MIN_UPTIME_S", "900"))
+LIVENESS_COOLDOWN_S    = float(os.environ.get("LIVENESS_COOLDOWN_S", "1800"))
+LIVENESS_TICK_S        = float(os.environ.get("LIVENESS_TICK_S", "10"))
+_liveness = {"started": False, "boot": time.time(), "loop_lag_s": 0.0, "max_loop_lag_s": 0.0,
+             "web_stuck_since": None, "last_verdict": "ok", "trips": 0}
+
+def _liveness_fingerprint(reason):
+    """Everything needed to name the cause later, as plain log lines."""
+    import sys as _sys, traceback as _tb
+    lines = ["=" * 70, "LIVENESS TRIP: %s" % reason]
+    try:
+        lines.append("health: " + json.dumps(thread_health(), ensure_ascii=False, default=str)[:4000])
+    except Exception as e:
+        lines.append("health unavailable: %s" % e)
+    names = {t.ident: t.name for t in threading.enumerate()}
+    for ident, frame in _sys._current_frames().items():
+        stack = _tb.extract_stack(frame)[-6:]
+        where = " <- ".join("%s:%d %s" % (os.path.basename(f.filename), f.lineno, f.name)
+                            for f in reversed(stack))
+        lines.append("thread %s: %s" % (names.get(ident, ident), where))
+    lines.append("=" * 70)
+    return lines
+
+def _liveness_cooldown_ok(now):
+    try:
+        with open(_state_path("liveness_last_restart.txt")) as f:
+            last = float(f.read().strip() or 0)
+    except Exception:
+        last = 0
+    return now - last >= LIVENESS_COOLDOWN_S
+
+def _liveness_verdict(now, loop_lag, web_stuck_for, uptime):
+    """Pure decision (unit-tested): 'ok' | 'warn:<why>' | 'restart:<why>'."""
+    why = None
+    if loop_lag >= LIVENESS_LOOP_STUCK_S:
+        why = "event loop did not answer for %.0fs" % loop_lag
+    elif web_stuck_for is not None and web_stuck_for >= LIVENESS_WEB_STUCK_S:
+        why = "web lane gave no worker for %.0fs" % web_stuck_for
+    if not why:
+        return "ok"
+    if uptime < LIVENESS_MIN_UPTIME_S or not LIVENESS_AUTORESTART or not _liveness_cooldown_ok(now):
+        return "warn:" + why
+    return "restart:" + why
+
+def _liveness_restart(reason):
+    for ln in _liveness_fingerprint(reason):
+        print(ln, flush=True)
+    try:
+        with open(_state_path("liveness_last_restart.txt"), "w") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+    saver = threading.Thread(target=lambda: persist_state(), name="liveness-save", daemon=True)
+    saver.start()
+    saver.join(15)                           # best effort: never let a stuck save block the restart
+    print("LIVENESS: exiting with code 1 so Railway restarts the service", flush=True)
+    os._exit(1)
+
+def _liveness_run(loop):
+    pending = {"sent": None}
+    pong = threading.Event()
+    web_probe = {"sent": None, "ran": threading.Event()}
+    warned = None
+    while True:
+        time.sleep(LIVENESS_TICK_S)
+        if loop.is_closed():                 # process is shutting down: nothing to guard
+            return
+        now = time.time()
+        try:
+            # loop ping: a lag is measured from when the ping was SENT until it was answered
+            if pending["sent"] is None or pong.is_set():
+                pong.clear()
+                pending["sent"] = now
+                loop.call_soon_threadsafe(pong.set)
+            lag = 0.0 if pong.is_set() else now - pending["sent"]
+            _liveness["loop_lag_s"] = round(lag, 1)
+            _liveness["max_loop_lag_s"] = max(_liveness["max_loop_lag_s"], round(lag, 1))
+            # web lane: same idea — a no-op dropped into the pool must get a worker
+            if web_probe["sent"] is None or web_probe["ran"].is_set():
+                web_probe["ran"].clear()
+                web_probe["sent"] = now
+                _web_pool.submit(web_probe["ran"].set)
+            stuck_for = None if web_probe["ran"].is_set() else now - web_probe["sent"]
+            _liveness["web_stuck_since"] = (web_probe["sent"] if stuck_for and stuck_for >= LIVENESS_TICK_S * 2
+                                            else None)
+            v = _liveness_verdict(now, lag, stuck_for, now - _liveness["boot"])
+            _liveness["last_verdict"] = v
+            if v.startswith("restart:"):
+                _liveness["trips"] += 1
+                _liveness_restart(v[8:])
+            elif v.startswith("warn:") and v != warned:
+                warned = v
+                _liveness["trips"] += 1
+                for ln in _liveness_fingerprint(v[5:] + " (no restart: warm-up / cooldown / disabled)"):
+                    print(ln, flush=True)
+            elif v == "ok":
+                warned = None
+        except Exception as e:
+            print("liveness tick error:", e)
+
+def start_liveness_guard(loop=None):
+    if not LIVENESS_ENABLED or _liveness["started"]:
+        return False
+    loop = loop or asyncio.get_running_loop()
+    _liveness["started"] = True
+    _liveness["boot"] = time.time()
+    threading.Thread(target=_liveness_run, args=(loop,), name="liveness", daemon=True).start()
+    print("[liveness] guard on · loop %ss · web lane %ss · restart=%s"
+          % (int(LIVENESS_LOOP_STUCK_S), int(LIVENESS_WEB_STUCK_S), LIVENESS_AUTORESTART))
+    return True
+
 
 def run_bounded(key, fn, budget_s=None):
     """Single-flighted fn with a deadline. Returns (True, value) when it finished
@@ -1323,6 +1455,8 @@ def thread_health():
                        if _HAS_GUIDE and hasattr(_guide, "routes") else "n/a"),
         "hostaway": {"in_10s_window": window, "cap": HOSTAWAY_MAX_PER_10S,
                      **_ha_throttle_stats},
+        "hostaway_refused_listings": ha_forbidden_listings(),
+        "liveness": {k: v for k, v in _liveness.items() if k != "boot"},
     }
 
 
@@ -1333,10 +1467,54 @@ async def _api_health_threads(request):
         return _json({"error": "unauthorized"}, 401)
     return _json({"ok": True, **thread_health()})
 
+# ---- listings Hostaway refuses (403) — remembered, not re-asked (2026-11-05) ----------
+# Live logs 2026-11-05 02:34–05:18 (1,000 lines): 480 lines were «403 Forbidden» on
+# /listings/{id}/calendar for the SAME 21 listing ids every cycle. Each one cost a calendar
+# call + a forced token refresh + a second calendar call, on the shared 11-calls/10s
+# throttle — the monthly calendar pass took 292–626 s per run, and every guest date search
+# asked those 21 units LIVE again (they never land in the store), 2 calls each.
+# A 403 with a token issued minutes ago is the LISTING being off-limits, not the token:
+# skip the refresh, remember the id for HOSTAWAY_FORBIDDEN_TTL_S, and answer the next GET
+# for it instantly with the same 403 error — every caller already handles that error.
+HOSTAWAY_FORBIDDEN_TTL_S = int(os.environ.get("HOSTAWAY_FORBIDDEN_TTL_S", "3600"))
+_FRESH_TOKEN_S = 600
+_ha_forbidden = {}                      # listing id (str) -> ts of the last 403
+_ha_forbidden_lock = threading.Lock()
+_HA_LISTING_PATH = re.compile(r"^/listings/(\d+)(?:/|$)")
+
+def _ha_listing_of(path):
+    m = _HA_LISTING_PATH.match(str(path or ""))
+    return m.group(1) if m else None
+
+def _ha_forbidden_hit(lid):
+    with _ha_forbidden_lock:
+        ts = _ha_forbidden.get(lid)
+        if ts is None:
+            return False
+        if time.time() - ts >= HOSTAWAY_FORBIDDEN_TTL_S:
+            _ha_forbidden.pop(lid, None)
+            return False
+        return True
+
+def _ha_forbidden_mark(lid):
+    with _ha_forbidden_lock:
+        _ha_forbidden[lid] = time.time()
+
+def ha_forbidden_listings():
+    """{listing id: seconds since Hostaway last refused it} — for /api/health/threads."""
+    now = time.time()
+    with _ha_forbidden_lock:
+        return {k: int(now - v) for k, v in _ha_forbidden.items()
+                if now - v < HOSTAWAY_FORBIDDEN_TTL_S}
+
 def _api_request(method, path, *, params=None, body=None, _retry=0):
     """One retry policy for GET/POST/PUT: refresh-once on auth failure, EXPONENTIAL
     backoff on 429 (5s → 10s → 20s, honoring Retry-After) instead of fixed 10s×3.
     Now throttled: see _ha_throttle_acquire. The throttle is what keeps 429s rare."""
+    lid = _ha_listing_of(path)
+    if method == "GET" and lid and _ha_forbidden_hit(lid):
+        raise requests.HTTPError("403 Client Error: Forbidden (remembered — Hostaway refused "
+                                 "this listing recently; not re-asked) for url: %s%s" % (BASE, path))
     token = get_token()
     headers = {"Authorization": f"Bearer {token}", "Cache-control": "no-cache"}
     if method != "GET":
@@ -1348,9 +1526,13 @@ def _api_request(method, path, *, params=None, body=None, _retry=0):
         r = _ha_session.request(method, f"{BASE}{path}", headers=headers,
                                 params=params if method == "GET" else None,
                                 json=body if method != "GET" else None, timeout=60)
-    if r.status_code in _AUTH_RETRY_CODES and _retry == 0:   # token expired -> refresh once
-        get_token(force=True)
+    listing_refused = (r.status_code == 403 and lid is not None
+                       and time.time() - (_token.get("issued_at") or 0) < _FRESH_TOKEN_S)
+    if r.status_code in _AUTH_RETRY_CODES and _retry == 0 and not listing_refused:
+        get_token(force=True)                                 # token expired -> refresh once
         return _api_request(method, path, params=params, body=body, _retry=_retry + 1)
+    if r.status_code == 403 and lid is not None:
+        _ha_forbidden_mark(lid)                               # the listing, not the token
     if r.status_code == 429 and _retry < 3:                  # rate limited -> backoff
         _ha_throttle_stats["429s"] += 1
         try:
@@ -1374,9 +1556,26 @@ def api_put(path, body, _retry=0):
 _listings = {"map": {}, "ts": 0}
 
 def get_listings_map():
-    """listingMapId -> internal name (cached for 1 hour)."""
-    if _listings["map"] and time.time() - _listings["ts"] < 3600:
+    """listingMapId -> internal name (cached for 1 hour).
+    Stale-while-revalidate (2026-11-05): once a map exists, an expired one is returned
+    AT ONCE and refreshed in a background thread. Before, the first caller after each
+    hour paid the Hostaway pagination itself — and ~25 async handlers (tickets, expenses,
+    owner cache bust, reviews) call this straight on the event loop, so that caller froze
+    every page and the Discord heartbeat. Unit names change rarely; a name up to a few
+    seconds old is harmless, a frozen app is not. Only the very first fill (empty map,
+    i.e. right after a boot) still blocks — which is why the async callers stay listed
+    in tests/test_no_loop_freeze.py KNOWN_DEBT."""
+    if _listings["map"]:
+        now = time.time()
+        # at most one background attempt per 2 min, so a Hostaway outage can't become a retry storm
+        if now - _listings["ts"] >= 3600 and now - _listings.get("kick_ts", 0) >= 120:
+            _listings["kick_ts"] = now
+            kick_refresh(("listings_map", "swr"), _listings_map_fetch)
         return _listings["map"]
+    return _listings_map_fetch()                  # very first fill (boot): the only blocking path left
+
+def _listings_map_fetch():
+    """The real paginated pull behind get_listings_map (blocking)."""
     m, limit, offset = {}, 100, 0
     while True:
         data = api_get("/listings", params={"limit": limit, "offset": offset})
@@ -12547,7 +12746,8 @@ _catalog_units = []        # structured: [{id, name, beds, area, price, link}]
 _avail_cache = OrderedDict()
 _AVAIL_CACHE_MAX = 2000
 INTEL_CACHE_MIN  = int(os.environ.get("INTEL_CACHE_MIN", "20"))    # cache calendar lookups
-STAY_CAL_MAX_AGE_MIN = int(os.environ.get("STAY_CAL_MAX_AGE_MIN", "60"))  # /apartments search trusts the calendar store up to this age
+STAY_CAL_MAX_AGE_MIN = int(os.environ.get("STAY_CAL_MAX_AGE_MIN", "60"))
+STAY_LIVE_BUDGET_S = float(os.environ.get("STAY_LIVE_BUDGET_S", "8"))   # max wait for live lookups in a guest search  # /apartments search trusts the calendar store up to this age
 INTEL_MAX_CHECKS = int(os.environ.get("INTEL_MAX_CHECKS", "80"))   # max units to date-check per msg (parallel — covers full portfolio)
 INTEL_PARALLEL = int(os.environ.get("INTEL_PARALLEL", "4"))          # concurrent calendar lookups
 # Was 12. Twelve concurrent calendar calls ate ~80% of Hostaway's 15-per-10s budget in
@@ -49115,7 +49315,8 @@ async def _handle_invest(request):
     ok = bool(tok) and hmac.compare_digest(str(tok), str(cur))
     if not ok and not _dash_auth(request):
         return web.Response(text=_INVEST_DENIED_HTML, content_type="text/html", status=403)
-    return web.Response(text=_render_invest_html(), content_type="text/html")
+    # web lane: the deck's stats read get_reservations_cached() (cold = full Hostaway pull)
+    return web.Response(text=await web_thread(_render_invest_html), content_type="text/html")
 
 async def _api_invest_link(request):
     """The investor link. GET → current URL + meta (any logged-in dashboard session —
@@ -49667,7 +49868,8 @@ async def _api_strategy(request):
         lid = int(request.query.get("lid"))
     except Exception:
         return _json({"error": "bad lid"}, 400)
-    return _json(_strategy_view(lid))
+    # web lane: _strategy_view reads get_reservations_cached() — a cold pull is ~60 pages
+    return _json(await web_thread(_strategy_view, lid))
 
 async def _api_strategy_stop(request):
     if not _dash_auth(request):
@@ -57163,9 +57365,10 @@ async def _api_fb_profit(request):
     month = request.query.get("month") or None
     dstart = request.query.get("start") or None
     dend = request.query.get("end") or None
+    # web lane: a cold window pull is Hostaway pagination — on the loop it froze every page
     if scope == "unit":
-        return _json({"ok": True, **_fb_unit_profitability(month, dstart, dend)})
-    return _json({"ok": True, **_fb_company_profitability(month, dstart, dend)})
+        return _json({"ok": True, **(await web_thread(_fb_unit_profitability, month, dstart, dend))})
+    return _json({"ok": True, **(await web_thread(_fb_company_profitability, month, dstart, dend))})
 
 async def _api_fb_close(request):
     if not _fb_can_finance(request):
@@ -58257,10 +58460,10 @@ async def _api_listings_geocode(request):
     if len(q) < 3:
         return _json({"error": "search_required"}, 400)
     try:
-        resp = requests.get("https://maps.googleapis.com/maps/api/geocode/json",
-                            params={"address": q, "components": "country:SA",
-                                    "region": "sa", "key": GOOGLE_MAPS_API_KEY},
-                            timeout=20)
+        resp = await web_thread(requests.get, "https://maps.googleapis.com/maps/api/geocode/json",
+                                params={"address": q, "components": "country:SA",
+                                        "region": "sa", "key": GOOGLE_MAPS_API_KEY},
+                                timeout=20)
         data = resp.json()
     except Exception as e:
         print("listings geocode error:", e)
@@ -60349,20 +60552,32 @@ def _gw_search(ci=None, co=None, guests=None, typ=None, area=None, neighborhood=
         # ThreadPoolExecutor does NOT copy contextvars, so without ctx.run the guest's
         # "user" Hostaway priority (set by web_thread) was lost and these calls queued
         # as background work behind every bot loop.
+        # HARD TIME CAP (2026-11-05): a guest never waits more than STAY_LIVE_BUDGET_S for the
+        # live part. Whatever has not answered by then is shown as «availability unknown» (the
+        # page already says «تعذر تحديث التوفر حاليًا»), and the unfinished lookups keep running
+        # in the background and land in _avail_cache, so the next search is warm. Without the
+        # cap, a slow Hostaway minute held each search — and its web-lane worker — for minutes;
+        # 16 such searches and /apartments stopped answering for everyone.
+        ex = ThreadPoolExecutor(max_workers=INTEL_PARALLEL, thread_name_prefix="stay-live")
         try:
-            with ThreadPoolExecutor(max_workers=INTEL_PARALLEL) as ex:
-                futures = {ex.submit(contextvars.copy_context().run, unit_availability_price,
-                                     s.get("id"), ci, co): s.get("id")
-                           for s, _ov in live_needed}
-                for fut in as_completed(futures):
+            futures = {ex.submit(contextvars.copy_context().run, unit_availability_price,
+                                 s.get("id"), ci, co): s.get("id")
+                       for s, _ov in live_needed}
+            try:
+                for fut in as_completed(futures, timeout=STAY_LIVE_BUDGET_S):
                     lid = futures[fut]
                     try:
                         avail_map[lid] = fut.result()
                     except Exception as e:
                         print(f"stay search availability parallel error ({lid}):", e)
                         avail_map[lid] = None
+            except TimeoutError:
+                left = sum(1 for f in futures if not f.done())
+                print(f"stay search: {left} live lookups past {STAY_LIVE_BUDGET_S}s — answered without them")
         except Exception as e:
             print("stay search availability pool error:", e)
+        finally:
+            ex.shutdown(wait=False)
 
     for s, ov in survivors:
         avail = None
@@ -60420,9 +60635,41 @@ def _gw_track(ev):
         _gw_analytics["events"].append(ev)
         if len(_gw_analytics["events"]) > 8000:
             del _gw_analytics["events"][:len(_gw_analytics["events"]) - 8000]
+        _gw_an_save_soon()
+    except Exception:
+        pass
+
+# The analytics file is ~2 MB at its 8,000-event cap. It used to be re-serialised and
+# rewritten to the network volume on EVERY guest event (page view, search, click) — on the
+# event loop, ~20 ms locally and more on the volume. A TikTok spike = the loop busy writing
+# the same file over and over. Now: at most one write per GW_AN_SAVE_EVERY_S, on a thread.
+GW_AN_SAVE_EVERY_S = float(os.environ.get("GW_AN_SAVE_EVERY_S", "30"))
+_gw_an_flush = {"pending": False}
+_gw_an_flush_lock = threading.Lock()
+
+def _gw_an_save_soon():
+    with _gw_an_flush_lock:
+        if _gw_an_flush["pending"]:
+            return
+        _gw_an_flush["pending"] = True
+
+    def _flush():
+        time.sleep(GW_AN_SAVE_EVERY_S)
+        with _gw_an_flush_lock:
+            _gw_an_flush["pending"] = False
+        try:
+            _gw_save_an()
+        except Exception as e:
+            print("guest analytics save error:", e)
+    threading.Thread(target=_flush, name="gw-an-save", daemon=True).start()
+
+def _gw_an_flush_now():
+    """Exit hook: don't lose the last <30 s of events on a redeploy."""
+    try:
         _gw_save_an()
     except Exception:
         pass
+atexit.register(_gw_an_flush_now)
 
 def _gw_analytics_summary(days=7):
     cutoff = (datetime.now(TZ) - timedelta(days=days)).isoformat(timespec="seconds")
@@ -66126,6 +66373,93 @@ async def _role_enforce_mw(request, handler):
                 break
     return await handler(request)
 
+# ---- gzip every text response ourselves (2026-11-05) ---------------------------
+# The app sent EVERY page uncompressed: /dashboard is 1.3 MB of HTML, gzip makes it
+# ~350 KB. Railway's edge only compresses on some of its proxies (railway-hikari does,
+# railway-edge does not — reported by other Railway users, not under our control), so
+# on the wrong proxy every open pulled the full 1.3 MB from the US to Riyadh.
+# Doing it here makes it certain. Rules: only text types, only real bytes bodies
+# (never files/streams), never twice, never on HEAD/204/304, never with no-transform.
+# Small bodies compress inline (a few ms); big ones (the dashboard) are memoised by
+# content hash, so the 1.3 MB page is compressed ONCE per deploy, not per open.
+import gzip as _gzip_mod
+_GZ_TYPES = ("text/html", "text/css", "text/plain", "text/javascript", "text/csv",
+             "text/xml", "application/javascript", "application/json",
+             "application/manifest+json", "application/xml", "image/svg+xml")
+_GZ_MIN_BYTES = 1024
+_GZ_INLINE_MAX = 256 * 1024
+_GZ_MEMO_MAX = 8
+_gz_memo = OrderedDict()
+_gz_memo_lock = threading.Lock()
+
+def _gz_bytes(body):
+    return _gzip_mod.compress(bytes(body), compresslevel=6, mtime=0)
+
+def _gz_memo_get(body):
+    key = hashlib.sha1(body).digest()
+    with _gz_memo_lock:
+        hit = _gz_memo.get(key)
+        if hit is not None:
+            _gz_memo.move_to_end(key)
+            return key, hit
+    return key, None
+
+def _gz_memo_put(key, gz):
+    with _gz_memo_lock:
+        _gz_memo[key] = gz
+        _gz_memo.move_to_end(key)
+        while len(_gz_memo) > _GZ_MEMO_MAX:
+            _gz_memo.popitem(last=False)
+
+def _gz_wants(request, resp):
+    """True when this response should be gzipped by us. Never raises."""
+    try:
+        if type(resp) is not web.Response:          # FileResponse / streams / prepared: leave alone
+            return False
+        if request.method == "HEAD" or resp.status in (204, 304) or resp.status < 200:
+            return False
+        if "gzip" not in (request.headers.get("Accept-Encoding") or "").lower():
+            return False
+        h = resp.headers
+        if h.get("Content-Encoding"):
+            return False
+        if "no-transform" in (h.get("Cache-Control") or "").lower():
+            return False
+        ct = (h.get("Content-Type") or resp.content_type or "").lower()
+        if not any(t in ct for t in _GZ_TYPES):
+            return False
+        body = resp.body
+        return isinstance(body, (bytes, bytearray)) and len(body) >= _GZ_MIN_BYTES
+    except Exception:
+        return False
+
+@web.middleware
+async def _compress_mw(request, handler):
+    resp = await handler(request)
+    if not _gz_wants(request, resp):
+        return resp
+    try:
+        body = resp.body
+        if len(body) <= _GZ_INLINE_MAX:
+            gz = _gz_bytes(body)
+        else:
+            key, gz = _gz_memo_get(body)
+            if gz is None:
+                # big + new: compress on the web lane, never on the loop or the shared pool
+                gz = await asyncio.get_running_loop().run_in_executor(_web_pool, _gz_bytes, body)
+                _gz_memo_put(key, gz)
+        if len(gz) >= len(body):
+            return resp
+        resp.body = gz
+        resp.headers["Content-Encoding"] = "gzip"
+        resp.headers.pop("Content-Length", None)
+        vary = resp.headers.get("Vary") or ""
+        if "accept-encoding" not in vary.lower():
+            resp.headers["Vary"] = (vary + ", Accept-Encoding") if vary else "Accept-Encoding"
+    except Exception as e:                             # compression must never break a page
+        print("gzip middleware skipped:", e)
+    return resp
+
 @web.middleware
 async def _security_headers_mw(request, handler):
     _remember_public_base(request)     # learn the public site URL for the dispatch button (no env needed)
@@ -66350,7 +66684,7 @@ async def start_web_server():
     # role-gated, so the larger ceiling widens what an ALREADY-AUTHORISED admin
     # may send, not who may send it.
     app = web.Application(client_max_size=25 * 1024 * 1024,
-                          middlewares=[_security_headers_mw, _role_enforce_mw])
+                          middlewares=[_compress_mw, _security_headers_mw, _role_enforce_mw])
     app.router.add_get("/healthz", _handle_health)          # health check (was "/" until 2026-10-12)
     # "/" is the oujares.com company homepage (site_home/) — business.sa reviews this page.
     # Registered here, outside DASHBOARD_ENABLED, so the homepage never depends on it.
@@ -67721,6 +68055,10 @@ async def start_web_server():
     site = web.TCPSite(_web_runner, "0.0.0.0", WEB_PORT)
     await site.start()
     print(f"web server listening on :{WEB_PORT}  (webhook path: /hook/{WEBHOOK_SECRET})")
+    try:
+        start_liveness_guard()
+    except Exception as _lve:
+        print("[liveness] could not start:", _lve)
 
 def _as_int(v):
     """Hostaway sometimes returns message/reservation IDs as strings; coerce safely.

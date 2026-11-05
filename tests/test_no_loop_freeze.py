@@ -39,7 +39,7 @@ _ROOT_NAMES = {"_ha_throttle_acquire", "_api_request"}
 KNOWN_DEBT = {
     "on_ready",
     "_exp_export_one", "_exp4_verify", "_exp4_export_one", "_exp4_reverify_verified",
-    "_handle_invest", "_api_strategy", "_api_tickets_create", "_api_reviews_list",
+    "_api_tickets_create", "_api_reviews_list",
     "_api_reviews_open_ticket", "_api_expenses_list", "_api_expenses_queue",
     "_api_expenses_summary", "_api_finance_owners", "_api_finance_adjust",
     "_api_finance_line_edit", "_api_expenses_update", "_api_expenses_post",
@@ -47,8 +47,9 @@ KNOWN_DEBT = {
     "_api_expenses_repair_apply", "_api_expenses_resolve_apartment",
     "_api_expenses_discard", "_api_expenses_delete", "_api_exp4_edit", "_api_exp4_export",
     "_api_exp4_split_apply", "_api_expenses_sync_status", "_api_expenses_v2_repair_apply",
-    "_api_fb_profit", "_api_listings_geocode",
 }
+# Paid off 2026-11-05 (moved to web_thread): _handle_invest, _api_strategy,
+# _api_fb_profit, _api_listings_geocode.
 
 
 def _call_name(call):
@@ -115,7 +116,8 @@ class NoLoopFreezeTest(unittest.TestCase):
     def test_scanner_sees_the_known_helpers(self):
         """Sanity: if the scan stops recognising these, it would pass vacuously."""
         names = {h[0] for h in HITS}
-        self.assertIn("_api_listings_geocode", names)     # requests.get on the loop (debt)
+        self.assertIn("_api_expenses_verify_selected", names)   # Hostaway pull on the loop (debt)
+        self.assertIn("_api_tickets_create", names)             # cold get_listings_map (debt)
 
     def test_no_new_blocking_call_in_async_code(self):
         bad = []
