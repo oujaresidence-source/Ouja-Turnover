@@ -146,6 +146,17 @@ except Exception as _dp_err:            # pragma: no cover
     _directpay = None
     _HAS_DIRECTPAY = False
 
+# StayHub channel partner — Ouja pushes its Airbnb reservations into StayHub like Gathern/Airbnb
+# do (owner decision 2026-11-05). Inert until STAYHUB_CLIENT_ID/SECRET are set AND a unit is
+# mapped. Additive; the bot runs without it.
+try:
+    import stayhub as _stayhub
+    _HAS_STAYHUB = True
+except Exception as _sh_err:            # pragma: no cover
+    print("[stayhub] import failed (StayHub sync disabled, bot unaffected):", _sh_err)
+    _stayhub = None
+    _HAS_STAYHUB = False
+
 # Cleaning coverage «تغطية التنظيف» — where every apartment is, who cleans it, how
 # OujaCT actually performs, and the head count to bring cleaning fully in-house.
 # READ-ONLY: it computes from the existing stores and writes nothing but its geo cache.
@@ -9342,6 +9353,115 @@ async def _directpay_nudge_ready():
     await bot.wait_until_ready()
 
 
+# ============= StayHub channel partner — the `stayhub/` package =============
+# Every confirmed Airbnb reservation of a MAPPED unit is pushed into StayHub (probe → hold →
+# confirm, then modify / cancel). /sync every minute, a daily reconciliation, signed webhooks at
+# /stayhub/webhook and the required sync probe at /stayhub/sync-probe. Rules: stayhub/__init__.py.
+STAYHUB_CHANNEL  = os.environ.get("STAYHUB_CHANNEL", "") or WATCHDOG_CHANNEL
+STAYHUB_SYNC_SEC = max(30, int(os.environ.get("STAYHUB_SYNC_SEC", "60") or 60))
+STAYHUB_PUSH_MIN = max(2, int(os.environ.get("STAYHUB_PUSH_MIN", "10") or 10))
+
+def _stayhub_on():
+    return bool(_HAS_STAYHUB and _stayhub.config.configured())
+
+def _stayhub_schedule(coro_fn, label):
+    """Run a coroutine on the bot loop from either the loop or a worker thread. Never raises."""
+    try:
+        try:
+            asyncio.get_running_loop()
+            _bg_task(coro_fn(), label)
+        except RuntimeError:
+            main = getattr(bot, "loop", None)
+            if main is not None and main.is_running():
+                asyncio.run_coroutine_threadsafe(coro_fn(), main)
+    except Exception as e:
+        print("[stayhub] schedule failed (non-fatal):", e)
+
+def _stayhub_notify(text):
+    """HOST.notify — one line to STAYHUB_CHANNEL (the package never puts a guest name in it)."""
+    async def _post():
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        ch = discord.utils.get(guild.text_channels, name=STAYHUB_CHANNEL)
+        if ch is None:
+            ch = await ensure_channel(guild, STAYHUB_CHANNEL, None)
+        if ch is not None:
+            await ch.send(str(text)[:1990])
+    _stayhub_schedule(_post, "stayhub:notify")
+
+def _stayhub_background(fn):
+    """HOST.background — run a blocking package function off the loop, fire-and-forget."""
+    async def _run():
+        try:
+            await asyncio.to_thread(fn)
+        except Exception as e:
+            print("[stayhub] background job failed (non-fatal):", e)
+    _stayhub_schedule(_run, "stayhub:bg")
+
+def _stayhub_caps():
+    """The exact capability dict wired into the package. Mutable globals go in as lambdas."""
+    return {
+        "dash_auth": _dash_auth, "req_role": _req_role, "req_actor": _req_actor,
+        "json_response": _json, "web": web, "run": web_thread, "background": _stayhub_background,
+        "now": now_riyadh, "listings": get_listings_map, "notify": _stayhub_notify,
+        "log_event": log_event, "finance_channel": _finance_channel,
+        "confirmed_statuses": lambda: CONFIRMED_STATUSES,
+        "ha_reservations_window": _ha_reservations_window,
+        "ha_reservation": _directpay_fetch_reservation,       # ONE targeted GET, never the cache
+    }
+
+@tasks.loop(seconds=STAYHUB_SYNC_SEC)
+async def stayhub_sync_loop():
+    """/sync every minute (guide step 3). StayHub suspends a partner whose sync goes stale."""
+    if not _stayhub_on():
+        return
+    try:
+        await asyncio.to_thread(_stayhub.sync.run_sync)
+    except Exception as e:
+        print("[stayhub] sync loop error (non-fatal):", e)
+
+@stayhub_sync_loop.before_loop
+async def _stayhub_sync_ready():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=STAYHUB_PUSH_MIN)
+async def stayhub_push_loop():
+    """The guarantee for pushes. The Hostaway webhook is only a latency optimisation."""
+    if not _stayhub_on():
+        return
+    try:
+        await asyncio.to_thread(_stayhub.push.tick, now_riyadh())
+    except Exception as e:
+        print("[stayhub] push loop error (non-fatal):", e)
+
+@stayhub_push_loop.before_loop
+async def _stayhub_push_ready():
+    await bot.wait_until_ready()
+
+@tasks.loop(hours=1)
+async def stayhub_recon_loop():
+    """Daily reconciliation — latched on a persisted date inside the package (redeploy-safe)."""
+    if not _stayhub_on():
+        return
+    try:
+        now = now_riyadh()
+        if now.hour >= _stayhub.config.recon_hour():
+            await asyncio.to_thread(_stayhub.recon.run, now.date())
+    except Exception as e:
+        print("[stayhub] recon loop error (non-fatal):", e)
+
+@stayhub_recon_loop.before_loop
+async def _stayhub_recon_ready():
+    await bot.wait_until_ready()
+
+async def _stayhub_on_hook(rid):
+    try:
+        await asyncio.to_thread(_stayhub.push.on_hook, rid)
+    except Exception as e:
+        print("[stayhub] hook path error (non-fatal):", e)
+
+
 def _finchat_notify(payload):
     """finchat escalation ping — schedules the async Discord post. Never raises into a handler."""
     if not (_HAS_FINCHAT and FINCHAT_ENABLED):
@@ -18305,6 +18425,8 @@ async def _handle_hook(request):
             _invalidate_reservation_caches(listing_id=lid, reservation_id=rid)
             if rid and DIRECTPAY_ENABLED and _HAS_DIRECTPAY:
                 _bg_task(_directpay_on_hook(rid), "hook:directpay")   # latency only; the poller is the guarantee
+            if rid and _stayhub_on():
+                _bg_task(_stayhub_on_hook(rid), "hook:stayhub")       # latency only; stayhub_push_loop is the guarantee
     except Exception as e:
         print("hook invalidation error:", e)
     cid = _extract_conversation_id(payload)
@@ -67258,6 +67380,16 @@ async def start_web_server():
             except Exception as _dpe:
                 print("[directpay] wiring failed (collection tickets disabled, bot unaffected):", _dpe)
 
+        # ---- StayHub channel partner — signed webhook + sync probe (public) and /api/stayhub/* (login) ----
+        if _HAS_STAYHUB:
+            try:
+                _stayhub.wire(_stayhub_caps())
+                _stayhub.register_routes(app)
+                print("[stayhub] wired + routes registered (/stayhub/*, /api/stayhub/*) — %s"
+                      % _stayhub.bootstrap())
+            except Exception as _she:
+                print("[stayhub] wiring failed (StayHub sync disabled, bot unaffected):", _she)
+
         # ---- «تغطية التنظيف» — the coverage study. READ-ONLY: every capability below is
         # a getter. It reads the same stores the cleaning ops already use and computes
         # locations, crew split, OujaCT throughput and the hiring model from them.
@@ -77532,7 +77664,10 @@ async def on_ready():
           f"escalation-ack={'ON' if ASSISTANT_ESC_ACK else 'OFF'} -> #{ASSISTANT_CHANNEL}")
     # LOW-1: restart-on-crash guards — one unhandled exception must never
     # silently kill a business loop until the next redeploy (H2 lesson).
-    for _lp, _nm in ((reminder_loop, "reminder_loop"),
+    for _lp, _nm in ((stayhub_sync_loop, "stayhub_sync_loop"),
+                     (stayhub_push_loop, "stayhub_push_loop"),
+                     (stayhub_recon_loop, "stayhub_recon_loop"),
+                     (reminder_loop, "reminder_loop"),
                      (discount_catchup_loop, "discount_catchup_loop"),
                      (lm_keeper_loop, "lm_keeper_loop"),
                      (escalation_reping_loop, "escalation_reping_loop"),
@@ -77732,6 +77867,12 @@ async def on_ready():
         _pending.append(directpay_poll_loop)      # «التحصيل»: direct bookings → collection rooms (dry-run by default)
     if DIRECTPAY_ENABLED and _HAS_DIRECTPAY and not directpay_nudge_loop.is_running():
         _pending.append(directpay_nudge_loop)     # «التحصيل»: aging nudges + the 13:00 daily summary
+    if _HAS_STAYHUB and not stayhub_sync_loop.is_running():
+        _pending.append(stayhub_sync_loop)        # StayHub: /sync every minute (idle until credentials are set)
+    if _HAS_STAYHUB and not stayhub_push_loop.is_running():
+        _pending.append(stayhub_push_loop)        # StayHub: Airbnb bookings of mapped units → StayHub
+    if _HAS_STAYHUB and not stayhub_recon_loop.is_running():
+        _pending.append(stayhub_recon_loop)       # StayHub: daily reconciliation + refused-bookings summary
     if _HAS_PERMITS and not permits_loop.is_running():
         _pending.append(permits_loop)             # PERMITS «التصاريح»: tickets + 13:00 digest (DRY until «تشغيل»)
     # Fire them off spread over time, in the background: on_ready must keep going

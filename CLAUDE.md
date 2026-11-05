@@ -254,9 +254,10 @@ POSTs to `/api/decor/inquire` **and** opens WhatsApp exactly as before.
 
 ## Direct-booking collection «التحصيل» — the `directpay/` package
 A debt ledger with a human attestation gate, NOT an integration. Direct (non-Airbnb) bookings
-are paid through **StayHub**, which is not connected to this bot and never will be — this code
-never calls StayHub, has no credentials and no URL for it; `stayhub_ref` is free text for a
-future reconciliation. Every confirmed direct reservation (classified by the ONE classifier
+are paid through **StayHub**. `directpay/` itself never calls StayHub, has no credentials and no
+URL for it; `stayhub_ref` is free text for a future reconciliation. (Since 2026-11-05 a SEPARATE
+package, `stayhub/`, connects to StayHub as a channel partner for **Airbnb** bookings only — see
+the next section. It never touches directpay tickets and never pushes direct bookings.) Every confirmed direct reservation (classified by the ONE classifier
 `_finance_channel` — never copy it; `DIRECTPAY_EXTRA_CHANNELS` adds substrings on top) opens
 its own Discord room under «تحصيل الحجوزات المباشرة» (topic `ouja-dp:<res_id> seq:<n> lid:<id>`).
 - **THE OWNER RULE (2026-09-10), absolute:** a room closes ONLY when an **administrator** (him
@@ -300,6 +301,42 @@ its own Discord room under «تحصيل الحجوزات المباشرة» (top
   `DIRECTPAY_NUDGE_EVERY_DAYS`(2), `DIRECTPAY_SUMMARY_HOUR`(13), `DIRECTPAY_VARIANCE_SAR`(1.0),
   `DIRECTPAY_VARIANCE_PCT`(0.01), `DIRECTPAY_PROOF_MAX_MB`(12), `DIRECTPAY_WATCH_DAYS`(30),
   `DIRECTPAY_EXTRA_CHANNELS`(empty).
+
+## StayHub channel partner — the `stayhub/` package
+Owner decision 2026-11-05: stay on Hostaway and connect to StayHub's Connectivity API v2 **as a
+channel partner** (like Gathern / Airbnb). Every confirmed **Airbnb** reservation of a **mapped**
+unit is pushed into StayHub so StayHub holds the full record per unit (guest ID-verification link,
+Ministry of Tourism reporting, Shomoos from the StayHub host app). Each owner has his own StayHub
+host account (each one is linked to the Ministry's monitoring platform) and authorises Ouja per unit.
+- **Credentials live in Railway variables ONLY** — `STAYHUB_CLIENT_ID`, `STAYHUB_CLIENT_SECRET`,
+  `STAYHUB_PARTNER_ID`, optional `STAYHUB_WEBHOOK_SECRET`, `STAYHUB_BASE_URL` (default the sandbox
+  `https://sandbox.apis.stayhub.sa`). Never commit or print the secret; `tests/test_stayhub.py`
+  fails if the sandbox secret appears in the repo. No credentials ⇒ the package is fully idle.
+- **Request path** (`push.py`): pre-booking probe → hold whose `partnerSnapshot` is StayHub's OWN
+  probe answer (rates / rooms / version — never the Airbnb price) → confirm with
+  `financial.total` = the Airbnb amount, `externalReservationId` = Airbnb code (Hostaway
+  `channelReservationId`), `paymentReference` = Hostaway reservation id, `externalRevision` 1.
+  Amount change ⇒ financial-only modify; date change ⇒ modify with a fresh snapshot; Hostaway
+  cancel ⇒ cancel. Revisions only ever go up.
+- **Traps closed — do not simplify:** only units an admin mapped (`POST /api/stayhub/map`) are
+  ever pushed, no auto-mapping (status shows name-match suggestions only) · only `airbnb`
+  (`STAYHUB_CHANNELS`) — direct bookings already live in StayHub, pushing them double-books ·
+  `UNIQUE(ha_reservation_id)` + a per-reservation lock (poller and Hostaway hook share one path) ·
+  a lost ledger ADOPTS the existing StayHub booking by Airbnb code instead of booking twice ·
+  a refused booking is retried every `STAYHUB_RETRY_REJECTED_HOURS` (6), posted ONCE to Discord,
+  listed in the daily reconciliation, parked as «يحتاج تدخل» after 8 tries · signed endpoints fail
+  closed (no secret / bad HMAC ⇒ 401) · the ledger and every Discord line carry NO guest name,
+  phone or email.
+- **Public endpoints** (outside `/api/`, HMAC-checked): `POST /stayhub/webhook`,
+  `POST /stayhub/sync-probe` (required for certification; answered from the local cache).
+  Dashboard API (login; admin for writes): `GET /api/stayhub/status`, `GET /api/stayhub/bookings`,
+  `POST /api/stayhub/map`, `POST /api/stayhub/retry`, `POST /api/stayhub/sync-now`.
+- **Loops:** `stayhub_sync_loop` (/sync every 60 s), `stayhub_push_loop` (every 10 min, arrival
+  window today-3 → +400, only mapped listings), `stayhub_recon_loop` (daily, latched in
+  `stayhub_settings.recon_date`). Discord lines go to `STAYHUB_CHANNEL` (default the watchdog room).
+- **Still unconfirmed by StayHub (verify in sandbox before production):** the exact HMAC string they
+  sign and with which key; the item shapes inside each /sync array; whether a date-change modify
+  accepts the booking's own nights reported as 0 rooms; the reconciliation report fields.
 
 ## Checkout Watch «متابعة الخروج» — the `checkout/` package
 Hotel front-desk "due-out" control inside every turnover room: at checkout time the bot mentions
