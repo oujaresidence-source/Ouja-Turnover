@@ -110,7 +110,7 @@ async def sync_probe(request):
         return _json({"ok": False, "error": "bad_json"}, 400)
     now = _now()
     try:
-        ans = await _run(probe.answer, req, now.isoformat(timespec="seconds"), now.date())
+        ans = await _run(probe.answer, req, db.now_iso(), now.date())
     except Exception:
         traceback.print_exc()
         return _json({"ok": False, "error": "internal"}, 500)

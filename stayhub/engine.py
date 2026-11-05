@@ -145,6 +145,24 @@ def guest_name(r):
     return n or "Guest"
 
 
+_CONFIRMATION = re.compile(r"confirmation-([A-Za-z0-9]+)$")
+
+
+def booking_code(r):
+    """The Airbnb code (HM…) of a Hostaway reservation. Once booked, channelReservationId reads
+    "<listing>-guest-<guest id>-confirmation-HM…" — only the tail is the code, and the guest id
+    must not leave Ouja. An inquiry's "…-thread-…" value is not a code at all."""
+    for key in ("confirmationCode", "channelReservationId"):
+        raw = str((r or {}).get(key) or "").strip()
+        m = _CONFIRMATION.search(raw)
+        if m:
+            return m.group(1)
+        if raw and "-guest-" not in raw and "-thread-" not in raw:
+            return raw
+    v = (r or {}).get("hostawayReservationId")
+    return str(v).strip() if v else None
+
+
 def reservation_view(r, default_currency="SAR"):
     """The fields that matter for StayHub, from one raw Hostaway reservation."""
     r = r or {}
@@ -158,10 +176,10 @@ def reservation_view(r, default_currency="SAR"):
         adults = max(1, int(adults))
     except (TypeError, ValueError):
         adults = 1
-    code = r.get("channelReservationId") or r.get("confirmationCode") or r.get("hostawayReservationId")
+    code = booking_code(r)
     return {
         "ha_reservation_id": str(r.get("id") or "").strip(),
-        "external_id": str(code).strip() if code else None,
+        "external_id": code,
         "listing_id": lid,
         "status": str(r.get("status") or "").strip().lower(),
         "check_in": (str(r.get("arrivalDate") or "")[:10]) or None,
@@ -198,16 +216,18 @@ def eligibility(view, channel, push_channels, confirmed_statuses, mapped, today)
     return True, "ok"
 
 
-def plan(view, row, cancelled_now):
+def plan(view, row, cancelled_now, today=None):
     """What to do for one reservation. row = its stayhub_bookings row or None.
-    Returns one of: "create" | "modify_dates" | "modify_amount" | "cancel" | "skip_cancel" | None."""
+    Returns one of: "create" | "modify_dates" | "modify_amount" | "cancel" | "skip_cancel" | None.
+    An amount-only change after check-in is ignored: Hostaway's total grows when an RR claim is
+    paid, and that money is not what the guest paid for the stay."""
     if row is None:
         return None if cancelled_now else "create"
     st = row.get("status")
     if cancelled_now:
         if st == CONFIRMED and row.get("sh_reservation_id"):
             return "cancel"
-        if st in (PENDING, RETRY, REJECTED, HELD):
+        if st in (PENDING, RETRY, REJECTED, HELD, FAILED):
             return "skip_cancel"
         return None
     if st in (CANCELLED, SKIPPED):
@@ -217,6 +237,8 @@ def plan(view, row, cancelled_now):
         return None              # the retry path owns it
     if (view.get("check_in"), view.get("check_out")) != (row.get("pushed_check_in"), row.get("pushed_check_out")):
         return "modify_dates"
+    if today is not None and str(view.get("check_in") or "") < today.isoformat():
+        return None
     t_new, t_old = view.get("total"), row.get("pushed_total")
     if t_new is not None and (t_old is None or abs(float(t_new) - float(t_old)) > 0.005):
         return "modify_amount"

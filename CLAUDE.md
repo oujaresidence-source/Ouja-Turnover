@@ -312,10 +312,14 @@ host account (each one is linked to the Ministry's monitoring platform) and auth
   `STAYHUB_PARTNER_ID`, optional `STAYHUB_WEBHOOK_SECRET`, `STAYHUB_BASE_URL` (default the sandbox
   `https://sandbox.apis.stayhub.sa`). Never commit or print the secret; `tests/test_stayhub.py`
   fails if the sandbox secret appears in the repo. No credentials ⇒ the package is fully idle.
+  `STAYHUB_DRYRUN`(**1** — computes and logs, sends no hold/confirm/modify/cancel; flip to 0 for
+  real pushes).
 - **Request path** (`push.py`): pre-booking probe → hold whose `partnerSnapshot` is StayHub's OWN
   probe answer (rates / rooms / version — never the Airbnb price) → confirm with
-  `financial.total` = the Airbnb amount, `externalReservationId` = Airbnb code (Hostaway
-  `channelReservationId`), `paymentReference` = Hostaway reservation id, `externalRevision` 1.
+  `financial.total` = the Airbnb amount, `externalReservationId` = the HM code from
+  `engine.booking_code` (a booked stay's `channelReservationId` is
+  `<listing>-guest-<guest id>-confirmation-HM…`; never send it whole), `paymentReference` =
+  Hostaway reservation id, `externalRevision` 1.
   Amount change ⇒ financial-only modify; date change ⇒ modify with a fresh snapshot; Hostaway
   cancel ⇒ cancel. Revisions only ever go up.
 - **Traps closed — do not simplify:** only units an admin mapped (`POST /api/stayhub/map`) are
@@ -324,7 +328,9 @@ host account (each one is linked to the Ministry's monitoring platform) and auth
   `UNIQUE(ha_reservation_id)` + a per-reservation lock (poller and Hostaway hook share one path) ·
   a lost ledger ADOPTS the existing StayHub booking by Airbnb code instead of booking twice ·
   a refused booking is retried every `STAYHUB_RETRY_REJECTED_HOURS` (6), posted ONCE to Discord,
-  listed in the daily reconciliation, parked as «يحتاج تدخل» after 8 tries · signed endpoints fail
+  listed in the daily reconciliation, parked as «يحتاج تدخل» after 8 tries, or as soon as check-in
+  passes (StayHub cannot hold past nights) · an amount-only change after check-in is ignored, because
+  Hostaway's total grows when an RR claim is paid · signed endpoints fail
   closed (no secret / bad HMAC ⇒ 401) · the ledger and every Discord line carry NO guest name,
   phone or email.
 - **Public endpoints** (outside `/api/`, HMAC-checked): `POST /stayhub/webhook`,

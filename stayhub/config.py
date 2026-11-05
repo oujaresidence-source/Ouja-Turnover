@@ -40,8 +40,9 @@ def enabled():
 
 def dryrun():
     """1 ⇒ everything is computed and logged but hold/confirm/modify/cancel are NOT sent.
-    Default 0: pushes only ever happen for units an administrator mapped by hand."""
-    return _flag("STAYHUB_DRYRUN", "0")
+    Default 1, like every other module here: real pushes need STAYHUB_DRYRUN=0 on top of the
+    credentials and a unit an administrator mapped by hand."""
+    return _flag("STAYHUB_DRYRUN", "1")
 
 
 def host_base():

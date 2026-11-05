@@ -192,7 +192,8 @@ class Base(unittest.TestCase):
         for k in list(os.environ):
             if k.startswith("STAYHUB_"):
                 os.environ.pop(k)
-        os.environ.update({"STAYHUB_CLIENT_ID": "client_x", "STAYHUB_CLIENT_SECRET": "s3cret"})
+        os.environ.update({"STAYHUB_CLIENT_ID": "client_x", "STAYHUB_CLIENT_SECRET": "s3cret",
+                           "STAYHUB_DRYRUN": "0"})
         self.sh = FakeStayHub()
         client.set_session_for_tests(self.sh)
         client._sleep = lambda s: None
@@ -496,6 +497,104 @@ class ProbeAndReconTests(Base):
         self.assertTrue(st["configured"])
 
 
+class OwnerReviewFixes(Base):
+    """The five faults found when the owner's review tried real Ouja data on the package."""
+
+    BOOKED = "462594-guest-29408500-confirmation-HMR4K3XTZQ"     # the live shape of a booked Airbnb stay
+
+    def test_airbnb_code_is_the_hm_code_never_the_composite(self):
+        view = lambda **k: engine.reservation_view(dict({"id": 1, "status": "new"}, **k))["external_id"]
+        self.assertEqual(view(channelReservationId=self.BOOKED), "HMR4K3XTZQ")
+        self.assertEqual(view(channelReservationId=self.BOOKED, confirmationCode="HMR4K3XTZQ"), "HMR4K3XTZQ")
+        self.assertEqual(view(channelReservationId="HMABC123"), "HMABC123")
+        self.assertIsNone(view(channelReservationId="537003-thread-2569157342-x"))
+
+    def test_the_composite_guest_id_never_reaches_stayhub(self):
+        self.map900()
+        self.put(ha_res(code=self.BOOKED))
+        push.tick(NOW)
+        body = self.sh.posts("/confirm")[-1][3]
+        self.assertEqual(body["externalReservationId"], "HMR4K3XTZQ")
+        self.assertNotIn("29408500", json.dumps(body))
+        self.assertEqual(db.booking(101)["external_id"], "HMR4K3XTZQ")
+
+    def test_plan_ignores_amount_changes_once_the_stay_started(self):
+        v = {"check_in": "2026-11-01", "check_out": "2026-11-04", "total": 2350.0}
+        row = {"status": "confirmed", "pushed_check_in": "2026-11-01", "pushed_check_out": "2026-11-04",
+               "pushed_total": 2000.0, "sh_reservation_id": "r"}
+        self.assertIsNone(engine.plan(v, row, False, today=datetime.date(2026, 11, 10)))
+        self.assertEqual(engine.plan(v, row, False, today=datetime.date(2026, 11, 1)), "modify_amount")
+        self.assertEqual(engine.plan(v, row, False, today=datetime.date(2026, 10, 25)), "modify_amount")
+        moved = dict(v, check_out="2026-11-05")
+        self.assertEqual(engine.plan(moved, row, False, today=datetime.date(2026, 11, 10)), "modify_dates")
+
+    def test_rr_money_after_checkout_stays_out_of_stayhub(self):
+        self.map900()
+        r = self.put(ha_res())
+        push.tick(NOW)
+        r["totalPrice"] = r["totalPrice"] + 350                  # the RR claim lands in Hostaway's total
+        out = push.on_hook(101, datetime.datetime(2026, 12, 20, 12, 0))
+        self.assertEqual(out, (None, "nothing"))
+        self.assertEqual(self.sh.posts("/modify"), [])
+        self.assertEqual(db.booking(101)["pushed_total"], 1834.5)
+
+    def test_a_refused_booking_past_checkin_stays_on_the_daily_list(self):
+        self.map900()
+        self.sh.blocked.add("2026-12-02")
+        self.put(ha_res())
+        push.tick(NOW)
+        self.assertEqual(db.booking(101)["status"], "rejected")
+        code = db.booking(101)["last_code"]
+        self.msgs.clear()
+        later = datetime.datetime(2026, 12, 2, 12, 0)
+        push.tick(later)
+        row = db.booking(101)
+        self.assertEqual((row["status"], row["last_code"]), ("failed", code))
+        self.assertIsNone(row["next_try_at"])
+        self.assertEqual(len(self.msgs), 1)
+        self.assertIn("HMABC123", self.msgs[0])
+        self.assertEqual([x["ha_reservation_id"] for x in db.bookings("failed", 20)], ["101"])
+        push.tick(later)
+        self.assertEqual(len(self.msgs), 1)              # one alert, not one per tick
+
+    def test_a_booking_never_tried_before_checkin_is_flagged_too(self):
+        self.map900()
+        r = self.put(ha_res())
+        db.insert_booking(ha_reservation_id="101", external_id="HMABC123", listing_id=900, property_id=PID,
+                          rate_plan_id=RP, status="pending", check_in=r["arrivalDate"], check_out=r["departureDate"])
+        push.tick(datetime.datetime(2026, 12, 2, 12, 0))
+        row = db.booking(101)
+        self.assertEqual((row["status"], row["last_code"]), ("failed", "STARTED"))
+
+    def test_dry_run_raises_no_alarm_when_checkin_passes(self):
+        os.environ["STAYHUB_DRYRUN"] = "1"
+        self.map900()
+        self.put(ha_res())
+        push.tick(NOW)
+        self.msgs.clear()
+        push.tick(datetime.datetime(2026, 12, 2, 12, 0))
+        self.assertEqual(db.booking(101)["status"], "skipped")
+        self.assertEqual(self.msgs, [])
+
+    def test_a_failed_booking_the_guest_cancelled_leaves_the_list(self):
+        self.map900()
+        r = self.put(ha_res(arrive="2026-12-10", depart="2026-12-12"))
+        self.sh.fail_next.append(("/reservations/hold", 403, "FORBIDDEN_INSUFFICIENT_ROLE"))
+        push.tick(NOW)
+        self.assertEqual(db.booking(101)["status"], "failed")
+        r["status"] = "cancelled"
+        push.tick(NOW)
+        self.assertEqual(db.booking(101)["status"], "skipped")
+        self.assertEqual(db.bookings("failed", 20), [])
+
+    def test_dry_run_is_the_default(self):
+        from stayhub import config
+        os.environ.pop("STAYHUB_DRYRUN", None)
+        self.assertTrue(config.dryrun())
+        os.environ["STAYHUB_DRYRUN"] = "0"
+        self.assertFalse(config.dryrun())
+
+
 class StructureTests(unittest.TestCase):
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -515,14 +614,16 @@ class StructureTests(unittest.TestCase):
                 self.assertNotRegex(src, r"(?m)^\s*import\s+requests\b", "%s: only client.py touches the network" % fn)
 
     def test_no_credentials_in_the_repo(self):
-        leaked = "d7ac59dc" + "10e33a10"          # the sandbox secret's prefix, split so this file never matches
+        import re
+        leaked = "6767934b6a64fd464c5f74180a857c9de04f2a96e1ff29d1f61675a2edf4de59"   # sha256 of the first 16 hex characters of the sandbox secret
         for root, _dirs, files in os.walk(self.ROOT):
             if ".git" in root:
                 continue
             for fn in files:
                 if fn.endswith((".py", ".md", ".json", ".toml", ".txt")):
                     with open(os.path.join(root, fn), encoding="utf-8", errors="ignore") as fh:
-                        self.assertNotIn(leaked, fh.read(), fn)
+                        for tok in re.findall(r"[0-9a-f]{16,}", fh.read()):
+                            self.assertNotEqual(hashlib.sha256(tok[:16].encode()).hexdigest(), leaked, fn)
 
     def test_bot_references_resolve(self):
         import re
@@ -589,6 +690,20 @@ class RouteTests(Base):
         st, js = self._run(go)
         self.assertEqual(st, 200)
         self.assertEqual((js["probeId"], js["properties"]["version"]), ("prb_9", 7))
+
+    def test_sync_probe_time_is_real_utc_not_riyadh_marked_z(self):
+        from unittest import mock
+        os.environ["STAYHUB_WEBHOOK_SECRET"] = "whsec"
+        body = json.dumps({"probeId": "prb_t", "propertyId": PID, "scope": "holds"}).encode()
+        ts, sig = self._sig(body)
+
+        async def go(c):
+            r = await c.post("/stayhub/sync-probe", data=body, headers={"X-StayHub-Probe-Signature": sig,
+                                                                         "X-StayHub-Probe-Timestamp": ts})
+            return await r.json()
+        with mock.patch.object(db, "now_iso", lambda: "2026-11-10T09:00:00"):    # NOW is 12:00 Riyadh
+            js = self._run(go)
+        self.assertEqual(js["respondedAt"], "2026-11-10T09:00:00Z")
 
     def test_dashboard_api_needs_login_and_maps(self):
         async def go(c):

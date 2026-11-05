@@ -455,7 +455,7 @@ def _process_locked(r, view, now, force):
         if row.get("status") != E.CANCELLED:
             return "cancel", row
 
-    action = E.plan(view, row, cancelled)
+    action = E.plan(view, row, cancelled, today=_naive(now).date())
     if action is None and row and row.get("status") in (E.PENDING, E.RETRY, E.REJECTED, E.HELD) and not cancelled:
         action = "retry"
     if action is None:
@@ -480,6 +480,16 @@ def _process_locked(r, view, now, force):
     # create / retry
     ok, why = E.eligibility(view, _channel(r), config.push_channels(), _confirmed_statuses(), bool(mapping), now)
     if not ok:
+        if why == "started" and row and row.get("status") in (E.PENDING, E.RETRY, E.REJECTED, E.HELD) \
+                and not config.dryrun():
+            # StayHub cannot hold past nights, so no retry can save it. A person has to record
+            # this stay by hand: «يحتاج تدخل» keeps it on the daily list, «skipped» would hide it.
+            code = row.get("last_code") or "STARTED"
+            row = db.update_booking(rid, status=E.FAILED, last_code=code, next_try_at=None,
+                                    hold_id=None, hold_expires=None)
+            _event(row, "missed", "check-in passed before StayHub took it (%s)" % code, None, now)
+            notify.send(notify.failed_text(row, code))
+            return None, why
         if row and why in ("unmapped", "channel", "started", "status"):
             db.update_booking(rid, status=E.SKIPPED if why != "unmapped" else row["status"], last_code=why.upper())
         return None, why
