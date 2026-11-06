@@ -41,6 +41,7 @@ import hashlib
 import statistics
 import hmac
 import atexit
+import socket
 import contextvars
 import threading
 import urllib.parse
@@ -51,6 +52,8 @@ from datetime import date, datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 import requests
+import aiohttp
+import aiohttp.abc
 import discord
 from discord import app_commands   # slash-command decorators (@app_commands.describe)
 from discord.ext import commands, tasks
@@ -1297,7 +1300,12 @@ LIVENESS_MIN_UPTIME_S  = float(os.environ.get("LIVENESS_MIN_UPTIME_S", "900"))
 LIVENESS_COOLDOWN_S    = float(os.environ.get("LIVENESS_COOLDOWN_S", "1800"))
 LIVENESS_TICK_S        = float(os.environ.get("LIVENESS_TICK_S", "10"))
 _liveness = {"started": False, "boot": time.time(), "loop_lag_s": 0.0, "max_loop_lag_s": 0.0,
-             "web_stuck_since": None, "last_verdict": "ok", "trips": 0}
+             "web_stuck_since": None, "last_verdict": "ok", "trips": 0,
+             "pool_queued": 0, "pool_jam_since": None, "pool_jam_warned": False}
+# The shared asyncio.to_thread pool was the one lane nobody watched: on 2026-11-06 it stayed
+# jammed for hours with no alarm. A long queue is reported only, never a restart.
+LIVENESS_POOL_WARN_QUEUE = int(os.environ.get("LIVENESS_POOL_WARN_QUEUE", "20"))
+LIVENESS_POOL_WARN_S     = float(os.environ.get("LIVENESS_POOL_WARN_S", "60"))
 
 def _liveness_fingerprint(reason):
     """Everything needed to name the cause later, as plain log lines."""
@@ -1336,6 +1344,24 @@ def _liveness_verdict(now, loop_lag, web_stuck_for, uptime):
     if uptime < LIVENESS_MIN_UPTIME_S or not LIVENESS_AUTORESTART or not _liveness_cooldown_ok(now):
         return "warn:" + why
     return "restart:" + why
+
+def _pool_jam_check(queued, now):
+    """Returns a line to log when a queue has lasted, and again when it clears; else None."""
+    if queued is None:
+        return None
+    _liveness["pool_queued"] = queued
+    if queued >= LIVENESS_POOL_WARN_QUEUE:
+        if _liveness["pool_jam_since"] is None:
+            _liveness["pool_jam_since"] = now
+        lasted = now - _liveness["pool_jam_since"]
+        if lasted >= LIVENESS_POOL_WARN_S and not _liveness["pool_jam_warned"]:
+            _liveness["pool_jam_warned"] = True
+            return "shared worker pool jammed: %d jobs queued for %.0fs" % (queued, lasted)
+        return None
+    warned = _liveness["pool_jam_warned"]
+    _liveness["pool_jam_since"] = None
+    _liveness["pool_jam_warned"] = False
+    return "shared worker pool cleared: %d jobs queued" % queued if warned else None
 
 def _liveness_restart(reason):
     for ln in _liveness_fingerprint(reason):
@@ -1390,6 +1416,10 @@ def _liveness_run(loop):
                     print(ln, flush=True)
             elif v == "ok":
                 warned = None
+            shared = getattr(loop, "_default_executor", None)
+            note = _pool_jam_check(_pool_snapshot(shared)["queued"] if shared else None, now)
+            if note:
+                print("LIVENESS WARNING: " + note, flush=True)
         except Exception as e:
             print("liveness tick error:", e)
 
@@ -2657,15 +2687,43 @@ def compute_forward_calendar(days=60):
     return out
 
 # Cache it for 20 minutes — calendar fetches across the whole portfolio aren't free.
+# One refresh at a time (2026-11-06): it costs one Hostaway call per apartment, and with no
+# lock every 15-second dashboard poll started another, until they filled the shared pool.
+# While one runs, readers get the last known numbers; with none to give they wait for it.
 _forward_cache = {"data": None, "ts": 0}
-def get_forward_calendar(days=60, ttl=1200):
-    if _forward_cache["data"] is not None and (time.time() - _forward_cache["ts"]) < ttl \
-       and len(_forward_cache["data"]) >= days:
-        return _forward_cache["data"][:days]
-    data = compute_forward_calendar(days=max(days, 60))
-    _forward_cache["data"] = data
-    _forward_cache["ts"] = time.time()
+_forward_refresh_lock = threading.Lock()
+
+def _forward_cached(days, ttl=None):
+    data = _forward_cache["data"]
+    if data is None or len(data) < days:
+        return None
+    if ttl is not None and time.time() - _forward_cache["ts"] >= ttl:
+        return None
     return data[:days]
+
+def get_forward_calendar(days=60, ttl=1200):
+    hit = _forward_cached(days, ttl)
+    if hit is not None:
+        return hit
+    if not _forward_refresh_lock.acquire(blocking=False):
+        stale = _forward_cached(days)
+        if stale is not None:
+            return stale
+        if not _forward_refresh_lock.acquire(timeout=SINGLE_FLIGHT_WAIT):
+            raise TimeoutError("forward calendar refresh still running")
+    try:
+        hit = _forward_cached(days, ttl)   # the refresh we waited for may have answered this
+        if hit is not None:
+            return hit
+        seen_ts = _forward_cache["ts"]
+        data = compute_forward_calendar(days=max(days, 60))
+        _forward_cache["data"] = data
+        # a price change cleared the cache mid-refresh: these rows predate it, so keep them
+        # only until the next reader instead of 20 minutes
+        _forward_cache["ts"] = time.time() if _forward_cache["ts"] == seen_ts else 0
+        return data[:days]
+    finally:
+        _forward_refresh_lock.release()
 
 def compute_pricing_alerts():
     """Edge-day attention list. Sees the next 45 days, flags:
@@ -4825,7 +4883,51 @@ handled = load_handled()
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = os.environ.get("MEMBERS_INTENT", "0").strip() == "1"   # portal toggle FIRST, else the bot cannot connect
-bot = commands.Bot(command_prefix="!ouja ", intents=intents)
+
+# ---- Discord's own address lookup (2026-11-06) -------------------------------------------
+# aiohttp looks hostnames up on the loop's DEFAULT thread pool — the same 32 workers every
+# asyncio.to_thread() uses. When dashboard jobs filled it (32/32 busy, 120+ queued, all
+# asleep on the Hostaway throttle) every NEW Discord connection queued behind them: button
+# replies landed after Discord's 3-second limit («Unknown interaction») and gateway
+# reconnects died at 60s inside _resolve_host, while the event loop and website looked fine.
+# So Discord gets two workers of its own, and remembers an address for 5 minutes instead of
+# aiohttp's 10 seconds. If any of this ever breaks, it falls back to the stock lookup.
+DISCORD_DNS_TTL_S = int(os.environ.get("DISCORD_DNS_TTL_S", "300"))
+_discord_dns_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="discord_dns")
+
+class _DiscordResolver(aiohttp.abc.AbstractResolver):
+    async def resolve(self, host, port=0, family=socket.AF_INET):
+        try:
+            infos = await asyncio.get_running_loop().run_in_executor(
+                _discord_dns_pool, socket.getaddrinfo, host, port, family,
+                socket.SOCK_STREAM, 0, socket.AI_ADDRCONFIG)
+        except OSError:
+            raise                          # a real DNS failure: discord.py retries it
+        except Exception as e:
+            print("discord dns lane error, using the stock lookup:", repr(e))
+            return await aiohttp.ThreadedResolver().resolve(host, port, family)
+        return [{"hostname": host, "host": addr[0], "port": addr[1], "family": fam,
+                 "proto": proto, "flags": socket.AI_NUMERICHOST | socket.AI_NUMERICSERV}
+                for fam, _type, proto, _name, addr in infos]
+
+    async def close(self):
+        pass
+
+def _discord_connector():
+    return aiohttp.TCPConnector(limit=0, resolver=_DiscordResolver(),
+                                ttl_dns_cache=DISCORD_DNS_TTL_S)
+
+class OujaBot(commands.Bot):
+    async def login(self, token):
+        # Here, not in __init__: a connector can only be built inside the running loop, and
+        # discord.py opens its session in login(). No connector set = discord.py's default.
+        try:
+            self.http.connector = _discord_connector()
+        except Exception as e:
+            print("discord connector error, using the default:", repr(e))
+        await super().login(token)
+
+bot = OujaBot(command_prefix="!ouja ", intents=intents)
 
 import ops_audit, sys as _oad_sys   # read-only: !ouja-audit + !ouja-msgdump (temporary)
 ops_audit.setup(bot, _oad_sys.modules[__name__])    # hand over the LIVE module (never `import bot`)
@@ -59394,11 +59496,35 @@ async def _api_pricing_bulk(request):
     return _json({"ok": True, "applied": tot_applied, "skipped": tot_skipped,
                   "dry_run": PRICE_APPLY_DRYRUN, "factor": factor})
 
+# Every open dashboard asks for these every 15 seconds with no check that the last answer
+# came back, and a browser giving up never cancels the worker. On 2026-11-06 that was 98
+# requests in 15 minutes averaging 201s each, which jammed the shared pool. Now one job runs
+# per feed and its answer is shared for HOME_FEED_TTL_S. Event-loop only, so no lock needed.
+HOME_FEED_TTL_S = float(os.environ.get("HOME_FEED_TTL_S", "30"))
+_home_feed_cache = {}                   # key -> (finished_at, value)
+_home_feed_jobs = {}                    # key -> the running task
+
+async def _home_feed(key, fn, *args):
+    hit = _home_feed_cache.get(key)
+    if hit and time.time() - hit[0] < HOME_FEED_TTL_S:
+        return hit[1]
+    job = _home_feed_jobs.get(key)
+    if job is None:
+        job = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+        _home_feed_jobs[key] = job
+
+        def _finished(t):
+            _home_feed_jobs.pop(key, None)
+            if not t.cancelled() and t.exception() is None:
+                _home_feed_cache[key] = (time.time(), t.result())
+        job.add_done_callback(_finished)
+    return await asyncio.shield(job)   # shield: one reader leaving must not end it for the rest
+
 async def _api_home_urgent(request):
     """Operational urgency feed for the home page — high-severity items first."""
     if not _dash_auth(request):
         return _json({"error": "unauthorized"}, 401)
-    items = await asyncio.to_thread(compute_urgent_now)
+    items = await _home_feed("urgent", compute_urgent_now)
     return _json({"items": items, "counts": {
         "high": sum(1 for i in items if i.get("severity") == "high"),
         "med":  sum(1 for i in items if i.get("severity") == "med"),
@@ -59413,7 +59539,8 @@ async def _api_home_arrivals(request):
         h = int(request.query.get("hours", "36"))
     except Exception:
         h = 36
-    items = await asyncio.to_thread(compute_arrivals_with_status, max(6, min(72, h)))
+    window = max(6, min(72, h))
+    items = await _home_feed(("arrivals", window), compute_arrivals_with_status, window)
     return _json({"items": items, "window_hours": h})
 
 async def _api_metrics_daily(request):
@@ -77407,9 +77534,16 @@ async def _api_promises_done(request):
     log_event("assistant", f"🤝 وعد اتقفل من اللوحة · {rec.get('apartment') or ''}")
     return _json({"ok": True, "promise": rec})
 
+def _load_state_once():
+    # on_ready fires again after every failed reconnect. Reloading then replaced live memory
+    # with a file up to 60 seconds older, so only the first start reads the volume.
+    if not getattr(bot, "_state_loaded", False):
+        load_state()
+        bot._state_loaded = True
+
 @bot.event
 async def on_ready():
-    load_state()                       # restore seen/cards/escalations from the volume FIRST
+    _load_state_once()                 # restore seen/cards/escalations from the volume FIRST
     if _HAS_OPS:
         # «القفل» buttons are handled by a LISTENER, not a bound view, so a press still works
         # on a message posted before the last redeploy.
