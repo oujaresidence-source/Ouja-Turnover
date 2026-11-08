@@ -7116,6 +7116,13 @@ LM_ALERT_AFTER_MIN = int(os.environ.get("LM_ALERT_AFTER_MIN", "30") or "30")
 LM_ALERT_MENTION = os.environ.get("LM_ALERT_MENTION", "")       # Discord user id; else FINCHAT_OWNER_MENTION
 LM_WEEK_TARGET = int(os.environ.get("LM_WEEK_TARGET", "43") or "43")
 LM_WEEK_BASELINE = int(os.environ.get("LM_WEEK_BASELINE", "37") or "37")
+# Owner 2026-11-08 (option B): Sunday/Monday nights are the emptiest (47% / 50% full), so their
+# first step starts the day before and is held overnight. LM_EARLY_NIGHTS="" switches it off.
+LM_EARLY_NIGHTS = (lm_keeper.parse_early_nights(os.environ.get("LM_EARLY_NIGHTS", "sun,mon"))
+                   if lm_keeper else frozenset())
+LM_EARLY_PERCENT = float(os.environ.get("LM_EARLY_PERCENT", "10") or "10")
+LM_EARLY_HOUR = int(os.environ.get("LM_EARLY_HOUR", "15") or "15")
+LM_EARLY_RECHECK_MIN = int(os.environ.get("LM_EARLY_RECHECK_MIN", "60") or "60")
 _lm_keeper_lock = threading.Lock()
 
 def lm_keeper_steps():
@@ -7174,6 +7181,24 @@ def lm_due_alerts(rec, now):
                     "current": u.get("current")})
     return out
 
+def _lm_early_days():
+    return LM_EARLY_NIGHTS if LM_EARLY_PERCENT > 0 else frozenset()
+
+def lm_keeper_should_tick(now):
+    """3 PM–midnight every night; from 3 AM on an early night too, whose price was dropped the
+    day before and must be held through the morning. 00:00–03:00 belongs to the report."""
+    if now.hour >= 15:
+        return True
+    return now.hour >= 3 and now.weekday() in _lm_early_days()
+
+def _lm_recheck_due(u, now):
+    """An early night's held price is re-read hourly: something may push it back up overnight."""
+    try:
+        last = datetime.fromisoformat(u.get("checked_at") or "")
+    except (TypeError, ValueError):
+        return True
+    return (now - last).total_seconds() >= LM_EARLY_RECHECK_MIN * 60
+
 def lm_keeper_tick(now=None):
     """One pass → (tonight's record, alerts due now). Never overlaps itself."""
     now = now or now_riyadh()
@@ -7185,17 +7210,29 @@ def lm_keeper_tick(now=None):
         _lm_keeper_lock.release()
 
 def _lm_keeper_tick(now):
-    pct = lm_keeper.step_pct(now, lm_keeper_steps())
-    night = pricing_target_date_riyadh(now)
+    """Tonight, plus tomorrow when tomorrow is an early night (Sun/Mon) already in its drop.
+    Alerts are for tonight only — tomorrow's failures retry and alert on their own night."""
     st = _lm_load_keeper_state(now)
+    early = _lm_early_days()
+    today_rec, alerts = None, []
+    for nd in lm_keeper.nights_to_watch(now, early, LM_EARLY_HOUR):
+        pct = lm_keeper.night_pct(nd, now, lm_keeper_steps(), early, LM_EARLY_HOUR, LM_EARLY_PERCENT)
+        rec, active = _lm_keeper_night(st, nd.isoformat(), pct, now, recheck=nd.weekday() in early)
+        if nd == now.date():
+            today_rec = rec
+            alerts = lm_due_alerts(rec, now) if active else []
+    _save_json(LM_KEEPER_STATE_FILE, st)
+    return today_rec, alerts
+
+def _lm_keeper_night(st, night, pct, now, recheck=False):
+    """One night, one pass → (record, acted). `recheck` re-reads a confirmed unit hourly."""
     rec = st.setdefault(night, {"units": {}})
     units = rec.setdefault("units", {})
     if pct <= 0:
-        return rec, []
+        return rec, False
     if is_discount_paused():
         rec["paused"] = True
-        _save_json(LM_KEEPER_STATE_FILE, st)
-        return rec, []
+        return rec, False
     mins = lm_minimums(now)
     pending = None                                 # fetched lazily, once per tick
     for lid, name in get_listings_map().items():
@@ -7208,7 +7245,7 @@ def _lm_keeper_tick(now):
             u.update(status="skipped",
                      reason="unit_skipped" if is_unit_skipped(lid) else "strategy_disabled")
             continue
-        if u.get("confirmed_pct") == pct:
+        if u.get("confirmed_pct") == pct and not (recheck and _lm_recheck_due(u, now)):
             continue                               # already right for this step — no API call
         try:
             cal = api_get(f"/listings/{lid}/calendar", params={"startDate": night, "endDate": night})
@@ -7216,6 +7253,7 @@ def _lm_keeper_tick(now):
         except Exception as e:
             u.update(status="error", reason="read_failed", error=str(e)[:160])
             continue
+        u["checked_at"] = now.isoformat(timespec="seconds")
         if not day:
             u.update(status="skipped", reason="no_calendar_day")
             continue
@@ -7261,9 +7299,7 @@ def _lm_keeper_tick(now):
                  reason="minimum" if d["floor_blocked"] else "")
         log_price_change(lid, night, d["current"], actual, "last-minute",
                          "حارس سعر الليلة: خصم %d٪ من السعر الأصلي %d" % (int(pct), int(round(orig))))
-    alerts = lm_due_alerts(rec, now)
-    _save_json(LM_KEEPER_STATE_FILE, st)
-    return rec, alerts
+    return rec, True
 
 def lm_report_text(night):
     """The 12 AM report for `night` (the evening that just ended)."""
@@ -7274,9 +7310,11 @@ def lm_report_text(night):
     ws = lm_keeper.week_start(d)
     rows_night = fetch_reservations_window(d, d, pad_days=0)
     rows_week = fetch_reservations_window(ws, d, pad_days=0)
-    bookings = lm_keeper.night_bookings(rows_night, night, units, lm_keeper_steps())
+    early_pct = LM_EARLY_PERCENT if d.weekday() in _lm_early_days() else 0
+    bookings = lm_keeper.night_bookings(rows_night, night, units, lm_keeper_steps(), early_pct=early_pct)
     week = lm_keeper.week_count(rows_week, ws.isoformat(), night)
-    txt = lm_keeper.render_report(night, units, bookings, week, LM_WEEK_TARGET, LM_WEEK_BASELINE)
+    txt = lm_keeper.render_report(night, units, bookings, week, LM_WEEK_TARGET, LM_WEEK_BASELINE,
+                                  early_pct=early_pct)
     if rec.get("paused"):
         txt += "\n⏸️ الخصم كان موقوف من لوحة التحكم جزء من الليلة."
     if DISCOUNT_DRY_RUN:
@@ -7332,10 +7370,9 @@ async def lm_keeper_loop():
     if now.hour < 3:
         await _lm_maybe_post_report(now)
         return
-    if now.hour < 14:
-        return
-    if now.hour < 15:
+    if now.hour == 14:
         await asyncio.to_thread(lm_minimums, now)  # ready before the 3 PM step
+    if not lm_keeper_should_tick(now):             # Sun/Mon also tick from 3 AM (held early drop)
         return
     _rec, alerts = await asyncio.to_thread(lm_keeper_tick, now)
     for a in alerts:

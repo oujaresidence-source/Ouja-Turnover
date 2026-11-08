@@ -31,6 +31,38 @@ def step_started_at(now, steps):
     return start
 
 
+_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def parse_early_nights(text):
+    """"sun,mon" → {6, 0} (Python weekdays). Unknown names are ignored; "" = feature off."""
+    return frozenset(_WEEKDAYS[p] for p in (s.strip().lower()[:3] for s in str(text or "").split(","))
+                     if p in _WEEKDAYS)
+
+
+def night_pct(night, now, steps, early_days, early_hour, early_pct):
+    """Discount % for `night` (a date) at `now`. Owner 2026-11-08: the emptiest nights (Sun/Mon)
+    get `early_pct` from `early_hour` the day before, held overnight; the night itself then runs
+    the normal ladder (never below `early_pct`). Every other night: the plain same-day ladder."""
+    today = now.date()
+    early = night.weekday() in early_days
+    if night == today:
+        pct = step_pct(now, steps)
+        return max(pct, float(early_pct)) if early else pct
+    if early and night == today + timedelta(days=1) and now.hour >= int(early_hour):
+        return float(early_pct)
+    return 0.0
+
+
+def nights_to_watch(now, early_days, early_hour):
+    """Tonight, plus tomorrow when tomorrow is an early night and its day-before drop has begun."""
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+    if tomorrow.weekday() in early_days and now.hour >= int(early_hour):
+        return [today, tomorrow]
+    return [today]
+
+
 def target_price(original, pct, minimum=0):
     """`pct`% off tonight's ORIGINAL price (never compounding), never below `minimum`."""
     raw = int(round(float(original) * (100.0 - float(pct)) / 100.0))
@@ -122,16 +154,21 @@ def build_minimums(reservations, min_samples=5, margin_pct=10):
 
 # ---- nightly report ---------------------------------------------------------------------
 
-def night_bookings(reservations, night, units, steps):
+def night_bookings(reservations, night, units, steps, early_pct=0):
     """Confirmed same-night bookings for `night`, each tagged `from_drop` only when it was made
-    AFTER that unit's first drop write that day."""
+    AFTER that unit's first drop write. For an early night (`early_pct` > 0) bookings made the
+    day before count too, since its drop started then."""
+    nd = date.fromisoformat(night)
+    days = {nd, nd - timedelta(days=1)} if early_pct else {nd}
     out = []
     for r in reservations:
-        if not _confirmed(r) or str(r.get("arrivalDate") or "")[:10] != night or not is_same_night(r):
+        if not _confirmed(r) or str(r.get("arrivalDate") or "")[:10] != night:
+            continue
+        at = booked_at_riyadh(r)
+        if at is None or at.date() not in days:
             continue
         lid = str(r.get("listingMapId"))
         u = units.get(lid) or {}
-        at = booked_at_riyadh(r)
         p = nightly_price(r) or 0.0
         try:
             nights = int(r.get("nights") or 1)
@@ -139,9 +176,12 @@ def night_bookings(reservations, night, units, steps):
             nights = 1
         fd = u.get("first_drop_at")
         from_drop = bool(fd) and at >= datetime.fromisoformat(fd)
+        pct = float(early_pct) if at.date() < nd else step_pct(at, steps)
+        if early_pct:
+            pct = max(pct, float(early_pct))
         out.append({"lid": lid, "name": u.get("name") or r.get("listingName") or lid,
                     "booked_at": at, "price": int(round(p)), "total": int(round(p * nights)),
-                    "orig": int(u.get("orig") or 0), "pct": int(step_pct(at, steps)),
+                    "orig": int(u.get("orig") or 0), "pct": int(pct),
                     "from_drop": from_drop})
     out.sort(key=lambda b: b["booked_at"])
     return out
@@ -175,18 +215,24 @@ _REASONS = {
 }
 
 
-def render_report(night, units, bookings, week, target=43, baseline=37):
+def render_report(night, units, bookings, week, target=43, baseline=37, early_pct=0):
     """The 12 AM Arabic report for `night` (plain text, chunked by the caller)."""
     empty = {lid: u for lid, u in units.items() if u.get("seen_empty")}
     dropped = [u for u in empty.values() if u.get("first_drop_at")]
-    lines = ["🌙 **تقرير سعر الليلة — %s**" % night, "",
-             "📉 فاضية الساعة ٣: %d · نزل سعرها: %d" % (len(empty), len(dropped))]
+    lines = ["🌙 **تقرير سعر الليلة — %s**" % night, ""]
+    if early_pct:
+        lines.append("🌅 خصم مبكر: نزلت %d٪ من أمس العصر (الأحد والاثنين أضعف ليالي الأسبوع)"
+                     % int(early_pct))
+    lines.append("📉 %s: %d · نزل سعرها: %d"
+                 % ("فاضية لما بدأ الخصم" if early_pct else "فاضية الساعة ٣", len(empty), len(dropped)))
 
+    nd = date.fromisoformat(night)
     ours = [b for b in bookings if b["from_drop"]]
     lines += ["", "✅ **انحجزت بعد النزول: %d**" % len(ours)]
     for b in ours:
+        when = ("أمس " if b["booked_at"].date() < nd else "") + b["booked_at"].strftime("%H:%M")
         lines.append("• %s — %s — %s ر.س (كان %s) · خصم %d٪"
-                     % (b["name"], b["booked_at"].strftime("%H:%M"), b["price"], b["orig"], b["pct"]))
+                     % (b["name"], when, b["price"], b["orig"], b["pct"]))
     if ours:
         income = sum(b["total"] for b in ours)
         disc = sum(max(0, b["orig"] - b["price"]) for b in ours if b["orig"])
@@ -214,6 +260,9 @@ def render_report(night, units, bookings, week, target=43, baseline=37):
         lines += ["", "⏸️ موقوفة (ما يلمسها الخصم): %s" % "، ".join(str(s) for s in skipped)]
 
     lines += ["", "📊 هالأسبوع: %d حجز بنفس اليوم بعد ٣ العصر · الهدف %d (قبل: %d)" % (week, target, baseline)]
+    prev = [b for b in ours if b["booked_at"].date() < nd]
+    if early_pct and prev:
+        lines.append("(حجوزات أمس بعد الخصم المبكر ما تدخل في رقم الأسبوع: %d)" % len(prev))
     return "\n".join(lines)
 
 

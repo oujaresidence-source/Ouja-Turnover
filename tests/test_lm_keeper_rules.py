@@ -72,6 +72,58 @@ class Decide(unittest.TestCase):
         self.assertTrue(d["floor_blocked"])
 
 
+class EarlyNights(unittest.TestCase):
+    """Owner 2026-11-08 (option B): Sunday and Monday nights are the emptiest (47% / 50%), so
+    their first −10% starts at 3 PM the day before and holds overnight; the night itself then
+    runs the normal 3/6/8 PM ladder."""
+    EARLY = k.parse_early_nights("sun,mon")
+    SAT, SUN, MON, TUE = date(2026, 11, 7), date(2026, 11, 8), date(2026, 11, 9), date(2026, 11, 10)
+
+    def pct(self, night, d, h, m=0):
+        now = datetime(d.year, d.month, d.day, h, m, tzinfo=RIY)
+        return k.night_pct(night, now, STEPS, self.EARLY, 15, 10)
+
+    def test_parse(self):
+        self.assertEqual(self.EARLY, frozenset({6, 0}))
+        self.assertEqual(k.parse_early_nights(""), frozenset())
+        self.assertEqual(k.parse_early_nights(" Sun , xyz "), frozenset({6}))
+
+    def test_sunday_night_starts_saturday_3pm(self):
+        self.assertEqual(self.pct(self.SUN, self.SAT, 14, 59), 0)
+        self.assertEqual(self.pct(self.SUN, self.SAT, 15, 0), 10)
+        self.assertEqual(self.pct(self.SUN, self.SAT, 23, 59), 10)
+
+    def test_held_overnight_then_the_normal_ladder(self):
+        self.assertEqual(self.pct(self.SUN, self.SUN, 3, 0), 10)
+        self.assertEqual(self.pct(self.SUN, self.SUN, 14, 59), 10)
+        self.assertEqual(self.pct(self.SUN, self.SUN, 15, 0), 10)
+        self.assertEqual(self.pct(self.SUN, self.SUN, 18, 0), 20)
+        self.assertEqual(self.pct(self.SUN, self.SUN, 20, 0), 30)
+
+    def test_monday_night_starts_sunday_3pm(self):
+        self.assertEqual(self.pct(self.MON, self.SUN, 15, 0), 10)
+        self.assertEqual(self.pct(self.MON, self.MON, 9, 0), 10)
+
+    def test_other_nights_unchanged(self):
+        self.assertEqual(self.pct(self.TUE, self.MON, 20, 0), 0)      # no day-before drop
+        self.assertEqual(self.pct(self.TUE, self.TUE, 9, 0), 0)       # no morning hold
+        self.assertEqual(self.pct(self.TUE, self.TUE, 15, 0), 10)
+        self.assertEqual(self.pct(self.SAT, self.SAT, 20, 0), 30)
+
+    def test_switched_off(self):
+        now = datetime(2026, 11, 7, 16, 0, tzinfo=RIY)
+        self.assertEqual(k.night_pct(self.SUN, now, STEPS, frozenset(), 15, 10), 0)
+        self.assertEqual(k.nights_to_watch(now, frozenset(), 15), [self.SAT])
+
+    def test_nights_to_watch(self):
+        w = lambda d, h: k.nights_to_watch(datetime(d.year, d.month, d.day, h, tzinfo=RIY), self.EARLY, 15)
+        self.assertEqual(w(self.SAT, 14), [self.SAT])
+        self.assertEqual(w(self.SAT, 15), [self.SAT, self.SUN])
+        self.assertEqual(w(self.SUN, 9), [self.SUN])
+        self.assertEqual(w(self.SUN, 16), [self.SUN, self.MON])
+        self.assertEqual(w(self.MON, 16), [self.MON])
+
+
 class Minimums(unittest.TestCase):
     def test_booking_time_is_utc_plus_3(self):
         r = res(1, "2026-11-01", "2026-11-01 17:39:00", 608)
@@ -152,6 +204,24 @@ class Report(unittest.TestCase):
         self.assertIn("HUE 103", txt)                        # didn't drop — minimum
         self.assertIn("الحد الأدنى", txt)
         self.assertIn("43", txt)
+
+    def test_early_night_counts_the_evening_before(self):
+        units = {"457230": {"name": "1 MLQ", "seen_empty": True, "orig": 490,
+                            "first_drop_at": datetime(2026, 11, 7, 15, 0, tzinfo=RIY).isoformat()},
+                 "485203": {"name": "13 JOOD", "seen_empty": True, "orig": 615,
+                            "first_drop_at": datetime(2026, 11, 7, 15, 0, tzinfo=RIY).isoformat()}}
+        rows = [res(457230, "2026-11-08", "2026-11-07 13:30:00", 441),     # Sat 16:30 Riyadh
+                res(485203, "2026-11-08", "2026-11-08 06:00:00", 553),     # Sun 09:00 (held −10%)
+                res(485203, "2026-11-08", "2026-11-06 13:30:00", 615)]     # 2 days ahead: not ours
+        plain = k.night_bookings(rows, "2026-11-08", units, STEPS)
+        self.assertEqual(len(plain), 1)                    # without the rule: only the same-day one
+        b = k.night_bookings(rows, "2026-11-08", units, STEPS, early_pct=10)
+        self.assertEqual([(x["name"], x["from_drop"], x["pct"]) for x in b],
+                         [("1 MLQ", True, 10), ("13 JOOD", True, 10)])
+        txt = k.render_report("2026-11-08", units, b, 3, early_pct=10)
+        self.assertIn("أمس 16:30", txt)
+        self.assertIn("خصم مبكر", txt)
+        self.assertIn("ما تدخل في رقم الأسبوع: 1", txt)
 
     def test_chunk(self):
         text = "\n".join("line %d %s" % (i, "x" * 50) for i in range(200))

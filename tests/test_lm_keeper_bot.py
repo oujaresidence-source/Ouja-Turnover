@@ -234,5 +234,131 @@ class ReportTest(_Base):
         self.assertIn("A5 MLQ", txt)                      # still empty
 
 
+SAT, SUN, MON = "2026-11-07", "2026-11-08", "2026-11-09"
+
+
+def on(day, h, m=0):
+    return datetime(2026, 11, day, h, m, tzinfo=bot.TZ)
+
+
+class DatedHostaway(FakeHostaway):
+    """Like FakeHostaway, but every (unit, date) has its own calendar day."""
+
+    def __init__(self):
+        super().__init__()
+        self.cal = {}
+
+    def day(self, lid, d):
+        if (lid, d) not in self.cal:
+            self.cal[(lid, d)] = dict(self.days[lid], date=d)
+        return self.cal[(lid, d)]
+
+    def get(self, path, params=None, **_kw):
+        lid, d = int(path.split("/")[2]), params["startDate"]
+        self.gets.append((lid, d))
+        return {"result": [dict(self.day(lid, d))]}
+
+    def put(self, path, body, _retry=0):
+        lid, d = int(path.split("/")[2]), body["startDate"]
+        if self.fail_puts:
+            self.fail_puts -= 1
+            raise RuntimeError("Hostaway 500")
+        self.puts.append((lid, d, body["price"]))
+        self.day(lid, d).update(price=body["price"], note=body.get("note", ""))
+        return {"status": "success"}
+
+
+class EarlyNightTest(_Base):
+    """Owner 2026-11-08, option B: Sunday and Monday nights drop −10% from 3 PM the day before,
+    held overnight, then the normal ladder on the night itself."""
+    EARLY_PATCHED = ("LM_EARLY_NIGHTS", "LM_EARLY_PERCENT", "LM_EARLY_HOUR", "LM_EARLY_RECHECK_MIN")
+
+    def setUp(self):
+        super().setUp()
+        self._orig.update({n: getattr(bot, n) for n in self.EARLY_PATCHED})
+        bot.LM_EARLY_NIGHTS = frozenset({6, 0})
+        bot.LM_EARLY_PERCENT, bot.LM_EARLY_HOUR, bot.LM_EARLY_RECHECK_MIN = 10.0, 15, 60
+        self.fake = DatedHostaway()
+        bot.api_get, bot.api_put = self.fake.get, self.fake.put
+
+    def p(self, lid, d):
+        return self.fake.day(lid, d)["price"]
+
+    def test_saturday_3pm_drops_sunday_night_too(self):
+        bot.lm_keeper_tick(on(7, 15, 0))
+        self.assertEqual(self.p(EMPTY, SAT), 388)
+        self.assertEqual(self.p(EMPTY, SUN), 388)
+        self.assertEqual(self.p(OTHER, SUN), 450)
+        self.assertEqual(self.p(BOOKED, SUN), 618)
+
+    def test_nothing_for_sunday_before_saturday_3pm(self):
+        bot.lm_keeper_tick(on(7, 14, 55))
+        self.assertEqual(self.fake.gets, [])
+
+    def test_overnight_bounce_is_fixed_in_the_morning(self):
+        bot.lm_keeper_tick(on(7, 15, 0))
+        self.fake.day(EMPTY, SUN).update(price=431, note="")      # someone pushed it back up
+        bot.lm_keeper_tick(on(8, 9, 0))
+        self.assertEqual(self.p(EMPTY, SUN), 388)                 # original still 431
+
+    def test_morning_recheck_is_hourly_not_every_tick(self):
+        bot.lm_keeper_tick(on(8, 9, 0))
+        n = self.fake.gets.count((EMPTY, SUN))
+        bot.lm_keeper_tick(on(8, 9, 5))
+        bot.lm_keeper_tick(on(8, 9, 30))
+        self.assertEqual(self.fake.gets.count((EMPTY, SUN)), n)
+        bot.lm_keeper_tick(on(8, 10, 5))
+        self.assertEqual(self.fake.gets.count((EMPTY, SUN)), n + 1)
+
+    def test_sunday_night_then_runs_the_normal_ladder(self):
+        bot.lm_keeper_tick(on(7, 15, 0))
+        bot.lm_keeper_tick(on(8, 15, 0))
+        self.assertEqual(self.p(EMPTY, SUN), 388)
+        bot.lm_keeper_tick(on(8, 18, 0))
+        self.assertEqual(self.p(EMPTY, SUN), 345)
+        bot.lm_keeper_tick(on(8, 20, 0))
+        self.assertEqual(self.p(EMPTY, SUN), 302)
+        self.assertEqual(self.p(EMPTY, MON), 388)                 # Monday night began at 3 PM Sunday
+
+    def test_monday_evening_leaves_tuesday_alone(self):
+        bot.lm_keeper_tick(on(9, 16, 0))
+        self.assertEqual({d for _l, d in self.fake.gets}, {MON})
+
+    def test_switched_off(self):
+        bot.LM_EARLY_NIGHTS = frozenset()
+        bot.lm_keeper_tick(on(7, 16, 0))
+        bot.lm_keeper_tick(on(8, 9, 0))
+        self.assertEqual({d for _l, d in self.fake.gets}, {SAT})
+
+    def test_alerts_only_for_tonight(self):
+        self.fake.fail_puts = 99
+        bot.lm_keeper_tick(on(7, 15, 0))
+        _rec, alerts = bot.lm_keeper_tick(on(7, 15, 30))
+        self.assertEqual(sorted(a["lid"] for a in alerts), sorted([str(EMPTY), str(OTHER)]))
+
+    def test_morning_ticks_only_on_early_nights(self):
+        self.assertTrue(bot.lm_keeper_should_tick(on(8, 9, 0)))     # Sunday
+        self.assertTrue(bot.lm_keeper_should_tick(on(9, 3, 0)))     # Monday
+        self.assertFalse(bot.lm_keeper_should_tick(on(10, 9, 0)))   # Tuesday
+        self.assertFalse(bot.lm_keeper_should_tick(on(8, 2, 0)))    # report hours
+        self.assertTrue(bot.lm_keeper_should_tick(on(10, 15, 0)))
+        bot.LM_EARLY_NIGHTS = frozenset()
+        self.assertFalse(bot.lm_keeper_should_tick(on(8, 9, 0)))
+
+    def test_sunday_report_counts_saturday_bookings(self):
+        bot.lm_keeper_tick(on(7, 15, 0))
+        rows = [{"listingMapId": EMPTY, "arrivalDate": SUN, "reservationDate": "2026-11-07 13:30:00",
+                 "totalPrice": 388, "nights": 1, "status": "new"}]
+        orig_fetch = bot.fetch_reservations_window
+        bot.fetch_reservations_window = lambda s, e, pad_days=45: rows
+        try:
+            txt = bot.lm_report_text(SUN)
+        finally:
+            bot.fetch_reservations_window = orig_fetch
+        self.assertIn("انحجزت بعد النزول: 1", txt)
+        self.assertIn("أمس 16:30", txt)
+        self.assertIn("خصم مبكر", txt)
+
+
 if __name__ == "__main__":
     unittest.main()
