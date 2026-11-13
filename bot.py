@@ -160,6 +160,17 @@ except Exception as _sh_err:            # pragma: no cover
     _stayhub = None
     _HAS_STAYHUB = False
 
+# Hatif (WhatsApp) — a guest writes dates on WhatsApp and gets the units that are really free,
+# from the same search the guest site uses (owner decision 2026-11-13). Dry-run by default and
+# refuses every webhook until HATIF_WEBHOOK_SECRET is set. Additive; the bot runs without it.
+try:
+    import hatif as _hatif
+    _HAS_HATIF = True
+except Exception as _hf_err:            # pragma: no cover
+    print("[hatif] import failed (WhatsApp availability disabled, bot unaffected):", _hf_err)
+    _hatif = None
+    _HAS_HATIF = False
+
 # Cleaning coverage «تغطية التنظيف» — where every apartment is, who cleans it, how
 # OujaCT actually performs, and the head count to bring cleaning fully in-house.
 # READ-ONLY: it computes from the existing stores and writes nothing but its geo cache.
@@ -9599,6 +9610,47 @@ async def _stayhub_on_hook(rid):
         await asyncio.to_thread(_stayhub.push.on_hook, rid)
     except Exception as e:
         print("[stayhub] hook path error (non-fatal):", e)
+
+
+# ============= Hatif (WhatsApp) live availability — the `hatif/` package =============
+# Hatif pushes each WhatsApp message to /hatif/webhook (signed). A message that reads as dates is
+# answered with the units _gw_search returns as available — the guest site's own search, so the
+# two can never disagree. HATIF_DRYRUN=1 (default) sends nothing: the would-be reply goes to
+# HATIF_CHANNEL on Discord. Rules and traps: hatif/__init__.py.
+HATIF_CHANNEL = os.environ.get("HATIF_CHANNEL", "") or WATCHDOG_CHANNEL
+
+def _hatif_notify(text):
+    """HOST.notify — one message to HATIF_CHANNEL (the package hides phone numbers itself)."""
+    async def _post():
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        ch = discord.utils.get(guild.text_channels, name=HATIF_CHANNEL)
+        if ch is not None:
+            await ch.send(str(text)[:1990])
+    _stayhub_schedule(_post, "hatif:notify")
+
+def _hatif_background(fn):
+    """HOST.background — run one blocking webhook job off the loop, fire-and-forget."""
+    async def _run():
+        try:
+            await asyncio.to_thread(fn)
+        except Exception as e:
+            print("[hatif] background job failed (non-fatal):", e)
+    _stayhub_schedule(_run, "hatif:bg")
+
+def _hatif_search(check_in, check_out, guests, typ, neighborhood):
+    """HOST.search — exactly what /api/stay/search runs for the guest site."""
+    return _gw_search(check_in, check_out, guests, typ, None, neighborhood, None)
+
+def _hatif_caps():
+    return {
+        "dash_auth": _dash_auth, "json_response": _json, "web": web, "run": web_thread,
+        "background": _hatif_background, "now": now_riyadh, "notify": _hatif_notify,
+        "log_event": log_event, "search": _hatif_search,
+        "neighborhoods": lambda: RIYADH_NEIGHBORHOODS,
+        "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
+    }
 
 
 def _finchat_notify(payload):
@@ -67553,6 +67605,16 @@ async def start_web_server():
                       % _stayhub.bootstrap())
             except Exception as _she:
                 print("[stayhub] wiring failed (StayHub sync disabled, bot unaffected):", _she)
+
+        # ---- Hatif (WhatsApp) — signed webhook (public) and /api/hatif/status (login) ----
+        if _HAS_HATIF:
+            try:
+                _hatif.wire(_hatif_caps())
+                _hatif.register_routes(app)
+                print("[hatif] wired + routes registered (/hatif/webhook, /api/hatif/status) — %s"
+                      % _hatif.bootstrap())
+            except Exception as _hfe:
+                print("[hatif] wiring failed (WhatsApp availability disabled, bot unaffected):", _hfe)
 
         # ---- «تغطية التنظيف» — the coverage study. READ-ONLY: every capability below is
         # a getter. It reads the same stores the cleaning ops already use and computes

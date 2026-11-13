@@ -632,6 +632,31 @@ his «-O» listings went live 2026-09-13…19). Spec: `docs/superpowers/specs/20
   payout / non-Airbnb booking / degraded pull). Approved = frozen snapshot vN; reopen = admin + reason.
 - PDF dates are written in Arabic words: an ISO date inside Arabic text is reordered by bidi.
 
+## Hatif (WhatsApp) live availability — the `hatif/` package
+A guest writes dates on WhatsApp; Hatif (api.voxa.sa) pushes the message to `/hatif/webhook`;
+the package answers with the units that are really free and their price for those dates.
+- **One search, two doors.** `HOST.search` is `_gw_search` — the guest site's own search. Never
+  give the bot a second way to compute availability or price; the two would drift.
+- **Hatif's webhook also fires for OUR outgoing messages.** Only `direction == "Inbound"` typed
+  text is handled; a button/list tap (`interactiveReply`) belongs to the Hatif menu flow.
+- **Menu flow vs bot.** Default `HATIF_GATE=assigned`: the bot answers only a conversation the
+  flow assigned to its own Hatif seat (`HATIF_BOT_USER_ID`), then unassigns it so the menu
+  resumes. Without that gate both would answer the same message.
+- **The bot never confirms a booking** and never words "could not check" as "nothing available"
+  (`engine.build_reply`); it lists only units with `available is True` AND a price, and it
+  never states how many apartments there are (owner rule 2026-11-13) — names, not counts.
+- **Fails closed / safe by default:** no `HATIF_WEBHOOK_SECRET` or a bad `X-Voxa-Signature` ⇒ 401;
+  `HATIF_DRYRUN` defaults to **1** (nothing sent, the would-be reply goes to `HATIF_CHANNEL` on
+  Discord); `HATIF_TEST_NUMBERS` holds live sends to those numbers; no client id/secret ⇒
+  listen-only. One delivery is handled once (`hatif_events` primary key — Hatif retries 5×).
+- **Privacy:** no phone number is stored or posted; guest text is kept trimmed with long digit
+  runs hidden, 30 days.
+- Env: `HATIF_ENABLED`(1), `HATIF_DRYRUN`(1), `HATIF_CLIENT_ID`/`HATIF_CLIENT_SECRET`,
+  `HATIF_WEBHOOK_SECRET`, `HATIF_CHANNEL_ID`, `HATIF_BOT_USER_ID`, `HATIF_HUMAN_USER_ID`,
+  `HATIF_TEST_NUMBERS`, `HATIF_GATE`(assigned), `HATIF_ACK`(1), `HATIF_MAX_PER_MIN`(20),
+  `HATIF_CHANNEL`(the watchdog room). Tests: `tests/test_hatif.py` (parser cases are the spec —
+  add a case before changing `hatif/parse.py`).
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log
