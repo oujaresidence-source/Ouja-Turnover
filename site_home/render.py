@@ -436,6 +436,8 @@ def _page(page, lang, title, desc, body, d):
     head = (
         '<!doctype html><html lang="%s" dir="%s"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        # Meta Business domain verification (owner request 2026-11-13) — invisible to visitors
+        '<meta name="facebook-domain-verification" content="pz91by1fl1m7ebthzca80wx2zsags7">'
         '<title>%s</title><meta name="description" content="%s">'
         '<link rel="canonical" href="%s">'
         '<link rel="alternate" hreflang="ar" href="%s">'
