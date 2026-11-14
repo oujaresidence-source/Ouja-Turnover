@@ -377,7 +377,10 @@ def _footer(d, lang):
                        % (_icon("mail"), _e(d["email"]), _e(d["email"])))
     for icon, label, link in _phone_items(d, lang):
         contact.append('<li>%s<span class="foot-k">%s</span>%s</li>' % (_icon(icon), _e(label), link))
-    contact.append('<li>%s<span>%s</span></li>' % (_icon("pin"), _e(c["riyadh"])))
+    lic_addr = d.get("licence_address_ar")
+    if en and lic_addr:
+        lic_addr = "%s · %s" % (d.get("licence_address_en"), lic_addr)   # the licence itself is Arabic
+    contact.append('<li>%s<span>%s</span></li>' % (_icon("pin"), _e(lic_addr or c["riyadh"])))
     social_html = _social(d, lang)
     legal_extra = _travel_line(d, lang) + _badge(d, lang)
     year = datetime.date.today().year
@@ -395,7 +398,7 @@ def _footer(d, lang):
         '<div class="foot-base"><p>© %d %s. %s</p><p>%s</p></div>'
         '</div></footer>'
     ) % (_e(d["brand_en"] if en else d["brand_ar"]),
-         _e(d["legal_name_en"] if en else d["legal_name_ar"]),
+         _e(("%s · %s" % (d["legal_name_en"], d["legal_name_ar"])) if en else d["legal_name_ar"]),
          _e(c["cr"]), _e(d["cr_number"]), _e(c["na"]), _e(d["national_address_short"]),
          _e(c["foot_pages"]),
          path_for("home", lang), _e(c["home"]), path_for("privacy", lang), _e(c["privacy"]),

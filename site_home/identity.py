@@ -34,6 +34,10 @@ SITE_IDENTITY = {
                   "Al Maather Al Shamali District, Riyadh 12314",
     "address_unit_en": "Naqwa Building, 2nd Floor, Office 16",
 
+    # ---- address as printed on the Civil Defense licence (what Meta's business check read) ----
+    "licence_address_ar": "شارع الأمير سعد بن سعود بن فيصل، حي المعذر الشمالي، الرياض 12314",
+    "licence_address_en": "Prince Saad bin Saud bin Faisal Street, Al Maather Al Shamali District, Riyadh 12314",
+
     # ---- contact (business.sa request EACR110675) ----
     "email": "info@oujares.com",       # "" = OUJA_CONTACT_EMAIL
     "mobile": "0505783355",            # shown as written; tel: link gets +966

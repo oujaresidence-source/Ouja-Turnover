@@ -165,6 +165,21 @@ class Health(unittest.TestCase):
             self.assertEqual(needle in src, want, needle)
 
 
+class FooterLegalDetails(unittest.TestCase):
+    """Meta's business check (2026-11-14): the register name, the licence address and the
+    mobile must be readable in the footer of BOTH languages."""
+
+    def test_footer_has_arabic_name_licence_address_and_mobile(self):
+        for path in PAGES_AR + PAGES_EN:
+            foot = fetch(path)[2].split("<footer", 1)[1]
+            self.assertIn(LEGAL_AR, foot, path)
+            self.assertIn("شارع الأمير سعد بن سعود بن فيصل، حي المعذر الشمالي، الرياض 12314", foot, path)
+            self.assertIn("0505783355", foot, path)
+        for path in PAGES_EN:
+            foot = fetch(path)[2].split("<footer", 1)[1]
+            self.assertIn("Prince Saad bin Saud bin Faisal Street", foot, path)
+
+
 class LegalPages(unittest.TestCase):
     """Test 4: privacy / terms / contact in both languages, footer + notice on each."""
 
