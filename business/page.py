@@ -153,7 +153,7 @@ COPY = {
         "contact_cr": "Commercial Registration", "contact_addr": "Riyadh, Saudi Arabia",
         "wa": "WhatsApp", "email_l": "Email", "book": "Book a stay",
         "footer_sync": "Figures refresh nightly from our property management system. Last sync: {sync}.",
-        "footer_legal": "Ahmed Musaed bin Nassar Company · Commercial Registration No. 7050158810",
+        "footer_legal": "Ahmed Musaed bin Nassar Company (شركة أحمد مساعد بن نصار) · Commercial Registration No. 7050158810",
         "skip": "Skip to content",
     },
     "ar": {

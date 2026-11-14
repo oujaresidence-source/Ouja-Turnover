@@ -28,6 +28,14 @@ class Renders(unittest.TestCase):
         self.html = {lang: page.render_page(lang, base="https://oujares.com", links=LINKS)
                      for lang in ("en", "ar")}
 
+    def test_legal_name_in_arabic_is_on_the_english_page_too(self):
+        """Meta business verification (2026-11-13) was rejected: «the legal name must be on the
+        website». The English /business page is the one given to Meta, and it only carried the
+        English spelling. Both pages must show the Arabic legal name exactly as on the CR."""
+        for lang in ("en", "ar"):
+            self.assertIn("شركة أحمد مساعد بن نصار", self.html[lang], lang)
+            self.assertIn("7050158810", self.html[lang], lang)
+
     def test_doctype_and_direction(self):
         self.assertIn("<!doctype html>", self.html["en"])
         self.assertIn('dir="ltr"', self.html["en"])
