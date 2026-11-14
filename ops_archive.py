@@ -334,7 +334,9 @@ def build_transcript(meta, rows):
         for a in (r.get("attachments") or []):
             path = "files/" + _html.escape(a.get("stored_as") or "")
             label = _html.escape(a.get("filename") or "file")
-            if a.get("failed"):
+            if a.get("skipped_photo"):
+                body.append('<div class="att sys">🖼 صورة (ما انحفظت): %s</div>' % label)
+            elif a.get("failed"):
                 body.append('<div class="att sys">⚠️ مرفق ما انحفظ: %s — %s</div>'
                             % (label, _html.escape(str(a.get("error") or ""))))
             elif str(a.get("content_type") or "").startswith("image/"):
@@ -388,11 +390,14 @@ def _entry_skeleton(ch):
     }
 
 
-async def _archive_channel(ch, sink, date_folder_id, entry, tick=None):
+async def _archive_channel(ch, sink, date_folder_id, entry, tick=None, keep_bytes=None):
     """Archive ONE channel into Drive. Mutates + returns `entry`.
 
     Unreadable channels are NOT skipped: they still get a folder and a messages.json
     saying {"unreadable": true, ...} so the archive is a complete, honest index.
+
+    `keep_bytes(att) -> bool` (optional): False = record the attachment as a line only
+    (`skipped_photo`), never download it. None = keep every file (the original behaviour).
     """
     cat_name = _safe_name(getattr(getattr(ch, "category", None), "name", None) or "بدون-تصنيف", "بدون-تصنيف")
     cat_folder = await asyncio.to_thread(sink.folder, date_folder_id, cat_name)
@@ -414,6 +419,11 @@ async def _archive_channel(ch, sink, date_folder_id, entry, tick=None):
                     "content_type": getattr(att, "content_type", None) or "",
                     "source_url": getattr(att, "url", ""),      # metadata only — it EXPIRES
                 }
+                if keep_bytes is not None and not keep_bytes(att):
+                    rec["skipped_photo"] = True               # owner rule: photos are not kept
+                    entry["photos_skipped"] = int(entry.get("photos_skipped") or 0) + 1
+                    row["attachments"].append(rec)
+                    continue
                 data, err = None, None
                 for attempt in range(1 + ATTACH_RETRIES):
                     try:

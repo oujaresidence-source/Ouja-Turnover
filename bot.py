@@ -4958,6 +4958,8 @@ import ops_archive, sys as _oa_sys  # Drive archive + guarded purge: !ouja-archi
 ops_archive.setup(bot, _oa_sys.modules[__name__])   # hand over the LIVE module (never `import bot`)
 import maint_cleanup  # closed صيانة rooms: saved to Drive, deleted on day 3 (2026-10-19)
 maint_cleanup.setup(bot, _oa_sys.modules[__name__])
+import ops_archive_clean  # !ouja-clean-archive: «📦 أرشيف» rooms saved to the dashboard, then deleted (2026-11-14)
+ops_archive_clean.setup(bot, _oa_sys.modules[__name__])
 
 import ops_tidy, sys as _ot_sys    # !ouja-tidy plan|run|undo|status + auto-archive on close
 ops_tidy.setup(bot, _ot_sys.modules[__name__])
@@ -68068,6 +68070,13 @@ async def start_web_server():
                       "/api/ops/*) — dryrun=%s" % _ops.notify.dryrun())
             except Exception as _opse:
                 print("[ops] wiring failed (accountability disabled, bot unaffected):", _opse)
+
+        # ---- «أرشيف ديسكورد» — read-only, admin-only reader for !ouja-clean-archive's saves
+        try:
+            ops_archive_clean.register_routes(app)
+            print("[ops_archive_clean] routes registered (/discord-archive, /api/discord-archive/*)")
+        except Exception as _oace:
+            print("[ops_archive_clean] routes failed (archive reader disabled, bot unaffected):", _oace)
 
         # ---- «متابعة الخروج» Checkout Watch — additive; reuses brain.db. Ships OFF.
         if _HAS_CHECKOUT:
