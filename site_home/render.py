@@ -368,6 +368,15 @@ def _header(page, lang):
          path_for(page, other), other, other, _e(c["switch"]))
 
 
+def _licence_addr(d, lang):
+    """The address as printed on the Civil Defense licence (the one Meta's check compares).
+    The English pages add the Arabic original, because the licence itself is Arabic."""
+    ar = d.get("licence_address_ar") or ""
+    if lang == "en" and ar:
+        return "%s · %s" % (d.get("licence_address_en"), ar)
+    return ar or (d["address_en"] if lang == "en" else d["address_ar"])
+
+
 def _footer(d, lang):
     c = content.COMMON[lang]
     en = lang == "en"
@@ -377,10 +386,7 @@ def _footer(d, lang):
                        % (_icon("mail"), _e(d["email"]), _e(d["email"])))
     for icon, label, link in _phone_items(d, lang):
         contact.append('<li>%s<span class="foot-k">%s</span>%s</li>' % (_icon(icon), _e(label), link))
-    lic_addr = d.get("licence_address_ar")
-    if en and lic_addr:
-        lic_addr = "%s · %s" % (d.get("licence_address_en"), lic_addr)   # the licence itself is Arabic
-    contact.append('<li>%s<span>%s</span></li>' % (_icon("pin"), _e(lic_addr or c["riyadh"])))
+    contact.append('<li>%s<span>%s</span></li>' % (_icon("pin"), _e(_licence_addr(d, lang) or c["riyadh"])))
     social_html = _social(d, lang)
     legal_extra = _travel_line(d, lang) + _badge(d, lang)
     year = datetime.date.today().year
@@ -419,7 +425,7 @@ def _jsonld(d, lang):
         "url": d["site_url"] + "/",
         "logo": d["site_url"] + "/site/logo.png",
         "identifier": {"@type": "PropertyValue", "propertyID": "CR", "value": d["cr_number"]},
-        "address": {"@type": "PostalAddress", "streetAddress": d["address_en"] if lang == "en" else d["address_ar"],
+        "address": {"@type": "PostalAddress", "streetAddress": _licence_addr(d, lang),
                     "addressLocality": "Riyadh", "postalCode": "12314", "addressCountry": "SA"},
     }
     if d["email"]:
@@ -475,9 +481,7 @@ def _official_card(d, lang):
         (h["f_legal"], _e(d["legal_name_en"] if en else d["legal_name_ar"])),
         (h["f_cr"], '<span class="ltr num big">%s</span>' % _e(d["cr_number"])),
         (h["f_na"], '<span class="ltr num big">%s</span>' % _e(d["national_address_short"])),
-        (h["f_addr"], '%s<span class="sub">%s</span>' % (
-            _e(d["address_en"] if en else d["address_ar"]),
-            _e(d["address_unit_en"] if en else d["address_unit_ar"]))),
+        (h["f_addr"], _e(_licence_addr(d, lang))),
     ]
     if d["email"]:
         rows.append((h["f_email"], '<a class="ltr" href="mailto:%s">%s</a>' % (_e(d["email"]), _e(d["email"]))))
@@ -573,9 +577,8 @@ def render_contact(lang, d=None):
                   % (_icon("mail"), _e(c["email"]), _e(d["email"]), subj, _e(d["email"])))
     for icon, label, link in _phone_items(d, lang):
         ch.append('<li>%s<div><b>%s</b>%s</div></li>' % (_icon(icon), _e(label), link))
-    ch.append('<li>%s<div><b>%s</b><span>%s<br>%s<br>%s <span class="ltr num">%s</span></span></div></li>'
-              % (_icon("pin"), _e(p["addr_h"]), _e(d["address_en"] if en else d["address_ar"]),
-                 _e(d["address_unit_en"] if en else d["address_unit_ar"]),
+    ch.append('<li>%s<div><b>%s</b><span>%s<br>%s <span class="ltr num">%s</span></span></div></li>'
+              % (_icon("pin"), _e(p["addr_h"]), _e(_licence_addr(d, lang)),
                  _e(h["f_na"]), _e(d["national_address_short"])))
     social = _social(d, lang)
     follow = ('<div class="follow"><b>%s</b>%s</div>' % (_e(c["follow"]), social)) if social else ""

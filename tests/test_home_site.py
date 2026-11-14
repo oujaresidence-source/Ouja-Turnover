@@ -180,6 +180,14 @@ class FooterLegalDetails(unittest.TestCase):
             self.assertIn("Prince Saad bin Saud bin Faisal Street", foot, path)
 
 
+    def test_every_page_shows_the_licence_address_not_the_other_one(self):
+        for path in PAGES_AR + PAGES_EN:
+            html = fetch(path)[2]
+            self.assertIn("شارع الأمير سعد بن سعود بن فيصل", html, path)
+            self.assertNotIn("طريق التخصصي", html, path)
+            self.assertNotIn("Takhassusi", html, path)
+
+
 class LegalPages(unittest.TestCase):
     """Test 4: privacy / terms / contact in both languages, footer + notice on each."""
 
