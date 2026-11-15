@@ -283,6 +283,18 @@ class Prize(PayCase):
         self.close()
         self.assertEqual(pay.month_sheet("2026-10", self.today())["prize"]["winners"], [])
 
+    def test_it_passes_down_when_first_place_earned_nothing(self):
+        # عهود's B1 sells a lot but its rating stops it: she is first in the race with no commission.
+        self.sell("201", 20000.0)
+        self.ratings[("201", "2026-10")] = {"avg": 4.0, "n": 2}
+        self.sell("102", 7700.0)                                       # نورة earns, in second place
+        self.close()
+        s = pay.month_sheet("2026-10", self.today())
+        by = {e["employee"]: e for e in s["employees"]}
+        self.assertEqual((by[AHOOD]["rank"], by[AHOOD]["commission"]), (1, 0.0))
+        self.assertEqual(s["prize"]["winners"], [NORA])
+        self.assertEqual((by[NORA]["prize"], by[AHOOD]["prize"]), (engine.MONTH_PRIZE, 0.0))
+
     def test_the_race_an_employee_sees_has_names_and_places_but_no_money(self):
         self.sell("102", 7700.0)
         self.clock = datetime.datetime(2026, 10, 30, 10, 0)

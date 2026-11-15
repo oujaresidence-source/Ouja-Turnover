@@ -94,9 +94,9 @@ def _compute(month_key, today):
                       "rate": round((fee_pct or 0.0) * engine.TARGET_SHARE, 6)})
 
     # THE RACE: each employee's apartments, together, against their targets together. First
-    # place takes the month's prize once the month has ended — if they earned any commission
-    # at all (no prize for the best of a month where nobody passed a target, or for a place won
-    # on apartments whose rating stopped them).
+    # place takes the month's prize once the month has ended — the highest place among those who
+    # earned commission (no prize in a month where nobody passed a target; apartments stopped by
+    # their rating earn nothing, so they cannot carry anyone to it).
     pct = {}
     for emp in {u["employee"] for u in units if u["employee"]}:
         mine = [u for u in units if u["employee"] == emp and u["target"] > 0]
@@ -105,9 +105,13 @@ def _compute(month_key, today):
     order = sorted(pct, key=lambda e: (-pct[e], e))
     rank = {e: i + 1 for i, e in enumerate(order)}
     winners = []
-    if closed and order:
-        top = pct[order[0]]
-        winners = [e for e in order if abs(pct[e] - top) < 1e-9 and raw.get(e, 0.0) > 0]
+    earners = [e for e in order if raw.get(e, 0.0) > 0]
+    if closed and earners:
+        # The prize goes to the highest-placed employee WHO EARNED COMMISSION. If first place
+        # earned none it passes down instead of being lost (2026-11-16: on the first live month
+        # the leader had no apartment above target, and nobody would have won).
+        top = pct[earners[0]]
+        winners = [e for e in earners if abs(pct[e] - top) < 1e-9]
     each = round(engine.MONTH_PRIZE / len(winners), 2) if winners else 0.0
 
     employees, team, prizes = [], 0.0, 0.0
