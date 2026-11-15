@@ -17,6 +17,7 @@ import datetime as dt
 import hashlib
 import hmac
 import secrets
+import threading
 
 from . import db, engine, history, score
 from . import host as _host
@@ -345,3 +346,60 @@ def nightly(today=None):
     rep["attributed"] = run_attribution()
     rep["rescue_snapshot"] = score.snapshot_rescue(today)
     return rep
+
+
+# ------------------------------------------------------------------ the sync job
+# A sync pulls four months of bookings and one calendar per unit through the Hostaway
+# throttle, so it takes MINUTES. It therefore never runs inside a web request, and only one
+# runs at a time: a second press (or the nightly loop meeting a manual run) is told
+# "already running" instead of stacking another job on Hostaway.
+
+_sync = {"lock": threading.Lock(), "running": False, "started_at": "", "finished_at": "",
+         "error": "", "by": ""}
+
+
+def _stamp():
+    try:
+        return HOST.require("now")().isoformat(timespec="seconds")
+    except Exception:
+        return ""
+
+
+def sync_status():
+    return {k: _sync[k] for k in ("running", "started_at", "finished_at", "error", "by")}
+
+
+def _claim_sync(by):
+    with _sync["lock"]:
+        if _sync["running"]:
+            return False
+        _sync.update(running=True, started_at=_stamp(), error="", by=by or "")
+        return True
+
+
+def _run_claimed(today=None):
+    try:
+        nightly(today)
+        return True
+    except Exception as e:
+        _sync["error"] = "%s: %s" % (type(e).__name__, e)
+        print("[targets] sync failed:", _sync["error"])
+        return False
+    finally:
+        _sync.update(running=False, finished_at=_stamp())
+
+
+def run_sync(today=None, by="system"):
+    """Run one sync NOW in the calling thread. Returns (ran, ok): ran is False when another
+    sync already holds the slot."""
+    if not _claim_sync(by):
+        return False, False
+    return True, _run_claimed(today)
+
+
+def start_sync(by=""):
+    """Start one sync in the background and return at once. False = one is already running."""
+    if not _claim_sync(by):
+        return False
+    threading.Thread(target=_run_claimed, name="ouja-targets-sync", daemon=True).start()
+    return True

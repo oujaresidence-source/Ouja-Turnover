@@ -349,5 +349,92 @@ class ConsentAndSwitches(RCase):
         self.assertFalse(routes.nightly_due(dt.datetime(2026, 11, 15, 14, 0), "2026-11-15"))
 
 
+
+# ============================================================ the sync job
+
+class SyncRunsInTheBackground(RCase):
+    """A sync takes minutes (Hostaway is throttled). It must never hold a web request, and two
+    must never run at once — the 2026-11-15 bug: the button waited silently and every press
+    stacked another job on Hostaway."""
+
+    def setUp(self):
+        super().setUp()
+        import threading
+        self.gate, self.entered, self.calls = threading.Event(), threading.Event(), []
+
+        def slow_window(start, end):
+            self.calls.append(start.isoformat())
+            self.entered.set()
+            self.gate.wait(10)
+            return []
+        HOST.fetch_window = slow_window
+        book._sync.update(running=False, started_at="", finished_at="", error="", by="")
+
+    def tearDown(self):
+        self.gate.set()
+        import time
+        for _ in range(100):
+            if not book.sync_status()["running"]:
+                break
+            time.sleep(0.05)
+        super().tearDown()
+
+    def wait_done(self):
+        import time
+        self.gate.set()
+        for _ in range(200):
+            if not book.sync_status()["running"]:
+                return
+            time.sleep(0.05)
+        self.fail("sync never finished")
+
+    def test_the_press_answers_at_once_and_a_second_press_does_not_stack(self):
+        data, status = self.call(routes._admin(routes.api_sync), self.owner)
+        self.assertEqual((status, data["ok"], data["started"]), (200, True, True))
+        self.assertTrue(data["sync"]["running"])                  # answered while the job is still going
+        self.assertTrue(self.entered.wait(5))
+        again, _ = self.call(routes._admin(routes.api_sync), self.owner)
+        self.assertEqual((again["ok"], again["started"]), (True, False))
+        self.assertEqual(book.run_sync(self.today(), "nightly"), (False, False))   # nor does the nightly
+        a, _ = self.call(routes._admin(routes.api_admin), Req("admin", "admin", query={"month": "2026-11"}))
+        self.assertTrue(a["seed"]["sync"]["running"])             # the screen can say so
+        self.wait_done()
+        self.assertEqual(len(self.calls), 4)                      # ONE job: four months, once
+        st = book.sync_status()
+        self.assertEqual((st["running"], st["error"]), (False, ""))
+        self.assertTrue(st["finished_at"])
+        self.assertTrue(db.setting("synced_at"))
+
+    def test_a_finished_sync_frees_the_slot(self):
+        self.gate.set()
+        self.assertEqual(book.run_sync(self.today(), "nightly"), (True, True))
+        self.assertEqual(book.run_sync(self.today(), "nightly"), (True, True))
+
+    def test_a_failed_sync_frees_the_slot_and_says_why(self):
+        real = book.nightly
+
+        def boom(today=None):
+            raise RuntimeError("Hostaway down")
+        book.nightly = boom
+        try:
+            self.assertEqual(book.run_sync(self.today(), "nightly"), (True, False))
+        finally:
+            book.nightly = real
+        st = book.sync_status()
+        self.assertFalse(st["running"])
+        self.assertIn("Hostaway down", st["error"])
+        self.gate.set()
+        self.assertEqual(book.run_sync(self.today(), "nightly"), (True, True))
+
+    def test_the_sync_route_is_admin_only_and_the_handler_does_no_work_itself(self):
+        _, status = self.call(routes._admin(routes.api_sync), self.nora)
+        self.assertEqual(status, 403)
+        self.assertEqual(self.calls, [])
+        src = inspect.getsource(routes.api_sync)
+        self.assertIn("start_sync", src)
+        self.assertNotIn("nightly", src)
+        self.assertNotIn("_run(", src)
+
+
 if __name__ == "__main__":
     unittest.main()

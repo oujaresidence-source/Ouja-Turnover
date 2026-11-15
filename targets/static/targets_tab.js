@@ -195,7 +195,7 @@
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (String(v) === String(sel) ? ' selected' : '') + '>' + esc(label) + '</option>'; }
 
   function adminView(d) {
-    var f = d.flags || {}, h = '';
+    var f = d.flags || {}, h = '', sy = (d.seed && d.seed.sync) || {};
     /* 1 — status + seed */
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('الحالة', 'Status')) + '</div><div class="tg-row">' +
       '<span class="tg-st">' + esc(T('من ينتصل عليهم: ', 'Callable: ')) + esc(arr(f.channels).join(' + ')) + '</span>' +
@@ -206,7 +206,8 @@
       esc(T('آخر مزامنة: ', 'Last sync: ')) + esc(d.seed.synced_at ? d.seed.synced_at.slice(0, 16).replace('T', ' ') : '—') + '</p>' +
       '<div class="tg-row" style="margin-top:10px"><input type="file" id="tgSeedFile" accept=".csv" class="tg-in">' +
       '<button class="tg-btn go" data-tg="seed">' + esc(T('ارفع ملف البداية', 'Upload seed file')) + '</button>' +
-      '<button class="tg-btn" data-tg="sync">' + esc(T('مزامنة الآن', 'Sync now')) + '</button></div>' +
+      '<button class="tg-btn" data-tg="sync" id="tgSyncBtn"' + (sy.running ? ' disabled' : '') + '>' + esc(sy.running ? T('المزامنة شغّالة…', 'Sync running…') : T('مزامنة الآن', 'Sync now')) + '</button></div>' +
+      '<p class="tg-note" id="tgSyncNote">' + esc(syncNote(sy)) + '</p>' +
       '<p class="tg-note">' + esc(T('الملف فيه أسماء وجوالات ضيوف: ينحفظ على السيرفر بس، وما يدخل GitHub.', 'The file holds guest names and phones: it is kept on the server only, never in GitHub.')) + '</p></div>';
 
     /* 2 — unmapped names */
@@ -305,6 +306,29 @@
     return h;
   }
 
+  /* The sync takes minutes on the server (Hostaway is throttled), so it runs in the
+     background there. Here we only say so, and check back quietly until it is done —
+     without redrawing the page under the owner's hands. */
+  function syncNote(sy) {
+    if (sy.running) return T('المزامنة شغّالة بالخلفية — تاخذ كم دقيقة. تقدر تكمل شغلك، وما يحتاج تضغط مرة ثانية.', 'The sync is running in the background — it takes a few minutes. Carry on; no need to press again.');
+    if (sy.error) return T('آخر مزامنة ما كملت: ', 'The last sync did not finish: ') + sy.error;
+    return '';
+  }
+  var syncTimer = null;
+  function watchSync() {
+    clearTimeout(syncTimer);
+    if (!(S.admin && S.admin.seed && S.admin.seed.sync && S.admin.seed.sync.running)) return;
+    syncTimer = setTimeout(function () {
+      api('/api/targets/admin?month=' + encodeURIComponent(S.month)).then(function (a) {
+        if (!a || !a.ok || !S.admin) return;
+        S.admin.seed.sync = a.seed.sync;
+        if (a.seed.sync.running) { watchSync(); return; }
+        toast(a.seed.sync.error ? T('المزامنة ما كملت', 'The sync did not finish') : T('خلصت المزامنة', 'Sync finished'));
+        if (S.pane === 'admin') loadTargets(true);
+      }).catch(function () { watchSync(); });
+    }, 20000);
+  }
+
   /* ---------------------------------------------------------------- render + load «أهدافي» */
 
   function renderTargets() {
@@ -323,6 +347,7 @@
     else if (S.pane === 'team' && S.team) h += teamView(S.team);
     else h += meView(d);
     putHtml('tgBody', h);
+    watchSync();
   }
 
   function loadTargets(force) {
@@ -392,7 +417,17 @@
       });
       act('/api/targets/admin/map-name', { name: nm, listing_id: pick });
     }
-    else if (a === 'sync') { el.disabled = true; act('/api/targets/admin/sync', {}, T('تمت المزامنة', 'Synced')); }
+    else if (a === 'sync') {
+      el.disabled = true;
+      post('/api/targets/admin/sync', {}).then(function (r) {
+        if (!r || !r.ok) { el.disabled = false; toast((r && r.error) || T('ما بدت المزامنة', 'The sync did not start')); return; }
+        toast(r.started ? T('بدت المزامنة — تاخذ كم دقيقة', 'Sync started — it takes a few minutes') : T('المزامنة شغّالة من قبل', 'A sync is already running'));
+        if (S.admin && S.admin.seed) S.admin.seed.sync = r.sync;
+        el.textContent = T('المزامنة شغّالة…', 'Sync running…');
+        putHtml('tgSyncNote', esc(syncNote(r.sync || {})));
+        watchSync();
+      });
+    }
     else if (a === 'seed') { uploadSeed(el); }
     else if (a === 'approveM') {
       if (confirm(T('تعتمد صرف هالشهر؟ الاعتماد يسجّل سطر بس.', 'Approve this month? Approval records one row only.'))) {

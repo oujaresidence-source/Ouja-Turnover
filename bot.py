@@ -11341,13 +11341,16 @@ async def _tg_nightly_loop():
             now = now_riyadh()
             last = await asyncio.to_thread(_targets.db.setting, "nightly_date")
             if _targets.routes.nightly_due(now, last):
-                await asyncio.to_thread(_targets.db.set_setting, "nightly_date",
-                                        now.date().isoformat(), "system",
-                                        now.isoformat(timespec="seconds"))
-                rep = await asyncio.to_thread(_targets.book.nightly, now.date())
-                print("[targets] nightly:", rep)
+                # One sync at a time (a manual «مزامنة الآن» may hold the slot). The day is
+                # recorded only AFTER a sync finishes, so one cut short by a redeploy runs again.
+                ran, ok = await asyncio.to_thread(_targets.book.run_sync, now.date(), "nightly")
+                if ran and ok:
+                    await asyncio.to_thread(_targets.db.set_setting, "nightly_date",
+                                            now.date().isoformat(), "system",
+                                            now_riyadh().isoformat(timespec="seconds"))
+                print("[targets] nightly: ran=%s ok=%s" % (ran, ok))
         except Exception as _tgn:
-            print("[targets] nightly failed (will retry tomorrow):", _tgn)
+            print("[targets] nightly failed (retries in 15 min):", _tgn)
         await asyncio.sleep(900)
 
 

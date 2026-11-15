@@ -239,7 +239,8 @@ def admin_payload(month_key, quarter, today):
     return {
         "flags": flags(), "month": month_key, "quarter": quarter,
         "seed": {"rows": db.res_count(), "imported_at": db.setting("seed_imported_at"),
-                 "synced_at": db.setting("synced_at"), "unmapped": history.unmapped()},
+                 "synced_at": db.setting("synced_at"), "unmapped": history.unmapped(),
+                 "sync": book.sync_status()},
         "listings": sorted(({"id": str(k), "name": v} for k, v in live.items()),
                            key=lambda x: x["name"] or ""),
         "users": users, "employees": score.employees(quarter), "manager": db.setting("manager"),
@@ -352,8 +353,10 @@ async def api_seed_upload(request):
 
 
 async def api_sync(request):
-    rep = await _run(book.nightly, _today())
-    return _json({"ok": True, "report": rep})
+    """Starts the sync in the background and answers at once — it takes minutes, far longer
+    than a web request should wait. One at a time: a second press reports the running one."""
+    started = book.start_sync(_actor(request))
+    return _json({"ok": True, "started": started, "sync": book.sync_status()})
 
 
 async def api_map_name(request):
@@ -601,7 +604,8 @@ def register_routes(app):
 
 
 def nightly_due(now, last_run_date):
-    """True once per day after 03:30 Riyadh. Pure, so the loop in bot.py stays trivial."""
+    """True after 03:30 Riyadh until a sync has FINISHED that day. The caller records the date
+    only on success, so a run cut short by a redeploy is tried again. Pure."""
     return (now.hour, now.minute) >= (3, 30) and last_run_date != now.date().isoformat()
 
 
