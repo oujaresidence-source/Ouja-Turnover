@@ -45159,7 +45159,56 @@ async def _api_price_dna(request):
     return _json({"ok": True, "building": _dna_cache["running"], "data": slim})
 
 # ---- Stage 3: pace + recommendation engine (per upcoming open night, per unit) ----
-_pe_floor_overrides = {}     # optional {lid: absolute SAR floor} the owner can set; default none
+# THE ONE MINIMUM PRICE PER APARTMENT ({listing id: SAR}). The engine, the same-day discount
+# ladder and the targets board all read it. Until 2026-11-15 it lived only in memory, so every
+# deploy wiped what the owner had typed; it is now a file in the state folder, and the Listings
+# page writes the same store instead of a second «floor» field that fed nothing.
+PE_FLOOR_FILE = "pricing_floor_overrides.json"
+
+
+def _pe_floor_load():
+    """{int listing id: int SAR} from disk. A missing or broken file starts empty."""
+    raw = _load_json(PE_FLOOR_FILE, {})
+    out = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                lid, val = int(k), int(round(float(v)))
+            except (TypeError, ValueError):
+                continue
+            if val > 0:
+                out[lid] = val
+    return out
+
+
+def _pe_floor_save():
+    return _save_json(PE_FLOOR_FILE, {str(k): v for k, v in _pe_floor_overrides.items()})
+
+
+def _pe_floor_set(lid, value):
+    """Set (or, with 0/empty, clear) one apartment's minimum and write it to disk.
+    Returns False — and changes nothing — on a bad id or value."""
+    try:
+        lid = int(lid)
+        value = int(round(float(value or 0)))
+    except (TypeError, ValueError):
+        return False
+    if value > 0:
+        _pe_floor_overrides[lid] = int(value)
+    else:
+        _pe_floor_overrides.pop(lid, None)
+    _pe_floor_save()
+    return True
+
+
+def _pe_floor_of(lid):
+    try:
+        return int(_pe_floor_overrides.get(int(lid), 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+_pe_floor_overrides = _pe_floor_load()
 
 def _pe_resolve_band(models, lid, g, dtype, ev):
     """Pick the realized ADR band to anchor on. Prefer the unit's OWN band when rich,
@@ -46822,15 +46871,7 @@ async def _api_plab_settings(request):
     if int(_plab_settings.get("horizon", 45)) > 60:
         _plab_settings["horizon"] = 60                  # safety cap
     if isinstance(b.get("floor"), dict):                # optional per-apartment manual floor
-        try:
-            lid = int(b["floor"].get("lid"))
-            fv = int(b["floor"].get("value") or 0)
-            if fv > 0:
-                _pe_floor_overrides[lid] = fv
-            else:
-                _pe_floor_overrides.pop(lid, None)
-        except (TypeError, ValueError):
-            pass
+        _pe_floor_set(b["floor"].get("lid"), b["floor"].get("value"))   # saved to disk
     await asyncio.to_thread(_plab_save_settings)
     return _json({"ok": True, "settings": _plab_settings_get()})
 
@@ -58838,7 +58879,7 @@ def _ls_row_view(rec):
         "directions_url": rec.get("directions_url"),
         "directions_field": rec.get("directions_field"),
         "group": rec.get("group") or "",
-        "floor": rec.get("floor"),
+        "floor": rec.get("floor") or (_pe_floor_of(rec.get("id")) or None),
         "oujact": bool(rec.get("oujact")),
         "first_seen": rec.get("first_seen"),
         "deactivated_at": rec.get("deactivated_at"),
@@ -58920,6 +58961,7 @@ async def _api_listings_update(request):
                 rec["floor"] = round(float(fv))
             except (TypeError, ValueError):
                 return _json({"error": "bad floor"}, 400)
+        _pe_floor_set(rec.get("id"), rec["floor"] or 0)     # the one minimum the pricing reads
     if "oujact" in b:
         rec["oujact"] = bool(b.get("oujact"))
     # Oujact dispatch config (all append-safe)
