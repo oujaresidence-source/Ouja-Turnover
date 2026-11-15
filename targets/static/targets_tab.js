@@ -18,6 +18,8 @@
 
   function T(ar, en) { return labelText(ar, en); }
   function arr(x) { return Array.isArray(x) ? x : []; }
+  /* A unit name like '1 MLQ' flips to 'MLQ 1' inside right-to-left text. <bdi> keeps it as written. */
+  function nm(x) { return '<bdi>' + esc(x) + '</bdi>'; }
   function num(x) { return '<span class="tg-num">' + esc(x) + '</span>'; }
   function pct(x) { return x == null ? '—' : num(Math.round(Number(x) * 100) + '%'); }
   function sar(x) { return num(Math.round(Number(x) || 0).toLocaleString('en-US')) + ' ' + T('ر.س', 'SAR'); }
@@ -91,7 +93,7 @@
 
   function unitRow(u) {
     if (u.excluded) {
-      return '<tr><td><b>' + esc(u.name) + '</b></td><td colspan="4"><span class="tg-st">' +
+      return '<tr><td><b>' + nm(u.name) + '</b></td><td colspan="4"><span class="tg-st">' +
         esc(T('خارج الحسبة — متاحة أقل من 15 ليلة', 'Left out — open fewer than 15 nights')) + '</span></td></tr>';
     }
     var marks = '';
@@ -105,7 +107,7 @@
     var why = [];
     if (u.below_floor) why.push(u.below_floor + ' ' + T('ليلة تحت الحد الأدنى للسعر — ما انحسبت', 'nights under the price floor — not counted'));
     if (u.half_nights) why.push(u.half_nights + ' ' + T('ليلة سعرها تحت متوسط الشقة — انحسبت نص', 'nights under the unit average — counted half'));
-    return '<tr><td><b>' + esc(u.name) + '</b>' +
+    return '<tr><td><b>' + nm(u.name) + '</b>' +
       (why.length ? '<span class="tg-sub">' + esc(why.join(' · ')) + '</span>' : '') + '</td>' +
       '<td>' + pct(u.occupancy) + '<div class="tg-meter"><i style="width:' + Math.min(100, Math.round(u.occupancy * 100)) + '%"></i>' + marks + '</div></td>' +
       '<td>' + tier + '</td>' +
@@ -124,7 +126,7 @@
     }
     var b = d.board, m = d.money, h = '';
     h += '<div class="tg-kpis">' +
-      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(T('عمولتي هالشهر', 'My commission this month')) + + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(T('عمولتي هالشهر', 'My commission this month')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + pct(b.share) + '</b><span>' + esc(T('نسبتي الحين', 'My share now')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(b.hit + ' / ' + b.scored) + '</b><span>' + esc(T('شقق ضربت البرونزي', 'Units at bronze')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(b.units_to_full_share) + '</b><span>' + esc(T('شقة باقي عشان توصل 40%', 'units to reach 40%')) + '</span></div>' +
@@ -141,7 +143,7 @@
       h += '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الضيف', 'Guest')) + '</th><th>' + esc(T('الشقة', 'Unit')) +
         '</th><th>' + esc(T('الليالي', 'Nights')) + '</th><th>' + esc(T('الحالة', 'Status')) + '</th></tr></thead><tbody>';
       arr(m.bookings).forEach(function (x) {
-        h += '<tr><td>' + esc(x.guest) + '</td><td>' + esc(x.unit_name) + '</td><td>' + num(x.nights) + '</td><td>' +
+        h += '<tr><td>' + esc(x.guest) + '</td><td>' + nm(x.unit_name) + '</td><td>' + num(x.nights) + '</td><td>' +
           (x.state === 'completed' ? '<span class="tg-st ok">' + esc(T('انحسب', 'Counted')) + '</span>'
             : '<span class="tg-st gold">' + esc(T('بانتظار خروج الضيف', 'Waiting for checkout')) + '</span>') + '</td></tr>';
       });
@@ -165,7 +167,7 @@
       '</th><th>' + esc(T('الإشغال', 'Occupancy')) + '</th><th>' + esc(T('البرونزي', 'Bronze')) + '</th><th>' + esc(T('باقي', 'To go')) +
       '</th><th>' + esc(T('ملاحظة', 'Note')) + '</th></tr></thead><tbody>';
     arr(rows).forEach(function (r) {
-      h += '<tr><td><b>' + esc(r.name) + '</b></td><td>' + esc(r.employee || '—') + '</td><td>' + pct(r.occupancy) + '</td><td>' + pct(r.bronze) +
+      h += '<tr><td><b>' + nm(r.name) + '</b></td><td>' + esc(r.employee || '—') + '</td><td>' + pct(r.occupancy) + '</td><td>' + pct(r.bronze) +
         '</td><td>' + num(r.to_bronze) + ' ' + esc(T('ليلة', 'nights')) + '</td><td>' +
         (r.price_stuck ? '<span class="tg-st bad">' + esc(T('واقفة بسبب السعر — ارفعها لمسؤول التسعير', 'Stuck on price — raise with pricing')) + '</span>' : '') + '</td></tr>';
     });
@@ -250,7 +252,7 @@
         '</th><th>' + esc(T('الحد الأعلى', 'Ceiling')) + '</th><th></th></tr></thead><tbody>';
       arr(d.targets).forEach(function (t) {
         var ed = t.status === 'proposed';
-        h += '<tr><td><b>' + esc(t.name) + '</b>' + (t.basis === 'peers' ? '<span class="tg-sub">' + esc(T('شقة جديدة — من متوسط شقق مثلها', 'New unit — from similar units')) + '</span>' : '') +
+        h += '<tr><td><b>' + nm(t.name) + '</b>' + (t.basis === 'peers' ? '<span class="tg-sub">' + esc(T('شقة جديدة — من متوسط شقق مثلها', 'New unit — from similar units')) + '</span>' : '') +
           '</td><td>' + esc(t.employee || '—') + '</td><td>' + pct(t.baseline) + '</td><td>' + pct(t.bronze) + ' / ' + pct(t.silver) + ' / ' + pct(t.gold) + '</td>' +
           '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="floor" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.floor || 0)) + '">' : num(Math.round(t.floor || 0))) + '</td>' +
           '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="ceiling" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.ceiling || 0)) + '">' : num(Math.round(t.ceiling || 0))) +
@@ -263,7 +265,7 @@
 
     /* 5 — month sheet */
     var s = d.sheet || {}, m = s.measure || {};
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') + + '</div>' +
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') + '</div>' +
       '<div class="tg-kpis">' +
       '<div class="tg-kpi"><b>' + num(m.contacted || 0) + '</b><span>' + esc(T('انتصل عليهم', 'Contacted')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.contacted_bookings || 0) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(m.holdout || 0) + '</b><span>' + esc(T('المجموعة الضابطة (عدد بس)', 'Hidden group (count only)')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.holdout_bookings || 0) + '</span></div>' +
@@ -483,7 +485,7 @@
     }
     arr(L.items).forEach(function (it) {
       h += '<div class="tg-call"><div><b>' + esc(it.name) + '</b><span class="tg-sub">' + esc(it.reason) + '</span>' +
-        '<span class="tg-sub">' + esc(it.unit_name) + ' · ' + esc(T('فاضية يوم ', 'empty on ')) + num(day(it.night)) + ' · ' + esc(T('سكن ', 'stayed ')) + num(it.stays) + ' ' + esc(T('مرة', 'times')) + '</span></div>' +
+        '<span class="tg-sub">' + nm(it.unit_name) + ' · ' + esc(T('فاضية يوم ', 'empty on ')) + num(day(it.night)) + ' · ' + esc(T('سكن ', 'stayed ')) + num(it.stays) + ' ' + esc(T('مرة', 'times')) + '</span></div>' +
         '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
         '<button type="submit" class="tg-btn wa">' + esc(T('واتساب', 'WhatsApp')) + '</button></form></div>';
     });

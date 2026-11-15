@@ -220,6 +220,9 @@ class SwitchedOn(unittest.TestCase):
         with open(routes.STATIC_JS, encoding="utf-8") as f:
             js = f.read()
         self.assertIn("window.TargetsTab", js)
+        # `'a' + + 'b'` is VALID JavaScript (unary plus) and renders "aNaN" while swallowing the
+        # closing tags after it. It reached the live page once (2026-11-15); node --check cannot see it.
+        self.assertIsNone(re.search(r"\+\s*\+\s*['(a-zA-Z]", js))
         self.assertNotIn("innerHTML", js)                          # everything goes through putHtml + esc
         self.assertNotIn("onclick=", js)                           # event delegation only
         shim = page._SHIM
