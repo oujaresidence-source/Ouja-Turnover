@@ -478,3 +478,25 @@ class LastBooking(PayCase):
 
     def test_no_past_stay_no_booking(self):
         self.assertIsNone(book.last_stay([]))
+
+
+class PeopleIMessaged(PayCase):
+    """An employee can go back to everyone they messaged — not only the fresh ones."""
+
+    def test_old_and_new_contacts_with_the_guests_last_booking(self):
+        self.clock = datetime.datetime(2026, 11, 15, 10, 0)
+        rid = self.res("102", self.phone(3), "ضيف3 فلان", "2026-09-10", "2026-09-13", channel="airbnb")
+        k = engine.phone_key(self.phone(3))
+        old = db.insert_contact(k, "ضيف3 فلان", NORA, "2026-09-20T09:00:00", "2026-Q3", "102", "2026-09-25", 1, None)
+        self.assertTrue(book.set_outcome(NORA, old, "declined")[0])
+        new = db.insert_contact(engine.phone_key(self.phone(4)), "ضيف4 فلان", NORA, "2026-11-14T09:00:00", "2026-Q4", "102", "2026-11-20", 1, None)
+        rows = book.open_contacts(NORA, self.today())
+        self.assertEqual([(r["id"], r["open"]) for r in rows], [(new, True), (old, False)])
+        self.assertEqual(rows[1]["last"]["booking"], rid)
+        self.assertEqual((rows[1]["unit_name"], rows[1]["night"], rows[1]["outcome"]), ("A2", "2026-09-25", "declined"))
+        self.assertFalse({"phone", "phone_key", "_key"} & set(rows[1]))
+
+    def test_only_my_own(self):
+        self.clock = datetime.datetime(2026, 11, 15, 10, 0)
+        db.insert_contact("kx", "ضيف", AHOOD, "2026-11-14T09:00:00", "2026-Q4", "201", "2026-11-20", 1, None)
+        self.assertEqual(book.open_contacts(NORA, self.today()), [])

@@ -752,20 +752,29 @@
     });
     h += '<p class="tg-note">' + esc(T('ضغطة الزر هي التسجيل. اتصال واحد لكل ضيف كل 45 يوم، وأول من يضغط هو صاحبه.', 'Pressing the button is the log. One contact per guest every 45 days; the first to press owns it.')) + '</p></div>';
 
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('اتصالاتي المفتوحة', 'My open contacts')) +
-      '<span class="tg-sub">' + esc(T('كل حجز تجيبه يرفع دخل الشقة — واللي فوق هدفها لك منه عمولة.', 'Every booking you bring lifts the unit’s revenue — and you earn on what is above its target.')) + '</span></div>';
-    if (!arr(d.open).length) h += '<p class="tg-note">' + esc(T('ما فيه اتصالات مفتوحة.', 'No open contacts.')) + '</p>';
-    arr(d.open).forEach(function (c) {
+    function sentRow(c) {
       var btns = '';
       if (!c.outcome) {
         Object.keys(OUT).forEach(function (k) {
           btns += '<button class="tg-btn sm" data-tg="outcome" data-id="' + esc(c.id) + '" data-o="' + k + '">' + esc(T(OUT[k][0], OUT[k][1])) + '</button>';
         });
       } else { btns = '<span class="tg-st">' + esc(T(OUT[c.outcome][0], OUT[c.outcome][1])) + '</span>'; }
-      h += '<div class="tg-call"><div><b>' + esc(c.name) + '</b>' + (c.booked ? ' <span class="tg-st ok">' + esc(T('حجز', 'Booked')) + '</span>' : '') +
-        '<span class="tg-sub">' + esc(T('اتصلت يوم ', 'Contacted on ')) + num(day(c.at)) + ' · ' + esc(T('باقي ', '')) + num(c.days_left) + ' ' + esc(T('يوم على النافذة', 'days left in the window')) + '</span></div>' +
+      return '<div class="tg-call"><div><b>' + esc(c.name) + '</b>' + (c.booked ? ' <span class="tg-st ok">' + esc(T('حجز', 'Booked')) + '</span>' : '') +
+        '<span class="tg-sub">' + esc(T('راسلته يوم ', 'Messaged on ')) + num(day(c.at)) +
+        (c.unit_name ? ' · ' + esc(T('عن ', 'about ')) + nm(c.unit_name) + (c.night ? ' ' + esc(T('ليلة ', 'night ')) + num(day(c.night)) : '') : '') +
+        (c.open ? ' · ' + esc(T('باقي ', '')) + num(c.days_left) + ' ' + esc(T('يوم على النافذة', 'days left in the window')) : '') + '</span>' + lastStay(c) + '</div>' +
         '<div class="tg-row">' + btns + '</div></div>';
-    });
+    }
+    var sent = arr(d.open), opened = sent.filter(function (c) { return c.open !== false; }), older = sent.filter(function (c) { return c.open === false; });
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('اتصالاتي المفتوحة', 'My open contacts')) +
+      '<span class="tg-sub">' + esc(T('كل حجز تجيبه يرفع دخل الشقة — واللي فوق هدفها لك منه عمولة.', 'Every booking you bring lifts the unit’s revenue — and you earn on what is above its target.')) + '</span></div>';
+    if (!opened.length) h += '<p class="tg-note">' + esc(T('ما فيه اتصالات مفتوحة.', 'No open contacts.')) + '</p>';
+    opened.forEach(function (c) { h += sentRow(c); });
+    h += '</div>';
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('اللي راسلتهم قبل', 'People I messaged before')) +
+      '<span class="tg-sub">' + esc(T('آخر 4 شهور. ترجع لهم وتشوف رقم حجزهم وآخر سكن.', 'The last 4 months. Come back to them and see their booking number and last stay.')) + '</span></div>';
+    if (!older.length) h += '<p class="tg-note">' + esc(T('ما فيه رسائل أقدم من أسبوعين للحين.', 'Nothing older than two weeks yet.')) + '</p>';
+    older.forEach(function (c) { h += sentRow(c); });
     return h + '</div>';
   }
 

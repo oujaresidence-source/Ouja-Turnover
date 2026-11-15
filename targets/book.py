@@ -318,21 +318,31 @@ def set_outcome(employee, contact_id, outcome):
     return True, ""
 
 
+SENT_DAYS = 120
+
+
 def open_contacts(employee, today):
-    """My contacts whose 14-day window is still running, or that have no outcome yet."""
-    since = (today - dt.timedelta(days=60)).isoformat()
+    """Everyone I messaged in the last SENT_DAYS days, so I can go back to them: the ones whose
+    14-day window is still running (or that have no outcome yet) first, flagged `open`, then
+    the older ones, newest first. Each carries the guest's last booking with us."""
+    since = (today - dt.timedelta(days=SENT_DAYS)).isoformat()
     booked = {a["contact_id"] for a in db.attrs()}
+    names = history.unit_names()
+    people = guests()
+    today_iso = today.isoformat()
     out = []
     for c in db.contacts(employee=employee, since=since):
         gap = (today - dt.date.fromisoformat(c["at"][:10])).days
         left = engine.ATTRIBUTION_DAYS - gap
-        if left < 0 and c["outcome"]:
-            continue
+        g = people.get(c["phone_key"])
         out.append({"id": c["id"], "name": first_name(c["guest_name"]), "at": c["at"][:10],
                     "days_left": max(0, left), "outcome": c["outcome"] or "",
-                    "booked": c["id"] in booked})
-    out.sort(key=lambda x: (x["outcome"] != "", -x["days_left"]))
-    return out
+                    "booked": c["id"] in booked, "open": not (left < 0 and c["outcome"]),
+                    "unit_name": names.get(c["unit"] or "") or "", "night": c["night"] or "",
+                    "last": last_stay(past_stays(g, today_iso), names) if g else None})
+    opened = sorted((x for x in out if x["open"]), key=lambda x: (x["outcome"] != "", -x["days_left"]))
+    closed = sorted((x for x in out if not x["open"]), key=lambda x: x["at"], reverse=True)
+    return opened + closed
 
 
 # ------------------------------------------------------------------ consent (public guide box)
