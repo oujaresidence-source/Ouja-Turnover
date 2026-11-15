@@ -26,7 +26,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import targets                                                    # noqa: E402
-from targets import book, db, engine, money, routes, score       # noqa: E402
+from targets import book, db, engine, pay, routes, score         # noqa: E402
 from targets.host import HOST                                     # noqa: E402
 from tests.test_targets_flow import AHOOD, Case, NORA             # noqa: E402
 
@@ -106,6 +106,8 @@ class RCase(Case):
                 g = book.guests()[it["_key"]]
                 self.res("201", g["phone"], g["name"], "2026-11-20", "2026-11-22", created="2026-11-17")
         book.run_attribution()
+        # نورة's A1 has a strong November: well above its target, so there is money to show.
+        self.res("101", "0558880001", "ضيف قوي", "2026-11-10", "2026-11-14", channel="airbnb", total=8000.0)
         self.clock = self.clock.replace(month=12, day=20)
 
 
@@ -121,17 +123,20 @@ class EmployeeSeesOwnOnly(RCase):
         self.money_scenario()
         d = self.me()
         self.assertEqual(d["employee"], NORA)
-        self.assertEqual(d["money"]["amount"], money.month_sheet("2026-12", self.today())["total_paid"])
+        self.assertEqual(d["money"]["amount"], 0.0)                # December: nothing above target yet
         d = self.me(Req("u_nora", "ops", query={"month": "2026-11"}))
+        row = next(e for e in pay.month_sheet("2026-11", self.today())["employees"] if e["employee"] == NORA)
         self.assertGreater(d["money"]["amount"], 0)
-        self.assertEqual(len(d["money"]["bookings"]), 2)
+        self.assertEqual(d["money"]["amount"], row["paid"])
+        self.assertEqual([u["name"] for u in d["money"]["units"]], ["A1"])
 
     def test_no_ouja_fee(self):
         self.money_scenario()
         d = self.me(Req("u_nora", "ops", query={"month": "2026-11"}))
         self.assertFalse(keys_of(d) & {"fee", "fee_pct", "avg_fee", "uplift_fee", "total"})
-        for b in d["money"]["bookings"]:                           # and no per-booking amount to divide
-            self.assertEqual(set(b), {"guest", "unit_name", "nights", "state"})
+        for u in d["money"]["units"]:                              # and no per-unit amount to divide
+            self.assertEqual(set(u), {"unit", "name", "revenue", "target", "over", "rating", "reviews",
+                                      "rating_blocked", "note"})
 
     def test_no_contract_percentage(self):
         self.money_scenario()
@@ -190,8 +195,49 @@ class EmployeeSeesOwnOnly(RCase):
         self.money_scenario()
         data, status = self.call(routes._safe(routes.api_team), Req("u_nora", "ops", query={"month": "2026-11"}))
         self.assertEqual(status, 200)
-        self.assertEqual(set(data["activity"][0]), {"employee", "contacts", "bookings", "hit", "scored"})
+        self.assertEqual(set(data["activity"][0]), {"employee", "contacts", "above", "units"})
         self.assertFalse(keys_of(data) & {"pool", "holdout", "fee_pct", "avg_fee", "raw", "paid", "measure"})
+
+
+# ============================================================ rating notes
+
+class RatingNotes(RCase):
+    """A low rating stops the apartment's commission; only its own employee may say «مو بيدي»,
+    and only the supervisor or the owner decides."""
+
+    def setUp(self):
+        super().setUp()
+        HOST.unit_rating = lambda lid, mk: {"avg": 4.2, "n": 3} if str(lid) == "101" else None
+        self.money_scenario()
+
+    def post(self, fn, req_user, role, body):
+        return self.call(routes._safe(fn), Req(req_user, role, body=body))
+
+    def test_the_flow(self):
+        d = self.call(routes._safe(routes.api_me), Req("u_nora", "ops", query={"month": "2026-11"}))[0]
+        self.assertEqual(d["money"]["amount"], 0.0)                 # 4.2 < 4.75: A1 does not count
+        self.assertTrue(d["money"]["units"][0]["rating_blocked"])
+        body = {"unit": "101", "month": "2026-11", "reason": "تسريب من المطور"}
+        r, _ = self.post(routes.api_note, "u_ahood", "ops", body)
+        self.assertFalse(r["ok"])                                   # not her apartment
+        r, _ = self.post(routes.api_note, "u_new", "ops", body)
+        self.assertFalse(r["ok"])                                   # not an employee at all
+        r, _ = self.post(routes.api_note, "u_nora", "ops", body)
+        self.assertTrue(r["ok"], r)
+        r, status = self.post(routes.api_note_decide, "u_nora", "ops", {"id": r["id"], "accept": True})
+        self.assertEqual(status, 403)                               # she cannot accept her own note
+        db.set_setting("manager_user", "u_ahood")
+        team, _ = self.call(routes._safe(routes.api_team), Req("u_ahood", "ops", query={"month": "2026-11"}))
+        note = team["notes"][0]
+        self.assertEqual((note["status"], note["employee"]), ("pending", NORA))
+        r, _ = self.post(routes.api_note_decide, "u_ahood", "ops", {"id": note["id"], "accept": True})
+        self.assertTrue(r["ok"], r)
+        d = self.call(routes._safe(routes.api_me), Req("u_nora", "ops", query={"month": "2026-11"}))[0]
+        self.assertGreater(d["money"]["amount"], 0)
+
+    def test_not_logged_in_is_401(self):
+        for fn in (routes.api_note, routes.api_note_decide):
+            self.assertEqual(self.call(routes._safe(fn), Req(""))[1], 401)
 
 
 # ============================================================ the hidden group in responses
@@ -226,7 +272,7 @@ class HoldoutNeverLeaves(RCase):
         self.money_scenario()
         data, status = self.call(routes._admin(routes.api_admin), Req("admin", "admin", query={"month": "2026-11"}))
         self.assertEqual(status, 200)
-        self.assertGreater(data["sheet"]["measure"]["holdout"], 0)      # the count is there
+        self.assertGreater(data["measure"]["holdout"], 0)      # the count is there
         self.assertClean(data)                                           # the people are not
 
     def test_no_search_and_no_lookup_by_phone_exists(self):
@@ -272,6 +318,7 @@ class WhatsAppRoute(RCase):
             "/api/targets/admin/approve-quarter", "/api/targets/admin/link",
             "/api/targets/admin/manager", "/api/targets/admin/seed-upload", "/api/targets/admin/sync",
             "/api/targets/admin/map-name", "/api/targets/admin/approve-month",
+            "/api/targets/note", "/api/targets/note-decide",
             "/api/book/wa", "/api/book/outcome"]))
         src = inspect.getsource(routes)
         self.assertEqual(src.count("log_contact"), 1)
@@ -338,7 +385,7 @@ class ConsentAndSwitches(RCase):
         for k in ("TG_ENABLED", "TG_POOL_CHANNELS"):
             os.environ.pop(k, None)
         self.assertTrue(targets.enabled())
-        self.assertEqual(targets.pool_channels(), ("consented", "direct"))
+        self.assertEqual(targets.pool_channels(), ("all",))      # owner decision 2026-11-15: everyone
         os.environ["TG_ENABLED"] = "0"
         self.assertFalse(targets.enabled())
 
@@ -382,9 +429,11 @@ class ManagerIsALogin(RCase):
     def test_her_share_carries_her_name_and_comes_from_the_same_pool(self):
         self.pick("u_aseel")
         self.money_scenario()
-        sheet = money.month_sheet("2026-11", self.today())
+        sheet = pay.month_sheet("2026-11", self.today())
         self.assertEqual(sheet["manager"]["name"], "Aseel")
-        self.assertLessEqual(sheet["total_paid"], sheet["pool"])
+        self.assertGreater(sheet["team_paid"], 0)
+        self.assertAlmostEqual(sheet["manager"]["amount"], sheet["team_paid"] * engine.MANAGER_OVERRIDE, delta=0.01)
+        self.assertAlmostEqual(sheet["total_paid"], sheet["team_paid"] + sheet["manager"]["amount"], delta=0.01)
 
     def test_unknown_login_is_refused_and_empty_clears(self):
         self.assertFalse(self.pick("u_ghost")["ok"])

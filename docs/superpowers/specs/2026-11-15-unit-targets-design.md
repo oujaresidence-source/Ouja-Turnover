@@ -177,3 +177,47 @@
 الميزة شغّالة من أول ما تنرفع: زر الواتساب يشتغل، والشهر ينعتمد أول ما يقفل. اللي يتحكم بالبداية هو المالك:
 الموظف ما يشوف شي لين ينربط حسابه وتنفتح له التبويبات من الصلاحيات. الباقي من الإعدادات: `TG_ENABLED`
 و`TG_POOL_CHANNELS`. (أي ذكر للوضع التجريبي في الأقسام فوق ما عاد ساري.)
+
+## 15. What pays now: the apartment target (owner decision, 2026-11-15)
+
+This section replaces the payout rules of sections 1–14. The commission on 10/10 reviews
+(about 1,887 SAR a month, computed by hand in Excel) stops. The client book stays as a tool;
+it no longer carries a commission of its own, and `targets/money.py` only measures what the
+messages add (contacted against the hidden group), for the owner's eyes.
+
+**The rule** (`targets/engine.py`, `targets/pay.py`)
+
+1. Every apartment has a monthly revenue target, frozen for the quarter when the owner
+   approves it: its own average month over the three months before the quarter, plus 20%
+   (`TARGET_STEP`). A unit with no full month yet takes the average of the others. The owner
+   may type a different target before approving.
+2. This month's target = the quarter target × open nights ÷ nights × the season. A blocked
+   night is not the employee's to sell. The season is how the whole company did against its
+   own base, judged after the month ends, and it only moves targets **down**: moving them up
+   would cancel the team's own gain.
+3. On revenue above the target, the employee gets 20% (`TARGET_SHARE`) of Ouja's contract fee.
+   Under the target the apartment pays nothing and costs the employee nothing. No contract fee
+   on record → zero, and the unit is flagged.
+4. An apartment whose guests rated it under 4.75 that month (`RATING_MIN`) pays nothing,
+   unless the supervisor accepts the employee's note that the cause was not theirs (a
+   developer's defect, the building). One note per apartment per month, decided once, by the
+   operations manager or the owner — never by the employee who raised it.
+5. Ops warnings multiply the employee's total as before. The operations manager gets 15% of
+   what the team earned, on top.
+6. The owner approves a month after it ends and no note is waiting. Approval freezes the
+   sheet; later bookings do not move an approved month. Nothing is written to payroll or the ERP.
+
+**Why 20% and not 10%.** With the rule exactly as built, run over April–October 2026
+(`outputs/targets-audit-2026-11-15/scripts/a10.py`): at +10% a team that changes nothing draws
+about 2,800 SAR a month, because the portfolio is young (5 units a year ago, 50 now) and units
+are still filling up. At +20% it draws about 2,090 (2,400 with the manager), close to what the
+review commission cost. About a third of apartments pass their target in any month without
+extra work; that part is luck, and it is the price of a rule simple enough to explain.
+
+**Known limits.** Seven months of history. The employee does not set prices. A strong month
+raises next quarter's target. An employee sees their own apartments' revenue and target and
+their own total — never Ouja's fee or a colleague's number — but the total divided by the
+riyals above target gives away the blended rate.
+
+**Callable guests.** `TG_POOL_CHANNELS` now defaults to `all` (owner's decision and risk:
+messaging Airbnb guests off the platform is against its terms).

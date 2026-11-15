@@ -5,7 +5,9 @@ targets.routes — «أهدافي» + «دفتر العملاء» endpoints.
     GET  /targets/static/targets_tab.js   PUBLIC code, no data
     GET  /my-targets, /my-book            phone pages (login)
     GET  /api/targets/me                  my scoreboard + my money         («targets» read)
-    GET  /api/targets/team                rescue list + counts             (admin / ops manager)
+    GET  /api/targets/team                rescue list + counts + notes     (admin / ops manager)
+    POST /api/targets/note                my note on a low-rated apartment («targets» write)
+    POST /api/targets/note-decide         accept / refuse a note           (admin / ops manager)
     GET  /api/targets/admin               everything                        (ADMIN ONLY)
     POST /api/targets/admin/*             propose, unit, approve-quarter, link, manager,
                                           seed-upload, sync, map-name, approve-month (ADMIN ONLY)
@@ -29,7 +31,7 @@ import os
 import time
 import traceback
 
-from . import book, db, engine, history, money, score
+from . import book, db, engine, history, money, pay, score
 from . import host as _host
 from .host import HOST
 
@@ -140,7 +142,7 @@ def me_payload(employee, month_key, today):
     """Everything ONE employee may see on «أهدافي»."""
     return {"employee": employee, "month": month_key,
             "board": score.board(employee, month_key, today),
-            "money": money.my_money(employee, month_key, today)}
+            "money": pay.my_money(employee, month_key, today)}
 
 
 async def api_me(request):
@@ -223,7 +225,8 @@ async def api_book_outcome(request):
 
 def team_payload(month_key, today):
     return {"month": month_key, "rescue": score.rescue(month_key, today),
-            "snapshots": db.rescues(month_key), "activity": money.team_activity(month_key, today),
+            "snapshots": db.rescues(month_key), "activity": pay.team_activity(month_key, today),
+            "notes": pay.team_notes(month_key, today),
             "quarter_state": score.quarter_state(score.quarter_of(month_key))}
 
 
@@ -251,7 +254,13 @@ def admin_payload(month_key, quarter, today):
         "users": users, "employees": score.employees(quarter), "manager": db.setting("manager"),
         "manager_user": db.setting("manager_user"),
         "quarter_state": score.quarter_state(quarter), "targets": db.targets(quarter),
-        "sheet": money.month_sheet(month_key, today),
+        "sheet": pay.month_sheet(month_key, today),
+        "notes": pay.team_notes(month_key, today),
+        # What the WhatsApp messages added, contacted vs the hidden group: counts only, and it
+        # no longer decides anyone's pay — it tells the owner whether the client book works.
+        "measure": money.month_sheet(month_key, today)["measure"],
+        "rules": {"step": engine.TARGET_STEP, "share": engine.TARGET_SHARE,
+                  "manager": engine.MANAGER_OVERRIDE, "rating_min": engine.RATING_MIN},
         "rescue": score.rescue(month_key, today), "snapshots": db.rescues(month_key),
         "consents": len(db.consents()), "dnc": len(db.dnc()),
     }
@@ -284,11 +293,14 @@ async def api_unit(request):
     try:
         floor = max(0.0, float(b.get("floor") or 0))
         ceiling = max(0.0, float(b.get("ceiling") or 0))
+        rev_target = b.get("rev_target")
+        rev_target = None if rev_target in (None, "") else max(0.0, float(rev_target))
     except (TypeError, ValueError):
         return _json({"ok": False, "error": "رقم غير صحيح"})
     if ceiling and ceiling <= floor:
         return _json({"ok": False, "error": "الحد الأعلى لازم يكون فوق الحد الأدنى"})
-    n = await _run(db.edit_target, str(b.get("quarter") or ""), str(b.get("unit") or ""), floor, ceiling)
+    n = await _run(db.edit_target, str(b.get("quarter") or ""), str(b.get("unit") or ""), floor, ceiling,
+                   rev_target)
     if not n:
         return _json({"ok": False, "error": "الشقة معتمدة أو غير موجودة — الحدود تتغير قبل الاعتماد فقط"})
     return _json({"ok": True})
@@ -386,7 +398,33 @@ async def api_approve_month(request):
         engine.month_bounds(m)
     except Exception:
         return _json({"ok": False, "error": "شهر غير صحيح"})
-    ok, err = await _run(money.approve_month, m, _actor(request))
+    ok, err = await _run(pay.approve_month, m, _actor(request))
+    return _json({"ok": ok, "error": err})
+
+
+# ------------------------------------------------------------------ rating notes
+
+async def api_note(request):
+    """The apartment's own employee: «التقييم نزل بسبب شي مو بيدي». Changes nothing until the
+    supervisor decides."""
+    emp = employee_of(request)
+    if not emp:
+        return _json({"ok": False, "error": "حسابك مو مربوط بموظف"}, 403)
+    b = await _body(request)
+    m = str(b.get("month") or "")[:7]
+    try:
+        engine.month_bounds(m)
+    except Exception:
+        return _json({"ok": False, "error": "شهر غير صحيح"})
+    ok, err, nid = await _run(pay.raise_note, emp, str(b.get("unit") or ""), m, b.get("reason"), _today())
+    return _json({"ok": ok, "error": err, "id": nid})
+
+
+async def api_note_decide(request):
+    if not (is_admin(request) or is_manager(request)):
+        return _json({"ok": False, "error": "للمشرف فقط"}, 403)
+    b = await _body(request)
+    ok, err = await _run(pay.decide_note, b.get("id"), bool(b.get("accept")), _actor(request))
     return _json({"ok": ok, "error": err})
 
 
@@ -601,6 +639,8 @@ def register_routes(app):
     p("/api/tg-consent", api_consent)
     g("/api/targets/me", _safe(api_me))
     g("/api/targets/team", _safe(api_team))
+    p("/api/targets/note", _safe(api_note))
+    p("/api/targets/note-decide", _safe(api_note_decide))
     g("/api/targets/admin", _admin(api_admin))
     p("/api/targets/admin/propose", _admin(api_propose))
     p("/api/targets/admin/unit", _admin(api_unit))

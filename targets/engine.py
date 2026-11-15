@@ -286,3 +286,73 @@ def settle(employee_commissions, pool, manager=None, ops_multipliers=None):
         out["manager"] = {"name": manager["name"], "amount": round(override * scale, 2)}
     out["total_paid"] = round(sum(paid.values()) + (out.get("manager", {}).get("amount", 0.0)), 2)
     return out
+
+
+# ====================================================================== the apartment target
+# OWNER-APPROVED 2026-11-15 — this is what PAYS. It replaced the commission on 10/10 reviews.
+#
+#   Every apartment has a monthly revenue target: its own average month before the quarter,
+#   plus TARGET_STEP. Whatever it makes ABOVE the target, the employee gets TARGET_SHARE of
+#   Ouja's fee on that part. At or under the target the apartment pays nothing; it never costs
+#   the employee anything.
+#
+#   THE STEP IS 20%, NOT 10%. Measured on the real history with the rule exactly as built
+#   (outputs/targets-audit-2026-11-15/scripts/a10.py): at +10% a team that changes nothing draws
+#   ~2,800 SAR a month, because the portfolio is young and still filling up; at +20% it draws
+#   ~2,090 — about what the review commission cost (1,887). Every riyal of real growth then
+#   leaves Ouja 80% of its fee. Re-measure before changing either number.
+TARGET_BASE_MONTHS = 3
+TARGET_STEP = 0.20
+TARGET_SHARE = 0.20
+RATING_MIN = 4.75            # out of 5: under it, the apartment pays nothing that month
+
+
+def revenue_in_month(reservations, month_key):
+    """Revenue of the confirmed stays that falls inside the month, night by night."""
+    start, end = month_bounds(month_key)
+    total = 0.0
+    for r in reservations or ():
+        if r.get("status") not in CONFIRMED:
+            continue
+        a, b = _d(r.get("arrival")), _d(r.get("departure"))
+        nights = (b - a).days
+        if nights <= 0:
+            continue
+        inside = (min(b, end) - max(a, start)).days
+        if inside > 0:
+            total += float(r.get("total") or 0) * inside / nights
+    return total
+
+
+def season_factor(revenue_total, base_total):
+    """How the whole company moved against its own base — DOWNWARD ONLY. A slow month lowers
+    every target; a strong month never raises one (it would cancel the team's own gain)."""
+    if not base_total or base_total <= 0:
+        return 1.0
+    return max(0.0, min(1.0, float(revenue_total) / float(base_total)))
+
+
+def month_target(rev_target, days, blocked=0, season=1.0):
+    """The quarter's monthly target, for THIS month: a night the owner or maintenance blocked
+    is not the employee's to sell, and a slow season lowers it."""
+    if not rev_target or rev_target <= 0 or days <= 0:
+        return 0.0
+    open_share = max(0, days - max(0, blocked)) / float(days)
+    return float(rev_target) * open_share * max(0.0, min(1.0, season))
+
+
+def rating_blocks(rating, waived=False):
+    """True when the month's guest rating stops the apartment from paying. No rating that
+    month = nothing to judge. `waived` = the supervisor accepted that the cause was not the
+    employee's (a developer's defect, the building)."""
+    return rating is not None and float(rating) < RATING_MIN and not waived
+
+
+def target_commission(revenue, target, fee_pct, share=TARGET_SHARE):
+    """(riyals above the target, the employee's commission on them)."""
+    if not target or target <= 0:
+        return 0.0, 0.0
+    over = max(0.0, float(revenue) - float(target))
+    if fee_pct is None or fee_pct <= 0:
+        return over, 0.0
+    return over, over * float(fee_pct) * float(share)

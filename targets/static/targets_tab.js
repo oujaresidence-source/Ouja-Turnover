@@ -89,30 +89,30 @@
 
   /* ---------------------------------------------------------------- «أهدافي» */
 
-  var TIER = { bronze: ['برونزي', 'Bronze'], silver: ['فضي', 'Silver'], gold: ['ذهبي', 'Gold'] };
+  var NOTE = { pending: ['ملاحظتك عند المشرف', 'Your note is with the supervisor'], approved: ['المشرف قبل الملاحظة — انحسبت', 'Supervisor accepted — counted'], rejected: ['المشرف ما قبل الملاحظة', 'Supervisor did not accept'] };
 
-  function unitRow(u) {
-    if (u.excluded) {
-      return '<tr><td><b>' + nm(u.name) + '</b></td><td colspan="4"><span class="tg-st">' +
-        esc(T('خارج الحسبة — متاحة أقل من 15 ليلة', 'Left out — open fewer than 15 nights')) + '</span></td></tr>';
+  function unitRow(u, canNote) {
+    var has = u.target > 0, w = has ? Math.min(100, Math.round(100 * u.revenue / u.target)) : 0;
+    var state = !has ? '<span class="tg-st">—</span>'
+      : u.over > 0 ? '<span class="tg-st ok">' + esc(T('فوق الهدف بـ ', 'Above by ')) + sar(u.over) + '</span>'
+        : '<span class="tg-st">' + esc(T('باقي ', 'To go ')) + sar(u.target - u.revenue) + '</span>';
+    var rate = u.rating == null ? '<span class="tg-sub">' + esc(T('ما فيه تقييم هالشهر', 'No rating this month')) + '</span>'
+      : num(Number(u.rating).toFixed(2)) + ' <span class="tg-sub">' + num(u.reviews) + ' ' + esc(T('تقييم', 'reviews')) + '</span>';
+    var extra = '';
+    if (u.rating_blocked) {
+      extra += '<span class="tg-st bad">' + esc(T('التقييم تحت 4.75 — الشقة ما تنحسب هالشهر', 'Rated under 4.75 — this unit does not count this month')) + '</span>';
     }
-    var marks = '';
-    if (u.has_target) {
-      ['bronze', 'silver', 'gold'].forEach(function (k) {
-        marks += '<u style="inset-inline-start:' + Math.round(u[k] * 100) + '%"></u>';
-      });
+    if (u.note) {
+      extra += '<span class="tg-sub">' + esc(T(NOTE[u.note.status][0], NOTE[u.note.status][1])) + '</span>';
+    } else if (u.rating_blocked && canNote) {
+      extra += '<div class="tg-row" style="margin-top:6px"><input class="tg-in" data-note-unit="' + esc(u.unit) + '" maxlength="400" placeholder="' +
+        esc(T('السبب مو بيدك؟ اكتبه (مثال: عيب من المطور)', 'Not in your hands? Say why (e.g. a developer defect)')) + '">' +
+        '<button class="tg-btn sm" data-tg="note" data-unit="' + esc(u.unit) + '">' + esc(T('ارفع ملاحظة للمشرف', 'Send note to supervisor')) + '</button></div>';
     }
-    var tier = u.tier ? '<span class="tg-st ok">' + esc(T(TIER[u.tier][0], TIER[u.tier][1])) + '</span>'
-      : (u.has_target ? '<span class="tg-st">' + esc(T('تحت البرونزي', 'Below bronze')) + '</span>' : '<span class="tg-st">—</span>');
-    var why = [];
-    if (u.below_floor) why.push(u.below_floor + ' ' + T('ليلة تحت الحد الأدنى للسعر — ما انحسبت', 'nights under the price floor — not counted'));
-    if (u.half_nights) why.push(u.half_nights + ' ' + T('ليلة سعرها تحت متوسط الشقة — انحسبت نص', 'nights under the unit average — counted half'));
-    return '<tr><td><b>' + nm(u.name) + '</b>' +
-      (why.length ? '<span class="tg-sub">' + esc(why.join(' · ')) + '</span>' : '') + '</td>' +
-      '<td>' + pct(u.occupancy) + '<div class="tg-meter"><i style="width:' + Math.min(100, Math.round(u.occupancy * 100)) + '%"></i>' + marks + '</div></td>' +
-      '<td>' + tier + '</td>' +
-      '<td>' + (u.has_target ? (u.to_bronze ? num(u.to_bronze) + ' ' + esc(T('ليلة للبرونزي', 'nights to bronze')) : esc(T('وصلت', 'Reached'))) : '—') + '</td>' +
-      '<td>' + num(u.empty) + ' ' + esc(T('ليلة فاضية', 'empty nights')) + '</td></tr>';
+    return '<tr><td><b>' + nm(u.name) + '</b></td>' +
+      '<td>' + sar(u.revenue) + ' <span class="tg-sub">' + esc(T('الهدف ', 'Target ')) + (has ? sar(u.target) : '—') + '</span>' +
+      '<div class="tg-meter"><i style="width:' + w + '%"></i></div></td>' +
+      '<td>' + state + '</td><td>' + rate + extra + '</td></tr>';
   }
 
   function meView(d) {
@@ -124,38 +124,26 @@
       return emptyState(T('حسابك مو مربوط بموظف', 'Your login is not linked to an employee'),
         T('كلّم المالك يربط حسابك من «مين هو مين».', 'Ask the owner to link your login.'), '🎯');
     }
-    var b = d.board, m = d.money, h = '';
+    var m = d.money || {}, units = arr(m.units), h = '', over = 0;
+    units.forEach(function (u) { over += Number(u.over) || 0; });
     h += '<div class="tg-kpis">' +
-      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(T('عمولتي هالشهر', 'My commission this month')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + pct(b.share) + '</b><span>' + esc(T('نسبتي الحين', 'My share now')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + num(b.hit + ' / ' + b.scored) + '</b><span>' + esc(T('شقق ضربت البرونزي', 'Units at bronze')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + num(b.units_to_full_share) + '</b><span>' + esc(T('شقة باقي عشان توصل 40%', 'units to reach 40%')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(m.final ? T('عمولتي — معتمدة', 'My commission — approved') : T('عمولتي هالشهر للحين', 'My commission so far')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + num((m.above || 0) + ' / ' + units.length) + '</b><span>' + esc(T('شقق فوق هدفها', 'Units above target')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(over) + '</b><span>' + esc(T('دخل فوق الأهداف', 'Revenue above targets')) + '</span></div>' +
       '</div>';
-    if (!b.approved) {
-      h += '<div class="tg-banner">' + esc(T('أهداف هالربع ما اعتمدها المالك للحين — نسبتك 30% لين تنعتمد.',
-        'This quarter’s targets are not approved yet — your share stays 30% until they are.')) + '</div>';
+    if (!m.has_targets) {
+      h += '<div class="tg-banner">' + esc(T('أهداف هالربع ما اعتمدها المالك للحين — العمولة تبدأ بعد الاعتماد.',
+        'This quarter’s targets are not approved yet — commission starts once they are.')) + '</div>';
     }
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('حجوزات انحسبت لي', 'Bookings counted for me')) +
-      '<span class="tg-sub">' + esc(T('من اتصالات هالشهر. العمولة تنحسب بعد خروج الضيف.', 'From this month’s contacts. Commission counts after checkout.')) + '</span></div>';
-    if (!arr(m.bookings).length) {
-      h += '<p class="tg-note">' + esc(T('ما فيه حجوزات من اتصالاتك هالشهر للحين.', 'No bookings from your contacts this month yet.')) + '</p>';
-    } else {
-      h += '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الضيف', 'Guest')) + '</th><th>' + esc(T('الشقة', 'Unit')) +
-        '</th><th>' + esc(T('الليالي', 'Nights')) + '</th><th>' + esc(T('الحالة', 'Status')) + '</th></tr></thead><tbody>';
-      arr(m.bookings).forEach(function (x) {
-        h += '<tr><td>' + esc(x.guest) + '</td><td>' + nm(x.unit_name) + '</td><td>' + num(x.nights) + '</td><td>' +
-          (x.state === 'completed' ? '<span class="tg-st ok">' + esc(T('انحسب', 'Counted')) + '</span>'
-            : '<span class="tg-st gold">' + esc(T('بانتظار خروج الضيف', 'Waiting for checkout')) + '</span>') + '</td></tr>';
-      });
-      h += '</tbody></table></div>';
-    }
-    h += '</div>';
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('شققي', 'My units')) + '</div><div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' +
-      esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الإشغال', 'Occupancy')) + '</th><th>' + esc(T('الشريحة', 'Tier')) + '</th><th>' +
-      esc(T('باقي', 'To go')) + '</th><th>' + esc(T('فاضي', 'Empty')) + '</th></tr></thead><tbody>';
-    if (!arr(b.units).length) h += '<tr><td colspan="5">' + esc(T('ما عندك شقق في تقويم الموظفين.', 'No units under your name in the team calendar.')) + '</td></tr>';
-    arr(b.units).forEach(function (u) { h += unitRow(u); });
-    h += '</tbody></table></div></div>';
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('شققي', 'My units')) +
+      '<span class="tg-sub">' + esc(T('كل شقة لها هدف دخل بالشهر. اللي فوق الهدف لك منه عمولة. تحت الهدف ما عليك شي.', 'Each unit has a monthly revenue target. You earn commission on what is above it. Under it costs you nothing.')) + '</span></div>' +
+      '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('دخل الشهر', 'Month revenue')) + '</th><th>' +
+      esc(T('الحالة', 'Status')) + '</th><th>' + esc(T('التقييم', 'Rating')) + '</th></tr></thead><tbody>';
+    if (!units.length) h += '<tr><td colspan="4">' + esc(T('ما عندك شقق بأهداف معتمدة هالشهر.', 'No units with approved targets this month.')) + '</td></tr>';
+    units.forEach(function (u) { h += unitRow(u, !m.final); });
+    h += '</tbody></table></div>' +
+      '<p class="tg-note">' + esc(T('الليالي المقفلة تنقص من الهدف. وإذا السوق كله نزل، هدفك ينزل معه آخر الشهر. التقييم تحت 4.75 يوقف عمولة الشقة إلا إذا قبل المشرف ملاحظتك.',
+        'Blocked nights lower the target. If the whole market drops, your target drops with it at month end. A rating under 4.75 stops the unit’s commission unless the supervisor accepts your note.')) + '</p></div>';
     return h;
   }
 
@@ -174,6 +162,23 @@
     return h + '</tbody></table></div>';
   }
 
+  /* Rating notes: the employee says the low rating was not theirs; the supervisor decides once. */
+  function notesBox(rows) {
+    var h = '<div class="tg-box"><div class="tg-h">' + esc(T('ملاحظات التقييم', 'Rating notes')) +
+      '<span class="tg-sub">' + esc(T('الموظف يقول التقييم نزل بسبب شي مو بيده (عيب مطور، العمارة). قبولك يرجّع عمولة الشقة لهالشهر. القرار مرة وحدة.',
+        'The employee says the low rating was not in their hands (developer defect, the building). Accepting restores the unit’s commission for the month. Decided once.')) + '</span></div>';
+    if (!arr(rows).length) return h + '<p class="tg-note">' + esc(T('ما فيه ملاحظات هالشهر.', 'No notes this month.')) + '</p></div>';
+    arr(rows).forEach(function (n) {
+      var right = n.status === 'pending'
+        ? '<div class="tg-row"><button class="tg-btn sm go" data-tg="noteYes" data-id="' + esc(n.id) + '">' + esc(T('اقبل', 'Accept')) + '</button>' +
+          '<button class="tg-btn sm" data-tg="noteNo" data-id="' + esc(n.id) + '">' + esc(T('ارفض', 'Refuse')) + '</button></div>'
+        : '<span class="tg-st' + (n.status === 'approved' ? ' ok' : '') + '">' + esc(n.status === 'approved' ? T('انقبلت', 'Accepted') : T('انرفضت', 'Refused')) + '</span>';
+      h += '<div class="tg-call"><div><b>' + nm(n.unit_name) + '</b> <span class="tg-sub">' + esc(n.employee) + ' · ' + esc(T('التقييم ', 'Rating ')) +
+        (n.rating == null ? '—' : num(Number(n.rating).toFixed(2))) + '</span><span class="tg-sub">' + esc(n.reason) + '</span></div>' + right + '</div>';
+    });
+    return h + '</div>';
+  }
+
   function teamView(d) {
     var h = '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
       '<span class="tg-sub">' + esc(T('الشقق المتأخرة عن البرونزي هالشهر. تنحفظ نسخة يوم 10 ويوم 20.', 'Units behind bronze this month. A copy is saved on day 10 and day 20.')) + '</span></div>';
@@ -183,13 +188,13 @@
       h += '<div class="tg-box"><div class="tg-h">' + esc(T('نسخة يوم ', 'Copy of day ')) + num(s.day) + '</div>' + rescueTable(s.units) + '</div>';
     });
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('نشاط الفريق', 'Team activity')) + '</div><div class="tg-wrap"><table class="tg-t"><thead><tr><th>' +
-      esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('اتصالات', 'Contacts')) + '</th><th>' + esc(T('حجوزات', 'Bookings')) + '</th><th>' +
-      esc(T('شقق على البرونزي', 'Units at bronze')) + '</th></tr></thead><tbody>';
-    if (!arr(d.activity).length) h += '<tr><td colspan="4">' + esc(T('ما فيه اتصالات هالشهر.', 'No contacts this month.')) + '</td></tr>';
+      esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('رسائل واتساب', 'WhatsApp messages')) + '</th><th>' +
+      esc(T('شقق فوق هدفها', 'Units above target')) + '</th></tr></thead><tbody>';
+    if (!arr(d.activity).length) h += '<tr><td colspan="3">' + esc(T('ما فيه أهداف معتمدة هالشهر.', 'No approved targets this month.')) + '</td></tr>';
     arr(d.activity).forEach(function (r) {
-      h += '<tr><td>' + esc(r.employee) + '</td><td>' + num(r.contacts) + '</td><td>' + num(r.bookings) + '</td><td>' + num(r.hit + ' / ' + r.scored) + '</td></tr>';
+      h += '<tr><td>' + esc(r.employee) + '</td><td>' + num(r.contacts) + '</td><td>' + num(r.above + ' / ' + r.units) + '</td></tr>';
     });
-    return h + '</tbody></table></div></div>';
+    return notesBox(d.notes) + h + '</tbody></table></div></div>';
   }
 
   /* ---------------------------------------------------------------- الإدارة (owner only) */
@@ -244,16 +249,19 @@
       (d.quarter_state === 'proposed' ? '<button class="tg-btn sm go" data-tg="approveQ">' + esc(T('اعتمد أهداف الربع', 'Approve quarter')) + '</button>' : '') +
       '</div></div>';
     h += '<p class="tg-note">' + esc(d.quarter_state === 'approved' ? T('معتمدة. نقل الشقق والحدود يتغير أول الربع الجاي.', 'Approved. Units and bounds change at the next quarter.')
-      : d.quarter_state === 'proposed' ? T('مقترحة — عدّل الحد الأدنى والأعلى ثم اعتمد.', 'Proposed — edit the floor and ceiling, then approve.')
+      : d.quarter_state === 'proposed' ? T('مقترحة — هدف الدخل = متوسط آخر 3 شهور + ', 'Proposed — revenue target = the last 3 months’ average + ') + Math.round(((d.rules || {}).step || 0) * 100) + T('%. عدّل اللي تبي ثم اعتمد. لو خانة الهدف صفر اضغط «احسب الأهداف».', '%. Edit what you like, then approve. If a target shows zero, press “Compute targets”.')
         : T('ما انحسبت. اضغط «احسب الأهداف».', 'Not computed. Press “Compute targets”.')) + '</p>';
     if (arr(d.targets).length) {
       h += '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' +
-        esc(T('الأساس', 'Baseline')) + '</th><th>' + esc(T('برونزي / فضي / ذهبي', 'Bronze / Silver / Gold')) + '</th><th>' + esc(T('الحد الأدنى', 'Floor')) +
+        esc(T('هدف الدخل بالشهر', 'Monthly revenue target')) + '</th><th>' + esc(T('إشغال: برونزي / فضي / ذهبي', 'Occupancy: Bronze / Silver / Gold')) + '</th><th>' + esc(T('الحد الأدنى', 'Floor')) +
         '</th><th>' + esc(T('الحد الأعلى', 'Ceiling')) + '</th><th></th></tr></thead><tbody>';
       arr(d.targets).forEach(function (t) {
         var ed = t.status === 'proposed';
         h += '<tr><td><b>' + nm(t.name) + '</b>' + (t.basis === 'peers' ? '<span class="tg-sub">' + esc(T('شقة جديدة — من متوسط شقق مثلها', 'New unit — from similar units')) + '</span>' : '') +
-          '</td><td>' + esc(t.employee || '—') + '</td><td>' + pct(t.baseline) + '</td><td>' + pct(t.bronze) + ' / ' + pct(t.silver) + ' / ' + pct(t.gold) + '</td>' +
+          '</td><td>' + esc(t.employee || '—') + '</td>' +
+          '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="rev_target" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.rev_target || 0)) + '">' : num(Math.round(t.rev_target || 0).toLocaleString('en-US'))) +
+          '<span class="tg-sub">' + esc(T('متوسط 3 شهور: ', '3-month average: ')) + num(Math.round(t.rev_base || 0).toLocaleString('en-US')) + '</span></td>' +
+          '<td>' + pct(t.bronze) + ' / ' + pct(t.silver) + ' / ' + pct(t.gold) + '</td>' +
           '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="floor" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.floor || 0)) + '">' : num(Math.round(t.floor || 0))) +
           '<span class="tg-sub">' + esc(T('المقترح: ', 'Suggested: ')) + num(Math.round(t.floor_suggested || 0)) + '</span></td>' +
           '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="ceiling" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.ceiling || 0)) + '">' : num(Math.round(t.ceiling || 0))) +
@@ -265,44 +273,58 @@
     h += '</div>';
 
     /* 5 — month sheet */
-    var s = d.sheet || {}, m = s.measure || {};
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') + '</div>' +
+    var s = d.sheet || {}, R = d.rules || {};
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') +
+      '<span class="tg-sub">' + esc(T('الموظف ياخذ ', 'The employee gets ')) + pct(R.share) + esc(T(' من حصة عوجا في الدخل اللي فوق هدف الشقة. المدير ', ' of Ouja’s fee on revenue above the unit’s target. The manager ')) + pct(R.manager) + esc(T(' فوقها.', ' on top.')) + '</span></div>' +
       '<div class="tg-kpis">' +
-      '<div class="tg-kpi"><b>' + num(m.contacted || 0) + '</b><span>' + esc(T('انتصل عليهم', 'Contacted')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.contacted_bookings || 0) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + num(m.holdout || 0) + '</b><span>' + esc(T('المجموعة الضابطة (عدد بس)', 'Hidden group (count only)')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.holdout_bookings || 0) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + num((Math.round((s.incremental || 0) * 10) / 10)) + '</b><span>' + esc(T('حجوزات زادت بسبب الاتصال', 'Bookings the calls added')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + sar(s.pool) + '</b><span>' + esc(T('السقف (50% من الزيادة)', 'Cap (50% of the uplift)')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + sar(s.raw_total) + '</b><span>' + esc(T('المطالبة قبل السقف', 'Claim before the cap')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + sar(s.total_paid) + '</b><span>' + esc(T('ينصرف بعد السقف', 'Paid after the cap')) + '</span></div></div>';
-    h += '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' + esc(T('نوع الضيف', 'Guest type')) + '</th><th>' + esc(T('انتصل عليهم', 'Contacted')) + '</th><th>' +
-      esc(T('حجزوا', 'Booked')) + '</th><th>' + esc(T('الضابطة', 'Hidden')) + '</th><th>' + esc(T('حجزوا', 'Booked')) + '</th><th>' + esc(T('معدل الرجوع بدون اتصال', 'Return rate with no call')) + '</th></tr></thead><tbody>';
-    var BN = { 1: ['سكن مرة', '1 past stay'], 2: ['سكن مرتين', '2 past stays'], 3: ['3 مرات وأكثر', '3+ past stays'] };
-    var SRC = { holdout: ['من الضابطة', 'measured'], history: ['من التاريخ (الضابطة قليلة)', 'from history (thin group)'], none: ['ما فيه دليل — ما ينصرف', 'no evidence — pays nothing'] };
-    arr(m.buckets).forEach(function (b) {
-      h += '<tr><td>' + esc(T(BN[b.bucket][0], BN[b.bucket][1])) + '</td><td>' + num(b.contacted) + '</td><td>' + num(b.contacted_bookings) + '</td><td>' + num(b.holdout) +
-        '</td><td>' + num(b.holdout_bookings) + '</td><td>' + num((Math.round(b.rate * 1000) / 10) + '%') + ' <span class="tg-sub">' + esc(T(SRC[b.rate_source][0], SRC[b.rate_source][1])) + '</span></td></tr>';
-    });
-    h += '</tbody></table></div>';
-    h += '<div class="tg-wrap" style="margin-top:12px"><table class="tg-t"><thead><tr><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('اتصالات', 'Contacts')) + '</th><th>' +
-      esc(T('حجوزات', 'Bookings')) + '</th><th>' + esc(T('نسبته', 'Share')) + '</th><th>' + esc(T('قبل السقف', 'Raw')) + '</th><th>' + esc(T('مضاعف الالتزام', 'Ops multiplier')) +
+      '<div class="tg-kpi"><b>' + sar(s.revenue) + '</b><span>' + esc(T('دخل الشقق هالشهر', 'Units’ revenue this month')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(s.over) + '</b><span>' + esc(T('دخل فوق الأهداف', 'Revenue above targets')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + pct(s.season) + '</b><span>' + esc(s.closed ? T('الموسم (100% = ما نزّل الأهداف)', 'Season (100% = targets not lowered)') : T('الموسم — ينحسب آخر الشهر', 'Season — judged at month end')) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(s.total_paid) + '</b><span>' + esc(T('ينصرف (مع المدير)', 'To pay (with the manager)')) + '</span></div></div>';
+    if (!s.approved_quarter) {
+      h += '<div class="tg-banner">' + esc(T('أهداف هالربع ما اعتمدت — ما ينصرف شي لين تعتمدها.', 'This quarter’s targets are not approved — nothing is paid until they are.')) + '</div>';
+    }
+    h += '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('شقق فوق هدفها', 'Units above target')) + '</th><th>' +
+      esc(T('دخل فوق الأهداف', 'Above targets')) + '</th><th>' + esc(T('العمولة', 'Commission')) + '</th><th>' + esc(T('مضاعف الالتزام', 'Ops multiplier')) +
       '</th><th>' + esc(T('ينصرف', 'Paid')) + '</th></tr></thead><tbody>';
-    if (!arr(s.employees).length) h += '<tr><td colspan="7">' + esc(T('ما فيه اتصالات مسجّلة هالشهر.', 'No logged contacts this month.')) + '</td></tr>';
+    if (!arr(s.employees).length) h += '<tr><td colspan="6">' + esc(T('ما فيه أهداف معتمدة لهالشهر.', 'No approved targets for this month.')) + '</td></tr>';
     arr(s.employees).forEach(function (e) {
-      h += '<tr><td>' + esc(e.employee) + '</td><td>' + num(e.contacts) + '</td><td>' + num(e.completed) + (e.pending ? ' <span class="tg-sub">+' + num(e.pending) + ' ' + esc(T('بانتظار الخروج', 'pending')) + '</span>' : '') +
-        '</td><td>' + pct(e.share) + '</td><td>' + sar(e.raw) + '</td><td>' + num('×' + e.multiplier) + '</td><td><b>' + sar(e.paid) + '</b></td></tr>';
+      h += '<tr><td>' + esc(e.employee) + '</td><td>' + num(e.above + ' / ' + e.units) + '</td><td>' + sar(e.over) + '</td><td>' + sar(e.raw) +
+        '</td><td>' + num('×' + e.multiplier) + '</td><td><b>' + sar(e.paid) + '</b></td></tr>';
     });
-    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + '</span></td><td colspan="5"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
+    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + '</span></td><td colspan="4"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
+    h += '</tbody></table></div>';
+    h += '<div class="tg-wrap" style="margin-top:12px"><table class="tg-t"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' +
+      esc(T('الدخل', 'Revenue')) + '</th><th>' + esc(T('هدف الشهر', 'Month target')) + '</th><th>' + esc(T('فوق الهدف', 'Above')) + '</th><th>' + esc(T('التقييم', 'Rating')) +
+      '</th><th>' + esc(T('العمولة', 'Commission')) + '</th></tr></thead><tbody>';
+    arr(s.units).forEach(function (u) {
+      var flag = u.rating_blocked ? ' <span class="tg-st bad">' + esc(T('موقوفة بالتقييم', 'Stopped by rating')) + '</span>'
+        : (u.note && u.note.status === 'approved' ? ' <span class="tg-st ok">' + esc(T('ملاحظة مقبولة', 'Note accepted')) + '</span>' : '');
+      h += '<tr><td><b>' + nm(u.name) + '</b>' + (u.blocked ? '<span class="tg-sub">' + num(u.blocked) + ' ' + esc(T('ليلة مقفلة', 'blocked nights')) + '</span>' : '') +
+        (u.no_fee ? '<span class="tg-sub">' + esc(T('بدون نسبة عقد', 'No contract fee')) + '</span>' : '') + '</td><td>' + esc(u.employee || '—') + '</td><td>' + sar(u.revenue) +
+        '</td><td>' + sar(u.target) + '</td><td>' + (u.over > 0 ? sar(u.over) : '—') + '</td><td>' + (u.rating == null ? '—' : num(Number(u.rating).toFixed(2))) + flag +
+        '</td><td>' + (u.raw > 0 ? sar(u.raw) : '—') + '</td></tr>';
+    });
     h += '</tbody></table></div>';
     if (arr(s.no_fee_units).length) {
-      h += '<div class="tg-banner lock" style="margin-top:12px">' + esc(T('شقق ما لها نسبة عقد مسجّلة — عمولتها صفر لين تنضاف بالمركز المالي: ', 'Units with no contract fee on record — they pay zero until it is added in Finance: ')) +
+      h += '<div class="tg-banner lock" style="margin-top:12px">' + esc(T('شقق فوق هدفها بس ما لها نسبة عقد مسجّلة — عمولتها صفر لين تنضاف بالمركز المالي: ', 'Units above target with no contract fee on record — they pay zero until it is added in Finance: ')) +
         esc(arr(s.no_fee_units).join('، ')) + '</div>';
     }
-    var why = s.approval ? T('معتمد', 'Approved')
-      : !s.window_closed ? T('الشهر ما قفل (14 يوم بعد نهايته)', 'Month not closed (14 days after it ends)')
-        : s.pending ? T('باقي حجوزات ما خرج ضيوفها', 'Some guests have not checked out') : '';
+    var why = s.approval ? T('معتمد — الأرقام مثبّتة', 'Approved — figures frozen')
+      : !s.approved_quarter ? T('اعتمد أهداف الربع أول', 'Approve the quarter targets first')
+        : !s.closed ? T('الشهر ما خلص', 'The month has not ended')
+          : s.notes_waiting ? T('باقي ملاحظات تقييم ما انبتّ فيها', 'Rating notes are still waiting') : '';
     h += '<div class="tg-row" style="margin-top:12px"><button class="tg-btn go" data-tg="approveM"' + (why ? ' disabled' : '') + '>' + esc(T('اعتمد صرف الشهر', 'Approve the month')) + '</button>' +
       (why ? '<span class="tg-sub">' + esc(why) + '</span>' : '') + '</div>';
-    h += '<p class="tg-note">' + esc(T('الاعتماد يسجّل سطر بس. ما يكتب بالرواتب ولا بالمركز المالي.', 'Approval records one row. It writes nothing to payroll or the Finance Center.')) + '</p></div>';
+    h += '<p class="tg-note">' + esc(T('الاعتماد يثبّت أرقام الشهر ويسجّل سطر. ما يكتب بالرواتب ولا بالمركز المالي.', 'Approval freezes the month and records one row. It writes nothing to payroll or the Finance Center.')) + '</p></div>';
+    h += notesBox(d.notes);
+    var ms2 = d.measure || {};
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('هل رسائل الواتساب تجيب حجوزات؟', 'Do the WhatsApp messages bring bookings?')) +
+      '<span class="tg-sub">' + esc(T('للمعلومة بس — ما تأثر على العمولة. نقارن اللي انرسل لهم بمجموعة ما انرسل لها شي.', 'For information only — it does not change pay. Those messaged are compared with a group that got nothing.')) + '</span></div>' +
+      '<div class="tg-kpis">' +
+      '<div class="tg-kpi"><b>' + num(ms2.contacted || 0) + '</b><span>' + esc(T('انرسل لهم', 'Messaged')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(ms2.contacted_bookings || 0) + '</span></div>' +
+      '<div class="tg-kpi"><b>' + num(ms2.holdout || 0) + '</b><span>' + esc(T('ما انرسل لهم (عدد بس)', 'Not messaged (count only)')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(ms2.holdout_bookings || 0) + '</span></div>' +
+      '</div></div>';
 
     /* 6 — rescue */
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) + '</div>' + rescueTable(d.rescue) + '</div>';
@@ -406,12 +428,25 @@
       }
     }
     else if (a === 'unit') {
-      var u = el.getAttribute('data-unit'), root = document.getElementById('tgBody'), f = 0, c = 0;
+      var u = el.getAttribute('data-unit'), root = document.getElementById('tgBody'), v = { floor: 0, ceiling: 0, rev_target: 0 };
       Array.prototype.forEach.call(root.querySelectorAll('input[data-unit]'), function (i) {
         if (i.getAttribute('data-unit') !== u) return;
-        if (i.getAttribute('data-f') === 'floor') f = Number(i.value) || 0; else c = Number(i.value) || 0;
+        v[i.getAttribute('data-f')] = Number(i.value) || 0;
       });
-      act('/api/targets/admin/unit', { quarter: S.quarter, unit: u, floor: f, ceiling: c });
+      act('/api/targets/admin/unit', { quarter: S.quarter, unit: u, floor: v.floor, ceiling: v.ceiling, rev_target: v.rev_target });
+    }
+    else if (a === 'note') {
+      var nu = el.getAttribute('data-unit'), why = '';
+      Array.prototype.forEach.call(document.getElementById('tgBody').querySelectorAll('input[data-note-unit]'), function (i) {
+        if (i.getAttribute('data-note-unit') === nu) why = i.value;
+      });
+      act('/api/targets/note', { unit: nu, month: S.month, reason: why }, T('وصلت الملاحظة للمشرف', 'Note sent to the supervisor'));
+    }
+    else if (a === 'noteYes' || a === 'noteNo') {
+      if (confirm(a === 'noteYes' ? T('تقبل الملاحظة؟ عمولة الشقة ترجع لهالشهر. القرار ما يتغير.', 'Accept the note? The unit’s commission returns for this month. The decision is final.')
+        : T('ترفض الملاحظة؟ القرار ما يتغير.', 'Refuse the note? The decision is final.'))) {
+        act('/api/targets/note-decide', { id: Number(el.getAttribute('data-id')), accept: a === 'noteYes' });
+      }
     }
     else if (a === 'map') {
       var nm = el.getAttribute('data-name'), pick = '';
@@ -433,7 +468,7 @@
     }
     else if (a === 'seed') { uploadSeed(el); }
     else if (a === 'approveM') {
-      if (confirm(T('تعتمد صرف هالشهر؟ الاعتماد يسجّل سطر بس.', 'Approve this month? Approval records one row only.'))) {
+      if (confirm(T('تعتمد صرف هالشهر؟ الأرقام تتثبّت وما تتغير بعدها.', 'Approve this month? The figures are frozen afterwards.'))) {
         act('/api/targets/admin/approve-month', { month: S.month }, T('انعتمد', 'Approved'));
       }
     }
@@ -493,7 +528,7 @@
     h += '<p class="tg-note">' + esc(T('ضغطة الزر هي التسجيل. اتصال واحد لكل ضيف كل 45 يوم، وأول من يضغط هو صاحبه.', 'Pressing the button is the log. One contact per guest every 45 days; the first to press owns it.')) + '</p></div>';
 
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('اتصالاتي المفتوحة', 'My open contacts')) +
-      '<span class="tg-sub">' + esc(T('لو حجز الضيف خلال 14 يوم من اتصالك، ينحسب لك.', 'If the guest books within 14 days of your contact, it counts for you.')) + '</span></div>';
+      '<span class="tg-sub">' + esc(T('كل حجز تجيبه يرفع دخل الشقة — واللي فوق هدفها لك منه عمولة.', 'Every booking you bring lifts the unit’s revenue — and you earn on what is above its target.')) + '</span></div>';
     if (!arr(d.open).length) h += '<p class="tg-note">' + esc(T('ما فيه اتصالات مفتوحة.', 'No open contacts.')) + '</p>';
     arr(d.open).forEach(function (c) {
       var btns = '';
@@ -502,7 +537,7 @@
           btns += '<button class="tg-btn sm" data-tg="outcome" data-id="' + esc(c.id) + '" data-o="' + k + '">' + esc(T(OUT[k][0], OUT[k][1])) + '</button>';
         });
       } else { btns = '<span class="tg-st">' + esc(T(OUT[c.outcome][0], OUT[c.outcome][1])) + '</span>'; }
-      h += '<div class="tg-call"><div><b>' + esc(c.name) + '</b>' + (c.booked ? ' <span class="tg-st ok">' + esc(T('حجز — انحسب لك', 'Booked — counted')) + '</span>' : '') +
+      h += '<div class="tg-call"><div><b>' + esc(c.name) + '</b>' + (c.booked ? ' <span class="tg-st ok">' + esc(T('حجز', 'Booked')) + '</span>' : '') +
         '<span class="tg-sub">' + esc(T('اتصلت يوم ', 'Contacted on ')) + num(day(c.at)) + ' · ' + esc(T('باقي ', '')) + num(c.days_left) + ' ' + esc(T('يوم على النافذة', 'days left in the window')) + '</span></div>' +
         '<div class="tg-row">' + btns + '</div></div>';
     });

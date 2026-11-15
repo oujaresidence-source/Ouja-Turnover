@@ -69,6 +69,23 @@ def unit_month(unit, month_key, floor=0, typical=0):
                              month_key, floor, typical)
 
 
+def unit_revenue(unit, month_key):
+    """What the unit's confirmed stays bring in that month (a stay across two months is split
+    by night)."""
+    return engine.revenue_in_month(data()[0].get(unit, []), month_key)
+
+
+def revenue_base(unit, months):
+    """The unit's average month over `months` — only months AFTER the one it first took a
+    booking in (a half first month would make the target too easy). None = no full month."""
+    stays = data()[0].get(unit, [])
+    born = min((r["arrival"] for r in stays), default="9999")[:7]
+    full = [mk for mk in months if mk > born]
+    if not full:
+        return None
+    return sum(unit_revenue(unit, mk) for mk in full) / len(full)
+
+
 def price_stats(unit, asof):
     """(typical, p75, p10) nightly price over the year before `asof`, weighted by nights.
     typical = the unit's average night; p75 = the suggested price ceiling; p10 = the suggested
@@ -132,7 +149,8 @@ def propose(quarter, today):
     trailing = [history.shift_month(ref, -i) for i in (3, 2, 1)]
     asof = engine.month_bounds(ref)[0]
     prev = {r["unit"]: r for r in db.targets(prev_quarter(quarter)) if r["status"] == "approved"}
-    kept = {r["unit"]: float(r["floor"] or 0) for r in db.targets(quarter)}
+    old = {r["unit"]: r for r in db.targets(quarter)}
+    kept = {u: float(r["floor"] or 0) for u, r in old.items()}
     rows = []
     for u in owned_units():
         typical, p75, p10 = price_stats(u["unit"], asof)
@@ -160,8 +178,21 @@ def propose(quarter, today):
                  else "recent" if any(x is not None for x in b) else "last_year")
         compound = (HOST.call("unit_meta", {}, u["listing_id"]) or {}).get("compound") or ""
         rows.append(dict(u, floor=floor, typical=typical, ceiling_suggested=p75,
-                         floor_suggested=p10, base=base, basis=basis, compound=compound))
+                         floor_suggested=p10, base=base, basis=basis, compound=compound,
+                         rev_base=revenue_base(u["unit"], trailing)))
     known = [r for r in rows if r["base"] is not None]
+    rev_known = [r["rev_base"] for r in rows if r["rev_base"]]
+    for r in rows:
+        # The revenue target: the unit's own average month + the step. A unit with no full
+        # month yet takes the average of the others. A target the owner already typed stays.
+        if not r["rev_base"]:
+            r["rev_base"] = (sum(rev_known) / len(rev_known)) if rev_known else 0.0
+        r["rev_base"] = round(r["rev_base"], 2)
+        r["rev_target"] = float(round(r["rev_base"] * (1 + engine.TARGET_STEP)))
+        o = old.get(r["unit"])
+        if o and o.get("rev_target") and o.get("rev_base") is not None \
+                and float(o["rev_target"]) != float(round(float(o["rev_base"]) * (1 + engine.TARGET_STEP))):
+            r["rev_target"] = float(o["rev_target"])
     for r in rows:
         if r["base"] is None:
             peers = [k["base"] for k in known if r["compound"] and k["compound"] == r["compound"]]
@@ -197,6 +228,10 @@ def _unit_line(unit, name, month_key, today, target):
     m = unit_month(unit, month_key, floor, typical)
     line = {"unit": unit, "name": name, "floor": int(floor), "has_target": bool(target),
             "ceiling": int((target or {}).get("ceiling") or 0)}
+    s0, e0 = engine.month_bounds(month_key)
+    line.update(revenue=round(unit_revenue(unit, month_key)),
+                rev_target=round(engine.month_target(float((target or {}).get("rev_target") or 0),
+                                                     (e0 - s0).days, blocked_count(unit, month_key))))
     if m is None:
         line.update(excluded=True)
         return line

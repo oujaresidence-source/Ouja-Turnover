@@ -11313,6 +11313,25 @@ def _tg_vip_keys():
             if p.get("vip") and p.get("phone")} - {""}
 
 
+def _tg_unit_rating(lid, month_key):
+    """A unit's guest rating for one month, out of 5: {"avg", "n"}, or None when no guest
+    rated it that month. Reads the reviews already held in memory — no Hostaway call."""
+    total, n = 0.0, 0
+    for r in list(_reviews.values()):
+        if str(r.get("listing_id")) != str(lid) or str(r.get("date") or "")[:7] != month_key:
+            continue
+        if str((r.get("raw") or {}).get("type") or "").lower() == "host-to-guest":
+            continue
+        try:
+            score10 = float(r.get("rating_raw") or 0) or 2.0 * float(r.get("rating") or 0)
+        except (TypeError, ValueError):
+            continue
+        if score10 > 0:
+            total += score10 / 2.0
+            n += 1
+    return {"avg": total / n, "n": n} if n else None
+
+
 def _tg_wire():
     if not _HAS_TARGETS:
         return False
@@ -11323,7 +11342,7 @@ def _tg_wire():
         "now": now_riyadh, "state_dir": STATE_DIR,
         "listings": get_listings_map, "ownership": _tg_ownership, "unit_meta": _tg_unit_meta,
         "floor": _tg_floor, "fee_pct": _tg_fee_pct, "ops_multiplier": _tg_ops_multiplier,
-        "vip_keys": _tg_vip_keys,
+        "vip_keys": _tg_vip_keys, "unit_rating": _tg_unit_rating,
         "fetch_window": fetch_reservations_window,      # never get_reservations_cached (trap #4)
         "calendar_days": fetch_calendar_days,
         "wa_url": _wa_send_url,

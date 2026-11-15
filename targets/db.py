@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS tg_targets (
     ceiling_suggested REAL,
     floor_suggested REAL,
     typical     REAL,
+    rev_base    REAL,                    -- the unit's average monthly revenue before the quarter
+    rev_target  REAL,                    -- the monthly revenue target (base + step; owner-editable)
     basis       TEXT,
     status      TEXT,                    -- proposed | approved
     approved_by TEXT,
@@ -138,6 +140,18 @@ CREATE TABLE IF NOT EXISTS tg_rescue (
     at        TEXT,
     PRIMARY KEY (month_key, day)
 );
+CREATE TABLE IF NOT EXISTS tg_notes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    unit       TEXT NOT NULL,
+    month_key  TEXT NOT NULL,
+    employee   TEXT NOT NULL,
+    reason     TEXT NOT NULL,
+    status     TEXT NOT NULL,           -- pending | approved | rejected
+    created_at TEXT,
+    decided_by TEXT,
+    decided_at TEXT,
+    UNIQUE (unit, month_key)
+);
 CREATE TABLE IF NOT EXISTS tg_log (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     at     TEXT,
@@ -172,6 +186,9 @@ def _migrate(cx):
     have = {r[1] for r in cx.execute("PRAGMA table_info(tg_targets)").fetchall()}
     if "floor_suggested" not in have:
         cx.execute("ALTER TABLE tg_targets ADD COLUMN floor_suggested REAL")
+    for col in ("rev_base", "rev_target"):          # the apartment revenue target (2026-11-15)
+        if col not in have:
+            cx.execute("ALTER TABLE tg_targets ADD COLUMN %s REAL" % col)
 
 
 def reset_init_cache():
@@ -358,24 +375,29 @@ def save_proposals(quarter, rows):
                 continue
             cx.execute(
                 "INSERT INTO tg_targets(quarter,unit,name,employee,baseline,bronze,silver,gold,"
-                "floor,ceiling,ceiling_suggested,floor_suggested,typical,basis,status) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed') "
+                "floor,ceiling,ceiling_suggested,floor_suggested,typical,basis,rev_base,rev_target,"
+                "status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed') "
                 "ON CONFLICT(quarter,unit) DO UPDATE SET name=excluded.name, "
                 "employee=excluded.employee, baseline=excluded.baseline, bronze=excluded.bronze, "
                 "silver=excluded.silver, gold=excluded.gold, floor=excluded.floor, "
                 "ceiling_suggested=excluded.ceiling_suggested, "
                 "floor_suggested=excluded.floor_suggested, typical=excluded.typical, "
-                "basis=excluded.basis",
+                "basis=excluded.basis, rev_base=excluded.rev_base, "
+                "rev_target=excluded.rev_target",
                 (quarter, r["unit"], r.get("name"), r.get("employee"), r.get("baseline"),
                  r.get("bronze"), r.get("silver"), r.get("gold"), r.get("floor"),
                  r.get("ceiling"), r.get("ceiling_suggested"), r.get("floor_suggested"),
-                 r.get("typical"), r.get("basis")))
+                 r.get("typical"), r.get("basis"), r.get("rev_base"), r.get("rev_target")))
 
 
-def edit_target(quarter, unit, floor, ceiling):
-    """Owner edits the price bounds of a row that is still a proposal."""
-    _, n = execute("UPDATE tg_targets SET floor=?, ceiling=? WHERE quarter=? AND unit=? "
-                   "AND status='proposed'", (floor, ceiling, quarter, unit))
+def edit_target(quarter, unit, floor, ceiling, rev_target=None):
+    """Owner edits the price bounds (and the revenue target) of a row that is still a proposal."""
+    if rev_target is None:
+        _, n = execute("UPDATE tg_targets SET floor=?, ceiling=? WHERE quarter=? AND unit=? "
+                       "AND status='proposed'", (floor, ceiling, quarter, unit))
+    else:
+        _, n = execute("UPDATE tg_targets SET floor=?, ceiling=?, rev_target=? WHERE quarter=? "
+                       "AND unit=? AND status='proposed'", (floor, ceiling, rev_target, quarter, unit))
     return n
 
 
@@ -501,6 +523,39 @@ def approve_month(month_key, by, at, total_paid, payload):
         cx.execute("INSERT INTO tg_approvals(month_key,by,at,total_paid,payload) VALUES(?,?,?,?,?)",
                    (month_key, by or "", at, total_paid, json.dumps(payload, ensure_ascii=False)))
     return True
+
+
+# ------------------------------------------------------------------ rating notes
+# An employee's note that a low rating was not theirs to prevent (a developer's defect, the
+# building). It changes nothing until the supervisor decides it — once.
+
+def add_note(unit, month_key, employee, reason, at):
+    """Returns the new id, or None when this apartment already has a note for the month."""
+    with transaction() as cx:
+        if cx.execute("SELECT 1 FROM tg_notes WHERE unit=? AND month_key=?",
+                      (unit, month_key)).fetchone():
+            return None
+        cur = cx.execute("INSERT INTO tg_notes(unit,month_key,employee,reason,status,created_at) "
+                         "VALUES(?,?,?,?,'pending',?)", (unit, month_key, employee, reason, at))
+        return cur.lastrowid
+
+
+def notes(month_key=None, employee=None):
+    sql, args = "SELECT * FROM tg_notes WHERE 1=1", []
+    if month_key:
+        sql += " AND month_key=?"
+        args.append(month_key)
+    if employee:
+        sql += " AND employee=?"
+        args.append(employee)
+    return q(sql + " ORDER BY id", tuple(args))
+
+
+def decide_note(note_id, status, by, at):
+    """pending -> approved | rejected, once."""
+    _, n = execute("UPDATE tg_notes SET status=?, decided_by=?, decided_at=? "
+                   "WHERE id=? AND status='pending'", (status, by or "", at, note_id))
+    return n
 
 
 # ------------------------------------------------------------------ user -> employee links

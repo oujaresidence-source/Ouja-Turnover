@@ -15,7 +15,8 @@ Layout mirrors schedule/, ops/ and oncall/:
     history.py — one-time seed import, nightly sync by month, blocked nights
     score.py   — the scoreboard: baselines, tiers, the gate, the rescue list
     book.py    — callable pool, hidden group, ranked call list, the logged contact, attribution
-    money.py   — the month's payout sheet (like-with-like cap) and its approval row
+    pay.py     — the month's payout sheet by apartment target, rating notes, approval
+    money.py   — what the messages added (contacted vs hidden group) — measures, no longer pays
     routes.py  — /api/targets/*, /api/book/*, the public consent box, dashboard splice
     page.py    — /my-targets and /my-book phone pages (zero backslashes)
     host.py    — the one bridge to bot.py + the two TG_* switches
@@ -23,12 +24,12 @@ Layout mirrors schedule/, ops/ and oncall/:
 Nothing here writes to payroll, the ERP or Hostaway.
 """
 
-from . import engine, db, history, score, book, money, routes, page  # noqa: F401
+from . import engine, db, history, score, book, money, pay, routes, page  # noqa: F401
 from .host import HOST, wire, enabled, pool_channels  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
 __all__ = ["wire", "register_routes", "HOST", "enabled", "pool_channels",
-           "engine", "db", "history", "score", "book", "money", "routes", "page", "bootstrap"]
+           "engine", "db", "history", "score", "book", "money", "pay", "routes", "page", "bootstrap"]
 
 
 def bootstrap():
