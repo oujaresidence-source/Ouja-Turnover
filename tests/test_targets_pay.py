@@ -133,13 +133,13 @@ class Sheet(PayCase):
         self.assertAlmostEqual(line["over"], 5000.0, delta=1)
         self.assertTrue(s["ready"])
 
-    def test_manager_gets_15_percent_on_top(self):
+    def test_manager_gets_her_share_on_top(self):
         db.set_setting("manager", "أسيل")
         self.sell("102", 7700.0)
         self.close()
         s = pay.month_sheet("2026-10", self.today())
-        self.assertAlmostEqual(s["manager"]["amount"], 45.0, delta=0.1)
-        self.assertAlmostEqual(s["total_paid"], 845.0, delta=0.6)
+        self.assertAlmostEqual(s["manager"]["share"], 75.0, delta=0.1)
+        self.assertAlmostEqual(s["total_paid"], 300.0 + 500.0 + 75.0 + 300.0, delta=0.6)   # commission + prize + her share + her team bonus
 
     def test_no_fee_on_record_pays_zero_and_is_flagged(self):
         self.fee.pop("102")
@@ -270,7 +270,7 @@ class Prize(PayCase):
         self.sell("102", 7700.0)
         self.close()
         s = pay.month_sheet("2026-10", self.today())
-        self.assertAlmostEqual(s["manager"]["amount"], 300.0 * engine.MANAGER_OVERRIDE, delta=0.1)
+        self.assertAlmostEqual(s["manager"]["share"], 300.0 * engine.TARGET_MANAGER_SHARE, delta=0.1)
 
     def test_no_prize_when_nobody_earned(self):
         self.close()                                                   # an ordinary month: all under target
@@ -292,6 +292,54 @@ class Prize(PayCase):
         self.assertEqual([r["employee"] for r in race["board"]], [NORA, AHOOD])
         for r in race["board"]:
             self.assertEqual(set(r), {"employee", "place", "pct", "me"})
+
+
+class ManagerBonus(PayCase):
+    """Her own bonus: on how many apartments passed their target, once the month has ended."""
+
+    def setUp(self):
+        super().setUp()
+        db.set_setting("manager", "أسيل")
+
+    def test_steps(self):
+        self.assertEqual(engine.manager_bonus(2, 10), (0.0, 0.2))
+        self.assertEqual(engine.manager_bonus(3, 10)[0], 300.0)
+        self.assertEqual(engine.manager_bonus(4, 10)[0], 700.0)
+        self.assertEqual(engine.manager_bonus(0, 0), (0.0, 0.0))
+
+    def test_one_of_three_apartments_above_is_the_first_step(self):
+        self.sell("102", 7700.0)                                       # 1 of 3 = 33%
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertEqual(s["manager"]["bonus"], 0.0)                   # not before the month ends
+        self.close()
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertEqual((s["manager"]["bonus"], s["manager"]["share"]), (300.0, 75.0))
+        self.assertAlmostEqual(s["manager"]["amount"], 375.0, delta=0.1)
+        self.assertAlmostEqual(s["total_paid"], 300.0 + 500.0 + 375.0, delta=0.6)
+
+    def test_two_of_three_is_the_top_step(self):
+        self.sell("102", 7700.0)
+        self.sell("201", 7700.0)
+        self.close()
+        self.assertEqual(pay.month_sheet("2026-10", self.today())["manager"]["bonus"], 700.0)
+
+    def test_no_manager_named_no_manager_money(self):
+        db.set_setting("manager", "")
+        self.sell("102", 7700.0)
+        self.close()
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertIsNone(s["manager"])
+        self.assertAlmostEqual(s["total_paid"], 800.0, delta=0.6)
+
+    def test_her_view_says_how_many_apartments_are_left_to_each_step(self):
+        self.sell("102", 7700.0)
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        v = pay.manager_view("2026-10", self.today())
+        self.assertEqual((v["above"], v["units"]), (1, 3))
+        self.assertEqual([(x["sar"], x["units"], x["left"]) for x in v["steps"]], [(300.0, 1, 0), (700.0, 2, 1)])
+        self.assertEqual(v["share"], 75.0)
+        self.assertFalse({"raw", "paid", "employees"} & set(v))
 
 
 class Freeze(PayCase):

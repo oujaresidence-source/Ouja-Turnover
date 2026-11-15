@@ -364,8 +364,24 @@
     return h + '</div>';
   }
 
+  /* The operations manager's own month: her share so far and the steps of her team bonus. */
+  function mineBox(v) {
+    if (!v || !v.is_set) return '';
+    var h = '<div class="tg-day" style="margin-bottom:18px"><div class="tg-hero"><p>' + esc(v.final ? T('حسبتي — معتمدة', 'My month — approved') : v.closed ? T('حسبتي لهالشهر', 'My month') : T('حسبتي هالشهر للحين', 'My month so far')) + '</p>' +
+      '<div class="big">' + num(Math.round(v.amount).toLocaleString('en-US')) + '<small>' + esc(T('ر.س', 'SAR')) + '</small></div>' +
+      '<div class="tg-road"><i style="inline-size:' + Math.min(100, Math.round(100 * (v.units ? v.above / v.units : 0) / 0.4)) + '%"></i></div>' +
+      '<div class="tg-ends"><span>' + esc(T('شقق فوق هدفها: ', 'Units above target: ')) + '<b>' + num(v.above + ' / ' + v.units) + '</b> (' + pct(v.rate) + ')</span></div>' +
+      '<div class="tg-chips">';
+    arr(v.steps).forEach(function (st) {
+      h += '<span' + (st.left === 0 ? ' class="first"' : '') + '>' + pct(st.need) + esc(T(' من الشقق = ', ' of units = ')) + '<b>' + sar(st.sar) + '</b>' +
+        (st.left === 0 ? esc(T(' ✓', ' ✓')) : esc(T(' · باقي ', ' · ')) + num(st.left) + esc(T(' شقة', ' to go'))) + '</span>';
+    });
+    h += '</div><p class="fine">' + esc(T('حسبتك = نصيبك من عمولات الفريق + جائزة الفريق. الجائزة تثبت بعد نهاية الشهر.', 'Your month = your share of the team’s commission + the team bonus. The bonus is fixed after month end.')) + '</p></div></div>';
+    return h;
+  }
+
   function teamView(d) {
-    var h = '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
+    var h = mineBox(d.mine) + '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
       '<span class="tg-sub">' + esc(T('الشقق المتأخرة عن البرونزي هالشهر. تنحفظ نسخة يوم 10 ويوم 20.', 'Units behind bronze this month. A copy is saved on day 10 and day 20.')) + '</span></div>';
     if (d.quarter_state !== 'approved') h += '<p class="tg-note">' + esc(T('أهداف الربع ما اعتمدت، فالقائمة فاضية.', 'Quarter targets are not approved, so the list is empty.')) + '</p>';
     h += rescueTable(d.rescue) + '</div>';
@@ -460,7 +476,7 @@
     /* 5 — month sheet */
     var s = d.sheet || {}, R = d.rules || {};
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') +
-      '<span class="tg-sub">' + esc(T('الموظف ياخذ ', 'The employee gets ')) + pct(R.share) + esc(T(' من حصة عوجا في الدخل اللي فوق هدف الشقة. المدير ', ' of Ouja’s fee on revenue above the unit’s target. The manager ')) + pct(R.manager) + esc(T(' فوقها. والأول بسباق الشهر ياخذ ', ' on top. First place in the month’s race takes ')) + sar((s.prize || {}).amount) + esc(T('.', '.')) + '</span></div>' +
+      '<span class="tg-sub">' + esc(T('الموظف ياخذ ', 'The employee gets ')) + pct(R.share) + esc(T(' من حصة عوجا في الدخل اللي فوق هدف الشقة. المدير ', ' of Ouja’s fee on revenue above the unit’s target. The manager ')) + pct(R.manager) + esc(T(' فوقها + جائزة الفريق. والأول بسباق الشهر ياخذ ', ' on top + the team bonus. First place in the month’s race takes ')) + sar((s.prize || {}).amount) + esc(T('.', '.')) + '</span></div>' +
       '<div class="tg-kpis">' +
       '<div class="tg-kpi"><b>' + sar(s.revenue) + '</b><span>' + esc(T('دخل الشقق هالشهر', 'Units’ revenue this month')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + sar(s.over) + '</b><span>' + esc(T('دخل فوق الأهداف', 'Revenue above targets')) + '</span></div>' +
@@ -477,7 +493,7 @@
       h += '<tr><td>' + esc(e.employee) + '</td><td>' + num(e.above + ' / ' + e.units) + '</td><td>' + sar(e.over) + '</td><td>' + sar(e.raw) +
         '</td><td>' + num('×' + e.multiplier) + '</td><td>' + (e.rank ? num(e.rank) + ' <span class="tg-sub">' + pct(e.pct) + '</span>' : '—') + '</td><td>' + (e.prize > 0 ? sar(e.prize) : '—') + '</td><td><b>' + sar(e.paid) + '</b></td></tr>';
     });
-    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + '</span></td><td colspan="6"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
+    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + (s.manager.bonus > 0 ? ' · ' + esc(T('منها جائزة الفريق ', 'incl. team bonus ')) + sar(s.manager.bonus) : '') + '</span></td><td colspan="6"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
     h += '</tbody></table></div>';
     h += '<div class="tg-wrap" style="margin-top:12px"><table class="tg-t"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' +
       esc(T('الدخل', 'Revenue')) + '</th><th>' + esc(T('هدف الشهر', 'Month target')) + '</th><th>' + esc(T('فوق الهدف', 'Above')) + '</th><th>' + esc(T('التقييم', 'Rating')) +

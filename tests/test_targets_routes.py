@@ -438,7 +438,7 @@ class ManagerIsALogin(RCase):
         sheet = pay.month_sheet("2026-11", self.today())
         self.assertEqual(sheet["manager"]["name"], "Aseel")
         self.assertGreater(sheet["team_paid"], 0)
-        self.assertAlmostEqual(sheet["manager"]["amount"], sheet["team_paid"] * engine.MANAGER_OVERRIDE, delta=0.01)
+        self.assertAlmostEqual(sheet["manager"]["share"], sheet["team_paid"] * engine.TARGET_MANAGER_SHARE, delta=0.01)
         self.assertAlmostEqual(sheet["total_paid"],
                                sheet["team_paid"] + sheet["prize_paid"] + sheet["manager"]["amount"], delta=0.01)
 

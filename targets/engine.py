@@ -310,6 +310,22 @@ TARGET_STEP = 0.30
 TARGET_SHARE = 0.30
 LEGACY_STEPS = (0.20,)       # earlier automatic steps: a stored target equal to one is not "typed by the owner"
 MONTH_PRIZE = 500.0          # SAR, to the employee whose apartments did best against their targets
+# THE OPERATIONS MANAGER (owner decision 2026-11-15 night). She sells no apartment; she moves
+# the team. At 15% of the team's commission her month was ~350 SAR while the team's offer had
+# been raised twice, so: 25% of the team's commission, on top, plus a team bonus of her own on
+# HOW MANY apartments passed their target that month. On Apr-Oct 2026 the share was
+# 31/23/27/40/21/18/20% — 30% reached twice in seven months, 40% once: it has to be worked for.
+TARGET_MANAGER_SHARE = 0.25
+MANAGER_TEAM_BONUS = ((0.40, 700.0), (0.30, 300.0))   # (share of apartments above target, SAR), best first
+
+
+def manager_bonus(above, units):
+    """(bonus in SAR, share of apartments above target)."""
+    rate = (float(above) / units) if units else 0.0
+    for need, sar in MANAGER_TEAM_BONUS:
+        if rate >= need - 1e-9:
+            return sar, rate
+    return 0.0, rate
 RATING_MIN = 4.75            # out of 5: under it, the apartment pays nothing that month
 
 

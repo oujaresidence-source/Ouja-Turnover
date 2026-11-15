@@ -17,7 +17,8 @@ Ouja's fee on. Under the target = zero, never a deduction. This replaced the com
                       unless the supervisor accepted the employee's note that the cause was
                       not theirs (a developer's defect, the building).
     warnings        : the ops multiplier cuts the employee's total, as before.
-    the manager     : engine.MANAGER_OVERRIDE of what the team earned, ON TOP.
+    the manager     : engine.TARGET_MANAGER_SHARE of what the team earned, ON TOP, plus her own
+                      team bonus on how many apartments passed their target.
 
 Nothing here writes to payroll or the ERP. An approval is one row in tg_approvals plus the
 frozen sheet in tg_results: an approved month never moves again.
@@ -124,10 +125,17 @@ def _compute(month_key, today):
                           "commission": commission, "prize": prize,
                           "pct": round(pct.get(emp, 0.0), 4), "rank": rank.get(emp, 0),
                           "paid": round(commission + prize, 2)})
+    # The manager: a share of what the team earned, on top, and her own team bonus on how many
+    # apartments passed their target (paid, like the prize, once the month has ended).
+    scored = [u for u in units if u["target"] > 0]
+    n_above = sum(1 for u in scored if u["over"] > 0)
+    tier, pass_rate = engine.manager_bonus(n_above, len(scored))
     manager = None
     mgr = db.setting("manager")
     if mgr:
-        manager = {"name": mgr, "amount": round(team * engine.MANAGER_OVERRIDE, 2)}
+        share = round(team * engine.TARGET_MANAGER_SHARE, 2)
+        bonus = tier if closed else 0.0
+        manager = {"name": mgr, "share": share, "bonus": bonus, "amount": round(share + bonus, 2)}
     waiting = sum(1 for n in notes.values() if n["status"] == "pending")
     return {"month": month_key, "quarter": quarter, "approved_quarter": bool(rows),
             "season": round(season, 4), "closed": closed,
@@ -137,6 +145,8 @@ def _compute(month_key, today):
             "team_paid": round(team, 2), "prize_paid": round(prizes, 2),
             "prize": {"amount": engine.MONTH_PRIZE, "winners": winners},
             "total_paid": round(team + prizes + (manager["amount"] if manager else 0.0), 2),
+            "team_goal": {"above": n_above, "units": len(scored), "rate": round(pass_rate, 4),
+                          "tiers": [[need, sar] for need, sar in reversed(engine.MANAGER_TEAM_BONUS)]},
             "notes_waiting": waiting, "no_fee_units": sorted(no_fee),
             "ready": bool(rows) and closed and not waiting}
 
@@ -309,6 +319,22 @@ def team_activity(month_key, today=None):
         contacts[c["employee"]] = contacts.get(c["employee"], 0) + 1
     return [{"employee": r["employee"], "contacts": contacts.get(r["employee"], 0),
              "above": r["above"], "units": r["units"]} for r in sheet["employees"]]
+
+
+def manager_view(month_key, today=None):
+    """What the operations manager sees about HER month: her share so far, and how far the
+    team is from each step of her bonus. Her own money only — no employee's amount."""
+    sheet = month_sheet(month_key, today)
+    goal = sheet.get("team_goal") or {"above": 0, "units": 0, "rate": 0.0, "tiers": []}
+    m = sheet.get("manager") or {}
+    steps = []
+    for need, sar in goal["tiers"]:
+        want = int(math.ceil(need * goal["units"] - 1e-9))
+        steps.append({"need": need, "sar": sar, "units": want, "left": max(0, want - goal["above"])})
+    return {"amount": m.get("amount", 0.0), "share": m.get("share", 0.0), "bonus": m.get("bonus", 0.0),
+            "above": goal["above"], "units": goal["units"], "rate": goal["rate"], "steps": steps,
+            "closed": sheet["closed"], "final": bool(sheet["approval"]),
+            "has_targets": sheet["approved_quarter"], "is_set": bool(m)}
 
 
 def team_notes(month_key, today=None):

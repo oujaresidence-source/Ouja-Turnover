@@ -244,3 +244,21 @@ Measured on April–October 2026 with the rule as built
 the 1,887 the review commission cost. Revenue growth of about 1.7% repays the gap; after that
 Ouja keeps about 65% of its fee on every extra riyal. With targets at +30%, about a quarter of
 apartments pass in a month.
+
+## 17. The operations manager's own offer (owner decision, 2026-11-15 night)
+
+She sells no apartment; she moves the team. At 15% of the team's commission her month was
+about 350 SAR while the team's offer had been raised twice.
+
+- **25% of the team's commission, on top** (`TARGET_MANAGER_SHARE`). Still never taken from an
+  employee, still not on the race prize.
+- **A team bonus of her own** (`MANAGER_TEAM_BONUS`), on how many apartments passed their
+  target in the month: 30% of them = 300 SAR, 40% = 700 SAR. Fixed after the month ends.
+  April–October 2026 gave 31 / 23 / 27 / 40 / 21 / 18 / 20%: the first step twice in seven
+  months, the second once.
+- Her «الفريق» page opens on her own month: her amount so far and how many apartments are
+  left to each step. No employee's amount appears there.
+
+Cost with nothing changed rises from about 3,160 to about 3,535 SAR a month; the break-even
+moves from about 1.7% to about 2.3% revenue growth; after it Ouja keeps about 62% of its fee on
+each extra riyal.

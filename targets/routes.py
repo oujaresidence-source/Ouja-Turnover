@@ -228,7 +228,7 @@ async def api_book_outcome(request):
 def team_payload(month_key, today):
     return {"month": month_key, "rescue": score.rescue(month_key, today),
             "snapshots": db.rescues(month_key), "activity": pay.team_activity(month_key, today),
-            "notes": pay.team_notes(month_key, today),
+            "notes": pay.team_notes(month_key, today), "mine": pay.manager_view(month_key, today),
             "quarter_state": score.quarter_state(score.quarter_of(month_key))}
 
 
@@ -262,7 +262,7 @@ def admin_payload(month_key, quarter, today):
         # no longer decides anyone's pay — it tells the owner whether the client book works.
         "measure": money.month_sheet(month_key, today)["measure"],
         "rules": {"step": engine.TARGET_STEP, "share": engine.TARGET_SHARE,
-                  "manager": engine.MANAGER_OVERRIDE, "rating_min": engine.RATING_MIN},
+                  "manager": engine.TARGET_MANAGER_SHARE, "rating_min": engine.RATING_MIN},
         "rescue": score.rescue(month_key, today), "snapshots": db.rescues(month_key),
         "consents": len(db.consents()), "dnc": len(db.dnc()),
     }
