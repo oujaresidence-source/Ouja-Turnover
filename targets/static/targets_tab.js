@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  var S = { me: null, admin: null, team: null, book: null, month: '', quarter: '', pane: 'me', busy: false };
+  var S = { me: null, admin: null, team: null, book: null, month: '', quarter: '', pane: 'me', busy: false, opened: false };
 
   function T(ar, en) { return labelText(ar, en); }
   function arr(x) { return Array.isArray(x) ? x : []; }
@@ -114,6 +114,10 @@
   }
 
   function meView(d) {
+    if (!d.linked && d.is_admin) {
+      return emptyState(T('هالصفحة للموظف', 'This page is the employee’s view'),
+        T('حسابك حساب مالك وما له شقق. شغلك كله تحت «الإدارة» فوق.', 'Yours is an owner login with no units. Your work is under “Admin” above.'), '🎯');
+    }
     if (!d.linked) {
       return emptyState(T('حسابك مو مربوط بموظف', 'Your login is not linked to an employee'),
         T('كلّم المالك يربط حسابك من «مين هو مين».', 'Ask the owner to link your login.'), '🎯');
@@ -330,6 +334,8 @@
       if (!d || !d.ok) throw new Error((d && d.error) || 'failed');
       S.me = d;
       S.month = d.month || S.month || new Date().toISOString().slice(0, 7);
+      /* The owner is not an employee: their first view is «الإدارة», not an empty «صفحتي». */
+      if (!S.opened) { S.opened = true; if (d.is_admin && !d.linked) S.pane = 'admin'; }
       if (S.pane === 'admin' && !d.is_admin) S.pane = 'me';
       if (S.pane === 'team' && !(d.is_admin || d.is_manager)) S.pane = 'me';
       if (S.pane === 'admin') {
