@@ -32,7 +32,8 @@ from types import SimpleNamespace
 from . import db, importer
 
 HOST = SimpleNamespace(dash_auth=None, req_role=None, json_response=None, web=None,
-                       state_dir=None, listings=None, listings_full=None, csv_path=None)
+                       state_dir=None, listings=None, listings_full=None, csv_path=None,
+                       page_extra="")   # optional block another package adds above the footer
 
 _DIR = Path(__file__).resolve().parent
 EDIT_ROLES = ("admin", "ops")
@@ -85,9 +86,23 @@ def _safe(fn):
 _page_cache = {"html": None}
 
 
+_FOOTER_ANCHOR = '<footer class="footer">'
+
+
+def _with_extra(html):
+    """Splice HOST.page_extra (today: the «أوافق على التواصل» consent box from targets/) in
+    above the footer. No extra -> the template is served exactly as it is on disk."""
+    extra = getattr(HOST, "page_extra", "") or ""
+    if not extra:
+        return html
+    if html.count(_FOOTER_ANCHOR) == 1:
+        return html.replace(_FOOTER_ANCHOR, extra + _FOOTER_ANCHOR, 1)
+    return html.replace("</body>", extra + "</body>", 1)
+
+
 async def page(request):
     if _page_cache["html"] is None:
-        _page_cache["html"] = (_DIR / "templates" / "guide.html").read_text("utf-8")
+        _page_cache["html"] = _with_extra((_DIR / "templates" / "guide.html").read_text("utf-8"))
     return HOST.web.Response(text=_page_cache["html"], content_type="text/html",
                              headers={"Cache-Control": "no-cache"})
 

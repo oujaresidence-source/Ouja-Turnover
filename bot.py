@@ -407,6 +407,18 @@ except Exception as _oc_err:            # pragma: no cover
     _oncall = None
     _HAS_ONCALL = False
 
+# «الأهداف ودفتر العملاء» — per-unit occupancy targets + the employees' client book. Cash only
+# from bookings that follow a LOGGED contact, capped by a hidden comparison group. Ships in
+# shadow (computes, pays nothing). TG_ENABLED=0 leaves the dashboard byte-for-byte unchanged.
+# Spec: docs/superpowers/specs/2026-11-15-unit-targets-design.md. Additive.
+try:
+    import targets as _targets
+    _HAS_TARGETS = bool(_targets.enabled())
+except Exception as _tg_err:            # pragma: no cover
+    print("[targets] import failed (targets disabled, bot unaffected):", _tg_err)
+    _targets = None
+    _HAS_TARGETS = False
+
 # «طلبات سام» RR Desk — every RR-room message translated (AR⇄EN), Sam's requests tracked with an
 # owner, working-hour SLAs, a reminder ladder, and misses → ops warnings (money dry-run until
 # /rrdesk-warnings-on). Spec: docs/superpowers/specs/2026-10-24-rrdesk-design.md. Additive.
@@ -11217,6 +11229,126 @@ ONCALL_HERE_PREFIX = "oc_here:"            # + check id — no race with the del
 ONCALL_SWAP_PREFIX = "oc_swap:"
 ONCALL_SWAP_YES, ONCALL_SWAP_NO = "oc_swap_yes", "oc_swap_no"
 ONCALL_RESOLVED_ID = "oc_resolved"
+
+
+# ===================== «الأهداف ودفتر العملاء» bridge (targets/) =====================
+# Read-only bridges into the live business. targets/ never imports bot; it calls these.
+def _tg_user_id(request):
+    """Stable id of the logged-in user ('admin' for the legacy dashboard token, '' if none)."""
+    token = _req_token(request)
+    if DASHBOARD_TOKEN and token and hmac.compare_digest(token, DASHBOARD_TOKEN):
+        return "admin"
+    u = _auth_session(request)
+    return str((u or {}).get("id") or "")
+
+
+def _tg_users():
+    return [{"id": str(u.get("id")), "name": u.get("name") or "", "role": u.get("role") or "viewer"}
+            for u in list(_users.values()) if u.get("active", True)]
+
+
+def _tg_ownership():
+    """Who owns which apartment — the Employee Calendar is the one source (schedule.owners)."""
+    from schedule import owners as _so
+    return [{"listing_id": a.get("listing_id"), "name": a.get("name"),
+             "employee": a.get("owner_name") or ""} for a in _so.permanent_map()["apartments"]]
+
+
+def _tg_unit_meta(lid):
+    for u in (_catalog_units or []):
+        if str(u.get("id")) == str(lid):
+            return {"compound": (u.get("neighbourhood") or u.get("area") or "").strip()}
+    return {}
+
+
+def _tg_floor(lid):
+    try:
+        return float(_pe_floor_overrides.get(int(lid), 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _tg_fee_pct(lid, name, day):
+    """Ouja's REAL contract fee for one unit on one date, as a fraction (18% -> 0.18), from the
+    finance terms store. None when the unit has no fee on record — the caller then pays ZERO
+    and flags the unit; it never falls back to a portfolio average."""
+    from finance import owners as _fo
+    rec = None
+    for r in list(_owner_registry.values()):
+        if lid not in (None, "") and str(r.get("lid") or "") == str(lid):
+            rec = r
+            break
+    if rec is None and name:
+        want = str(name).strip().casefold()
+        rec = next((r for r in list(_owner_registry.values())
+                    if str(r.get("apartment") or "").strip().casefold() == want), None)
+    if rec is None:
+        return None
+    d = datetime.strptime(str(day)[:10], "%Y-%m-%d").date()
+    pct = _fo.terms_on(rec.get("apartment") or name, d, rec).get("mgmt_pct")
+    if pct in (None, ""):
+        return None
+    return max(0.0, float(pct)) / 100.0
+
+
+def _tg_ops_multiplier(employee, month_key):
+    """Warnings multiplier (ops phase 1) x the RELEASED scorecard bonus (ops phase 3)."""
+    mult = 1.0
+    if not _HAS_OPS:
+        return mult
+    led = _ops.db.commission(employee, month_key)
+    if led and led.get("multiplier") is not None:
+        mult *= float(led["multiplier"])
+    card = _ops.db.scorecard(month_key, employee)
+    if card and card.get("released_at"):
+        try:
+            mult *= float(json.loads(card.get("card_json") or "{}").get("multiplier") or 1.0)
+        except Exception:
+            pass
+    return mult
+
+
+def _tg_vip_keys():
+    return {_targets.engine.phone_key(p.get("phone")) for p in list(_guest_profiles.values())
+            if p.get("vip") and p.get("phone")} - {""}
+
+
+def _tg_wire():
+    if not _HAS_TARGETS:
+        return False
+    _targets.wire({
+        "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+        "user_id": _tg_user_id, "users": _tg_users,
+        "json_response": _json, "web": web, "web_thread": web_thread,
+        "now": now_riyadh, "state_dir": STATE_DIR,
+        "listings": get_listings_map, "ownership": _tg_ownership, "unit_meta": _tg_unit_meta,
+        "floor": _tg_floor, "fee_pct": _tg_fee_pct, "ops_multiplier": _tg_ops_multiplier,
+        "vip_keys": _tg_vip_keys,
+        "fetch_window": fetch_reservations_window,      # never get_reservations_cached (trap #4)
+        "calendar_days": fetch_calendar_days,
+        "wa_url": _wa_send_url,
+    })
+    return True
+
+
+async def _tg_nightly_loop():
+    """History sync + attribution, once a day after 03:30 Riyadh. A plain task on purpose —
+    NOT @tasks.loop, whose first iteration fires on every deploy. The day it last ran is
+    stored, so a redeploy cannot run it twice."""
+    await asyncio.sleep(180)
+    while True:
+        try:
+            now = now_riyadh()
+            last = await asyncio.to_thread(_targets.db.setting, "nightly_date")
+            if _targets.routes.nightly_due(now, last):
+                await asyncio.to_thread(_targets.db.set_setting, "nightly_date",
+                                        now.date().isoformat(), "system",
+                                        now.isoformat(timespec="seconds"))
+                rep = await asyncio.to_thread(_targets.book.nightly, now.date())
+                print("[targets] nightly:", rep)
+        except Exception as _tgn:
+            print("[targets] nightly failed (will retry tomorrow):", _tgn)
+        await asyncio.sleep(900)
 
 
 def _oc_wire():
@@ -48059,6 +48191,11 @@ NAV_DEF = {
     "erp_targets": {"erp": "today", "expenses": "exp", "finance": "owners"},
 }
 
+# «أهدافي» + «دفتر العملاء»: added to the nav (items, category, labels.ar + labels.en) only
+# when TG_ENABLED=1 — BEFORE the _USER_TABS reconcile below, so both get a permission key.
+if _HAS_TARGETS:
+    _targets.routes.patch_nav(NAV_DEF)
+
 # «العقود»: AQD_ENABLED=0 (or a failed import) removes the tab from the sidebar at boot.
 if not _HAS_AQD:
     for _c in NAV_DEF["cats"]:
@@ -48099,6 +48236,10 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace(
 # «طلبات سام»: same pattern — the tab script lives in rrdesk/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__RRDESK_JS_V__", (_rrdesk.routes.js_version() if _rrdesk is not None else "0"), 1)
+# «أهدافي» + «دفتر العملاء»: the two views + their loader are SPLICED in here (nothing was typed
+# into the DASHBOARD_HTML literal), so with TG_ENABLED=0 the served dashboard is unchanged.
+if _HAS_TARGETS:
+    DASHBOARD_HTML = _targets.routes.patch_dashboard(DASHBOARD_HTML)
 
 async def _api_nav(request):
     """The shared nav definition for any non-dashboard shell (the ERP). Same auth as
@@ -66563,6 +66704,7 @@ _ROLE_EXEMPT_WRITES = {
     "/api/oujact/report-submit",             # cleaning-team token auth
     "/api/oujact/status",                    # team token OR dashboard session
     "/api/decor/inquire",                    # public guide button — records an INTEREST only
+    "/api/tg-consent",                       # public guide box — a guest agrees to be contacted (rate-limited)
     "/api/cp/lead",                          # public /cp meeting request — validated + rate-limited in cp/routes.py
     "/api/ops/appeal/submit",                # warned employee answers — appeal token in body
     "/api/onb/t/submit",                     # assigned employee updates a task — link token in body
@@ -66591,6 +66733,8 @@ _ROLE_CREATE_RULES = [
 ]
 _ROLE_WRITE_RULES = [
     # (path prefix, permission tab) — FIRST match wins; specific paths above broad prefixes.
+    ("/api/targets/", "targets"),            # «أهدافي» — every /admin/ write re-checks role==admin in targets/routes.py
+    ("/api/book/", "book"),                  # «دفتر العملاء» — the WhatsApp press + its outcome, own contacts only
     ("/api/onb/", "onb"),                    # /api/onb/t/submit is exempt above (employee link)
     ("/api/aqd/", "aqd"),                    # «العقود» — the client link lives at /api/aqd-t/ (exempt above)
     ("/api/decor/", "decor"),                # /api/decor/inquire is exempt above (public guest)
@@ -66653,6 +66797,10 @@ _ROLE_READ_RULES = [
     # NOTE: the assigned employee's phone link reads /api/onb-t/{token} — deliberately OUTSIDE
     # this prefix, because it is anonymous and this rule would 403 it. Its token is its auth.
     ("/api/onb/", "onb"),
+    # «أهدافي» / «دفتر العملاء»: an employee's own money and their guest list. The public consent
+    # box posts to /api/tg-consent — deliberately OUTSIDE both prefixes.
+    ("/api/targets/", "targets"),
+    ("/api/book/", "book"),
     # «العقود»: owner names, units, terms. The client's phone reads /api/aqd-t/{token} — OUTSIDE
     # this prefix on purpose (anonymous; its token + last-4 are its auth).
     ("/api/aqd/", "aqd"),
@@ -68116,6 +68264,26 @@ async def start_web_server():
                 print("[rrdesk] wired + routes registered (/api/rrdesk/*, /rrdesk/health)")
             except Exception as _rdw:
                 print("[rrdesk] wiring failed (RR Desk disabled, bot unaffected):", _rdw)
+
+        # ---- «الأهداف ودفتر العملاء» — additive; reuses brain.db. Shadow by default: it
+        # computes and shows, approves no payout, and the WhatsApp button stays locked. ----
+        if _HAS_TARGETS:
+            try:
+                _tg_wire()
+                _targets.bootstrap()
+                _targets.register_routes(app)
+                asyncio.create_task(_tg_nightly_loop())
+                try:    # the «أوافق على التواصل» box on /guide/{slug} — consent grows the call list lawfully
+                    import guide.routes as _tg_guide_routes
+                    _tg_guide_routes.HOST.page_extra = _targets.routes.GUIDE_CONSENT_HTML
+                    _tg_guide_routes._page_cache["html"] = None
+                except Exception as _tgg:
+                    print("[targets] guide consent box not added:", _tgg)
+                print("[targets] wired + routes registered (/api/targets/*, /api/book/*, "
+                      "/my-targets, /my-book) — shadow=%s book_live=%s"
+                      % (_targets.shadow(), _targets.book_live()))
+            except Exception as _tge:
+                print("[targets] wiring failed (targets disabled, bot unaffected):", _tge)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
