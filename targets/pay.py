@@ -30,7 +30,6 @@ from . import db, engine, history, score
 from .host import HOST
 
 _cache = {"v": None, "sheets": {}}
-MISSION_GOAL = 3             # WhatsApp messages a day: the daily mission on «يومي»
 RECORD_MONTHS = 6
 WIN_DAYS = 10
 
@@ -93,16 +92,38 @@ def _compute(month_key, today):
                       # the employee's OWN «يومي» only)
                       "rate": round((fee_pct or 0.0) * engine.TARGET_SHARE, 6)})
 
-    employees, team = [], 0.0
+    # THE RACE: each employee's apartments, together, against their targets together. First
+    # place takes the month's prize once the month has ended — if they earned any commission
+    # at all (no prize for the best of a month where nobody passed a target, or for a place won
+    # on apartments whose rating stopped them).
+    pct = {}
+    for emp in {u["employee"] for u in units if u["employee"]}:
+        mine = [u for u in units if u["employee"] == emp and u["target"] > 0]
+        t = sum(u["target"] for u in mine)
+        pct[emp] = (sum(u["revenue"] for u in mine) / t) if t > 0 else 0.0
+    order = sorted(pct, key=lambda e: (-pct[e], e))
+    rank = {e: i + 1 for i, e in enumerate(order)}
+    winners = []
+    if closed and order:
+        top = pct[order[0]]
+        winners = [e for e in order if abs(pct[e] - top) < 1e-9 and raw.get(e, 0.0) > 0]
+    each = round(engine.MONTH_PRIZE / len(winners), 2) if winners else 0.0
+
+    employees, team, prizes = [], 0.0, 0.0
     for emp in sorted(e for e in raw if e):
         mult = float(HOST.call("ops_multiplier", 1.0, emp, month_key) or 1.0)
-        paid = round(raw[emp] * mult, 2)
-        team += paid
+        commission = round(raw[emp] * mult, 2)
+        prize = each if emp in winners else 0.0
+        team += commission
+        prizes += prize
         mine = [u for u in units if u["employee"] == emp]
         employees.append({"employee": emp, "units": len(mine),
                           "above": sum(1 for u in mine if u["over"] > 0),
                           "over": round(sum(u["over"] for u in mine), 2),
-                          "raw": round(raw[emp], 2), "multiplier": round(mult, 4), "paid": paid})
+                          "raw": round(raw[emp], 2), "multiplier": round(mult, 4),
+                          "commission": commission, "prize": prize,
+                          "pct": round(pct.get(emp, 0.0), 4), "rank": rank.get(emp, 0),
+                          "paid": round(commission + prize, 2)})
     manager = None
     mgr = db.setting("manager")
     if mgr:
@@ -113,8 +134,9 @@ def _compute(month_key, today):
             "revenue": round(sum(u["revenue"] for u in units), 2),
             "over": round(sum(u["over"] for u in units), 2),
             "units": units, "employees": employees, "manager": manager,
-            "team_paid": round(team, 2),
-            "total_paid": round(team + (manager["amount"] if manager else 0.0), 2),
+            "team_paid": round(team, 2), "prize_paid": round(prizes, 2),
+            "prize": {"amount": engine.MONTH_PRIZE, "winners": winners},
+            "total_paid": round(team + prizes + (manager["amount"] if manager else 0.0), 2),
             "notes_waiting": waiting, "no_fee_units": sorted(no_fee),
             "ready": bool(rows) and closed and not waiting}
 
@@ -148,7 +170,8 @@ def my_money(employee, month_key, today=None):
               "over": u["over"], "rating": u["rating"], "reviews": u["reviews"],
               "rating_blocked": u["rating_blocked"], "note": u["note"]}
              for u in sheet["units"] if u["employee"] == employee]
-    return {"month": month_key, "amount": (row or {}).get("paid", 0.0), "units": units,
+    return {"month": month_key, "amount": (row or {}).get("paid", 0.0),
+            "won_prize": (row or {}).get("prize", 0.0), "units": units,
             "above": sum(1 for u in units if u["over"] > 0),
             "has_targets": sheet["approved_quarter"], "closed": sheet["closed"],
             "final": bool(sheet["approval"])}
@@ -208,11 +231,24 @@ def my_day(employee, month_key, today=None):
     wins = _wins(employee, sheet, month_key, today, mult) if live else []
     n_today, run = _streak(employee, today) if live else (0, 0)
     record = my_record(employee, month_key, today)
+    # The race, as an employee may see it: names, place and how far each is against their own
+    # targets. Never anybody's riyals. (Owner decision 2026-11-15: «ابيهم يتذابحون».)
+    rows = sorted(sheet["employees"], key=lambda r: r.get("rank") or 99)
+    me = next((r for r in rows if r["employee"] == employee), None)
+    lead = rows[0] if rows else None
+    my_target = sum(u["target"] for u in sheet["units"] if u["employee"] == employee)
+    race = {"prize": (sheet.get("prize") or {}).get("amount", 0.0),
+            "place": (me or {}).get("rank", 0), "of": len(rows),
+            "to_first": round(max(0.0, ((lead or {}).get("pct", 0) - (me or {}).get("pct", 0)) * my_target), 0)
+            if me and lead and lead is not me else 0.0,
+            "won": employee in ((sheet.get("prize") or {}).get("winners") or []),
+            "board": [{"employee": r["employee"], "place": r.get("rank", 0), "pct": r.get("pct", 0.0),
+                       "me": r["employee"] == employee} for r in rows]}
     return {"live": live, "amount": (row or {}).get("paid", 0.0),
             "potential": round(max(potential, (row or {}).get("paid", 0.0)), 2),
             "nearest": [u["unit"] for u in hot[:3]], "units": units,
-            "mission": {"goal": MISSION_GOAL, "today": n_today, "streak": run},
-            "wins": wins, "record": record}
+            "mission": {"today": n_today, "streak": run},
+            "race": race, "wins": wins, "record": record}
 
 
 def _wins(employee, sheet, month_key, today, mult):

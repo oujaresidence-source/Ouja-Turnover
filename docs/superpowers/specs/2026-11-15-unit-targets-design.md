@@ -221,3 +221,26 @@ riyals above target gives away the blended rate.
 
 **Callable guests.** `TG_POOL_CHANNELS` now defaults to `all` (owner's decision and risk:
 messaging Airbnb guests off the platform is against its terms).
+
+## 16. A higher bar, a bigger slice, and a race (owner decision, 2026-11-15 evening)
+
+Section 15's numbers change; its rules stay.
+
+- **Target = the unit's average month + 30%; the employee keeps 30% of Ouja's fee above it**
+  (`TARGET_STEP`, `TARGET_SHARE`). At +20% / 20% an extra night was worth about 26 SAR to the
+  employee and one WhatsApp message one or two riyals. Nobody runs for that.
+- **A monthly prize of 500 SAR** (`MONTH_PRIZE`) to the employee whose apartments, taken
+  together, did best against their targets together. It is paid only after the month ends and
+  only if the winner earned commission that month. The manager's 15% is on commission, not on
+  the prize. A tie splits it.
+- **The race is visible to employees**: every employee's name, place and percentage of target.
+  Never anybody's riyals. This replaces the earlier rule that an employee sees no colleague.
+- The "3 messages a day" mission is gone. The page shows today's message count and the run of
+  days, with no ceiling.
+
+Measured on April–October 2026 with the rule as built
+(`outputs/targets-audit-2026-11-15/scripts/a13.py`): a team that changes nothing draws about
+2,310 SAR a month in commission, 2,660 with the manager, plus the prize: about 3,160 against
+the 1,887 the review commission cost. Revenue growth of about 1.7% repays the gap; after that
+Ouja keeps about 65% of its fee on every extra riyal. With targets at +30%, about a quarter of
+apartments pass in a month.

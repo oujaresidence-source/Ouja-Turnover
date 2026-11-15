@@ -71,52 +71,66 @@
       '.tg-call b{font-size:15px;color:var(--text)}',
       '.tg-call form{margin:0}',
       '.tg-note{font-size:12.5px;color:var(--mut);margin:8px 0 0}',
-      /* «يومي» — the employee's day. One column, the money first. */
-      '.tg-day{max-width:680px;margin-inline:auto}',
-      '.tg-money{padding:6px 2px 18px}',
-      '.tg-money>p:first-child{margin:0;font-size:14px;color:var(--text-2);font-weight:700}',
-      '.tg-money .big{display:flex;align-items:baseline;gap:8px;margin:2px 0 14px;color:var(--text);font-weight:800;font-size:clamp(40px,13vw,60px);line-height:1.05;letter-spacing:-.02em}',
-      '.tg-money .big .tg-num{font-family:inherit}',
-      '.tg-money .big small{font-size:16px;font-weight:700;color:var(--mut);letter-spacing:0}',
-      '.tg-road{position:relative;height:14px;border-radius:7px;background:var(--surface-2);overflow:hidden}',
-      '.tg-road i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:7px;background:var(--gold)}',
+      /* «يومي» — the employee's day, in sections: each one a titled block of its own, so
+         nothing runs into the next. The money sits on the one dark block of the page. */
+      '.tg-day{max-width:680px;margin-inline:auto;display:grid;gap:18px}',
+      '.tg-hero{background:#292925;color:#F4EFE6;border-radius:18px;padding:22px 20px 18px}',
+      '.tg-hero>p:first-child{margin:0;font-size:13.5px;font-weight:700;color:#CFC6B4}',
+      '.tg-hero .big{display:flex;align-items:baseline;gap:8px;margin:2px 0 14px;color:#E3C27A;font-weight:800;font-size:clamp(44px,14vw,64px);line-height:1.05;letter-spacing:-.02em}',
+      '.tg-hero .big .tg-num{font-family:inherit}',
+      '.tg-hero .big small{font-size:16px;font-weight:700;color:#CFC6B4;letter-spacing:0}',
+      '.tg-road{position:relative;height:12px;border-radius:6px;background:#45413A;overflow:hidden}',
+      '.tg-road i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:6px;background:#E3C27A}',
       '.tg-road.go i{animation:tgGrow .8s cubic-bezier(0.23,1,0.32,1) both}',
       '@keyframes tgGrow{from{inline-size:0}}',
+      '.tg-hero .tg-ends{color:#CFC6B4}.tg-hero .tg-ends b{color:#F4EFE6}',
       '.tg-ends{display:flex;justify-content:space-between;gap:10px;margin-top:7px;font-size:12.5px;color:var(--text-2)}',
       '.tg-ends b{color:var(--text)}',
-      '.tg-mission{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:14px 0;border-block:1px solid var(--line);margin-bottom:22px}',
-      '.tg-pips{display:inline-flex;gap:7px}',
-      '.tg-pips i{width:26px;height:10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line)}',
-      '.tg-pips i.on{background:var(--green);border-color:var(--green)}',
-      '.tg-mission b{color:var(--text);font-size:14px}',
-      '.tg-mission span{font-size:12.5px;color:var(--text-2)}',
-      '.tg-sec{font-size:16px;font-weight:800;color:var(--text);margin:26px 0 4px}',
-      '.tg-sec+p{margin:0 0 10px;font-size:12.5px;color:var(--text-2)}',
+      '.tg-hero .fine{margin:8px 0 0;font-size:11.5px;color:#A79F8F}',
+      '.tg-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid #45413A}',
+      '.tg-chips>span{display:inline-block;padding:6px 12px;border-radius:9px;background:#3A362F;font-size:12.5px;color:#CFC6B4}',
+      '.tg-chips b{color:#F4EFE6;font-size:14px}',
+      '.tg-chips .first{background:#E3C27A;color:#292925}.tg-chips .first b{color:#292925}',
+      '.tg-sx{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}',
+      '.tg-sx>header{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;justify-content:space-between;padding:13px 16px;background:var(--surface-2);border-bottom:1px solid var(--line)}',
+      '.tg-sx>header h3{margin:0;font-size:16px;font-weight:800;color:var(--text)}',
+      '.tg-sx>header span{font-size:12px;color:var(--text-2)}',
+      '.tg-sx>.in{padding:2px 16px 6px}',
+      '.tg-sx>footer{padding:11px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--text-2);background:var(--surface)}',
+      '.tg-sx>footer b{color:var(--text)}',
+      '.tg-race{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}',
+      '.tg-race:last-child{border-bottom:0}',
+      '.tg-race .pl{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;background:var(--surface-2);color:var(--text-2)}',
+      '.tg-race.p1 .pl{background:var(--gold);color:#fff}',
+      '.tg-race .who{font-weight:800;color:var(--text);font-size:14.5px;display:flex;gap:8px;align-items:center}',
+      '.tg-race .pc{font-weight:800;color:var(--text);font-size:15px}',
+      '.tg-race .tg-meter{grid-column:2 / 4;margin:0;height:8px;min-width:0}',
+      '.tg-race.me{margin-inline:-16px;padding-inline:16px;background:var(--gold-tint)}',
       '.tg-hot{padding:16px 0;border-bottom:1px solid var(--line)}',
-      '.tg-hot:last-of-type{border-bottom:0}',
+      '.tg-hot:last-child{border-bottom:0}',
       '.tg-hot h4{margin:0;font-size:17px;color:var(--text);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}',
-      '.tg-hot .say{margin:6px 0 8px;font-size:14.5px;color:var(--text);line-height:1.7}',
-      '.tg-hot .say b{color:var(--green);white-space:nowrap}',
+      '.tg-hot .say{margin:8px 0 10px;font-size:14px;color:var(--text-2);line-height:1.6}',
+      '.tg-hot .say b{display:block;font-size:19px;color:var(--green);line-height:1.4}',
       '.tg-hot .tg-meter{height:10px;max-width:none}',
       '.tg-hot .who{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}',
       '.tg-hot .who form{margin:0}',
-      '.tg-win{display:flex;gap:10px;align-items:baseline;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}',
+      '.tg-win{display:flex;gap:10px;align-items:baseline;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}',
       '.tg-win:last-child{border-bottom:0}',
       '.tg-win em{font-style:normal;font-weight:800;color:var(--green);white-space:nowrap}',
-      '.tg-win em.z{color:var(--mut);font-weight:700;font-size:12.5px}',
-      '.tg-rec{display:flex;align-items:flex-end;gap:10px;height:132px;padding-top:6px}',
+      '.tg-win em.z{color:var(--text-2);font-weight:700;font-size:12.5px}',
+      '.tg-rec{display:flex;align-items:flex-end;gap:10px;height:132px;padding:14px 0 6px}',
       '.tg-rec div{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}',
       '.tg-rec i{display:block;width:100%;max-width:54px;min-height:3px;border-radius:5px 5px 2px 2px;background:var(--surface-2);border:1px solid var(--line)}',
       '.tg-rec i.fin{background:var(--gold);border-color:var(--gold)}',
       '.tg-rec i.now{background:var(--gold-tint);border-color:var(--gold)}',
       '.tg-rec b{font-size:12px;color:var(--text)}',
       '.tg-rec span{font-size:11px;color:var(--text-2)}',
-      '.tg-cheer{padding:14px 16px;border-radius:var(--r-md);background:var(--green-soft);color:var(--green);font-weight:800;font-size:15px;margin-bottom:16px;animation:tgCheer .5s cubic-bezier(0.23,1,0.32,1) both}',
+      '.tg-cheer{padding:14px 16px;border-radius:16px;background:var(--green-soft);color:var(--green);font-weight:800;font-size:15px;animation:tgCheer .5s cubic-bezier(0.23,1,0.32,1) both}',
       '.tg-cheer>span{display:block;font-weight:400;font-size:13px;color:var(--text);margin-top:2px}',
       '@keyframes tgCheer{from{opacity:0;transform:translateY(8px) scale(.98)}}',
-      '.tg-all{margin-top:26px;border-top:1px solid var(--line);padding-top:6px}',
-      '.tg-all summary{cursor:pointer;padding:12px 0;font-weight:800;color:var(--text);font-size:14px;min-height:44px}',
-      '.tg-all summary:focus-visible,.tg-btn:focus-visible,.tg-in:focus-visible{outline:2px solid var(--gold);outline-offset:2px}',
+      '.tg-sx summary{cursor:pointer;padding:13px 16px;font-weight:800;color:var(--text);font-size:16px;min-height:48px;background:var(--surface-2)}',
+      '.tg-sx[open] summary{border-bottom:1px solid var(--line)}',
+      '.tg-sx summary:focus-visible,.tg-btn:focus-visible,.tg-in:focus-visible{outline:2px solid var(--gold);outline-offset:2px}',
       '.tg-day ::selection{background:var(--gold-tint)}',
       '@media (prefers-reduced-motion:reduce){.tg-btn{transition:none}.tg-btn:active{transform:none}.tg-road.go i,.tg-cheer{animation:none}}'
     ].join('');
@@ -180,25 +194,30 @@
   function hotRow(u, guests, action) {
     var w = u.target > 0 ? Math.min(100, Math.round(100 * u.revenue / u.target)) : 0, say;
     if (u.over > 0) {
-      say = esc(T('فوق الهدف. كل ليلة زيادة تنباع ', 'Above target. Every extra night sold ')) + '<b>≈ ' + sar(u.night_value) + esc(T(' لك', ' for you')) + '</b>';
+      say = esc(T('فوق الهدف. كل ليلة زيادة تنباع:', 'Above target. Every extra night sold:')) + '<b>≈ ' + sar(u.night_value) + esc(T(' لك', ' for you')) + '</b>';
     } else {
-      say = esc(T('باقي ', 'Needs ')) + sar(u.gap) + ' (' + nights(u.nights_to_target) + ')' + esc(T(' وتوصل الهدف. بعدها كل ليلة ', ' to reach target. After that every night ')) +
+      say = esc(T('باقي ', 'Needs ')) + sar(u.gap) + ' (' + nights(u.nights_to_target) + ')' + esc(T(' وتوصل الهدف. بعدها كل ليلة:', ' to reach target. After that every night:')) +
         '<b>≈ ' + sar(u.night_value) + esc(T(' لك', ' for you')) + '</b>';
     }
     var h = '<div class="tg-hot"><h4>' + nm(u.name) +
-      (u.over > 0 ? '<span class="tg-st ok">' + esc(T('كسبت منها ', 'Earned ')) + sar(u.mine) + '</span>' : '') + '</h4>' +
+      (u.over > 0 ? '<span class="tg-st ok">' + esc(T('كسبت منها ', 'Earned ')) + sar(u.mine) + '</span>' : '<span class="tg-st gold">' + esc(T('قريبة من الهدف', 'Close to target')) + '</span>') + '</h4>' +
       '<p class="say">' + say + '</p>' +
       '<div class="tg-meter"><i style="width:' + w + '%"></i></div>' +
       '<div class="tg-ends"><span>' + sar(u.revenue) + ' ' + esc(T('من', 'of')) + ' ' + sar(u.target) + '</span><span>' + nights(u.empty) + ' ' + esc(T('فاضية', 'empty')) +
       (u.next_empty ? ' · ' + esc(T('أقربها ', 'next ')) + num(day(u.next_empty)) : '') + '</span></div><div class="who">';
     if (!guests.length) {
-      h += '<span class="tg-sub">' + esc(T('ما فيه ضيف مناسب لها اليوم بالقائمة. جرّب بكرة أو افتح «دفتر العملاء».', 'No matching guest for it today. Try tomorrow or open the client book.')) + '</span>';
+      h += '<span class="tg-sub">' + esc(T('ما فيه ضيف مناسب لها اليوم بالقائمة. افتح «دفتر العملاء» أو ارجع بكرة.', 'No matching guest for it today. Open the client book or come back tomorrow.')) + '</span>';
     }
     guests.forEach(function (it) {
       h += '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
         '<button type="submit" class="tg-btn wa">' + esc(T('راسل ', 'Message ')) + esc(it.name) + '</button></form>';
     });
     return h + '</div></div>';
+  }
+
+  function sx(title, hint, body, foot) {
+    return '<section class="tg-sx"><header><h3>' + esc(title) + '</h3>' + (hint ? '<span>' + hint + '</span>' : '') + '</header><div class="in">' + body + '</div>' +
+      (foot ? '<footer>' + foot + '</footer>' : '') + '</section>';
   }
 
   function meView(d) {
@@ -210,8 +229,9 @@
       return emptyState(T('حسابك مو مربوط بموظف', 'Your login is not linked to an employee'),
         T('كلّم المالك يربط حسابك من «مين هو مين».', 'Ask the owner to link your login.'), '🎯');
     }
-    var m = d.money || {}, y = d.day || {}, units = arr(m.units), h = '<div class="tg-day">';
+    var m = d.money || {}, y = d.day || {}, units = arr(m.units), h = '<div class="tg-day">', b;
     var byUnit = {}, action = '/api/book/wa' + (tok() ? '?token=' + encodeURIComponent(tok()) : '');
+    var race = y.race || {}, ms = y.mission || {};
     arr(y.units).forEach(function (u) { byUnit[u.unit] = u; });
 
     /* a new apartment crossed its target since the last visit */
@@ -220,75 +240,95 @@
         '<span>' + esc(T('من الحين كل ليلة زيادة عليها ≈ ', 'From now every extra night on it ≈ ')) + sar(u.night_value) + esc(T(' لك.', ' for you.')) + '</span></div>';
     });
 
-    /* 1 — my money */
+    /* 1 — my money (the one dark block) */
     var amount = Number(y.amount != null ? y.amount : m.amount) || 0, pot = Math.max(Number(y.potential) || 0, amount);
-    h += '<div class="tg-money"><p>' + esc(m.final ? T('كسبت في ', 'You earned in ') + monName(d.month) + T(' — معتمد', ' — approved')
+    h += '<div class="tg-hero"><p>' + esc(m.final ? T('كسبت في ', 'You earned in ') + monName(d.month) + T(' — معتمد', ' — approved')
       : y.live ? T('جبت هالشهر للحين', 'Earned so far this month') : T('عمولة ', 'Commission for ') + monName(d.month)) + '</p>' +
       '<div class="big">' + num(Math.round(amount).toLocaleString('en-US')) + '<small>' + esc(T('ر.س', 'SAR')) + '</small></div>';
     if (y.live && m.has_targets) {
       h += '<div class="tg-road' + (S.grown ? '' : ' go') + '"><i style="inline-size:' + (pot > 0 ? Math.max(2, Math.round(100 * amount / pot)) : 0) + '%"></i></div>' +
         '<div class="tg-ends"><span>' + esc(T('الحين', 'Now')) + '</span><span>' + esc(T('تقدر توصل ', 'You can reach ')) + '<b>' + sar(pot) + '</b></span></div>' +
-        '<p class="tg-note">' + esc(T('لو انباعت نص لياليك الفاضية بسعرها المعتاد. تقدير، مو وعد.', 'If half your empty nights sell at their usual price. An estimate, not a promise.')) + '</p>';
+        '<p class="fine">' + esc(T('لو انباعت نص لياليك الفاضية بسعرها المعتاد. تقدير، مو وعد.', 'If half your empty nights sell at their usual price. An estimate, not a promise.')) + '</p>';
       S.grown = true;
+    }
+    if (m.won_prize > 0) {
+      h += '<div class="tg-chips"><span class="first">' + esc(T('الأول هالشهر — الجائزة ', 'First this month — prize ')) + '<b>' + sar(m.won_prize) + '</b></span></div>';
+    } else if (y.live && race.place) {
+      h += '<div class="tg-chips"><span' + (race.place === 1 ? ' class="first"' : '') + '>' + esc(T('ترتيبك ', 'Your place ')) + '<b>' + num(race.place) + '</b>' + esc(T(' من ', ' of ')) + num(race.of) + '</span>' +
+        '<span>' + esc(T('رسائلك اليوم ', 'Messages today ')) + '<b>' + num(ms.today || 0) + '</b></span>' +
+        (ms.streak > 1 ? '<span><b>' + num(ms.streak) + '</b>' + esc(T(' أيام ورا بعض', ' days in a row')) + '</span>' : '') + '</div>';
     }
     h += '</div>';
     if (!m.has_targets) {
-      h += '<div class="tg-banner">' + esc(T('أهداف هالربع ما اعتمدها المالك للحين — العمولة تبدأ بعد الاعتماد.',
-        'This quarter’s targets are not approved yet — commission starts once they are.')) + '</div>';
+      h += '<div class="tg-banner" style="margin:0">' + esc(T('أهداف هالربع ما اعتمدها المالك للحين — العمولة والسباق يبدون بعد الاعتماد.',
+        'This quarter’s targets are not approved yet — commission and the race start once they are.')) + '</div>';
+    }
+
+    /* 2 — the race */
+    if (arr(race.board).length) {
+      b = '';
+      var top = 0;
+      arr(race.board).forEach(function (r) { top = Math.max(top, Number(r.pct) || 0); });
+      arr(race.board).forEach(function (r) {
+        b += '<div class="tg-race' + (r.place === 1 ? ' p1' : '') + (r.me ? ' me' : '') + '"><span class="pl">' + num(r.place) + '</span>' +
+          '<span class="who">' + esc(r.employee) + (r.me ? '<span class="tg-st gold">' + esc(T('أنت', 'You')) + '</span>' : '') + '</span>' +
+          '<span class="pc">' + pct(r.pct) + '</span>' +
+          '<div class="tg-meter"><i style="width:' + (top > 0 ? Math.round(100 * r.pct / top) : 0) + '%"></i></div></div>';
+      });
+      var foot = y.live
+        ? (race.place === 1 ? T('أنت الأول. حافظ عليها لآخر الشهر.', 'You are first. Hold it to month end.')
+          : T('باقي لك دخل ', 'You need ') + '<b>' + sar(race.to_first) + '</b>' + T(' على شققك وتصير الأول.', ' more revenue on your units to be first.'))
+        : '';
+      h += sx(T('سباق الشهر', 'This month’s race'), esc(T('الأول ياخذ ', 'First place takes ')) + '<b style="color:var(--text)">' + sar(race.prize) + '</b>',
+        b, y.live ? (race.place === 1 ? esc(foot) : foot) : '') ;
     }
 
     if (y.live) {
-      /* 2 — today's mission */
-      var ms = y.mission || {}, pips = '', k;
-      for (k = 0; k < (ms.goal || 3); k++) pips += '<i' + (k < (ms.today || 0) ? ' class="on"' : '') + '></i>';
-      var left = Math.max(0, (ms.goal || 3) - (ms.today || 0));
-      h += '<div class="tg-mission"><span class="tg-pips" aria-hidden="true">' + pips + '</span>' +
-        '<b>' + esc(left ? T('مهمة اليوم: باقي ', 'Today: ') + left + T(left === 1 ? ' رسالة' : ' رسائل', ' messages left') : T('خلصت مهمة اليوم', 'Today’s mission is done')) + '</b>' +
-        '<span>' + esc(ms.streak > 1 ? ms.streak + T(' أيام ورا بعض — لا تقطعها', ' days in a row — keep it going') : T('كل رسالة واتساب = فرصة حجز', 'Each WhatsApp message is a chance at a booking')) + '</span></div>';
-
       /* 3 — the nearest money */
       var hot = arr(y.nearest).map(function (id) { return byUnit[id]; }).filter(Boolean);
-      if (hot.length) {
-        h += '<h3 class="tg-sec">' + esc(T('أقرب فلوس', 'Nearest money')) + '</h3><p>' + esc(T('أسهل شقق تكسب منها اليوم. اضغط اسم الضيف ويفتح لك واتساب برسالة جاهزة.', 'The easiest units to earn from today. Tap a guest and WhatsApp opens with the message written.')) + '</p>';
-        hot.forEach(function (u) {
-          var guests = arr(d.list && d.list.items).filter(function (it) { return String(it.unit) === String(u.unit); }).slice(0, 3);
-          h += hotRow(u, guests, action);
-        });
-      } else if (m.has_targets) {
-        h += '<h3 class="tg-sec">' + esc(T('أقرب فلوس', 'Nearest money')) + '</h3><p>' + esc(T('ما فيه ليالي فاضية تقدر تكسب منها الحين. ارجع بكرة.', 'No empty nights to earn from right now. Come back tomorrow.')) + '</p>';
+      b = '';
+      hot.forEach(function (u) {
+        var guests = arr(d.list && d.list.items).filter(function (it) { return String(it.unit) === String(u.unit); }).slice(0, 3);
+        b += hotRow(u, guests, action);
+      });
+      if (m.has_targets) {
+        h += sx(T('أقرب فلوس', 'Nearest money'), esc(T('اضغط اسم الضيف ويفتح واتساب برسالة جاهزة', 'Tap a guest: WhatsApp opens with the message written')),
+          b || '<p class="tg-note" style="margin:14px 0">' + esc(T('ما فيه ليالي فاضية تقدر تكسب منها الحين. ارجع بكرة.', 'No empty nights to earn from right now. Come back tomorrow.')) + '</p>');
       }
 
       /* 4 — wins */
       if (arr(y.wins).length) {
-        h += '<h3 class="tg-sec">' + esc(T('آخر الحجوزات على شققي', 'Latest bookings on my units')) + '</h3><p>' + esc(T('وكم زاد كل حجز بعمولتك.', 'And what each one added to your commission.')) + '</p>';
+        b = '';
         arr(y.wins).forEach(function (wn) {
-          h += '<div class="tg-win"><span>' + esc(wn.guest) + ' · ' + nm(wn.unit_name) + ' · ' + nights(wn.nights) + '</span>' +
+          b += '<div class="tg-win"><span>' + esc(wn.guest) + ' · ' + nm(wn.unit_name) + ' · ' + nights(wn.nights) + '</span>' +
             (wn.mine > 0 ? '<em>' + num('+' + Math.round(wn.mine).toLocaleString('en-US')) + ' ' + esc(T('ر.س', 'SAR')) + '</em>' : '<em class="z">' + esc(T('قرّبك من الهدف', 'Closer to target')) + '</em>') + '</div>';
         });
+        h += sx(T('آخر الحجوزات على شققي', 'Latest bookings on my units'), esc(T('وكم زاد كل حجز بعمولتك', 'and what each added to your commission')), b);
       }
     }
 
     /* 5 — my record */
-    var rec = y.record || {}, months = arr(rec.months), top = 0;
-    months.forEach(function (x) { top = Math.max(top, Number(x.amount) || 0); });
+    var rec = y.record || {}, months = arr(rec.months), peak = 0;
+    months.forEach(function (x) { peak = Math.max(peak, Number(x.amount) || 0); });
     if (months.length) {
-      h += '<h3 class="tg-sec">' + esc(T('سجلّي', 'My record')) + '</h3><p>' + esc(T('المجموع: ', 'Total: ')) + sar(rec.earned) +
-        (rec.best ? ' · ' + esc(T('أحسن شهر: ', 'Best month: ')) + esc(monName(rec.best.month)) + ' ' + sar(rec.best.amount) : '') + '</p><div class="tg-rec">';
+      b = '<div class="tg-rec">';
       months.forEach(function (x) {
-        h += '<div><b>' + num(Math.round(x.amount).toLocaleString('en-US')) + '</b><i class="' + (x.final ? 'fin' : 'now') + '" style="height:' + (top > 0 ? Math.round(72 * x.amount / top) : 0) + 'px"></i><span>' + esc(monName(x.month)) + '</span></div>';
+        b += '<div><b>' + num(Math.round(x.amount).toLocaleString('en-US')) + '</b><i class="' + (x.final ? 'fin' : 'now') + '" style="height:' + (peak > 0 ? Math.round(72 * x.amount / peak) : 0) + 'px"></i><span>' + esc(monName(x.month)) + '</span></div>';
       });
-      h += '</div><p class="tg-note">' + esc(T('الغامق = معتمد من المالك. الفاتح = لسا ما انعتمد.', 'Solid = approved by the owner. Light = not approved yet.')) + '</p>';
+      b += '</div>';
+      h += sx(T('سجلّي', 'My record'), esc(T('المجموع ', 'Total ')) + '<b style="color:var(--text)">' + sar(rec.earned) + '</b>', b,
+        (rec.best ? esc(T('أحسن شهر: ', 'Best month: ')) + '<b>' + esc(monName(rec.best.month)) + ' ' + sar(rec.best.amount) + '</b> · ' : '') +
+        esc(T('الغامق معتمد من المالك، والفاتح لسا.', 'Solid is approved by the owner; light is not yet.')));
     }
 
     /* 6 — every unit */
-    h += '<details class="tg-all"' + (y.live ? '' : ' open') + '><summary>' + esc(T('كل شققي', 'All my units')) + ' (' + units.length + ')</summary>' +
+    h += '<details class="tg-sx"' + (y.live ? '' : ' open') + '><summary>' + esc(T('كل شققي', 'All my units')) + ' (' + units.length + ')</summary><div class="in">' +
       '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('دخل الشهر', 'Month revenue')) + '</th><th>' +
       esc(T('الحالة', 'Status')) + '</th><th>' + esc(T('التقييم', 'Rating')) + '</th></tr></thead><tbody>';
     if (!units.length) h += '<tr><td colspan="4">' + esc(T('ما عندك شقق بأهداف معتمدة هالشهر.', 'No units with approved targets this month.')) + '</td></tr>';
     units.forEach(function (u) { h += unitRow(u, !m.final); });
-    h += '</tbody></table></div>' +
-      '<p class="tg-note">' + esc(T('الليالي المقفلة تنقص من الهدف. وإذا السوق كله نزل، هدفك ينزل معه آخر الشهر. التقييم تحت 4.75 يوقف عمولة الشقة إلا إذا قبل المشرف ملاحظتك.',
-        'Blocked nights lower the target. If the whole market drops, your target drops with it at month end. A rating under 4.75 stops the unit’s commission unless the supervisor accepts your note.')) + '</p></details>';
+    h += '</tbody></table></div></div><footer>' + esc(T('الليالي المقفلة تنقص من الهدف. وإذا السوق كله نزل، هدفك ينزل معه آخر الشهر. التقييم تحت 4.75 يوقف عمولة الشقة إلا إذا قبل المشرف ملاحظتك.',
+        'Blocked nights lower the target. If the whole market drops, your target drops with it at month end. A rating under 4.75 stops the unit’s commission unless the supervisor accepts your note.')) + '</footer></details>';
     return h + '</div>';
   }
 
@@ -420,7 +460,7 @@
     /* 5 — month sheet */
     var s = d.sheet || {}, R = d.rules || {};
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') +
-      '<span class="tg-sub">' + esc(T('الموظف ياخذ ', 'The employee gets ')) + pct(R.share) + esc(T(' من حصة عوجا في الدخل اللي فوق هدف الشقة. المدير ', ' of Ouja’s fee on revenue above the unit’s target. The manager ')) + pct(R.manager) + esc(T(' فوقها.', ' on top.')) + '</span></div>' +
+      '<span class="tg-sub">' + esc(T('الموظف ياخذ ', 'The employee gets ')) + pct(R.share) + esc(T(' من حصة عوجا في الدخل اللي فوق هدف الشقة. المدير ', ' of Ouja’s fee on revenue above the unit’s target. The manager ')) + pct(R.manager) + esc(T(' فوقها. والأول بسباق الشهر ياخذ ', ' on top. First place in the month’s race takes ')) + sar((s.prize || {}).amount) + esc(T('.', '.')) + '</span></div>' +
       '<div class="tg-kpis">' +
       '<div class="tg-kpi"><b>' + sar(s.revenue) + '</b><span>' + esc(T('دخل الشقق هالشهر', 'Units’ revenue this month')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + sar(s.over) + '</b><span>' + esc(T('دخل فوق الأهداف', 'Revenue above targets')) + '</span></div>' +
@@ -431,13 +471,13 @@
     }
     h += '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('شقق فوق هدفها', 'Units above target')) + '</th><th>' +
       esc(T('دخل فوق الأهداف', 'Above targets')) + '</th><th>' + esc(T('العمولة', 'Commission')) + '</th><th>' + esc(T('مضاعف الالتزام', 'Ops multiplier')) +
-      '</th><th>' + esc(T('ينصرف', 'Paid')) + '</th></tr></thead><tbody>';
-    if (!arr(s.employees).length) h += '<tr><td colspan="6">' + esc(T('ما فيه أهداف معتمدة لهالشهر.', 'No approved targets for this month.')) + '</td></tr>';
+      '</th><th>' + esc(T('الترتيب', 'Place')) + '</th><th>' + esc(T('الجائزة', 'Prize')) + '</th><th>' + esc(T('ينصرف', 'Paid')) + '</th></tr></thead><tbody>';
+    if (!arr(s.employees).length) h += '<tr><td colspan="8">' + esc(T('ما فيه أهداف معتمدة لهالشهر.', 'No approved targets for this month.')) + '</td></tr>';
     arr(s.employees).forEach(function (e) {
       h += '<tr><td>' + esc(e.employee) + '</td><td>' + num(e.above + ' / ' + e.units) + '</td><td>' + sar(e.over) + '</td><td>' + sar(e.raw) +
-        '</td><td>' + num('×' + e.multiplier) + '</td><td><b>' + sar(e.paid) + '</b></td></tr>';
+        '</td><td>' + num('×' + e.multiplier) + '</td><td>' + (e.rank ? num(e.rank) + ' <span class="tg-sub">' + pct(e.pct) + '</span>' : '—') + '</td><td>' + (e.prize > 0 ? sar(e.prize) : '—') + '</td><td><b>' + sar(e.paid) + '</b></td></tr>';
     });
-    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + '</span></td><td colspan="4"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
+    if (s.manager) h += '<tr><td>' + esc(s.manager.name) + ' <span class="tg-sub">' + esc(T('مدير التشغيل', 'Operations manager')) + '</span></td><td colspan="6"></td><td><b>' + sar(s.manager.amount) + '</b></td></tr>';
     h += '</tbody></table></div>';
     h += '<div class="tg-wrap" style="margin-top:12px"><table class="tg-t"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) + '</th><th>' +
       esc(T('الدخل', 'Revenue')) + '</th><th>' + esc(T('هدف الشهر', 'Month target')) + '</th><th>' + esc(T('فوق الهدف', 'Above')) + '</th><th>' + esc(T('التقييم', 'Rating')) +

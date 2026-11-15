@@ -147,7 +147,13 @@ class EmployeeSeesOwnOnly(RCase):
     def test_no_colleagues_numbers(self):
         self.money_scenario()
         d = self.me(Req("u_nora", "ops", query={"month": "2026-11"}))
-        self.assertNotIn(AHOOD, json.dumps(d, ensure_ascii=False))
+        # Owner decision 2026-11-15: the RACE shows colleagues by name, place and how far they
+        # are against their own targets — and nothing else about them. No riyals, ever.
+        race = d["day"].pop("race")
+        self.assertEqual({r["employee"] for r in race["board"]}, {NORA, AHOOD})
+        for r in race["board"]:
+            self.assertEqual(set(r), {"employee", "place", "pct", "me"})
+        self.assertNotIn(AHOOD, json.dumps(d, ensure_ascii=False))     # nowhere outside the race
         self.assertFalse(keys_of(d) & {"employees", "lines", "activity"})
         self.assertEqual({u["name"] for u in d["board"]["units"]}, {"A1"})
 
@@ -433,7 +439,8 @@ class ManagerIsALogin(RCase):
         self.assertEqual(sheet["manager"]["name"], "Aseel")
         self.assertGreater(sheet["team_paid"], 0)
         self.assertAlmostEqual(sheet["manager"]["amount"], sheet["team_paid"] * engine.MANAGER_OVERRIDE, delta=0.01)
-        self.assertAlmostEqual(sheet["total_paid"], sheet["team_paid"] + sheet["manager"]["amount"], delta=0.01)
+        self.assertAlmostEqual(sheet["total_paid"],
+                               sheet["team_paid"] + sheet["prize_paid"] + sheet["manager"]["amount"], delta=0.01)
 
     def test_unknown_login_is_refused_and_empty_clears(self):
         self.assertFalse(self.pick("u_ghost")["ok"])

@@ -41,7 +41,7 @@ class Rules(unittest.TestCase):
     def test_commission_is_a_share_of_the_fee_on_the_part_above(self):
         over, pay_ = engine.target_commission(15000, 11000, 0.20)
         self.assertEqual(over, 4000.0)
-        self.assertAlmostEqual(pay_, 160.0)                  # 4000 x 20% fee x 20% share
+        self.assertAlmostEqual(pay_, 240.0)                  # 4000 x 20% fee x 30% share
         self.assertEqual(engine.target_commission(9000, 11000, 0.20), (0.0, 0.0))
         self.assertEqual(engine.target_commission(15000, 11000, None), (4000.0, 0.0))
         self.assertEqual(engine.target_commission(15000, 0, 0.20), (0.0, 0.0))   # no target, no pay
@@ -72,7 +72,7 @@ class Rules(unittest.TestCase):
 
 
 class PayCase(Case):
-    """A2 (نورة) and B1 (عهود) each made 9,000 a month in Jul-Sep 2026 -> target 10,800.
+    """A2 (نورة) and B1 (عهود) each made 9,000 a month in Jul-Sep 2026 -> target 11,700.
     October starts as an ordinary month (each unit at its base) so the season factor is 1."""
     ORDINARY_OCTOBER = True
 
@@ -102,8 +102,8 @@ class PayCase(Case):
 
 class Targets(PayCase):
     def test_target_is_the_three_months_before_plus_the_step(self):
-        self.assertAlmostEqual(self.tgt("102"), 9000 * 1.20, delta=1)
-        self.assertAlmostEqual(self.tgt("201"), 9000 * 1.20, delta=1)
+        self.assertAlmostEqual(self.tgt("102"), 9000 * 1.30, delta=1)
+        self.assertAlmostEqual(self.tgt("201"), 9000 * 1.30, delta=1)
         row = db.target("2026-Q4", "102")
         self.assertAlmostEqual(float(row["rev_base"]), 9000.0, delta=1)
 
@@ -122,12 +122,12 @@ class Targets(PayCase):
 
 class Sheet(PayCase):
     def test_pays_only_above_the_target(self):
-        self.sell("102", 6800.0)                       # 5,000 above 10,800
+        self.sell("102", 7700.0)                       # 5,000 above 11,700
                                                         # B1 stays at 9,000: under its target
         self.close()
         s = pay.month_sheet("2026-10", self.today())
         by = {e["employee"]: e for e in s["employees"]}
-        self.assertAlmostEqual(by[NORA]["paid"], 5000 * 0.20 * 0.20, delta=0.5)       # 200
+        self.assertAlmostEqual(by[NORA]["commission"], 5000 * 0.20 * 0.30, delta=0.5)   # 300
         self.assertEqual(by[AHOOD]["paid"], 0.0)
         line = next(u for u in s["units"] if u["unit"] == "102")
         self.assertAlmostEqual(line["over"], 5000.0, delta=1)
@@ -135,15 +135,15 @@ class Sheet(PayCase):
 
     def test_manager_gets_15_percent_on_top(self):
         db.set_setting("manager", "أسيل")
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         s = pay.month_sheet("2026-10", self.today())
-        self.assertAlmostEqual(s["manager"]["amount"], 30.0, delta=0.1)
-        self.assertAlmostEqual(s["total_paid"], 230.0, delta=0.6)
+        self.assertAlmostEqual(s["manager"]["amount"], 45.0, delta=0.1)
+        self.assertAlmostEqual(s["total_paid"], 845.0, delta=0.6)
 
     def test_no_fee_on_record_pays_zero_and_is_flagged(self):
         self.fee.pop("102")
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         s = pay.month_sheet("2026-10", self.today())
         self.assertEqual(s["total_paid"], 0.0)
@@ -151,18 +151,18 @@ class Sheet(PayCase):
 
     def test_ops_warnings_cut_it(self):
         HOST.ops_multiplier = lambda emp, mk: 0.75
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         s = pay.month_sheet("2026-10", self.today())
         self.assertAlmostEqual(s["employees"][0]["paid"] if s["employees"][0]["employee"] == NORA
-                               else s["employees"][1]["paid"], 150.0, delta=0.5)
+                               else s["employees"][1]["commission"], 225.0, delta=0.5)
 
     def test_blocked_nights_lower_the_target(self):
         db.add_blocked([("201", "2026-10-%02d" % d) for d in range(1, 16)], "test")   # 15 of 31
         self.close()
         s = pay.month_sheet("2026-10", self.today())
         line = next(u for u in s["units"] if u["unit"] == "201")
-        self.assertAlmostEqual(line["target"], 10800 * 16 / 31.0, delta=2)
+        self.assertAlmostEqual(line["target"], 11700 * 16 / 31.0, delta=2)
         self.assertGreater(line["over"], 0)
 
     def test_a_strong_month_never_raises_a_target(self):
@@ -174,7 +174,7 @@ class Sheet(PayCase):
         self.assertGreater(s["total_paid"], 0)
 
     def test_the_open_month_is_shown_but_not_ready(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.clock = datetime.datetime(2026, 10, 20, 10, 0)
         s = pay.month_sheet("2026-10", self.today())
         self.assertFalse(s["ready"])
@@ -200,14 +200,14 @@ class SlowSeason(PayCase):
         s = pay.month_sheet("2026-10", self.today())
         self.assertLess(s["season"], 0.6)
         line = next(u for u in s["units"] if u["unit"] == "201")
-        self.assertLess(line["target"], 10800 * 0.6)
+        self.assertLess(line["target"], 11700 * 0.6)
         self.assertGreater(line["target"], 0)
 
 
 class Rating(PayCase):
     def test_low_rating_pays_nothing_for_that_apartment_only(self):
         self.sell("101", 30000.0)
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.ratings[("102", "2026-10")] = {"avg": 4.5, "n": 4}
         self.close()
         s = pay.month_sheet("2026-10", self.today())
@@ -217,7 +217,7 @@ class Rating(PayCase):
         self.assertGreater(next(u for u in s["units"] if u["unit"] == "101")["raw"], 0)
 
     def test_supervisor_note_lifts_the_block(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.ratings[("102", "2026-10")] = {"avg": 4.0, "n": 2}
         self.close()
         ok, err, nid = pay.raise_note(NORA, "102", "2026-10", "تسريب من المطور")
@@ -228,11 +228,11 @@ class Rating(PayCase):
         self.assertFalse(pay.approve_month("2026-10", "owner")[0])
         self.assertTrue(pay.decide_note(nid, True, "أسيل")[0])
         s = pay.month_sheet("2026-10", self.today())
-        self.assertAlmostEqual(s["total_paid"], 200.0, delta=0.6)
+        self.assertAlmostEqual(s["total_paid"], 800.0, delta=0.6)        # 300 commission + the 500 prize
         self.assertTrue(s["ready"])
 
     def test_refused_note_keeps_the_block(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.ratings[("102", "2026-10")] = {"avg": 4.0, "n": 2}
         self.close()
         _, _, nid = pay.raise_note(NORA, "102", "2026-10", "سبب")
@@ -249,33 +249,78 @@ class Rating(PayCase):
         self.assertFalse(pay.raise_note(NORA, "102", "2026-10", "مرة ثانية")[0])      # one per unit-month
 
 
+class Prize(PayCase):
+    """The month's prize: first place in the race, once the month has ended."""
+
+    def test_first_place_takes_it_after_the_month_ends(self):
+        self.sell("102", 7700.0)                                      # نورة: A2 well above target
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertEqual(s["prize"]["winners"], [])                    # the month is still open
+        self.close()
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertEqual(s["prize"]["winners"], [NORA])
+        by = {e["employee"]: e for e in s["employees"]}
+        self.assertEqual((by[NORA]["rank"], by[NORA]["prize"]), (1, engine.MONTH_PRIZE))
+        self.assertEqual(by[AHOOD]["prize"], 0.0)
+        self.assertAlmostEqual(by[NORA]["paid"], 300.0 + engine.MONTH_PRIZE, delta=0.6)
+
+    def test_the_manager_share_is_on_commission_not_on_the_prize(self):
+        db.set_setting("manager", "أسيل")
+        self.sell("102", 7700.0)
+        self.close()
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertAlmostEqual(s["manager"]["amount"], 300.0 * engine.MANAGER_OVERRIDE, delta=0.1)
+
+    def test_no_prize_when_nobody_earned(self):
+        self.close()                                                   # an ordinary month: all under target
+        s = pay.month_sheet("2026-10", self.today())
+        self.assertEqual((s["prize"]["winners"], s["prize_paid"], s["total_paid"]), ([], 0.0, 0.0))
+
+    def test_first_place_on_a_rating_stopped_apartment_wins_nothing(self):
+        self.sell("102", 7700.0)
+        self.ratings[("102", "2026-10")] = {"avg": 4.0, "n": 2}
+        self.close()
+        self.assertEqual(pay.month_sheet("2026-10", self.today())["prize"]["winners"], [])
+
+    def test_the_race_an_employee_sees_has_names_and_places_but_no_money(self):
+        self.sell("102", 7700.0)
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        race = pay.my_day(AHOOD, "2026-10", self.today())["race"]
+        self.assertEqual((race["place"], race["of"], race["prize"]), (2, 2, engine.MONTH_PRIZE))
+        self.assertGreater(race["to_first"], 0)
+        self.assertEqual([r["employee"] for r in race["board"]], [NORA, AHOOD])
+        for r in race["board"]:
+            self.assertEqual(set(r), {"employee", "place", "pct", "me"})
+
+
 class Freeze(PayCase):
     def test_an_approved_month_does_not_move(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         ok, err = pay.approve_month("2026-10", "owner")
         self.assertTrue(ok, err)
         self.sell("102", 99999.0, "2026-10-16", "2026-10-20")          # a late booking appears
         s = pay.month_sheet("2026-10", self.today())
-        self.assertAlmostEqual(s["total_paid"], 200.0, delta=0.6)
+        self.assertAlmostEqual(s["total_paid"], 800.0, delta=0.6)
         self.assertTrue(s["approval"])
         self.assertFalse(pay.approve_month("2026-10", "owner")[0])
 
 
 class WhatAnEmployeeSees(PayCase):
     def test_own_amount_and_units_only(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.sell("201", 30000.0)
         self.close()
         mine = pay.my_money(NORA, "2026-10", self.today())
-        self.assertAlmostEqual(mine["amount"], 200.0, delta=0.5)
+        self.assertAlmostEqual(mine["amount"], 300.0, delta=0.5)          # عهود was first that month
         self.assertEqual({u["name"] for u in mine["units"]}, {"A1", "A2"})
         flat = repr(mine)
         for word in ("fee", "share", "raw", "paid", "manager", AHOOD):
             self.assertNotIn(word, flat)
 
     def test_team_view_has_no_money(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         rows = pay.team_activity("2026-10", self.today())
         self.assertEqual(set(rows[0]), {"employee", "contacts", "above", "units"})
@@ -289,14 +334,14 @@ class MyDay(PayCase):
     """«يومي»: the same sheet, said as "what do I do now and what is it worth to me"."""
 
     def test_money_now_and_what_is_reachable(self):
-        self.sell("102", 6800.0)                                    # A2: 5,000 above its target
+        self.sell("102", 7700.0)                                    # A2: 5,000 above its target
         self.clock = datetime.datetime(2026, 10, 30, 10, 0)         # the month is still open
         d = pay.my_day(NORA, "2026-10", self.today())
         self.assertTrue(d["live"])
-        self.assertAlmostEqual(d["amount"], 200.0, delta=0.6)
+        self.assertAlmostEqual(d["amount"], 300.0, delta=0.6)
         self.assertGreaterEqual(d["potential"], d["amount"])
         a2 = next(u for u in d["units"] if u["unit"] == "102")
-        self.assertAlmostEqual(a2["mine"], 200.0, delta=0.6)
+        self.assertAlmostEqual(a2["mine"], 300.0, delta=0.6)
         self.assertGreater(a2["night_value"], 0)                    # an extra night is worth riyals to her
         self.assertEqual(d["nearest"][0], "102")                    # already above target: pays today
         self.assertFalse({AHOOD} & {u["name"] for u in d["units"]})
@@ -305,15 +350,15 @@ class MyDay(PayCase):
     def test_a_new_booking_shows_what_it_added_to_me(self):
         self.clock = datetime.datetime(2026, 10, 30, 10, 0)
         self.res("102", "0557770001", "سارة محمد", "2026-10-05", "2026-10-15", channel="airbnb",
-                 total=6800.0, created="2026-10-28")
+                 total=7700.0, created="2026-10-28")
         d = pay.my_day(NORA, "2026-10", self.today())
         win = d["wins"][0]
         self.assertEqual((win["unit_name"], win["guest"], win["nights"]), ("A2", "سارة", 10))
-        self.assertAlmostEqual(win["mine"], 200.0, delta=0.6)
+        self.assertAlmostEqual(win["mine"], 300.0, delta=0.6)
         self.assertAlmostEqual(sum(w["mine"] for w in d["wins"]), d["amount"], delta=0.6)   # they add up
 
     def test_a_low_rating_makes_the_unit_worth_nothing_to_chase(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.ratings[("102", "2026-10")] = {"avg": 4.0, "n": 2}
         self.clock = datetime.datetime(2026, 10, 30, 10, 0)
         d = pay.my_day(NORA, "2026-10", self.today())
@@ -325,18 +370,18 @@ class MyDay(PayCase):
         for i, day in enumerate(("2026-10-28", "2026-10-29", "2026-10-30", "2026-10-30")):
             db.insert_contact("k%d" % i, "ضيف", NORA, day + "T09:00:00", "2026-Q4", "102", day, 1, None)
         m = pay.my_day(NORA, "2026-10", self.today())["mission"]
-        self.assertEqual((m["today"], m["streak"], m["goal"]), (2, 3, pay.MISSION_GOAL))
+        self.assertEqual((m["today"], m["streak"]), (2, 3))
         self.clock = datetime.datetime(2026, 10, 31, 8, 0)          # nothing yet today: not broken
         self.assertEqual(pay.my_day(NORA, "2026-10", self.today())["mission"]["streak"], 3)
 
     def test_record_keeps_past_months(self):
-        self.sell("102", 6800.0)
+        self.sell("102", 7700.0)
         self.close()
         pay.approve_month("2026-10", "owner")
         rec = pay.my_day(NORA, "2026-11", self.today())["record"]
         octo = next(m for m in rec["months"] if m["month"] == "2026-10")
         self.assertTrue(octo["final"])
-        self.assertAlmostEqual(octo["amount"], 200.0, delta=0.6)
+        self.assertAlmostEqual(octo["amount"], 800.0, delta=0.6)
         self.assertEqual(rec["best"]["month"], "2026-10")
         self.assertAlmostEqual(rec["earned"], sum(m["amount"] for m in rec["months"]), delta=0.01)
 

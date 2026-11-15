@@ -190,9 +190,11 @@ def propose(quarter, today):
         r["rev_base"] = round(r["rev_base"], 2)
         r["rev_target"] = float(round(r["rev_base"] * (1 + engine.TARGET_STEP)))
         o = old.get(r["unit"])
-        if o and o.get("rev_target") and o.get("rev_base") is not None \
-                and float(o["rev_target"]) != float(round(float(o["rev_base"]) * (1 + engine.TARGET_STEP))):
-            r["rev_target"] = float(o["rev_target"])
+        if o and o.get("rev_target") and o.get("rev_base") is not None:
+            auto = {float(round(float(o["rev_base"]) * (1 + st)))
+                    for st in (engine.TARGET_STEP,) + tuple(engine.LEGACY_STEPS)}
+            if float(o["rev_target"]) not in auto:
+                r["rev_target"] = float(o["rev_target"])
     for r in rows:
         if r["base"] is None:
             peers = [k["base"] for k in known if r["compound"] and k["compound"] == r["compound"]]

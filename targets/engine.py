@@ -296,14 +296,20 @@ def settle(employee_commissions, pool, manager=None, ops_multipliers=None):
 #   Ouja's fee on that part. At or under the target the apartment pays nothing; it never costs
 #   the employee anything.
 #
-#   THE STEP IS 20%, NOT 10%. Measured on the real history with the rule exactly as built
-#   (outputs/targets-audit-2026-11-15/scripts/a10.py): at +10% a team that changes nothing draws
-#   ~2,800 SAR a month, because the portfolio is young and still filling up; at +20% it draws
-#   ~2,090 — about what the review commission cost (1,887). Every riyal of real growth then
-#   leaves Ouja 80% of its fee. Re-measure before changing either number.
+#   A HIGHER BAR, A BIGGER SLICE (owner decision, 2026-11-15 evening). At +20% / 20% an extra
+#   night was worth ~26 SAR to the employee and one WhatsApp message one or two riyals: nobody
+#   runs for that. So the target is the unit's own average + 30% and the employee keeps 30% of
+#   Ouja's fee above it (about 6 riyals in every 100), plus a monthly prize for whoever is first.
+#   Measured on Apr-Oct 2026 with the rule exactly as built
+#   (outputs/targets-audit-2026-11-15/scripts/a13.py): a team that changes nothing draws ~2,310
+#   in commission, ~2,660 with the manager, +500 prize = ~3,160 a month against the 1,887 the
+#   review commission cost. That gap is repaid once revenue grows ~1.7%; every riyal of growth
+#   after it leaves Ouja ~65% of its fee. Re-measure before changing any of these.
 TARGET_BASE_MONTHS = 3
-TARGET_STEP = 0.20
-TARGET_SHARE = 0.20
+TARGET_STEP = 0.30
+TARGET_SHARE = 0.30
+LEGACY_STEPS = (0.20,)       # earlier automatic steps: a stored target equal to one is not "typed by the owner"
+MONTH_PRIZE = 500.0          # SAR, to the employee whose apartments did best against their targets
 RATING_MIN = 4.75            # out of 5: under it, the apartment pays nothing that month
 
 
