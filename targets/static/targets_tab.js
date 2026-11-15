@@ -380,22 +380,28 @@
     return h;
   }
 
+  /* Her page, top to bottom in the order she works: her own month, the notes waiting for her
+     decision, who is moving, and the apartments to rescue. */
   function teamView(d) {
-    var h = mineBox(d.mine) + '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
-      '<span class="tg-sub">' + esc(T('الشقق المتأخرة عن البرونزي هالشهر. تنحفظ نسخة يوم 10 ويوم 20.', 'Units behind bronze this month. A copy is saved on day 10 and day 20.')) + '</span></div>';
-    if (d.quarter_state !== 'approved') h += '<p class="tg-note">' + esc(T('أهداف الربع ما اعتمدت، فالقائمة فاضية.', 'Quarter targets are not approved, so the list is empty.')) + '</p>';
-    h += rescueTable(d.rescue) + '</div>';
-    arr(d.snapshots).forEach(function (s) {
-      h += '<div class="tg-box"><div class="tg-h">' + esc(T('نسخة يوم ', 'Copy of day ')) + num(s.day) + '</div>' + rescueTable(s.units) + '</div>';
-    });
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('نشاط الفريق', 'Team activity')) + '</div><div class="tg-wrap"><table class="tg-t"><thead><tr><th>' +
+    var h = mineBox(d.mine) + notesBox(d.notes);
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('نشاط الفريق', 'Team activity')) +
+      '<span class="tg-sub">' + esc(T('رسائل كل موظف هالشهر، وكم شقة عنده فوق هدفها.', 'Each employee’s messages this month, and how many of their units are above target.')) + '</span></div>' +
+      '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' +
       esc(T('الموظف', 'Employee')) + '</th><th>' + esc(T('رسائل واتساب', 'WhatsApp messages')) + '</th><th>' +
       esc(T('شقق فوق هدفها', 'Units above target')) + '</th></tr></thead><tbody>';
     if (!arr(d.activity).length) h += '<tr><td colspan="3">' + esc(T('ما فيه أهداف معتمدة هالشهر.', 'No approved targets this month.')) + '</td></tr>';
     arr(d.activity).forEach(function (r) {
       h += '<tr><td>' + esc(r.employee) + '</td><td>' + num(r.contacts) + '</td><td>' + num(r.above + ' / ' + r.units) + '</td></tr>';
     });
-    return notesBox(d.notes) + h + '</tbody></table></div></div>';
+    h += '</tbody></table></div></div>';
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
+      '<span class="tg-sub">' + esc(T('الشقق المتأخرة عن البرونزي هالشهر. تنحفظ نسخة يوم 10 ويوم 20.', 'Units behind bronze this month. A copy is saved on day 10 and day 20.')) + '</span></div>';
+    if (d.quarter_state !== 'approved') h += '<p class="tg-note">' + esc(T('أهداف الربع ما اعتمدت، فالقائمة فاضية.', 'Quarter targets are not approved, so the list is empty.')) + '</p>';
+    h += rescueTable(d.rescue) + '</div>';
+    arr(d.snapshots).forEach(function (s) {
+      h += '<div class="tg-box"><div class="tg-h">' + esc(T('نسخة يوم ', 'Copy of day ')) + num(s.day) + '</div>' + rescueTable(s.units) + '</div>';
+    });
+    return h;
   }
 
   /* ---------------------------------------------------------------- الإدارة (owner only) */
