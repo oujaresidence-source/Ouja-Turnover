@@ -254,8 +254,6 @@ def log_contact(employee, guest_token):
     """Press of the WhatsApp button. Returns (ok, error, {phone, text, contact_id}).
     No date and no phone come from the caller: the clock is the server's, the guest is
     whoever that token means inside THIS employee's list right now."""
-    if not _host.book_live():
-        return False, "الواتساب مقفل لين يفعّله المالك", None
     if not employee:
         return False, "حسابك مو مربوط بموظف", None
     now = HOST.require("now")()

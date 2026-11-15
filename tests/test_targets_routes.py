@@ -8,7 +8,7 @@ Locked here:
     * a hidden guest appears in NO response an employee can reach — and the admin view shows
       hidden-group COUNTS, never identities
     * the admin view and every admin write refuse a non-admin; the team view refuses a plain employee
-    * the WhatsApp route logs the contact and THEN redirects; locked while TG_BOOK_LIVE=0
+    * the WhatsApp route logs the contact and THEN redirects
     * no route inserts or back-dates a contact
     * the public consent box always answers the same, and is rate-limited
     * TG_ENABLED=0 hides the feature
@@ -256,16 +256,6 @@ class WhatsAppRoute(RCase):
         self.assertEqual([(c["employee"], c["phone_key"], c["at"]) for c in rows],
                          [(NORA, it["_key"], "2026-11-15T10:00:00")])
 
-    def test_locked_while_book_live_is_off(self):
-        os.environ["TG_BOOK_LIVE"] = "0"
-        data, _ = self.call(routes._safe(routes.api_book_list), self.nora)
-        self.assertFalse(data["flags"]["book_live"])
-        self.assertTrue(data["list"]["items"])                           # the list still shows
-        r = self.call(routes.api_book_wa, Req("u_nora", "ops", form={"g": data["list"]["items"][0]["g"]}))
-        self.assertNotEqual(r.status, 302)
-        self.assertIn("مقفل", r.text)
-        self.assertEqual(db.contacts(), [])
-
     def test_a_date_or_phone_in_the_request_is_ignored(self):
         it = book.call_list(NORA, self.today(), limit=0)["items"][0]
         r = self.call(routes.api_book_wa, Req("u_nora", "ops", query={"at": "2026-01-01", "phone": "0500000000"},
@@ -300,7 +290,7 @@ class WhatsAppRoute(RCase):
         self.assertFalse(keys_of(data) & {"phone", "phone_key", "_key"})
 
 
-# ============================================================ consent box + shadow + switches
+# ============================================================ consent box + switches
 
 class ConsentAndSwitches(RCase):
     def test_consent_answers_the_same_for_everyone(self):
@@ -323,24 +313,31 @@ class ConsentAndSwitches(RCase):
             self.call(routes.api_consent, Req(body={"phone": "05077700%02d" % i, "agree": True}, ip="9.9.9.9"))
         self.assertEqual(len(db.consents()), routes.CONSENT_PER_HOUR)
 
-    def test_shadow_label_reaches_every_amount(self):
+    def test_there_is_no_trial_mode_and_no_whatsapp_lock(self):
+        """Owner's decision 2026-11-15: no dry run. The feature is live once it is switched on."""
         self.money_scenario()
         d, _ = self.call(routes._safe(routes.api_me), Req("u_nora", "ops", query={"month": "2026-11"}))
-        self.assertTrue(d["flags"]["shadow"])
-        self.assertTrue(d["money"]["shadow"])
+        self.assertFalse(keys_of(d) & {"flags", "shadow", "book_live"})
         a, _ = self.call(routes._admin(routes.api_admin), Req("admin", "admin", query={"month": "2026-11"}))
-        self.assertTrue(a["sheet"]["shadow"])
+        self.assertEqual(set(a["flags"]), {"channels"})
+        self.assertNotIn("shadow", a["sheet"])
         data, _ = self.call(routes._admin(routes.api_approve_month), Req("admin", "admin", body={"month": "2026-11"}))
-        self.assertFalse(data["ok"])
-        self.assertIsNone(db.approval("2026-11"))
+        self.assertTrue(data["ok"], data)                         # the month is closed and every guest has left
+        self.assertEqual(db.approval("2026-11")["total_paid"], a["sheet"]["total_paid"])
         with open(routes.STATIC_JS, encoding="utf-8") as f:
             js = f.read()
-        self.assertIn("تجريبي — ما ينصرف", js)
+        host_py = os.path.join(os.path.dirname(os.path.dirname(routes.STATIC_JS)), "host.py")
+        with open(host_py, encoding="utf-8") as f:
+            host_src = f.read()
+        for word in ("shadow", "book_live", "TG_PAYOUT_SHADOW", "TG_BOOK_LIVE"):
+            self.assertNotIn(word, js)
+            self.assertNotIn(word, host_src)
+            self.assertFalse(hasattr(targets, word))
 
-    def test_defaults_are_visible_shadow_and_locked(self):
-        for k in ("TG_ENABLED", "TG_PAYOUT_SHADOW", "TG_BOOK_LIVE", "TG_POOL_CHANNELS"):
+    def test_defaults_and_the_one_off_switch(self):
+        for k in ("TG_ENABLED", "TG_POOL_CHANNELS"):
             os.environ.pop(k, None)
-        self.assertEqual((targets.enabled(), targets.shadow(), targets.book_live()), (True, True, False))
+        self.assertTrue(targets.enabled())
         self.assertEqual(targets.pool_channels(), ("consented", "direct"))
         os.environ["TG_ENABLED"] = "0"
         self.assertFalse(targets.enabled())

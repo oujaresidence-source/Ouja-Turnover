@@ -7,11 +7,12 @@ Locked here — each one is a rule that costs Ouja money or a guest's trust if i
     * a guest in the hidden group reaches no call list and cannot be contacted
     * no consent, no call; «لا تتصل» is permanent and immediate
     * a contact is logged by the system: server clock, guest from the list, one per 45 days,
-      first logger wins, and nothing happens while TG_BOOK_LIVE=0
+      first logger wins
     * commission counts completed stays only, with the unit's real fee; no fee on record -> 0
     * the month's total never exceeds the cap; no evidence of uplift -> nothing is paid
     * like with like: guests who would have come anyway add no uplift
-    * no payout can be approved in shadow mode; an approval is one row and nothing else
+    * a month is approved only after it closes and every counted guest has left; an approval
+      is one row and nothing else
     * the scoreboard: baseline, tiers, the +2-point cap, units frozen at approval
 
 Run: python3 -m unittest tests.test_targets_flow
@@ -31,7 +32,7 @@ from targets import book, db, engine, history, money, score        # noqa: E402
 from targets.host import HOST                                       # noqa: E402
 
 NORA, AHOOD = "نورة", "عهود"
-ENV = ("TG_ENABLED", "TG_PAYOUT_SHADOW", "TG_BOOK_LIVE", "TG_POOL_CHANNELS")
+ENV = ("TG_ENABLED", "TG_POOL_CHANNELS")
 
 
 def D(s):
@@ -47,8 +48,7 @@ class Case(unittest.TestCase):
         db.reset_init_cache()
         book._compound_memo.clear()
         self._env = {k: os.environ.get(k) for k in ENV}
-        os.environ.update({"TG_ENABLED": "1", "TG_PAYOUT_SHADOW": "1", "TG_BOOK_LIVE": "1",
-                           "TG_POOL_CHANNELS": "direct,consented"})
+        os.environ.update({"TG_ENABLED": "1", "TG_POOL_CHANNELS": "direct,consented"})
         self.clock = datetime.datetime(2026, 11, 15, 10, 0)
         self.fee = {"101": 0.20, "102": 0.20, "201": 0.25}
         self.own = [{"listing_id": 101, "name": "A1", "employee": NORA},
@@ -265,13 +265,6 @@ class ContactIsLoggedNotTyped(Case):
         self.assertEqual(engine.phone_key(out["phone"]), it["_key"])
         self.assertIn(NORA, out["text"])
 
-    def test_locked_until_the_owner_switches_it_on(self):
-        os.environ["TG_BOOK_LIVE"] = "0"
-        self.assertTrue(self.full_list())                        # the list still shows
-        ok, err, out = book.log_contact(NORA, self.full_list()[0]["g"])
-        self.assertFalse(ok)
-        self.assertEqual(db.contacts(), [])
-
     def test_one_contact_per_guest_per_45_days_and_first_logger_wins(self):
         self.own[2]["employee"] = NORA                           # give عهود a unit in the same compound
         self.own[1]["employee"] = AHOOD
@@ -427,16 +420,7 @@ class Money(Case):
         sheet = money.month_sheet("2026-11", self.today())
         self.assertEqual(sheet["employees"][0]["paid"], 162.0)
 
-    def test_no_payout_can_be_approved_in_shadow(self):
-        self.contact_and_book()
-        self.clock = datetime.datetime(2026, 12, 20, 10, 0)
-        ok, err = money.approve_month("2026-11", "owner")
-        self.assertFalse(ok)
-        self.assertIn("تجريبي", err)
-        self.assertIsNone(db.approval("2026-11"))
-
     def test_approval_is_one_row_and_nothing_else(self):
-        os.environ["TG_PAYOUT_SHADOW"] = "0"
         self.contact_and_book()
         self.assertFalse(money.approve_month("2026-11", "owner")[0])      # month not closed, guests not out
         self.clock = datetime.datetime(2026, 12, 20, 10, 0)

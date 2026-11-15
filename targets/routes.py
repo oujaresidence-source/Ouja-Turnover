@@ -126,8 +126,7 @@ def _month(request):
 
 
 def flags():
-    return {"shadow": _host.shadow(), "book_live": _host.book_live(),
-            "channels": list(_host.pool_channels())}
+    return {"channels": list(_host.pool_channels())}
 
 
 # ------------------------------------------------------------------ employee: «أهدافي»
@@ -144,8 +143,7 @@ async def api_me(request):
     asked = (request.query.get("employee") or "").strip()
     if asked and is_admin(request):
         emp = asked                                   # the owner may look at anyone's page
-    base = {"ok": True, "flags": {k: v for k, v in flags().items() if k != "channels"},
-            "is_admin": is_admin(request), "is_manager": is_manager(request), "linked": bool(emp)}
+    base = {"ok": True, "is_admin": is_admin(request), "is_manager": is_manager(request), "linked": bool(emp)}
     if not emp:
         return _json(base)
     base.update(await _run(me_payload, emp, _month(request), _today()))
@@ -162,8 +160,7 @@ def book_payload(employee, today):
 
 async def api_book_list(request):
     emp = employee_of(request)
-    base = {"ok": True, "flags": {k: v for k, v in flags().items() if k != "channels"},
-            "linked": bool(emp)}
+    base = {"ok": True, "linked": bool(emp)}
     if not emp:
         return _json(base)
     base.update(await _run(book_payload, emp, _today()))

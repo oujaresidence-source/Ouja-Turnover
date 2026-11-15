@@ -138,7 +138,7 @@ def _bounds_for(unit, arrival):
 def month_sheet(month_key, today=None):
     """The full sheet for one cohort month — ADMIN ONLY. Employees get my_money()."""
     today = today or HOST.require("now")().date()
-    ck = (db.version(), month_key, today.isoformat(), _host.pool_channels(), _host.shadow())
+    ck = (db.version(), month_key, today.isoformat(), _host.pool_channels())
     if ck in _sheet_cache:
         return _sheet_cache[ck]
     start, end = engine.month_bounds(month_key)
@@ -204,7 +204,7 @@ def month_sheet(month_key, today=None):
                          "hit": gates[e][0], "scored": gates[e][1], "share": round(shares[e], 4),
                          "raw": round(raw[e], 2), "multiplier": round(mults[e], 4),
                          "paid": st["employees"].get(e, 0.0)})
-    sheet = {"month": month_key, "shadow": _host.shadow(), "measure": m,
+    sheet = {"month": month_key, "measure": m,
              "avg_fee": round(avg_fee, 2), "incremental": round(cap["incremental_bookings"], 2),
              "uplift_fee": round(cap["uplift_fee"], 2), "pool": cap["pool"],
              "raw_total": st["raw_total"], "total_paid": st["total_paid"],
@@ -225,7 +225,7 @@ def my_money(employee, month_key, today=None):
     row = next((r for r in sheet["employees"] if r["employee"] == employee), None)
     mine = [{"guest": ln["guest"], "unit_name": ln["unit_name"], "nights": ln["nights"],
              "state": ln["state"]} for ln in sheet["lines"] if ln["employee"] == employee]
-    return {"month": month_key, "shadow": sheet["shadow"],
+    return {"month": month_key,
             "amount": (row or {}).get("paid", 0.0), "contacts": (row or {}).get("contacts", 0),
             "bookings": mine, "pending": sum(1 for b in mine if b["state"] == "pending"),
             "final": bool(sheet["approval"])}
@@ -239,10 +239,8 @@ def team_activity(month_key, today=None):
 
 
 def approve_month(month_key, by):
-    """Owner approves a month: one row, nothing else. Refused in shadow mode, before the
+    """Owner approves a month: one row, nothing else. Refused before the
     14-day window has closed, and while a counted guest has not checked out yet."""
-    if _host.shadow():
-        return False, "الوضع تجريبي — ما ينصرف شي ولا ينعتمد صرف. بدّل TG_PAYOUT_SHADOW=0 أول."
     sheet = month_sheet(month_key)
     if not sheet["window_closed"]:
         return False, "الشهر ما قفل: لازم يمر 14 يوم بعد نهايته."

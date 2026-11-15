@@ -4,10 +4,8 @@ targets.host — the ONE bridge between this package and bot.py (schedule/ops/on
 bot.py calls targets.wire({...}) once at web-server start. This package NEVER does
 `import bot`: bot.py runs as __main__, so importing it by name would boot a second bot.
 
-The four switches live here so every module reads them the same way, at call time:
+The two switches live here so every module reads them the same way, at call time:
     TG_ENABLED=1         0 hides the whole feature (no tabs, no routes, dashboard untouched)
-    TG_PAYOUT_SHADOW=1   amounts are «تجريبي — ما ينصرف» and no month can be approved
-    TG_BOOK_LIVE=0       the call list shows but the WhatsApp button is locked
     TG_POOL_CHANNELS     who may be called: direct,consented (default) — add `all` at the
                          owner's own risk (Airbnb guests without consent)
 """
@@ -19,14 +17,6 @@ _ON = ("1", "true", "True", "yes", "on")
 
 def enabled():
     return os.environ.get("TG_ENABLED", "1") in _ON
-
-
-def shadow():
-    return os.environ.get("TG_PAYOUT_SHADOW", "1") in _ON
-
-
-def book_live():
-    return os.environ.get("TG_BOOK_LIVE", "0") in _ON
 
 
 def pool_channels():

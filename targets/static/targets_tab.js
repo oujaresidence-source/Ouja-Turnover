@@ -74,16 +74,6 @@
     document.head.appendChild(s);
   }
 
-  function banner(flags) {
-    var h = '';
-    if (flags && flags.shadow) {
-      h += '<div class="tg-banner">' + esc(T('تجريبي — ما ينصرف', 'Trial — nothing is paid')) +
-        '<span class="tg-sub">' + esc(T('الأرقام تنحسب وتنعرض بس. ما ينصرف شي لين المالك يفعّل الصرف.',
-          'Numbers are computed and shown only. Nothing is paid until the owner switches payouts on.')) + '</span></div>';
-    }
-    return h;
-  }
-
   function shiftMonth(mk, by) {
     var y = Number(mk.slice(0, 4)), m = Number(mk.slice(5, 7)) - 1 + by;
     var d = new Date(Date.UTC(y, m, 1));
@@ -130,8 +120,7 @@
     }
     var b = d.board, m = d.money, h = '';
     h += '<div class="tg-kpis">' +
-      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(T('عمولتي هالشهر', 'My commission this month')) +
-        (m.shadow ? ' · ' + esc(T('تجريبي', 'trial')) : '') + '</span></div>' +
+      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(T('عمولتي هالشهر', 'My commission this month')) + + '</span></div>' +
       '<div class="tg-kpi"><b>' + pct(b.share) + '</b><span>' + esc(T('نسبتي الحين', 'My share now')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(b.hit + ' / ' + b.scored) + '</b><span>' + esc(T('شقق ضربت البرونزي', 'Units at bronze')) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(b.units_to_full_share) + '</b><span>' + esc(T('شقة باقي عشان توصل 40%', 'units to reach 40%')) + '</span></div>' +
@@ -205,8 +194,6 @@
     var f = d.flags || {}, h = '';
     /* 1 — status + seed */
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('الحالة', 'Status')) + '</div><div class="tg-row">' +
-      '<span class="tg-st ' + (f.shadow ? 'gold' : 'ok') + '">' + esc(f.shadow ? T('الصرف: تجريبي', 'Payout: trial') : T('الصرف: فعّال', 'Payout: live')) + '</span>' +
-      '<span class="tg-st ' + (f.book_live ? 'ok' : 'bad') + '">' + esc(f.book_live ? T('الواتساب: شغّال', 'WhatsApp: on') : T('الواتساب: مقفل', 'WhatsApp: locked')) + '</span>' +
       '<span class="tg-st">' + esc(T('من ينتصل عليهم: ', 'Callable: ')) + esc(arr(f.channels).join(' + ')) + '</span>' +
       '<span class="tg-st">' + esc(T('وافقوا على التواصل: ', 'Consented: ')) + num(d.consents) + '</span>' +
       '<span class="tg-st">' + esc(T('لا تتصل: ', 'Do not contact: ')) + num(d.dnc) + '</span></div>' +
@@ -271,8 +258,7 @@
 
     /* 5 — month sheet */
     var s = d.sheet || {}, m = s.measure || {};
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') +
-      (s.shadow ? '<span class="tg-st gold">' + esc(T('تجريبي — ما ينصرف', 'Trial — nothing is paid')) + '</span>' : '') + '</div>' +
+    h += '<div class="tg-box"><div class="tg-h">' + esc(T('صرف شهر ', 'Payout for ')) + esc(s.month || '') + + '</div>' +
       '<div class="tg-kpis">' +
       '<div class="tg-kpi"><b>' + num(m.contacted || 0) + '</b><span>' + esc(T('انتصل عليهم', 'Contacted')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.contacted_bookings || 0) + '</span></div>' +
       '<div class="tg-kpi"><b>' + num(m.holdout || 0) + '</b><span>' + esc(T('المجموعة الضابطة (عدد بس)', 'Hidden group (count only)')) + ' · ' + esc(T('حجز منهم ', 'booked ')) + num(m.holdout_bookings || 0) + '</span></div>' +
@@ -303,7 +289,7 @@
       h += '<div class="tg-banner lock" style="margin-top:12px">' + esc(T('شقق ما لها نسبة عقد مسجّلة — عمولتها صفر لين تنضاف بالمركز المالي: ', 'Units with no contract fee on record — they pay zero until it is added in Finance: ')) +
         esc(arr(s.no_fee_units).join('، ')) + '</div>';
     }
-    var why = s.approval ? T('معتمد', 'Approved') : s.shadow ? T('الوضع تجريبي — ما ينعتمد صرف', 'Trial mode — no payout can be approved')
+    var why = s.approval ? T('معتمد', 'Approved')
       : !s.window_closed ? T('الشهر ما قفل (14 يوم بعد نهايته)', 'Month not closed (14 days after it ends)')
         : s.pending ? T('باقي حجوزات ما خرج ضيوفها', 'Some guests have not checked out') : '';
     h += '<div class="tg-row" style="margin-top:12px"><button class="tg-btn go" data-tg="approveM"' + (why ? ' disabled' : '') + '>' + esc(T('اعتمد صرف الشهر', 'Approve the month')) + '</button>' +
@@ -319,7 +305,7 @@
 
   function renderTargets() {
     css();
-    var d = S.me || {}, h = banner(d.flags), panes = [['me', T('صفحتي', 'My page')]];
+    var d = S.me || {}, h = '', panes = [['me', T('صفحتي', 'My page')]];
     if (d.is_admin || d.is_manager) panes.push(['team', T('الفريق', 'Team')]);
     if (d.is_admin) panes.push(['admin', T('الإدارة', 'Admin')]);
     h += '<div class="tg-bar">';
@@ -441,11 +427,7 @@
   var OUT = { booked: ['حجز', 'Booked'], interested: ['مهتم', 'Interested'], declined: ['رفض', 'Declined'], dnc: ['لا تتصل', 'Do not contact'] };
 
   function bookView(d) {
-    var f = d.flags || {}, h = banner(f);
-    if (!f.book_live) {
-      h += '<div class="tg-banner lock">' + esc(T('زر الواتساب مقفل لين يفعّله المالك', 'The WhatsApp button is locked until the owner switches it on')) +
-        '<span class="tg-sub">' + esc(T('تقدر تشوف القائمة، بس ما ينرسل شي لأي ضيف.', 'You can see the list, but nothing is sent to any guest.')) + '</span></div>';
-    }
+    var h = '';
     if (!d.linked) {
       return h + emptyState(T('حسابك مو مربوط بموظف', 'Your login is not linked to an employee'),
         T('كلّم المالك يربط حسابك من «مين هو مين».', 'Ask the owner to link your login.'), '📒');
@@ -462,7 +444,7 @@
       h += '<div class="tg-call"><div><b>' + esc(it.name) + '</b><span class="tg-sub">' + esc(it.reason) + '</span>' +
         '<span class="tg-sub">' + esc(it.unit_name) + ' · ' + esc(T('فاضية يوم ', 'empty on ')) + num(day(it.night)) + ' · ' + esc(T('سكن ', 'stayed ')) + num(it.stays) + ' ' + esc(T('مرة', 'times')) + '</span></div>' +
         '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
-        '<button type="submit" class="tg-btn wa"' + (f.book_live ? '' : ' disabled') + '>' + esc(T('واتساب', 'WhatsApp')) + '</button></form></div>';
+        '<button type="submit" class="tg-btn wa">' + esc(T('واتساب', 'WhatsApp')) + '</button></form></div>';
     });
     h += '<p class="tg-note">' + esc(T('ضغطة الزر هي التسجيل. اتصال واحد لكل ضيف كل 45 يوم، وأول من يضغط هو صاحبه.', 'Pressing the button is the log. One contact per guest every 45 days; the first to press owns it.')) + '</p></div>';
 

@@ -408,8 +408,8 @@ except Exception as _oc_err:            # pragma: no cover
     _HAS_ONCALL = False
 
 # «الأهداف ودفتر العملاء» — per-unit occupancy targets + the employees' client book. Cash only
-# from bookings that follow a LOGGED contact, capped by a hidden comparison group. Ships in
-# shadow (computes, pays nothing). TG_ENABLED=0 leaves the dashboard byte-for-byte unchanged.
+# from bookings that follow a LOGGED contact, capped by a hidden comparison group. No dry-run
+# switch. TG_ENABLED=0 leaves the dashboard byte-for-byte unchanged.
 # Spec: docs/superpowers/specs/2026-11-15-unit-targets-design.md. Additive.
 try:
     import targets as _targets
@@ -68265,8 +68265,9 @@ async def start_web_server():
             except Exception as _rdw:
                 print("[rrdesk] wiring failed (RR Desk disabled, bot unaffected):", _rdw)
 
-        # ---- «الأهداف ودفتر العملاء» — additive; reuses brain.db. Shadow by default: it
-        # computes and shows, approves no payout, and the WhatsApp button stays locked. ----
+        # ---- «الأهداف ودفتر العملاء» — additive; reuses brain.db. No dry run (owner, 2026-11-15):
+        # live once switched on. An employee still sees nothing until the owner links their
+        # login and ticks the two tabs in الصلاحيات. TG_ENABLED=0 switches it all off. ----
         if _HAS_TARGETS:
             try:
                 _tg_wire()
@@ -68280,8 +68281,7 @@ async def start_web_server():
                 except Exception as _tgg:
                     print("[targets] guide consent box not added:", _tgg)
                 print("[targets] wired + routes registered (/api/targets/*, /api/book/*, "
-                      "/my-targets, /my-book) — shadow=%s book_live=%s"
-                      % (_targets.shadow(), _targets.book_live()))
+                      "/my-targets, /my-book) — pool=%s" % ",".join(_targets.pool_channels()))
             except Exception as _tge:
                 print("[targets] wiring failed (targets disabled, bot unaffected):", _tge)
 
