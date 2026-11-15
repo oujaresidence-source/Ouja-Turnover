@@ -34,13 +34,13 @@ _secret_memo = {}
 
 
 def _secret():
-    """The server's secret, read from the database ONCE per process.
+    """The server's secret, read from the database once per WRITE to it, not once per call.
 
     It used to be read on every call — and it is called once per guest. With the callable
     pool opened to every guest (5,700 of them) that was 8,000 database connections to build
     one call list: under a second on a laptop, over 40 seconds on the live volume, which is
     why «أهدافي» sat on «…» for the first employee who opened it (2026-11-15)."""
-    path = db.version()[0]
+    path = db.version()             # (database, write counter): any write re-reads it once
     s = _secret_memo.get(path)
     if s:
         return s
