@@ -142,7 +142,9 @@ def me_payload(employee, month_key, today):
     """Everything ONE employee may see on «أهدافي»."""
     return {"employee": employee, "month": month_key,
             "board": score.board(employee, month_key, today),
-            "money": pay.my_money(employee, month_key, today)}
+            "money": pay.my_money(employee, month_key, today),
+            "day": pay.my_day(employee, month_key, today),
+            "list": book.public_items(book.call_list(employee, today))}
 
 
 async def api_me(request):

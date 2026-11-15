@@ -283,3 +283,65 @@ class WhatAnEmployeeSees(PayCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MyDay(PayCase):
+    """«يومي»: the same sheet, said as "what do I do now and what is it worth to me"."""
+
+    def test_money_now_and_what_is_reachable(self):
+        self.sell("102", 6800.0)                                    # A2: 5,000 above its target
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)         # the month is still open
+        d = pay.my_day(NORA, "2026-10", self.today())
+        self.assertTrue(d["live"])
+        self.assertAlmostEqual(d["amount"], 200.0, delta=0.6)
+        self.assertGreaterEqual(d["potential"], d["amount"])
+        a2 = next(u for u in d["units"] if u["unit"] == "102")
+        self.assertAlmostEqual(a2["mine"], 200.0, delta=0.6)
+        self.assertGreater(a2["night_value"], 0)                    # an extra night is worth riyals to her
+        self.assertEqual(d["nearest"][0], "102")                    # already above target: pays today
+        self.assertFalse({AHOOD} & {u["name"] for u in d["units"]})
+        self.assertNotIn("201", [u["unit"] for u in d["units"]])
+
+    def test_a_new_booking_shows_what_it_added_to_me(self):
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        self.res("102", "0557770001", "سارة محمد", "2026-10-05", "2026-10-15", channel="airbnb",
+                 total=6800.0, created="2026-10-28")
+        d = pay.my_day(NORA, "2026-10", self.today())
+        win = d["wins"][0]
+        self.assertEqual((win["unit_name"], win["guest"], win["nights"]), ("A2", "سارة", 10))
+        self.assertAlmostEqual(win["mine"], 200.0, delta=0.6)
+        self.assertAlmostEqual(sum(w["mine"] for w in d["wins"]), d["amount"], delta=0.6)   # they add up
+
+    def test_a_low_rating_makes_the_unit_worth_nothing_to_chase(self):
+        self.sell("102", 6800.0)
+        self.ratings[("102", "2026-10")] = {"avg": 4.0, "n": 2}
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        d = pay.my_day(NORA, "2026-10", self.today())
+        a2 = next(u for u in d["units"] if u["unit"] == "102")
+        self.assertEqual((a2["mine"], a2["night_value"], a2["reachable"]), (0.0, 0.0, False))
+
+    def test_mission_and_streak_count_logged_messages(self):
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        for i, day in enumerate(("2026-10-28", "2026-10-29", "2026-10-30", "2026-10-30")):
+            db.insert_contact("k%d" % i, "ضيف", NORA, day + "T09:00:00", "2026-Q4", "102", day, 1, None)
+        m = pay.my_day(NORA, "2026-10", self.today())["mission"]
+        self.assertEqual((m["today"], m["streak"], m["goal"]), (2, 3, pay.MISSION_GOAL))
+        self.clock = datetime.datetime(2026, 10, 31, 8, 0)          # nothing yet today: not broken
+        self.assertEqual(pay.my_day(NORA, "2026-10", self.today())["mission"]["streak"], 3)
+
+    def test_record_keeps_past_months(self):
+        self.sell("102", 6800.0)
+        self.close()
+        pay.approve_month("2026-10", "owner")
+        rec = pay.my_day(NORA, "2026-11", self.today())["record"]
+        octo = next(m for m in rec["months"] if m["month"] == "2026-10")
+        self.assertTrue(octo["final"])
+        self.assertAlmostEqual(octo["amount"], 200.0, delta=0.6)
+        self.assertEqual(rec["best"]["month"], "2026-10")
+        self.assertAlmostEqual(rec["earned"], sum(m["amount"] for m in rec["months"]), delta=0.01)
+
+    def test_a_closed_month_has_no_mission(self):
+        self.close()
+        d = pay.my_day(NORA, "2026-10", self.today())
+        self.assertFalse(d["live"])
+        self.assertEqual(d["wins"], [])

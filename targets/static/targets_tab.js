@@ -14,7 +14,7 @@
 (function () {
   'use strict';
 
-  var S = { me: null, admin: null, team: null, book: null, month: '', quarter: '', pane: 'me', busy: false, opened: false };
+  var S = { me: null, admin: null, team: null, book: null, month: '', quarter: '', pane: 'me', busy: false, opened: false, grown: false };
 
   function T(ar, en) { return labelText(ar, en); }
   function arr(x) { return Array.isArray(x) ? x : []; }
@@ -50,7 +50,7 @@
       '.tg-t td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}',
       '.tg-t tr:last-child td{border-bottom:0}',
       '@media (max-width:620px){.tg-t.stack thead{display:none}.tg-t.stack tr{display:block;padding:10px 0;border-bottom:1px solid var(--line)}.tg-t.stack tr:last-child{border-bottom:0}.tg-t.stack td{display:block;border:0;padding:3px 0}.tg-t.stack .tg-meter{max-width:260px}}',
-      '.tg-st{display:inline-flex;align-items:center;padding:2px 9px;border-radius:6px;font-size:11.5px;font-weight:700;white-space:nowrap;background:var(--surface-2);color:var(--text-2)}',
+      '.tg-st{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:6px;font-size:11.5px;font-weight:700;white-space:nowrap;background:var(--surface-2);color:var(--text-2)}',
       '.tg-st.ok{background:var(--green-soft);color:var(--green)}',
       '.tg-st.bad{background:var(--red-soft);color:var(--red)}',
       '.tg-st.gold{background:var(--gold-tint);color:var(--text)}',
@@ -71,7 +71,54 @@
       '.tg-call b{font-size:15px;color:var(--text)}',
       '.tg-call form{margin:0}',
       '.tg-note{font-size:12.5px;color:var(--mut);margin:8px 0 0}',
-      '@media (prefers-reduced-motion:reduce){.tg-btn{transition:none}.tg-btn:active{transform:none}}'
+      /* «يومي» — the employee's day. One column, the money first. */
+      '.tg-day{max-width:680px;margin-inline:auto}',
+      '.tg-money{padding:6px 2px 18px}',
+      '.tg-money>p:first-child{margin:0;font-size:14px;color:var(--text-2);font-weight:700}',
+      '.tg-money .big{display:flex;align-items:baseline;gap:8px;margin:2px 0 14px;color:var(--text);font-weight:800;font-size:clamp(40px,13vw,60px);line-height:1.05;letter-spacing:-.02em}',
+      '.tg-money .big .tg-num{font-family:inherit}',
+      '.tg-money .big small{font-size:16px;font-weight:700;color:var(--mut);letter-spacing:0}',
+      '.tg-road{position:relative;height:14px;border-radius:7px;background:var(--surface-2);overflow:hidden}',
+      '.tg-road i{position:absolute;inset-block:0;inset-inline-start:0;border-radius:7px;background:var(--gold)}',
+      '.tg-road.go i{animation:tgGrow .8s cubic-bezier(0.23,1,0.32,1) both}',
+      '@keyframes tgGrow{from{inline-size:0}}',
+      '.tg-ends{display:flex;justify-content:space-between;gap:10px;margin-top:7px;font-size:12.5px;color:var(--text-2)}',
+      '.tg-ends b{color:var(--text)}',
+      '.tg-mission{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:14px 0;border-block:1px solid var(--line);margin-bottom:22px}',
+      '.tg-pips{display:inline-flex;gap:7px}',
+      '.tg-pips i{width:26px;height:10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line)}',
+      '.tg-pips i.on{background:var(--green);border-color:var(--green)}',
+      '.tg-mission b{color:var(--text);font-size:14px}',
+      '.tg-mission span{font-size:12.5px;color:var(--text-2)}',
+      '.tg-sec{font-size:16px;font-weight:800;color:var(--text);margin:26px 0 4px}',
+      '.tg-sec+p{margin:0 0 10px;font-size:12.5px;color:var(--text-2)}',
+      '.tg-hot{padding:16px 0;border-bottom:1px solid var(--line)}',
+      '.tg-hot:last-of-type{border-bottom:0}',
+      '.tg-hot h4{margin:0;font-size:17px;color:var(--text);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}',
+      '.tg-hot .say{margin:6px 0 8px;font-size:14.5px;color:var(--text);line-height:1.7}',
+      '.tg-hot .say b{color:var(--green);white-space:nowrap}',
+      '.tg-hot .tg-meter{height:10px;max-width:none}',
+      '.tg-hot .who{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}',
+      '.tg-hot .who form{margin:0}',
+      '.tg-win{display:flex;gap:10px;align-items:baseline;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--text)}',
+      '.tg-win:last-child{border-bottom:0}',
+      '.tg-win em{font-style:normal;font-weight:800;color:var(--green);white-space:nowrap}',
+      '.tg-win em.z{color:var(--mut);font-weight:700;font-size:12.5px}',
+      '.tg-rec{display:flex;align-items:flex-end;gap:10px;height:132px;padding-top:6px}',
+      '.tg-rec div{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;height:100%}',
+      '.tg-rec i{display:block;width:100%;max-width:54px;min-height:3px;border-radius:5px 5px 2px 2px;background:var(--surface-2);border:1px solid var(--line)}',
+      '.tg-rec i.fin{background:var(--gold);border-color:var(--gold)}',
+      '.tg-rec i.now{background:var(--gold-tint);border-color:var(--gold)}',
+      '.tg-rec b{font-size:12px;color:var(--text)}',
+      '.tg-rec span{font-size:11px;color:var(--text-2)}',
+      '.tg-cheer{padding:14px 16px;border-radius:var(--r-md);background:var(--green-soft);color:var(--green);font-weight:800;font-size:15px;margin-bottom:16px;animation:tgCheer .5s cubic-bezier(0.23,1,0.32,1) both}',
+      '.tg-cheer>span{display:block;font-weight:400;font-size:13px;color:var(--text);margin-top:2px}',
+      '@keyframes tgCheer{from{opacity:0;transform:translateY(8px) scale(.98)}}',
+      '.tg-all{margin-top:26px;border-top:1px solid var(--line);padding-top:6px}',
+      '.tg-all summary{cursor:pointer;padding:12px 0;font-weight:800;color:var(--text);font-size:14px;min-height:44px}',
+      '.tg-all summary:focus-visible,.tg-btn:focus-visible,.tg-in:focus-visible{outline:2px solid var(--gold);outline-offset:2px}',
+      '.tg-day ::selection{background:var(--gold-tint)}',
+      '@media (prefers-reduced-motion:reduce){.tg-btn{transition:none}.tg-btn:active{transform:none}.tg-road.go i,.tg-cheer{animation:none}}'
     ].join('');
     document.head.appendChild(s);
   }
@@ -115,6 +162,45 @@
       '<td>' + state + '</td><td>' + rate + extra + '</td></tr>';
   }
 
+  var MON = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  var MON_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function monName(mk) { var k = Number(String(mk).slice(5, 7)) - 1; return T(MON[k] || mk, MON_EN[k] || mk); }
+  function nights(n) { return n === 1 ? T('ليلة وحدة', '1 night') : n === 2 ? T('ليلتين', '2 nights') : num(n) + ' ' + T(n <= 10 ? 'ليالي' : 'ليلة', 'nights'); }
+
+  /* Which apartments were above target last time this employee looked — to cheer a new one once. */
+  function newlyAbove(d) {
+    var key = 'tgAbove:' + (d.employee || '') + ':' + (d.month || ''), now = [], fresh = [], seen = null;
+    arr(d.day && d.day.units).forEach(function (u) { if (u.over > 0) now.push(u.unit); });
+    try { seen = JSON.parse(localStorage.getItem(key) || 'null'); localStorage.setItem(key, JSON.stringify(now)); } catch (e) { seen = null; }
+    if (!seen) return [];
+    arr(d.day.units).forEach(function (u) { if (u.over > 0 && seen.indexOf(u.unit) < 0) fresh.push(u); });
+    return fresh;
+  }
+
+  function hotRow(u, guests, action) {
+    var w = u.target > 0 ? Math.min(100, Math.round(100 * u.revenue / u.target)) : 0, say;
+    if (u.over > 0) {
+      say = esc(T('فوق الهدف. كل ليلة زيادة تنباع ', 'Above target. Every extra night sold ')) + '<b>≈ ' + sar(u.night_value) + esc(T(' لك', ' for you')) + '</b>';
+    } else {
+      say = esc(T('باقي ', 'Needs ')) + sar(u.gap) + ' (' + nights(u.nights_to_target) + ')' + esc(T(' وتوصل الهدف. بعدها كل ليلة ', ' to reach target. After that every night ')) +
+        '<b>≈ ' + sar(u.night_value) + esc(T(' لك', ' for you')) + '</b>';
+    }
+    var h = '<div class="tg-hot"><h4>' + nm(u.name) +
+      (u.over > 0 ? '<span class="tg-st ok">' + esc(T('كسبت منها ', 'Earned ')) + sar(u.mine) + '</span>' : '') + '</h4>' +
+      '<p class="say">' + say + '</p>' +
+      '<div class="tg-meter"><i style="width:' + w + '%"></i></div>' +
+      '<div class="tg-ends"><span>' + sar(u.revenue) + ' ' + esc(T('من', 'of')) + ' ' + sar(u.target) + '</span><span>' + nights(u.empty) + ' ' + esc(T('فاضية', 'empty')) +
+      (u.next_empty ? ' · ' + esc(T('أقربها ', 'next ')) + num(day(u.next_empty)) : '') + '</span></div><div class="who">';
+    if (!guests.length) {
+      h += '<span class="tg-sub">' + esc(T('ما فيه ضيف مناسب لها اليوم بالقائمة. جرّب بكرة أو افتح «دفتر العملاء».', 'No matching guest for it today. Try tomorrow or open the client book.')) + '</span>';
+    }
+    guests.forEach(function (it) {
+      h += '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
+        '<button type="submit" class="tg-btn wa">' + esc(T('راسل ', 'Message ')) + esc(it.name) + '</button></form>';
+    });
+    return h + '</div></div>';
+  }
+
   function meView(d) {
     if (!d.linked && d.is_admin) {
       return emptyState(T('هالصفحة للموظف', 'This page is the employee’s view'),
@@ -124,27 +210,86 @@
       return emptyState(T('حسابك مو مربوط بموظف', 'Your login is not linked to an employee'),
         T('كلّم المالك يربط حسابك من «مين هو مين».', 'Ask the owner to link your login.'), '🎯');
     }
-    var m = d.money || {}, units = arr(m.units), h = '', over = 0;
-    units.forEach(function (u) { over += Number(u.over) || 0; });
-    h += '<div class="tg-kpis">' +
-      '<div class="tg-kpi"><b>' + sar(m.amount) + '</b><span>' + esc(m.final ? T('عمولتي — معتمدة', 'My commission — approved') : T('عمولتي هالشهر للحين', 'My commission so far')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + num((m.above || 0) + ' / ' + units.length) + '</b><span>' + esc(T('شقق فوق هدفها', 'Units above target')) + '</span></div>' +
-      '<div class="tg-kpi"><b>' + sar(over) + '</b><span>' + esc(T('دخل فوق الأهداف', 'Revenue above targets')) + '</span></div>' +
-      '</div>';
+    var m = d.money || {}, y = d.day || {}, units = arr(m.units), h = '<div class="tg-day">';
+    var byUnit = {}, action = '/api/book/wa' + (tok() ? '?token=' + encodeURIComponent(tok()) : '');
+    arr(y.units).forEach(function (u) { byUnit[u.unit] = u; });
+
+    /* a new apartment crossed its target since the last visit */
+    newlyAbove(d).forEach(function (u) {
+      h += '<div class="tg-cheer">' + nm(u.name) + ' ' + esc(T('تعدّت هدفها', 'passed its target')) +
+        '<span>' + esc(T('من الحين كل ليلة زيادة عليها ≈ ', 'From now every extra night on it ≈ ')) + sar(u.night_value) + esc(T(' لك.', ' for you.')) + '</span></div>';
+    });
+
+    /* 1 — my money */
+    var amount = Number(y.amount != null ? y.amount : m.amount) || 0, pot = Math.max(Number(y.potential) || 0, amount);
+    h += '<div class="tg-money"><p>' + esc(m.final ? T('كسبت في ', 'You earned in ') + monName(d.month) + T(' — معتمد', ' — approved')
+      : y.live ? T('جبت هالشهر للحين', 'Earned so far this month') : T('عمولة ', 'Commission for ') + monName(d.month)) + '</p>' +
+      '<div class="big">' + num(Math.round(amount).toLocaleString('en-US')) + '<small>' + esc(T('ر.س', 'SAR')) + '</small></div>';
+    if (y.live && m.has_targets) {
+      h += '<div class="tg-road' + (S.grown ? '' : ' go') + '"><i style="inline-size:' + (pot > 0 ? Math.max(2, Math.round(100 * amount / pot)) : 0) + '%"></i></div>' +
+        '<div class="tg-ends"><span>' + esc(T('الحين', 'Now')) + '</span><span>' + esc(T('تقدر توصل ', 'You can reach ')) + '<b>' + sar(pot) + '</b></span></div>' +
+        '<p class="tg-note">' + esc(T('لو انباعت نص لياليك الفاضية بسعرها المعتاد. تقدير، مو وعد.', 'If half your empty nights sell at their usual price. An estimate, not a promise.')) + '</p>';
+      S.grown = true;
+    }
+    h += '</div>';
     if (!m.has_targets) {
       h += '<div class="tg-banner">' + esc(T('أهداف هالربع ما اعتمدها المالك للحين — العمولة تبدأ بعد الاعتماد.',
         'This quarter’s targets are not approved yet — commission starts once they are.')) + '</div>';
     }
-    h += '<div class="tg-box"><div class="tg-h">' + esc(T('شققي', 'My units')) +
-      '<span class="tg-sub">' + esc(T('كل شقة لها هدف دخل بالشهر. اللي فوق الهدف لك منه عمولة. تحت الهدف ما عليك شي.', 'Each unit has a monthly revenue target. You earn commission on what is above it. Under it costs you nothing.')) + '</span></div>' +
+
+    if (y.live) {
+      /* 2 — today's mission */
+      var ms = y.mission || {}, pips = '', k;
+      for (k = 0; k < (ms.goal || 3); k++) pips += '<i' + (k < (ms.today || 0) ? ' class="on"' : '') + '></i>';
+      var left = Math.max(0, (ms.goal || 3) - (ms.today || 0));
+      h += '<div class="tg-mission"><span class="tg-pips" aria-hidden="true">' + pips + '</span>' +
+        '<b>' + esc(left ? T('مهمة اليوم: باقي ', 'Today: ') + left + T(left === 1 ? ' رسالة' : ' رسائل', ' messages left') : T('خلصت مهمة اليوم', 'Today’s mission is done')) + '</b>' +
+        '<span>' + esc(ms.streak > 1 ? ms.streak + T(' أيام ورا بعض — لا تقطعها', ' days in a row — keep it going') : T('كل رسالة واتساب = فرصة حجز', 'Each WhatsApp message is a chance at a booking')) + '</span></div>';
+
+      /* 3 — the nearest money */
+      var hot = arr(y.nearest).map(function (id) { return byUnit[id]; }).filter(Boolean);
+      if (hot.length) {
+        h += '<h3 class="tg-sec">' + esc(T('أقرب فلوس', 'Nearest money')) + '</h3><p>' + esc(T('أسهل شقق تكسب منها اليوم. اضغط اسم الضيف ويفتح لك واتساب برسالة جاهزة.', 'The easiest units to earn from today. Tap a guest and WhatsApp opens with the message written.')) + '</p>';
+        hot.forEach(function (u) {
+          var guests = arr(d.list && d.list.items).filter(function (it) { return String(it.unit) === String(u.unit); }).slice(0, 3);
+          h += hotRow(u, guests, action);
+        });
+      } else if (m.has_targets) {
+        h += '<h3 class="tg-sec">' + esc(T('أقرب فلوس', 'Nearest money')) + '</h3><p>' + esc(T('ما فيه ليالي فاضية تقدر تكسب منها الحين. ارجع بكرة.', 'No empty nights to earn from right now. Come back tomorrow.')) + '</p>';
+      }
+
+      /* 4 — wins */
+      if (arr(y.wins).length) {
+        h += '<h3 class="tg-sec">' + esc(T('آخر الحجوزات على شققي', 'Latest bookings on my units')) + '</h3><p>' + esc(T('وكم زاد كل حجز بعمولتك.', 'And what each one added to your commission.')) + '</p>';
+        arr(y.wins).forEach(function (wn) {
+          h += '<div class="tg-win"><span>' + esc(wn.guest) + ' · ' + nm(wn.unit_name) + ' · ' + nights(wn.nights) + '</span>' +
+            (wn.mine > 0 ? '<em>' + num('+' + Math.round(wn.mine).toLocaleString('en-US')) + ' ' + esc(T('ر.س', 'SAR')) + '</em>' : '<em class="z">' + esc(T('قرّبك من الهدف', 'Closer to target')) + '</em>') + '</div>';
+        });
+      }
+    }
+
+    /* 5 — my record */
+    var rec = y.record || {}, months = arr(rec.months), top = 0;
+    months.forEach(function (x) { top = Math.max(top, Number(x.amount) || 0); });
+    if (months.length) {
+      h += '<h3 class="tg-sec">' + esc(T('سجلّي', 'My record')) + '</h3><p>' + esc(T('المجموع: ', 'Total: ')) + sar(rec.earned) +
+        (rec.best ? ' · ' + esc(T('أحسن شهر: ', 'Best month: ')) + esc(monName(rec.best.month)) + ' ' + sar(rec.best.amount) : '') + '</p><div class="tg-rec">';
+      months.forEach(function (x) {
+        h += '<div><b>' + num(Math.round(x.amount).toLocaleString('en-US')) + '</b><i class="' + (x.final ? 'fin' : 'now') + '" style="height:' + (top > 0 ? Math.round(72 * x.amount / top) : 0) + 'px"></i><span>' + esc(monName(x.month)) + '</span></div>';
+      });
+      h += '</div><p class="tg-note">' + esc(T('الغامق = معتمد من المالك. الفاتح = لسا ما انعتمد.', 'Solid = approved by the owner. Light = not approved yet.')) + '</p>';
+    }
+
+    /* 6 — every unit */
+    h += '<details class="tg-all"' + (y.live ? '' : ' open') + '><summary>' + esc(T('كل شققي', 'All my units')) + ' (' + units.length + ')</summary>' +
       '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('دخل الشهر', 'Month revenue')) + '</th><th>' +
       esc(T('الحالة', 'Status')) + '</th><th>' + esc(T('التقييم', 'Rating')) + '</th></tr></thead><tbody>';
     if (!units.length) h += '<tr><td colspan="4">' + esc(T('ما عندك شقق بأهداف معتمدة هالشهر.', 'No units with approved targets this month.')) + '</td></tr>';
     units.forEach(function (u) { h += unitRow(u, !m.final); });
     h += '</tbody></table></div>' +
       '<p class="tg-note">' + esc(T('الليالي المقفلة تنقص من الهدف. وإذا السوق كله نزل، هدفك ينزل معه آخر الشهر. التقييم تحت 4.75 يوقف عمولة الشقة إلا إذا قبل المشرف ملاحظتك.',
-        'Blocked nights lower the target. If the whole market drops, your target drops with it at month end. A rating under 4.75 stops the unit’s commission unless the supervisor accepts your note.')) + '</p></div>';
-    return h;
+        'Blocked nights lower the target. If the whole market drops, your target drops with it at month end. A rating under 4.75 stops the unit’s commission unless the supervisor accepts your note.')) + '</p></details>';
+    return h + '</div>';
   }
 
   /* ---------------------------------------------------------------- الفريق (manager) */
@@ -358,7 +503,7 @@
 
   function renderTargets() {
     css();
-    var d = S.me || {}, h = '', panes = [['me', T('صفحتي', 'My page')]];
+    var d = S.me || {}, h = '', panes = [['me', T('يومي', 'My day')]];
     if (d.is_admin || d.is_manager) panes.push(['team', T('الفريق', 'Team')]);
     if (d.is_admin) panes.push(['admin', T('الإدارة', 'Admin')]);
     h += '<div class="tg-bar">';
@@ -571,13 +716,19 @@
     setTimeout(function () { loadBook(true); }, 1800);
   }
 
+  function onDaySubmit(ev) {
+    if (!ev.target || ev.target.getAttribute('data-tg-form') !== 'wa') return;
+    /* The press is the log: a moment later the mission pip fills and the guest leaves the list. */
+    setTimeout(function () { loadTargets(true); }, 1800);
+  }
+
   function bind(id, type, fn) {
     var el = document.getElementById(id);
     if (el && !el['__tg_' + type]) { el.addEventListener(type, fn); el['__tg_' + type] = 1; }
   }
 
   window.TargetsTab = {
-    targets: function (force) { bind('tgBody', 'click', onTargetsClick); bind('tgBody', 'change', onTargetsChange); return loadTargets(force); },
+    targets: function (force) { bind('tgBody', 'click', onTargetsClick); bind('tgBody', 'change', onTargetsChange); bind('tgBody', 'submit', onDaySubmit); return loadTargets(force); },
     book: function (force) { bind('bkBody', 'click', onBookClick); bind('bkBody', 'submit', onBookSubmit); return loadBook(force); }
   };
   /* The dashboard's retry buttons call these by name. */

@@ -23,10 +23,16 @@ Nothing here writes to payroll or the ERP. An approval is one row in tg_approval
 frozen sheet in tg_results: an approved month never moves again.
 """
 
-from . import db, engine, score
+import datetime as dt
+import math
+
+from . import db, engine, history, score
 from .host import HOST
 
-_cache = {}
+_cache = {"v": None, "sheets": {}}
+MISSION_GOAL = 3             # WhatsApp messages a day: the daily mission on «يومي»
+RECORD_MONTHS = 6
+WIN_DAYS = 10
 
 
 def _now():
@@ -82,7 +88,10 @@ def _compute(month_key, today):
                       "rating_blocked": blocked_by_rating,
                       "note": ({"id": note["id"], "status": note["status"], "reason": note["reason"]}
                                if note else None),
-                      "no_fee": fee_pct is None})
+                      "no_fee": fee_pct is None,
+                      # riyals the employee earns per riyal above the target (admin sheet and
+                      # the employee's OWN «يومي» only)
+                      "rate": round((fee_pct or 0.0) * engine.TARGET_SHARE, 6)})
 
     employees, team = [], 0.0
     for emp in sorted(e for e in raw if e):
@@ -114,17 +123,19 @@ def month_sheet(month_key, today=None):
     """The full sheet — ADMIN ONLY. Employees get my_money(). An approved month is served
     from its frozen copy."""
     today = today or HOST.require("now")().date()
-    ck = (db.version(), month_key, today.isoformat())
-    if ck in _cache:
-        return _cache[ck]
+    v = db.version()
+    if _cache["v"] != v:
+        _cache.update(v=v, sheets={})
+    ck = (month_key, today.isoformat())
+    if ck in _cache["sheets"]:
+        return _cache["sheets"][ck]
     approval = db.approval(month_key)
     frozen = db.result(month_key) if approval else None
     if frozen and "units" in frozen:
         sheet = dict(frozen, approval=approval, ready=False)
     else:
         sheet = dict(_compute(month_key, today), approval=approval)
-    _cache.clear()
-    _cache[ck] = sheet
+    _cache["sheets"][ck] = sheet
     return sheet
 
 
@@ -141,6 +152,116 @@ def my_money(employee, month_key, today=None):
             "above": sum(1 for u in units if u["over"] > 0),
             "has_targets": sheet["approved_quarter"], "closed": sheet["closed"],
             "final": bool(sheet["approval"])}
+
+
+# ------------------------------------------------------------------ «يومي»: the employee's day
+# The same numbers as the sheet, turned into "what do I do now and what is it worth to me".
+# OWNER DECISION 2026-11-15: an employee sees their OWN riyals per booking and per night. That
+# gives away roughly what Ouja keeps; he chose it knowingly, because the page cannot say
+# «+85 ريال لك» without it. Still never shown: a percentage, a colleague, the manager's cut.
+
+def _streak(employee, today):
+    """(messages today, days in a row with at least one message — today does not break it)."""
+    since = (today - dt.timedelta(days=60)).isoformat()
+    days = {c["at"][:10] for c in db.contacts(employee, since=since)}
+    n_today = sum(1 for c in db.contacts(employee, since=today.isoformat()))
+    d, run = today, 0
+    if d.isoformat() not in days:
+        d -= dt.timedelta(days=1)
+    while d.isoformat() in days:
+        run += 1
+        d -= dt.timedelta(days=1)
+    return n_today, run
+
+
+def my_day(employee, month_key, today=None):
+    today = today or HOST.require("now")().date()
+    sheet = month_sheet(month_key, today)
+    start, end = engine.month_bounds(month_key)
+    row = next((r for r in sheet["employees"] if r["employee"] == employee), None)
+    mult = float((row or {}).get("multiplier", 1.0))
+    live = start <= today < end and not sheet["approval"]
+    units, potential = [], 0.0
+    for u in sheet["units"]:
+        if u["employee"] != employee:
+            continue
+        rate = 0.0 if u["rating_blocked"] else float(u.get("rate") or 0.0) * mult
+        typical = score.price_stats(u["unit"], start)[0]
+        empties = score.empty_nights(u["unit"], max(start, today), end) if live else []
+        gap = max(0.0, u["target"] - u["revenue"]) if u["target"] > 0 else 0.0
+        nights_to = int(math.ceil(gap / typical)) if (gap and typical) else 0
+        half = (len(empties) + 1) // 2
+        reach = max(0.0, u["revenue"] + half * typical - u["target"]) * rate if u["target"] > 0 else 0.0
+        mine = u["over"] * rate
+        potential += max(mine, reach)
+        units.append({"unit": u["unit"], "name": u["name"], "revenue": u["revenue"],
+                      "target": u["target"], "over": u["over"], "mine": round(mine, 2),
+                      "gap": round(gap, 2), "nights_to_target": nights_to, "empty": len(empties),
+                      "next_empty": empties[0] if empties else "",
+                      "night_value": round(typical * rate, 2),
+                      "reachable": bool(u["target"] > 0 and rate > 0 and empties
+                                        and (u["over"] > 0 or nights_to <= len(empties)))})
+    # «أقرب فلوس»: units already above their target first (every extra night pays today),
+    # then the ones the fewest nights away.
+    hot = sorted((u for u in units if u["reachable"]),
+                 key=lambda u: (0, -u["night_value"]) if u["over"] > 0 else (1, u["nights_to_target"]))
+    wins = _wins(employee, sheet, month_key, today, mult) if live else []
+    n_today, run = _streak(employee, today) if live else (0, 0)
+    record = my_record(employee, month_key, today)
+    return {"live": live, "amount": (row or {}).get("paid", 0.0),
+            "potential": round(max(potential, (row or {}).get("paid", 0.0)), 2),
+            "nearest": [u["unit"] for u in hot[:3]], "units": units,
+            "mission": {"goal": MISSION_GOAL, "today": n_today, "streak": run},
+            "wins": wins, "record": record}
+
+
+def _wins(employee, sheet, month_key, today, mult):
+    """Bookings that landed on my apartments in the last days, and what each added to MY month.
+    Bookings are taken in the order they were made: the one that crosses the target earns only
+    on its part above it, so the amounts add up to exactly what the apartment pays."""
+    mine = {u["unit"]: u for u in sheet["units"] if u["employee"] == employee}
+    if not mine:
+        return []
+    start, end = engine.month_bounds(month_key)
+    since = (today - dt.timedelta(days=WIN_DAYS)).isoformat()
+    marks = ",".join("?" * len(mine))
+    rows = db.q("SELECT unit, guest_name, arrival, departure, total, created, status FROM tg_res "
+                "WHERE unit IN (%s) AND arrival<? AND departure>? AND status IN ('new','modified') "
+                "ORDER BY created, arrival" % marks,
+                tuple(mine) + (end.isoformat(), start.isoformat()))
+    so_far, out = {}, []
+    for r in rows:
+        u = mine[r["unit"]]
+        part = engine.revenue_in_month([r], month_key)
+        before = so_far.get(r["unit"], 0.0)
+        so_far[r["unit"]] = before + part
+        if part <= 0 or str(r["created"] or "")[:10] < since:
+            continue
+        rate = 0.0 if u["rating_blocked"] else float(u.get("rate") or 0.0) * mult
+        gain = 0.0
+        if u["target"] > 0:
+            gain = (max(0.0, before + part - u["target"]) - max(0.0, before - u["target"])) * rate
+        nights = (dt.date.fromisoformat(r["departure"]) - dt.date.fromisoformat(r["arrival"])).days
+        out.append({"unit_name": u["name"], "guest": (str(r["guest_name"] or "").split() or ["ضيف"])[0],
+                    "nights": nights, "created": str(r["created"])[:10], "mine": round(gain, 2)})
+    out.sort(key=lambda w: w["created"], reverse=True)
+    return out[:5]
+
+
+def my_record(employee, month_key, today):
+    """My last months: what I earned in each. An approved month reads its frozen sheet."""
+    out = []
+    for mk in history.month_keys(history.shift_month(month_key, -(RECORD_MONTHS - 1)), RECORD_MONTHS):
+        if mk > score.month_of(today):
+            continue
+        sh = month_sheet(mk, today)
+        row = next((r for r in sh["employees"] if r["employee"] == employee), None)
+        if not row and not sh["approved_quarter"]:
+            continue
+        out.append({"month": mk, "amount": (row or {}).get("paid", 0.0), "final": bool(sh["approval"])})
+    best = max(out, key=lambda x: x["amount"]) if out else None
+    return {"months": out, "earned": round(sum(x["amount"] for x in out), 2),
+            "best": best if best and best["amount"] > 0 else None}
 
 
 def team_activity(month_key, today=None):
