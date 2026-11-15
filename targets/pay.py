@@ -119,6 +119,8 @@ def _compute(month_key, today):
         prizes += prize
         mine = [u for u in units if u["employee"] == emp]
         employees.append({"employee": emp, "units": len(mine),
+                          "revenue": round(sum(u["revenue"] for u in mine), 2),
+                          "target": round(sum(u["target"] for u in mine), 2),
                           "above": sum(1 for u in mine if u["over"] > 0),
                           "over": round(sum(u["over"] for u in mine), 2),
                           "raw": round(raw[emp], 2), "multiplier": round(mult, 4),
@@ -314,10 +316,14 @@ def team_activity(month_key, today=None):
     """For the operations manager: counts only — no money."""
     sheet = month_sheet(month_key, today)
     start, end = engine.month_bounds(month_key)
-    contacts = {}
+    day = (today or HOST.require("now")().date()).isoformat()
+    contacts, now = {}, {}
     for c in db.contacts(since=start.isoformat(), until=end.isoformat()):
         contacts[c["employee"]] = contacts.get(c["employee"], 0) + 1
+        if c["at"][:10] == day:
+            now[c["employee"]] = now.get(c["employee"], 0) + 1
     return [{"employee": r["employee"], "contacts": contacts.get(r["employee"], 0),
+             "today": now.get(r["employee"], 0),
              "above": r["above"], "units": r["units"]} for r in sheet["employees"]]
 
 

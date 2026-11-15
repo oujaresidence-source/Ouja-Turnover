@@ -426,8 +426,41 @@
 
   function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (String(v) === String(sel) ? ' selected' : '') + '>' + esc(label) + '</option>'; }
 
+  /* The owner's board: who is where, in one look — the first thing on «الإدارة». */
+  function ownerBoard(d) {
+    var s = d.sheet || {}, emps = arr(s.employees).slice().sort(function (a, b) { return (a.rank || 99) - (b.rank || 99); });
+    var act = {}, g = s.team_goal || {}, top = 0, mgr = d.mine || {}, winners = (s.prize && s.prize.winners) || [];
+    arr(d.activity).forEach(function (a) { act[a.employee] = a; });
+    emps.forEach(function (e) { top = Math.max(top, Number(e.pct) || 0); });
+    var h = '<div class="tg-day" style="max-width:none;margin-bottom:18px"><div class="tg-hero"><p>' + esc(T('لوحة المالك — ', 'Owner’s board — ')) + esc(monName(s.month || d.month)) +
+      (s.approval ? esc(T(' · معتمد', ' · approved')) : s.closed ? esc(T(' · الشهر خلص، ينتظر اعتمادك', ' · month ended, waiting for your approval')) : esc(T(' · الشهر شغّال', ' · month running'))) + '</p>' +
+      '<div class="big">' + num(Math.round(s.total_paid || 0).toLocaleString('en-US')) + '<small>' + esc(T('ر.س ينصرف للحين (الفريق + المديرة + الجائزة)', 'SAR to pay so far (team + manager + prize)')) + '</small></div>' +
+      '<div class="tg-chips">' +
+      '<span>' + esc(T('دخل الشقق ', 'Revenue ')) + '<b>' + sar(s.revenue) + '</b></span>' +
+      '<span>' + esc(T('فوق الأهداف ', 'Above targets ')) + '<b>' + sar(s.over) + '</b></span>' +
+      '<span>' + esc(T('شقق فوق هدفها ', 'Units above target ')) + '<b>' + num((g.above || 0) + ' / ' + (g.units || 0)) + '</b> (' + pct(g.rate) + ')</span>' +
+      (mgr.is_set ? '<span>' + esc(T('حسبة المديرة ', 'Manager ')) + '<b>' + sar(mgr.amount) + '</b></span>' : '') +
+      '</div></div>';
+    var b = '';
+    if (!emps.length) b = '<p class="tg-note" style="margin:14px 0">' + esc(T('ما فيه أهداف معتمدة لهالشهر.', 'No approved targets for this month.')) + '</p>';
+    emps.forEach(function (e) {
+      var a = act[e.employee] || {}, won = winners.indexOf(e.employee) >= 0;
+      b += '<div class="tg-race' + (e.rank === 1 ? ' p1' : '') + '"><span class="pl">' + num(e.rank || '—') + '</span>' +
+        '<span class="who">' + esc(e.employee) + (won ? '<span class="tg-st gold">' + esc(T('الجائزة', 'Prize')) + '</span>' : '') + '</span>' +
+        '<span class="pc">' + pct(e.pct) + '</span>' +
+        '<div class="tg-meter"><i style="width:' + (top > 0 ? Math.round(100 * e.pct / top) : 0) + '%"></i></div>' +
+        '<span class="tg-sub" style="grid-column:2 / 4;margin:0">' + sar(e.revenue) + ' ' + esc(T('من هدف', 'of target')) + ' ' + sar(e.target) +
+        ' · ' + esc(T('شقق فوق هدفها ', 'above target ')) + num(e.above + ' / ' + e.units) +
+        ' · ' + esc(T('رسائل: اليوم ', 'messages: today ')) + num(a.today || 0) + esc(T('، الشهر ', ', month ')) + num(a.contacts || 0) +
+        ' · ' + esc(T('عمولته ', 'commission ')) + '<b style="color:var(--text)">' + sar(e.commission != null ? e.commission : e.paid) + '</b></span></div>';
+    });
+    h += sx(T('ترتيب الفريق', 'Team standing'), esc(T('النسبة = دخل شققه ÷ أهدافها. الأول ياخذ ', 'Share = his units’ revenue ÷ their targets. First takes ')) + '<b style="color:var(--text)">' + sar((s.prize || {}).amount) + '</b>', b,
+      esc(T('الأرقام تتحدث مع كل حجز. العمولة والجائزة تثبت بعد نهاية الشهر واعتمادك.', 'Figures move with every booking. Commission and prize are fixed after month end and your approval.')));
+    return h + '</div>';
+  }
+
   function adminView(d) {
-    var f = d.flags || {}, h = '', sy = (d.seed && d.seed.sync) || {};
+    var f = d.flags || {}, h = ownerBoard(d), sy = (d.seed && d.seed.sync) || {};
     /* 1 — status + seed */
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('الحالة', 'Status')) + '</div><div class="tg-row">' +
       '<span class="tg-st">' + esc(T('من ينتصل عليهم: ', 'Callable: ')) + esc(arr(f.channels).join(' + ')) + '</span>' +

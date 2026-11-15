@@ -258,6 +258,7 @@ def admin_payload(month_key, quarter, today):
         "quarter_state": score.quarter_state(quarter), "targets": db.targets(quarter),
         "sheet": pay.month_sheet(month_key, today),
         "notes": pay.team_notes(month_key, today),
+        "activity": pay.team_activity(month_key, today), "mine": pay.manager_view(month_key, today),
         # What the WhatsApp messages added, contacted vs the hidden group: counts only, and it
         # no longer decides anyone's pay — it tells the owner whether the client book works.
         "measure": money.month_sheet(month_key, today)["measure"],

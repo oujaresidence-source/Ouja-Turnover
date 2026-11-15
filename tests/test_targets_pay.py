@@ -371,7 +371,7 @@ class WhatAnEmployeeSees(PayCase):
         self.sell("102", 7700.0)
         self.close()
         rows = pay.team_activity("2026-10", self.today())
-        self.assertEqual(set(rows[0]), {"employee", "contacts", "above", "units"})
+        self.assertEqual(set(rows[0]), {"employee", "contacts", "today", "above", "units"})
 
 
 if __name__ == "__main__":

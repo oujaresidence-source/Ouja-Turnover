@@ -201,7 +201,7 @@ class EmployeeSeesOwnOnly(RCase):
         self.money_scenario()
         data, status = self.call(routes._safe(routes.api_team), Req("u_nora", "ops", query={"month": "2026-11"}))
         self.assertEqual(status, 200)
-        self.assertEqual(set(data["activity"][0]), {"employee", "contacts", "above", "units"})
+        self.assertEqual(set(data["activity"][0]), {"employee", "contacts", "today", "above", "units"})
         self.assertFalse(keys_of(data) & {"pool", "holdout", "fee_pct", "avg_fee", "raw", "paid", "measure"})
 
 
