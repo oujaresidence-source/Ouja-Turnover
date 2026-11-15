@@ -294,7 +294,8 @@ class ContactIsLoggedNotTyped(Case):
         lst = book.public_items(book.call_list(NORA, self.today()))
         self.assertTrue(lst["items"])
         for it in lst["items"]:
-            self.assertEqual(set(it), {"g", "name", "reason", "unit", "unit_name", "night", "stays", "score"})
+            self.assertEqual(set(it), {"g", "name", "reason", "unit", "unit_name", "night", "stays", "score", "last"})
+            self.assertEqual(set(it["last"]), {"booking", "arrival", "departure", "nights", "channel", "unit_name"})
             self.assertIn("سكن عندك", it["reason"])
             self.assertNotIn(" ", it["name"])                    # first name only
 

@@ -284,19 +284,28 @@ def employees(quarter=None):
 
 
 def rescue(month_key, today):
-    """Units behind bronze this month — the operations manager's list (day 10 and day 20)."""
+    """The apartments farthest from their REVENUE target this month, with empty nights still
+    to sell — the operations manager's list (frozen on day 10 and day 20).
+
+    It used to list units "behind bronze" on the old weighted occupancy, where a night sold
+    under the price floor counts as nothing: once floors were set, most units read 0% and every
+    row said «واقفة بسبب السعر». That measure no longer pays anyone; this one does."""
+    start, end = engine.month_bounds(month_key)
+    days = (end - start).days
     out = []
     for r in db.targets(quarter_of(month_key)):
-        if r["status"] != "approved":
+        if r["status"] != "approved" or not float(r.get("rev_target") or 0) > 0:
             continue
-        line = _unit_line(r["unit"], r["name"], month_key, today, r)
-        if line.get("excluded") or line.get("tier"):
+        target = engine.month_target(float(r["rev_target"]), days, blocked_count(r["unit"], month_key))
+        revenue = unit_revenue(r["unit"], month_key)
+        if target <= 0 or revenue >= target:
             continue
+        empties = empty_nights(r["unit"], max(start, today), end) if today < end else []
         out.append({"unit": r["unit"], "name": r["name"], "employee": r["employee"] or "",
-                    "occupancy": line["occupancy"], "bronze": line["bronze"],
-                    "to_bronze": line["to_bronze"], "empty": line["empty"],
-                    "price_stuck": line["below_floor"] > 0, "below_floor": line["below_floor"]})
-    out.sort(key=lambda x: (-x["to_bronze"], x["name"] or ""))
+                    "revenue": round(revenue), "target": round(target),
+                    "gap": round(target - revenue), "pct": round(revenue / target, 4),
+                    "empty": len(empties)})
+    out.sort(key=lambda x: (x["pct"], x["name"] or ""))
     return out
 
 

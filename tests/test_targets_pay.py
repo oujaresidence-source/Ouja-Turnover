@@ -25,7 +25,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from targets import db, engine, pay, score                 # noqa: E402
+from targets import book, db, engine, pay, score           # noqa: E402
 from targets.host import HOST                              # noqa: E402
 from tests.test_targets_flow import AHOOD, NORA, Case, D   # noqa: E402
 
@@ -438,3 +438,43 @@ class MyDay(PayCase):
         d = pay.my_day(NORA, "2026-10", self.today())
         self.assertFalse(d["live"])
         self.assertEqual(d["wins"], [])
+
+
+class RescueByRevenue(PayCase):
+    """The manager's rescue list is on the measure that pays: revenue against the target.
+    (2026-11-15: on the old weighted occupancy every row read 0% and «واقفة بسبب السعر».)"""
+
+    def test_worst_first_and_only_units_under_their_target(self):
+        self.sell("102", 7700.0)                                       # A2 is above: not on the list
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        rows = score.rescue("2026-10", self.today())
+        self.assertEqual({r["name"] for r in rows}, {"A1", "B1"})
+        self.assertEqual(rows, sorted(rows, key=lambda r: r["pct"]))
+        for r in rows:
+            self.assertEqual(set(r), {"unit", "name", "employee", "revenue", "target", "gap", "pct", "empty"})
+            self.assertEqual(r["gap"], r["target"] - r["revenue"])
+            self.assertLess(r["pct"], 1.0)
+
+    def test_a_unit_with_no_revenue_target_is_not_listed(self):
+        db.execute("UPDATE tg_targets SET rev_target=0 WHERE quarter='2026-Q4' AND unit='201'")
+        self.clock = datetime.datetime(2026, 10, 30, 10, 0)
+        self.assertNotIn("B1", [r["name"] for r in score.rescue("2026-10", self.today())])
+
+
+class LastBooking(PayCase):
+    """Each guest on the list carries the booking they last had with us, so the employee can
+    open it in Hostaway and read the conversation before writing."""
+
+    def test_the_last_finished_stay_and_its_number(self):
+        self.clock = datetime.datetime(2026, 11, 15, 10, 0)
+        rid = self.res("102", self.phone(3), "ضيف3 فلان", "2026-09-10", "2026-09-13", channel="airbnb")
+        items = book.call_list(NORA, self.today(), limit=0)["items"]
+        it = next(i for i in items if i["_key"] == engine.phone_key(self.phone(3)))
+        self.assertEqual(it["last"], {"booking": rid, "arrival": "2026-09-10", "departure": "2026-09-13",
+                                      "nights": 3, "channel": "airbnb", "unit_name": "A2"})
+        pub = book.public_items({"items": [it]})["items"][0]
+        self.assertNotIn("_key", pub)
+        self.assertFalse({"phone", "phone_key", "res_id"} & set(pub["last"]))
+
+    def test_no_past_stay_no_booking(self):
+        self.assertIsNone(book.last_stay([]))

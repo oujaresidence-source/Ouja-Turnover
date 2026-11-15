@@ -208,11 +208,13 @@
     if (!guests.length) {
       h += '<span class="tg-sub">' + esc(T('ما فيه ضيف مناسب لها اليوم بالقائمة. افتح «دفتر العملاء» أو ارجع بكرة.', 'No matching guest for it today. Open the client book or come back tomorrow.')) + '</span>';
     }
+    h += '</div>';
     guests.forEach(function (it) {
-      h += '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
-        '<button type="submit" class="tg-btn wa">' + esc(T('راسل ', 'Message ')) + esc(it.name) + '</button></form>';
+      h += '<div class="tg-call" style="padding:10px 0"><div><b>' + esc(it.name) + '</b>' + lastStay(it) + '</div>' +
+        '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
+        '<button type="submit" class="tg-btn wa">' + esc(T('راسل ', 'Message ')) + esc(it.name) + '</button></form></div>';
     });
-    return h + '</div></div>';
+    return h + '</div>';
   }
 
   function sx(title, hint, body, foot) {
@@ -334,17 +336,33 @@
 
   /* ---------------------------------------------------------------- الفريق (manager) */
 
+  /* The apartments farthest from their revenue target, worst first. (An older shape of this
+     list, saved before 2026-11-15, carried occupancy instead: those rows are skipped.) */
   function rescueTable(rows) {
-    if (!arr(rows).length) return '<p class="tg-note">' + esc(T('ما فيه شقق متأخرة عن البرونزي.', 'No units behind bronze.')) + '</p>';
-    var h = '<div class="tg-wrap"><table class="tg-t"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) +
-      '</th><th>' + esc(T('الإشغال', 'Occupancy')) + '</th><th>' + esc(T('البرونزي', 'Bronze')) + '</th><th>' + esc(T('باقي', 'To go')) +
-      '</th><th>' + esc(T('ملاحظة', 'Note')) + '</th></tr></thead><tbody>';
-    arr(rows).forEach(function (r) {
-      h += '<tr><td><b>' + nm(r.name) + '</b></td><td>' + esc(r.employee || '—') + '</td><td>' + pct(r.occupancy) + '</td><td>' + pct(r.bronze) +
-        '</td><td>' + num(r.to_bronze) + ' ' + esc(T('ليلة', 'nights')) + '</td><td>' +
-        (r.price_stuck ? '<span class="tg-st bad">' + esc(T('واقفة بسبب السعر — ارفعها لمسؤول التسعير', 'Stuck on price — raise with pricing')) + '</span>' : '') + '</td></tr>';
+    rows = arr(rows).filter(function (r) { return r.target > 0; });
+    if (!rows.length) return '<p class="tg-note">' + esc(T('ما فيه شقق تحت هدفها.', 'No units under their target.')) + '</p>';
+    var h = '<div class="tg-wrap"><table class="tg-t stack"><thead><tr><th>' + esc(T('الشقة', 'Unit')) + '</th><th>' + esc(T('الموظف', 'Employee')) +
+      '</th><th>' + esc(T('دخلها من هدفها', 'Revenue vs target')) + '</th><th>' + esc(T('باقي للهدف', 'Left to target')) +
+      '</th><th>' + esc(T('ليالي فاضية', 'Empty nights')) + '</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      h += '<tr><td><b>' + nm(r.name) + '</b></td><td>' + esc(r.employee || '—') + '</td>' +
+        '<td>' + pct(r.pct) + ' <span class="tg-sub">' + sar(r.revenue) + ' ' + esc(T('من', 'of')) + ' ' + sar(r.target) + '</span>' +
+        '<div class="tg-meter"><i style="width:' + Math.min(100, Math.round(100 * r.pct)) + '%"></i></div></td>' +
+        '<td>' + sar(r.gap) + '</td><td>' + (r.empty ? num(r.empty) : '<span class="tg-sub">' + esc(T('ما باقي ليالي', 'none left')) + '</span>') + '</td></tr>';
     });
     return h + '</tbody></table></div>';
+  }
+
+  /* The guest's last booking with us: the number an employee searches in Hostaway to read the
+     conversation before writing. */
+  function lastStay(it) {
+    var l = it && it.last;
+    if (!l || !l.booking) return '';
+    return '<span class="tg-sub">' + esc(T('آخر سكن: ', 'Last stay: ')) + nm(l.unit_name || '—') + ' · ' + num(day(l.arrival)) + ' ← ' + num(day(l.departure)) +
+      ' · ' + nights(l.nights) + (l.channel ? ' · ' + esc(l.channel) : '') + '</span>' +
+      '<span class="tg-sub">' + esc(T('رقم الحجز: ', 'Booking no.: ')) + '<a href="https://dashboard.hostaway.com/reservations/' + encodeURIComponent(l.booking) +
+      '" target="_blank" rel="noopener" style="color:var(--gold);font-weight:700">' + num(l.booking) + '</a>' +
+      esc(T(' — اضغطه يفتح الحجز والمحادثة في Hostaway', ' — tap to open the booking and conversation in Hostaway')) + '</span>';
   }
 
   /* Rating notes: the employee says the low rating was not theirs; the supervisor decides once. */
@@ -395,7 +413,7 @@
     });
     h += '</tbody></table></div></div>';
     h += '<div class="tg-box"><div class="tg-h">' + esc(T('قائمة الإنقاذ', 'Rescue list')) +
-      '<span class="tg-sub">' + esc(T('الشقق المتأخرة عن البرونزي هالشهر. تنحفظ نسخة يوم 10 ويوم 20.', 'Units behind bronze this month. A copy is saved on day 10 and day 20.')) + '</span></div>';
+      '<span class="tg-sub">' + esc(T('أبعد الشقق عن هدف دخلها هالشهر، الأبعد أول. تنحفظ نسخة يوم 10 ويوم 20.', 'The units farthest from their revenue target this month, worst first. A copy is saved on day 10 and day 20.')) + '</span></div>';
     if (d.quarter_state !== 'approved') h += '<p class="tg-note">' + esc(T('أهداف الربع ما اعتمدت، فالقائمة فاضية.', 'Quarter targets are not approved, so the list is empty.')) + '</p>';
     h += rescueTable(d.rescue) + '</div>';
     arr(d.snapshots).forEach(function (s) {
@@ -728,7 +746,7 @@
     }
     arr(L.items).forEach(function (it) {
       h += '<div class="tg-call"><div><b>' + esc(it.name) + '</b><span class="tg-sub">' + esc(it.reason) + '</span>' +
-        '<span class="tg-sub">' + nm(it.unit_name) + ' · ' + esc(T('فاضية يوم ', 'empty on ')) + num(day(it.night)) + ' · ' + esc(T('سكن ', 'stayed ')) + num(it.stays) + ' ' + esc(T('مرة', 'times')) + '</span></div>' +
+        '<span class="tg-sub">' + nm(it.unit_name) + ' · ' + esc(T('فاضية يوم ', 'empty on ')) + num(day(it.night)) + ' · ' + esc(T('سكن ', 'stayed ')) + num(it.stays) + ' ' + esc(T('مرة', 'times')) + '</span>' + lastStay(it) + '</div>' +
         '<form method="POST" action="' + esc(action) + '" target="_blank" rel="noopener" data-tg-form="wa"><input type="hidden" name="g" value="' + esc(it.g) + '">' +
         '<button type="submit" class="tg-btn wa">' + esc(T('واتساب', 'WhatsApp')) + '</button></form></div>';
     });

@@ -236,6 +236,7 @@ def call_list(employee, today, limit=40):
     if not open_units:
         return {"open_units": 0, "open_nights": 0, "items": []}
     vip = set(HOST.call("vip_keys", set()) or ())
+    names = history.unit_names()
     items = []
     for g, past in pool(today):
         r = _rank(g, past, open_units, today, vip)
@@ -244,11 +245,24 @@ def call_list(employee, today, limit=40):
         pts, why, unit, night = r
         items.append({"g": token(g["key"]), "name": first_name(g["name"]), "reason": why,
                       "unit": unit, "unit_name": open_units[unit]["name"], "night": night,
-                      "stays": len(past), "score": pts, "_key": g["key"]})
+                      "stays": len(past), "score": pts, "_key": g["key"],
+                      "last": last_stay(past, names)})
     items.sort(key=lambda x: (-x["score"], x["name"]))
     return {"open_units": len(open_units),
             "open_nights": sum(len(o["nights"]) for o in open_units.values()),
             "items": items[:limit] if limit else items}
+
+
+def last_stay(past, names=None):
+    """The guest's most recent finished stay: the booking an employee opens in Hostaway to
+    read the conversation before writing. None when there is none."""
+    if not past:
+        return None
+    s = max(past, key=lambda x: (x["departure"], x["arrival"]))
+    nights = (dt.date.fromisoformat(s["departure"]) - dt.date.fromisoformat(s["arrival"])).days
+    return {"booking": str(s["res_id"]), "arrival": s["arrival"], "departure": s["departure"],
+            "nights": nights, "channel": s.get("channel") or "",
+            "unit_name": (names or {}).get(s["unit"]) or s.get("listing_name") or ""}
 
 
 def public_items(lst):
