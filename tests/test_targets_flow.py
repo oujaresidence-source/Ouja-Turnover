@@ -470,6 +470,39 @@ class Scoreboard(Case):
         score.propose("2026-Q4", self.today())
         self.assertEqual(db.target("2026-Q4", "102")["employee"], NORA)  # the board does not
 
+    def test_a_unit_with_no_floor_gets_a_suggested_one_from_its_own_history(self):
+        """2026-11-15: every floor showed 0 because none is set anywhere in the system."""
+        s, _ = engine.month_bounds("2026-08")
+        for i, price in enumerate([200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]):
+            a = s + datetime.timedelta(days=i)
+            self.res("102", "", "", a.isoformat(), (a + datetime.timedelta(days=1)).isoformat(), total=price)
+        r = {x["unit"]: x for x in score.propose("2026-Q4", self.today())}["102"]
+        self.assertEqual(r["floor_suggested"], 200)                 # nine nights in ten sold above it
+        self.assertEqual(r["floor"], 200)
+        self.assertEqual(r["ceiling_suggested"], 900)
+        self.assertGreater(r["ceiling"], r["floor"])
+        db.edit_target("2026-Q4", "102", 350, 900)                  # the owner types his own
+        r = {x["unit"]: x for x in score.propose("2026-Q4", self.today())}["102"]
+        self.assertEqual((r["floor"], r["floor_suggested"]), (350, 200))   # recompute keeps it
+        HOST.floor = lambda lid: 275                                # a floor set in the pricing engine wins
+        db.execute("DELETE FROM tg_targets")
+        r = {x["unit"]: x for x in score.propose("2026-Q4", self.today())}["102"]
+        self.assertEqual((r["floor"], r["floor_suggested"]), (275, 200))
+
+    def test_unit_with_no_history_has_no_invented_floor(self):
+        r = {x["unit"]: x for x in score.propose("2026-Q4", self.today())}["201"]
+        self.assertEqual((r["floor"], r["floor_suggested"], r["ceiling"]), (0, 0, 0))
+
+    def test_an_older_table_gains_the_new_column(self):
+        db.execute("DROP TABLE tg_targets")
+        db.execute("CREATE TABLE tg_targets (quarter TEXT NOT NULL, unit TEXT NOT NULL, name TEXT, "
+                   "employee TEXT, baseline REAL, bronze REAL, silver REAL, gold REAL, floor REAL, "
+                   "ceiling REAL, ceiling_suggested REAL, typical REAL, basis TEXT, status TEXT, "
+                   "approved_by TEXT, approved_at TEXT, PRIMARY KEY (quarter, unit))")
+        db.reset_init_cache()
+        self.assertEqual(len(score.propose("2026-Q4", self.today())), 3)
+        self.assertIn("floor_suggested", db.targets("2026-Q4")[0])
+
     def test_baseline_rises_at_most_two_points_a_quarter(self):
         self.fill("102", "2026-04", 6)
         self.fill("102", "2026-05", 6)

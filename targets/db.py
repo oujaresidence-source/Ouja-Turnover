@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS tg_targets (
     floor       REAL,
     ceiling     REAL,
     ceiling_suggested REAL,
+    floor_suggested REAL,
     typical     REAL,
     basis       TEXT,
     status      TEXT,                    -- proposed | approved
@@ -160,8 +161,17 @@ def _ensure():
             return
         with closing(_bdb.connect()) as cx:
             cx.executescript(SCHEMA)
+            _migrate(cx)
             cx.commit()
         _inited.add(path)
+
+
+def _migrate(cx):
+    """Additive columns for a tg_* table that already exists (CREATE TABLE IF NOT EXISTS does
+    not add a column to a live table)."""
+    have = {r[1] for r in cx.execute("PRAGMA table_info(tg_targets)").fetchall()}
+    if "floor_suggested" not in have:
+        cx.execute("ALTER TABLE tg_targets ADD COLUMN floor_suggested REAL")
 
 
 def reset_init_cache():
@@ -348,16 +358,18 @@ def save_proposals(quarter, rows):
                 continue
             cx.execute(
                 "INSERT INTO tg_targets(quarter,unit,name,employee,baseline,bronze,silver,gold,"
-                "floor,ceiling,ceiling_suggested,typical,basis,status) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed') "
+                "floor,ceiling,ceiling_suggested,floor_suggested,typical,basis,status) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'proposed') "
                 "ON CONFLICT(quarter,unit) DO UPDATE SET name=excluded.name, "
                 "employee=excluded.employee, baseline=excluded.baseline, bronze=excluded.bronze, "
                 "silver=excluded.silver, gold=excluded.gold, floor=excluded.floor, "
-                "ceiling_suggested=excluded.ceiling_suggested, typical=excluded.typical, "
+                "ceiling_suggested=excluded.ceiling_suggested, "
+                "floor_suggested=excluded.floor_suggested, typical=excluded.typical, "
                 "basis=excluded.basis",
                 (quarter, r["unit"], r.get("name"), r.get("employee"), r.get("baseline"),
                  r.get("bronze"), r.get("silver"), r.get("gold"), r.get("floor"),
-                 r.get("ceiling"), r.get("ceiling_suggested"), r.get("typical"), r.get("basis")))
+                 r.get("ceiling"), r.get("ceiling_suggested"), r.get("floor_suggested"),
+                 r.get("typical"), r.get("basis")))
 
 
 def edit_target(quarter, unit, floor, ceiling):

@@ -233,8 +233,8 @@
       arr(d.employees).forEach(function (e) { sel += opt(e, e, u.employee); });
       h += '<div class="tg-call"><b>' + esc(u.name) + '</b>' + sel + '</select></div>';
     });
-    var ms = '<select class="tg-in" data-tg-change="manager">' + opt('', T('— ما تحدد —', '— not set —'), d.manager);
-    arr(d.employees).forEach(function (e) { ms += opt(e, e, d.manager); });
+    var ms = '<select class="tg-in" data-tg-change="manager">' + opt('', T('— ما تحدد —', '— not set —'), d.manager_user || '');
+    arr(d.users).forEach(function (u) { ms += opt(u.id, u.name, d.manager_user || ''); });
     h += '<div class="tg-call"><b>' + esc(T('مدير التشغيل', 'Operations manager')) + '</b>' + ms + '</select></div></div>';
 
     /* 4 — quarter targets */
@@ -254,7 +254,8 @@
         var ed = t.status === 'proposed';
         h += '<tr><td><b>' + nm(t.name) + '</b>' + (t.basis === 'peers' ? '<span class="tg-sub">' + esc(T('شقة جديدة — من متوسط شقق مثلها', 'New unit — from similar units')) + '</span>' : '') +
           '</td><td>' + esc(t.employee || '—') + '</td><td>' + pct(t.baseline) + '</td><td>' + pct(t.bronze) + ' / ' + pct(t.silver) + ' / ' + pct(t.gold) + '</td>' +
-          '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="floor" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.floor || 0)) + '">' : num(Math.round(t.floor || 0))) + '</td>' +
+          '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="floor" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.floor || 0)) + '">' : num(Math.round(t.floor || 0))) +
+          '<span class="tg-sub">' + esc(T('المقترح: ', 'Suggested: ')) + num(Math.round(t.floor_suggested || 0)) + '</span></td>' +
           '<td>' + (ed ? '<input class="tg-in n" inputmode="numeric" data-f="ceiling" data-unit="' + esc(t.unit) + '" value="' + esc(Math.round(t.ceiling || 0)) + '">' : num(Math.round(t.ceiling || 0))) +
           '<span class="tg-sub">' + esc(T('المقترح: ', 'Suggested: ')) + num(Math.round(t.ceiling_suggested || 0)) + '</span></td>' +
           '<td>' + (ed ? '<button class="tg-btn sm" data-tg="unit" data-unit="' + esc(t.unit) + '">' + esc(T('احفظ', 'Save')) + '</button>' : '<span class="tg-st ok">' + esc(T('معتمد', 'Approved')) + '</span>') + '</td></tr>';
@@ -362,7 +363,7 @@
       S.me = d;
       S.month = d.month || S.month || new Date().toISOString().slice(0, 7);
       /* The owner is not an employee: their first view is «الإدارة», not an empty «صفحتي». */
-      if (!S.opened) { S.opened = true; if (d.is_admin && !d.linked) S.pane = 'admin'; }
+      if (!S.opened) { S.opened = true; if (!d.linked) S.pane = d.is_admin ? 'admin' : (d.is_manager ? 'team' : 'me'); }
       if (S.pane === 'admin' && !d.is_admin) S.pane = 'me';
       if (S.pane === 'team' && !(d.is_admin || d.is_manager)) S.pane = 'me';
       if (S.pane === 'admin') {
@@ -443,7 +444,7 @@
     if (!el) return;
     var a = el.getAttribute('data-tg-change');
     if (a === 'link') act('/api/targets/admin/link', { user_id: el.getAttribute('data-user'), employee: el.value });
-    else if (a === 'manager') act('/api/targets/admin/manager', { name: el.value });
+    else if (a === 'manager') act('/api/targets/admin/manager', { user_id: el.value });
   }
 
   function uploadSeed(btn) {

@@ -78,8 +78,13 @@ def employee_of(request):
 
 
 def is_manager(request):
-    emp = employee_of(request)
-    return bool(emp) and emp == db.setting("manager")
+    """The operations manager is a LOGIN the owner picked — a supervisor has no apartments in
+    the Employee Calendar, so she cannot be found among its employees."""
+    try:
+        uid = str(HOST.user_id(request) if HOST.user_id else "")
+    except Exception:
+        uid = ""
+    return bool(uid) and uid == db.setting("manager_user")
 
 
 def _safe(fn):
@@ -244,6 +249,7 @@ def admin_payload(month_key, quarter, today):
         "listings": sorted(({"id": str(k), "name": v} for k, v in live.items()),
                            key=lambda x: x["name"] or ""),
         "users": users, "employees": score.employees(quarter), "manager": db.setting("manager"),
+        "manager_user": db.setting("manager_user"),
         "quarter_state": score.quarter_state(quarter), "targets": db.targets(quarter),
         "sheet": money.month_sheet(month_key, today),
         "rescue": score.rescue(month_key, today), "snapshots": db.rescues(month_key),
@@ -312,11 +318,18 @@ async def api_link(request):
 
 async def api_manager(request):
     b = await _body(request)
-    name = str(b.get("name") or "").strip()[:80]
+    uid = str(b.get("user_id") or "").strip()
+    name = ""
+    if uid:
+        user = next((u for u in (HOST.call("users", []) or []) if str(u.get("id")) == uid), None)
+        if user is None:
+            return _json({"ok": False, "error": "الحساب غير موجود"})
+        name = str(user.get("name") or "").strip()[:80]
     now = HOST.now().isoformat(timespec="seconds")
+    await _run(db.set_setting, "manager_user", uid, _actor(request), now)
     await _run(db.set_setting, "manager", name, _actor(request), now)
-    db.log("manager", now, _actor(request), {"name": name})
-    return _json({"ok": True})
+    db.log("manager", now, _actor(request), {"user_id": uid, "name": name})
+    return _json({"ok": True, "manager": name})
 
 
 async def api_seed_upload(request):

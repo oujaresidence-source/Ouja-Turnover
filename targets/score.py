@@ -70,8 +70,9 @@ def unit_month(unit, month_key, floor=0, typical=0):
 
 
 def price_stats(unit, asof):
-    """(typical, p75) nightly price over the year before `asof`, weighted by nights.
-    typical = the unit's average night; p75 = the suggested price ceiling."""
+    """(typical, p75, p10) nightly price over the year before `asof`, weighted by nights.
+    typical = the unit's average night; p75 = the suggested price ceiling; p10 = the suggested
+    price floor (nine nights in ten sold above it)."""
     lo, hi = (asof - dt.timedelta(days=365)).isoformat(), asof.isoformat()
     prices = []
     for r in data()[0].get(unit, []):
@@ -81,10 +82,11 @@ def price_stats(unit, asof):
         if n > 0 and (r["total"] or 0) > 0:
             prices.extend([float(r["total"]) / n] * n)
     if not prices:
-        return 0, 0
+        return 0, 0, 0
     prices.sort()
     p75 = prices[min(len(prices) - 1, int(math.ceil(0.75 * len(prices))) - 1)]
-    return int(round(sum(prices) / len(prices))), int(round(p75))
+    p10 = prices[max(0, int(math.ceil(0.10 * len(prices))) - 1)]
+    return int(round(sum(prices) / len(prices))), int(round(p75)), int(round(p10))
 
 
 def empty_nights(unit, start, end):
@@ -130,10 +132,15 @@ def propose(quarter, today):
     trailing = [history.shift_month(ref, -i) for i in (3, 2, 1)]
     asof = engine.month_bounds(ref)[0]
     prev = {r["unit"]: r for r in db.targets(prev_quarter(quarter)) if r["status"] == "approved"}
+    kept = {r["unit"]: float(r["floor"] or 0) for r in db.targets(quarter)}
     rows = []
     for u in owned_units():
-        floor = float(HOST.call("floor", 0, u["listing_id"]) or 0)
-        typical, p75 = price_stats(u["unit"], asof)
+        typical, p75, p10 = price_stats(u["unit"], asof)
+        # The floor, in order: what the owner already typed for this quarter; the floor set in
+        # the pricing engine; else a SUGGESTION from the unit's own history (it is only a
+        # proposal — the owner edits it before approving).
+        floor = (kept.get(u["unit"]) or float(HOST.call("floor", 0, u["listing_id"]) or 0)
+                 or float(p10))
 
         stays = data()[0].get(u["unit"], [])
         born = min((r["arrival"] for r in stays), default="9999")[:7]
@@ -152,8 +159,8 @@ def propose(quarter, today):
                  "last_year+recent" if any(x is not None for x in a) and any(x is not None for x in b)
                  else "recent" if any(x is not None for x in b) else "last_year")
         compound = (HOST.call("unit_meta", {}, u["listing_id"]) or {}).get("compound") or ""
-        rows.append(dict(u, floor=floor, typical=typical, ceiling_suggested=p75, base=base,
-                         basis=basis, compound=compound))
+        rows.append(dict(u, floor=floor, typical=typical, ceiling_suggested=p75,
+                         floor_suggested=p10, base=base, basis=basis, compound=compound))
     known = [r for r in rows if r["base"] is not None]
     for r in rows:
         if r["base"] is None:
@@ -186,7 +193,7 @@ def _unit_line(unit, name, month_key, today, target):
     floor = float((target or {}).get("floor") or 0) or float(HOST.call("floor", 0, lid) or 0)
     typical = float((target or {}).get("typical") or 0)
     if not typical:
-        typical = price_stats(unit, engine.month_bounds(month_key)[0])[0]
+        typical = price_stats(unit, engine.month_bounds(month_key)[0])[0]   # (typical, p75, p10)
     m = unit_month(unit, month_key, floor, typical)
     line = {"unit": unit, "name": name, "floor": int(floor), "has_target": bool(target),
             "ceiling": int((target or {}).get("ceiling") or 0)}

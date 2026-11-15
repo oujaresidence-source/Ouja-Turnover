@@ -186,7 +186,7 @@ class EmployeeSeesOwnOnly(RCase):
     def test_team_view_is_for_the_manager_and_the_owner(self):
         _, status = self.call(routes._safe(routes.api_team), self.nora)
         self.assertEqual(status, 403)
-        db.set_setting("manager", NORA)
+        db.set_setting("manager_user", "u_nora")
         self.money_scenario()
         data, status = self.call(routes._safe(routes.api_team), Req("u_nora", "ops", query={"month": "2026-11"}))
         self.assertEqual(status, 200)
@@ -218,7 +218,7 @@ class HoldoutNeverLeaves(RCase):
             for fn in (routes.api_me, routes.api_book_list):
                 data, _ = self.call(routes._safe(fn), req)
                 self.assertClean(data)
-        db.set_setting("manager", NORA)
+        db.set_setting("manager_user", "u_nora")
         data, _ = self.call(routes._safe(routes.api_team), Req("u_nora", "ops", query={"month": "2026-11"}))
         self.assertClean(data)
 
@@ -348,6 +348,54 @@ class ConsentAndSwitches(RCase):
         self.assertTrue(routes.nightly_due(dt.datetime(2026, 11, 15, 3, 30), "2026-11-14"))
         self.assertFalse(routes.nightly_due(dt.datetime(2026, 11, 15, 14, 0), "2026-11-15"))
 
+
+
+
+# ============================================================ the operations manager is a login
+
+class ManagerIsALogin(RCase):
+    """2026-11-15: the supervisor (Aseel) has no apartments in the Employee Calendar, so she
+    was missing from a list built from its employees. The manager is picked among LOGINS."""
+
+    def setUp(self):
+        super().setUp()
+        HOST.users = lambda: [{"id": "u_nora", "name": "Nora login", "role": "ops"},
+                              {"id": "u_aseel", "name": "Aseel", "role": "ops"}]
+        self.aseel = Req("u_aseel", "ops", query={"month": "2026-11"})
+
+    def pick(self, uid):
+        return self.call(routes._admin(routes.api_manager), Req("admin", "admin", body={"user_id": uid}))[0]
+
+    def test_a_login_with_no_apartments_can_be_the_manager(self):
+        self.assertEqual(self.call(routes._safe(routes.api_team), self.aseel)[1], 403)
+        self.assertEqual(self.pick("u_aseel"), {"ok": True, "manager": "Aseel"})
+        self.assertEqual((db.setting("manager_user"), db.setting("manager")), ("u_aseel", "Aseel"))
+        data, status = self.call(routes._safe(routes.api_team), self.aseel)
+        self.assertEqual(status, 200)
+        me, _ = self.call(routes._safe(routes.api_me), self.aseel)
+        self.assertEqual((me["is_manager"], me["linked"], me["is_admin"]), (True, False, False))
+        self.assertFalse(keys_of(me) & {"board", "money"})          # she has no page of her own
+        self.assertEqual(self.call(routes._admin(routes.api_admin), self.aseel)[1], 403)   # and no admin view
+        a, _ = self.call(routes._admin(routes.api_admin), Req("admin", "admin"))
+        self.assertEqual(a["manager_user"], "u_aseel")
+
+    def test_her_share_carries_her_name_and_comes_from_the_same_pool(self):
+        self.pick("u_aseel")
+        self.money_scenario()
+        sheet = money.month_sheet("2026-11", self.today())
+        self.assertEqual(sheet["manager"]["name"], "Aseel")
+        self.assertLessEqual(sheet["total_paid"], sheet["pool"])
+
+    def test_unknown_login_is_refused_and_empty_clears(self):
+        self.assertFalse(self.pick("u_ghost")["ok"])
+        self.pick("u_aseel")
+        self.assertTrue(self.pick("")["ok"])
+        self.assertEqual((db.setting("manager_user"), db.setting("manager")), ("", ""))
+        self.assertEqual(self.call(routes._safe(routes.api_team), self.aseel)[1], 403)
+
+    def test_being_linked_to_an_employee_is_not_what_makes_a_manager(self):
+        db.set_setting("manager", NORA)                              # the name alone opens nothing
+        self.assertEqual(self.call(routes._safe(routes.api_team), self.nora)[1], 403)
 
 
 # ============================================================ the sync job
