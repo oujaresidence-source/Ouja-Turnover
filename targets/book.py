@@ -30,12 +30,27 @@ _cache = {"v": None, "guests": {}}
 
 # ------------------------------------------------------------------ secrets / tokens
 
+_secret_memo = {}
+
+
 def _secret():
+    """The server's secret, read from the database ONCE per process.
+
+    It used to be read on every call — and it is called once per guest. With the callable
+    pool opened to every guest (5,700 of them) that was 8,000 database connections to build
+    one call list: under a second on a laptop, over 40 seconds on the live volume, which is
+    why «أهدافي» sat on «…» for the first employee who opened it (2026-11-15)."""
+    path = db.version()[0]
+    s = _secret_memo.get(path)
+    if s:
+        return s
     s = db.setting("holdout_secret")
     if not s:
         s = secrets.token_hex(16)
         db.set_setting("holdout_secret", s, "system", "")
         s = db.setting("holdout_secret")      # two racers converge on whichever landed
+    _secret_memo.clear()
+    _secret_memo[path] = s
     return s
 
 
