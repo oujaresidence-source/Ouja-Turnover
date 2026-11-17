@@ -419,6 +419,16 @@ except Exception as _tg_err:            # pragma: no cover
     _targets = None
     _HAS_TARGETS = False
 
+# «عوجا فريق» /team — the employees' phone app. READ-ONLY: every input is a cache or a local
+# table, never a live Hostaway call. STAFF_ENABLED=0 removes /team. Additive.
+try:
+    import staff as _staff
+    _HAS_STAFF = bool(_staff.enabled())
+except Exception as _stf_err:           # pragma: no cover
+    print("[staff] import failed (team app disabled, bot unaffected):", _stf_err)
+    _staff = None
+    _HAS_STAFF = False
+
 # «طلبات سام» RR Desk — every RR-room message translated (AR⇄EN), Sam's requests tracked with an
 # owner, working-hour SLAs, a reminder ladder, and misses → ops warnings (money dry-run until
 # /rrdesk-warnings-on). Spec: docs/superpowers/specs/2026-10-24-rrdesk-design.md. Additive.
@@ -11346,6 +11356,33 @@ def _tg_wire():
         "fetch_window": fetch_reservations_window,      # never get_reservations_cached (trap #4)
         "calendar_days": fetch_calendar_days,
         "wa_url": _wa_send_url,
+    })
+    return True
+
+
+def _staff_wire():
+    if not _HAS_STAFF:
+        return False
+    _staff.wire({
+        "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor, "can": _user_can,
+        "employee_of": (_targets.routes.employee_of if _HAS_TARGETS else (lambda r: "")),
+        "is_manager": (_targets.routes.is_manager if _HAS_TARGETS else (lambda r: False)),
+        "has_targets": lambda: bool(_HAS_TARGETS),
+        "today_iso": lambda: now_riyadh().date().isoformat(),
+        "now_iso": lambda: now_riyadh().replace(tzinfo=None).isoformat(timespec="seconds"),
+        "json_response": _json, "web": web, "web_thread": web_thread,
+        # the day's inputs — caches and local tables ONLY (staff/gather.py)
+        "schedule_day": (_schedule.routes.schedule_day if _HAS_SCHEDULE else None),
+        "today_snapshot": lambda: _dash_cache.get("today"),
+        "listing_names": lambda: dict(_listings.get("map") or {}),
+        "catalog_units": lambda: list(_catalog_units),
+        "tickets": lambda: list(_tickets),
+        "promises": lambda: (_pk.db.open_rows() if _pk_enabled() else []),
+        "cleaning_reports": lambda: list(_cleaning_reports.values()),
+        "route_status": lambda: dict(_oujact_status_last),
+        "oncall_state": ((lambda: _oncall.routes.state_payload(now_riyadh())) if _HAS_ONCALL else None),
+        "pending_replies": lambda: len(_pending_replies),
+        "open_escalations": lambda: sum(1 for e in list(_escalations.values()) if not e.get("claimed_by")),
     })
     return True
 
@@ -26932,7 +26969,7 @@ const T = {
     urgent_esc:'تصعيد مفتوح', urgent_pending:'رد بانتظار مراجعتك', urgent_unsigned:'عقد غير موقّع · تشيك-إن قريب',
     urgent_age:'منذ', urgent_open:'افتح',
     refresh:'تحديث', theme:'المظهر', logout:'خروج',
-    pwaInstall:'تثبيت التطبيق', pwaInstalled:'تم تثبيت التطبيق ✓', pwaUpdate:'يوجد تحديث جديد لعوجا', pwaUpdateNow:'تحديث',
+    staffApp:'تطبيق الفريق (للجوال)', pwaInstall:'تثبيت التطبيق', pwaInstalled:'تم تثبيت التطبيق ✓', pwaUpdate:'يوجد تحديث جديد لعوجا', pwaUpdateNow:'تحديث',
     today_h:'اليوم', today_date_sub:'',
     rev_card:'الإيراد الشهري', recent_h:'آخر النشاط', seeall:'عرض الكل ←',
     inbox_sub:'كل الردود والتصعيدات في مكان واحد',
@@ -27261,7 +27298,7 @@ const T = {
     urgent_esc:'open escalation', urgent_pending:'pending reply', urgent_unsigned:'unsigned · check-in soon',
     urgent_age:'ago', urgent_open:'open',
     refresh:'Refresh', theme:'Theme', logout:'Logout',
-    pwaInstall:'Install app', pwaInstalled:'App installed ✓', pwaUpdate:'A new Ouja version is available', pwaUpdateNow:'Update',
+    staffApp:'Team app (phone)', pwaInstall:'Install app', pwaInstalled:'App installed ✓', pwaUpdate:'A new Ouja version is available', pwaUpdateNow:'Update',
     today_h:'Today', today_date_sub:'',
     rev_card:'Monthly revenue', recent_h:'Recent activity', seeall:'See all →',
     inbox_sub:'Replies and escalations in one place',
@@ -28942,6 +28979,7 @@ function buildMoreNav(){
   const items = [];
   if(_pwaInstallable()) items.push({action:'install', tk:'pwaInstall'});   // phone: install lives in "More"
   items.push(
+    {action:'team', tk:'staffApp'},
     {id:'strat', tk:'strat'},
     {id:'rev', tk:'rev'},
     {id:'log', tk:'log'},
@@ -28954,6 +28992,7 @@ function buildMoreNav(){
     let click;
     if(i.id) click = "go('"+i.id+"')";
     else if(i.action==='install') click = 'pwaInstall()';
+    else if(i.action==='team') click = "location.href='/team'";
     else if(i.action==='theme') click = 'toggleTheme()';
     else if(i.action==='lang') click = 'toggleLang()';
     else if(i.action==='logout') click = 'logout()';
@@ -69205,6 +69244,16 @@ async def start_web_server():
                       "/my-targets, /my-book) — pool=%s" % ",".join(_targets.pool_channels()))
             except Exception as _tge:
                 print("[targets] wiring failed (targets disabled, bot unaffected):", _tge)
+
+        # ---- «عوجا فريق» /team — the employees' phone app. Read-only, cached data only.
+        # Who sees what = the «مين هو مين» link in «أهدافي» (owner, 2026-11-17: no extra box). ----
+        if _HAS_STAFF:
+            try:
+                _staff_wire()
+                _staff.register_routes(app)
+                print("[staff] wired + routes registered (/team, /api/staff/today)")
+            except Exception as _stw:
+                print("[staff] wiring failed (team app disabled, bot unaffected):", _stw)
 
         # ---- Ops Watchdog «الرقيب التشغيلي» — additive; reuses brain.db + existing auth ----
         if _HAS_WATCHDOG and WATCHDOG_ENABLED:
