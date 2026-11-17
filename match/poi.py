@@ -98,6 +98,7 @@ NEIGHBOURHOOD_CENTROIDS = {
     "al_shimaisi":    (24.6520, 46.7000),
     "al_wusham":      (24.6550, 46.6850),
     "al_rabi":        (24.8180, 46.6550),
+    "al_nafl":        (24.7850, 46.6750),
 
     # -- medium confidence
     "al_wizarat":     (24.6550, 46.7100),

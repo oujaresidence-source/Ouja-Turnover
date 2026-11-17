@@ -37343,13 +37343,14 @@ function gwEdit(id){ var ar=(L==='ar'); var x=(_gw.byId||{})[id]; if(!x){ toast(
     +f(ar?'عنوان عربي':'Title AR','gwe_tar',x.title_ar)+f(ar?'عنوان إنجليزي':'Title EN','gwe_ten',x.title_en)
     +f(ar?'وصف قصير عربي':'Short AR','gwe_sar',x.short_ar)+f(ar?'المنطقة (نص حر)':'Area (free text)','gwe_area',x.area)
     +'<label class="muted" style="font-size:11px">'+(ar?'الحي (للفلترة)':'Neighborhood (for filter)')+'</label><select id="gwe_nb" style="'+fbInp()+'">'+gwNbOptions(x.neighborhood||'')+'</select>'
+    +'<label class="muted" style="font-size:11px">'+(ar?'غرف النوم في الموقع (Hostaway: '+(x.bedrooms_ha==null?'—':x.bedrooms_ha)+')':'Bedrooms on the site (Hostaway: '+(x.bedrooms_ha==null?'-':x.bedrooms_ha)+')')+'</label><select id="gwe_beds" style="'+fbInp()+'">'+[['',(ar?'مثل Hostaway':'Same as Hostaway')],['0',(ar?'استوديو':'Studio')],['1','1'],['2','2'],['3','3'],['4','4'],['5','5'],['6','6']].map(function(o){ return '<option value="'+o[0]+'"'+(String(x.bedrooms_ov==null?'':x.bedrooms_ov)===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select>'
     +f(ar?'الرابط (slug)':'Slug','gwe_slug',x.slug)+f(ar?'نص الشارة':'Badge','gwe_badge',x.badge)
     +f(ar?'أولوية الترتيب':'Sort priority','gwe_sort',x.sort)+f(ar?'رابط Airbnb (احتياطي محلي)':'Airbnb URL (local fallback)','gwe_ab',x.airbnb_override)
     +'<label class="muted" style="font-size:11px">'+(ar?'الصورة الرئيسية':'Hero image')+'</label><select id="gwe_hero" style="'+fbInp()+'"><option value="">'+(ar?'تلقائي':'auto')+'</option>'+(x.image_urls||[]).map(function(u,i){ return '<option value="'+esc(u)+'"'+(x.hero===u?' selected':'')+'>'+(ar?'صورة ':'image ')+(i+1)+'</option>'; }).join('')+'</select>'
     +f(ar?'ملاحظات داخلية':'Internal notes','gwe_notes',x.notes));
   setDrawerFoot('<button class="btn primary sm" onclick="gwEditSave('+id+')">'+(ar?'حفظ':'Save')+'</button><button class="btn ghost sm" onclick="gwStructure('+id+',this)">✨ '+(x.has_structured?(ar?'إعادة صياغة البطاقات':'Regenerate cards'):(ar?'صياغة بطاقات بالذكاء':'Generate cards'))+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إلغاء':'Cancel')+'</button>'); }
 async function gwEditSave(id){ var ar=(L==='ar'); function v(i){ var e=document.getElementById(i); return e?e.value:undefined; }
-  var body={id:String(id), visible:document.getElementById('gwe_vis').checked, featured:document.getElementById('gwe_featured').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), neighborhood:v('gwe_nb'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
+  var body={id:String(id), visible:document.getElementById('gwe_vis').checked, featured:document.getElementById('gwe_featured').checked, title_ar:v('gwe_tar'), title_en:v('gwe_ten'), short_ar:v('gwe_sar'), area:v('gwe_area'), neighborhood:v('gwe_nb'), bedrooms:v('gwe_beds'), slug:v('gwe_slug'), badge:v('gwe_badge'), sort:(parseInt(v('gwe_sort')||'0',10)||0), airbnb_override:v('gwe_ab'), hero_image:v('gwe_hero'), notes:v('gwe_notes')};
   var r; try{ r=await post('/api/gw/listing',body); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'حُفظ ✓':'Saved ✓'); closeDrawer(); gwListings(); } else toast('⚠'); }
 async function gwStructure(id,btn){ var ar=(L==='ar'); if(btn){ btn.disabled=true; btn.textContent='⏳ '+(ar?'جاري الصياغة…':'Generating…'); } var r; try{ r=await post('/api/gw/structure',{id:String(id)}); }catch(_){ r=null; } if(r&&r.ok){ toast(ar?'تم — البطاقات صارت لايف ✨':'Done — cards are live ✨'); if((_gw.byId||{})[id]) _gw.byId[id].has_structured=true; closeDrawer(); gwListings(); } else { toast((r&&r.message)||(ar?'⚠ ما تمت الصياغة':'⚠ failed')); if(btn){ btn.disabled=false; btn.textContent='✨ '+(ar?'صياغة بطاقات بالذكاء':'Generate cards'); } } }
 async function gwStructureAll(){ var ar=(L==='ar'); var ids=(_gw.listings||[]).filter(function(x){return x.visible;}).map(function(x){return x.id;}); if(!ids.length){ toast(ar?'ما فيه وحدات ظاهرة':'No visible units'); return; } if(!confirm(ar?('بنصيغ بطاقات لـ '+ids.length+' وحدة (مكالمة ذكاء لكل وحدة). نكمل؟'):('Generate cards for '+ids.length+' units (one AI call each). Continue?'))) return; var btn=document.getElementById('gwStructAll'), pg=document.getElementById('gwStructProg'); if(btn) btn.disabled=true; var ok=0,fail=0; for(var i=0;i<ids.length;i++){ if(pg) pg.textContent=(i+1)+'/'+ids.length+(fail?(' · '+fail+(ar?' فشل':' failed')):''); var r; try{ r=await post('/api/gw/structure',{id:String(ids[i])}); }catch(_){ r=null; } if(r&&r.ok){ ok++; if((_gw.byId||{})[ids[i]]) _gw.byId[ids[i]].has_structured=true; } else fail++; } if(pg) pg.textContent=(ar?('تمت: '+ok+' · فشل: '+fail):('done: '+ok+' · failed: '+fail)); if(btn) btn.disabled=false; toast(ar?('خلصنا — '+ok+' بطاقة جاهزة'):('Finished — '+ok+' done')); gwListings(); }
@@ -60761,6 +60762,162 @@ def _gw_amenity_groups(amenities):
         groups.append({"key": "other", "ar": "أخرى", "items": other})
     return groups
 
+# ---- Airbnb reference (owner rule 2026-11-17: «Airbnb is the approved reference; never edit it»).
+# guest_airbnb_ref.json is a READ-ONLY snapshot of our own public Airbnb pages: each unit's amenity
+# list, plus a short list of neighbourhood/bedroom corrections the owner approved after the site
+# launched with wrong values. The amenities replace Hostaway's thinner list on the guest site only.
+_GW_AB_AMEN = {
+    # Airbnb title: (key, icon, Arabic, group). Titles not listed here are not shown (no English
+    # leaking into the Arabic page; wine glasses etc. are left out on purpose).
+    "Wifi": ("wifi", "wifi", "واي فاي", "basics"),
+    "Ethernet connection": ("ethernet", "wifi", "إنترنت سلكي", "basics"),
+    "Air conditioning": ("ac", "snow", "تكييف", "basics"),
+    "Window AC unit": ("ac", "snow", "تكييف", "basics"),
+    "Heating": ("heating", "flame", "تدفئة", "basics"),
+    "Essentials": ("essentials", "spark", "الأساسيات: مناشف وصابون وورق", "basics"),
+    "Dedicated workspace": ("workspace", "laptop", "مساحة عمل", "basics"),
+    "Kitchen": ("kitchen", "pot", "مطبخ", "kitchen"),
+    "Cooking basics": ("cooking", "pot", "أساسيات الطبخ", "kitchen"),
+    "Refrigerator": ("fridge", "fridge", "ثلاجة", "kitchen"),
+    "Freezer": ("freezer", "fridge", "فريزر", "kitchen"),
+    "Microwave": ("microwave", "pot", "ميكروويف", "kitchen"),
+    "Oven": ("oven", "pot", "فرن", "kitchen"),
+    "Stove": ("stove", "flame", "موقد", "kitchen"),
+    "Hot water kettle": ("kettle", "cup", "غلاية ماء", "kitchen"),
+    "Coffee maker": ("coffee", "cup", "مكينة قهوة", "kitchen"),
+    "Coffee": ("coffee_beans", "cup", "قهوة", "kitchen"),
+    "Dishes and silverware": ("dishes", "pot", "أطباق وأدوات أكل", "kitchen"),
+    "Dining table": ("dining", "pot", "طاولة طعام", "kitchen"),
+    "Washer": ("washer", "washer", "غسالة ملابس", "laundry"),
+    "Washer – In unit": ("washer", "washer", "غسالة ملابس", "laundry"),
+    "Dryer": ("dryer", "washer", "نشافة", "laundry"),
+    "Iron": ("iron", "iron", "مكواة", "laundry"),
+    "Hangers": ("hangers", "hanger", "علاقات ملابس", "laundry"),
+    "Drying rack for clothing": ("rack", "hanger", "منشر ملابس", "laundry"),
+    "Clothing storage": ("closet", "hanger", "دولاب ملابس", "laundry"),
+    "Clothing storage: wardrobe": ("closet", "hanger", "دولاب ملابس", "laundry"),
+    "Clothing storage: closet": ("closet", "hanger", "دولاب ملابس", "laundry"),
+    "Bed linens": ("linens", "bed", "مفارش سرير", "laundry"),
+    "Extra pillows and blankets": ("pillows", "bed", "مخدات وبطانيات إضافية", "laundry"),
+    "Room-darkening shades": ("shades", "moon", "ستائر معتمة", "laundry"),
+    "Hot water": ("hot_water", "drop", "ماء حار", "bath"),
+    "Shampoo": ("shampoo", "drop", "شامبو", "bath"),
+    "Conditioner": ("conditioner", "drop", "بلسم", "bath"),
+    "Body soap": ("soap", "drop", "صابون استحمام", "bath"),
+    "Shower gel": ("shower_gel", "drop", "شاور جل", "bath"),
+    "Hair dryer": ("hair_dryer", "wind", "مجفف شعر", "bath"),
+    "Bidet": ("bidet", "drop", "شطّاف", "bath"),
+    "Bathtub": ("bathtub", "bath", "بانيو", "bath"),
+    "Cleaning products": ("cleaning", "spark", "أدوات تنظيف", "bath"),
+    "TV": ("tv", "tv", "تلفزيون", "fun"),
+    "HDTV": ("tv", "tv", "تلفزيون", "fun"),
+    "Movie theater": ("cinema", "film", "سينما خاصة", "fun"),
+    "Sound system": ("sound", "tv", "نظام صوت", "fun"),
+    "Exercise equipment": ("gym", "dumbbell", "معدات رياضية", "fun"),
+    "Exercise equipment: free weights, treadmill": ("gym", "dumbbell", "أوزان وسير مشي", "fun"),
+    "Gym": ("gym", "dumbbell", "نادي رياضي", "fun"),
+    "Shared gym in building": ("gym", "dumbbell", "نادي رياضي في المبنى", "fun"),
+    "Private pool": ("pool", "waves", "مسبح خاص", "fun"),
+    "Shared pool": ("pool_shared", "waves", "مسبح مشترك", "fun"),
+    "Shared pool - open specific hours": ("pool_shared", "waves", "مسبح مشترك", "fun"),
+    "Patio or balcony": ("balcony", "sun", "بلكونة أو جلسة خارجية", "outdoor"),
+    "Outdoor furniture": ("outdoor", "sun", "جلسة خارجية", "outdoor"),
+    "Outdoor dining area": ("outdoor_dining", "sun", "طاولة طعام خارجية", "outdoor"),
+    "BBQ grill": ("bbq", "flame", "شواية", "outdoor"),
+    "Fire pit": ("firepit", "flame", "موقد نار خارجي", "outdoor"),
+    "Hammock": ("hammock", "sun", "أرجوحة", "outdoor"),
+    "Free parking on premises": ("parking", "car", "موقف مجاني داخل المبنى", "building"),
+    "Free carport on premises": ("parking", "car", "موقف مظلل مجاني", "building"),
+    "Elevator": ("elevator", "elevator", "مصعد", "building"),
+    "Doorman": ("doorman", "users", "حارس للمبنى", "building"),
+    "Self check-in": ("self_checkin", "key", "دخول ذاتي", "building"),
+    "Smart lock": ("smart_lock", "lock", "قفل ذكي", "building"),
+    "Long term stays allowed": ("long_stays", "cal", "تقبل الإقامات الطويلة", "building"),
+    "High chair": ("high_chair", "baby", "كرسي أطفال", "building"),
+    "Smoke alarm": ("smoke", "alert", "كاشف دخان", "safety"),
+    "Carbon monoxide alarm": ("co", "alert", "كاشف أول أكسيد الكربون", "safety"),
+    "First aid kit": ("first_aid", "plus", "حقيبة إسعافات أولية", "safety"),
+    "Fire extinguisher": ("extinguisher", "flame", "طفاية حريق", "safety"),
+    "Exterior security cameras on property": ("cameras", "camera", "كاميرات مراقبة خارجية", "safety"),
+    "Safe": ("safe", "lock", "خزنة", "safety"),
+}
+_GW_AB_GROUPS = [("basics", "الأساسيات"), ("kitchen", "المطبخ"), ("laundry", "النوم والملابس"),
+                 ("bath", "الحمّام"), ("fun", "الترفيه والرياضة"), ("outdoor", "الجلسات الخارجية"),
+                 ("building", "الدخول والمبنى"), ("safety", "السلامة")]
+# The few that make a stay — shown as the big tiles, in this order, when the unit has them.
+_GW_AB_TOP = ("cinema", "pool", "pool_shared", "gym", "self_checkin", "wifi", "ac", "kitchen",
+              "washer", "parking", "balcony", "outdoor", "workspace", "tv", "elevator", "bathtub",
+              "coffee", "bbq", "firepit")
+# Hostaway's Arabic labels (the fallback path) -> icon, for units with no Airbnb snapshot.
+_GW_AR_ICON = {"إنترنت": "wifi", "تكييف": "snow", "تلفزيون": "tv", "مطبخ": "pot", "غسالة": "washer",
+               "نشافة": "washer", "موقف": "car", "موقف مجاني": "car", "مصعد": "elevator", "مسبح": "waves",
+               "صالة رياضية": "dumbbell", "بلكونة": "sun", "تراس": "sun", "دخول ذاتي": "key",
+               "مساحة عمل": "laptop", "قهوة": "cup", "ثلاجة": "fridge"}
+_gw_ab_ref_cache = {"data": None}
+
+def _gw_ab_ref():
+    if _gw_ab_ref_cache["data"] is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_airbnb_ref.json"),
+                      encoding="utf-8") as f:
+                _gw_ab_ref_cache["data"] = json.load(f) or {}
+        except Exception as e:
+            print("guest_airbnb_ref load error:", e)
+            _gw_ab_ref_cache["data"] = {}
+    return _gw_ab_ref_cache["data"]
+
+def _gw_amenities_view(snap):
+    """(groups, tiles) for one unit. Airbnb's list when we hold it, else Hostaway's."""
+    ref = ((_gw_ab_ref().get("units") or {}).get(str(snap.get("id"))) or {})
+    titles = ref.get("amenities") or []
+    if titles:
+        seen, by = set(), {}
+        for t in titles:
+            m = _GW_AB_AMEN.get(t)
+            if not m or m[0] in seen:
+                continue
+            seen.add(m[0])
+            by.setdefault(m[3], []).append({"key": m[0], "icon": m[1], "ar": m[2]})
+        groups = [{"key": g, "ar": gar, "items": [i["ar"] for i in by[g]], "icons": [i["icon"] for i in by[g]]}
+                  for g, gar in _GW_AB_GROUPS if by.get(g)]
+        flat = {i["key"]: i for g in by.values() for i in g}
+        tiles = [{"icon": flat[k]["icon"], "ar": flat[k]["ar"]} for k in _GW_AB_TOP if k in flat][:8]
+        return groups, tiles
+    groups = _gw_amenity_groups(snap.get("amenities") or [])
+    tiles, seen = [], set()
+    for g in groups:
+        for it in g.get("items") or []:
+            ic = _GW_AR_ICON.get(it)
+            if ic and it not in seen:
+                seen.add(it)
+                tiles.append({"icon": ic, "ar": it})
+    return groups, tiles[:8]
+
+def _gw_apply_ref_corrections():
+    """Write the owner-approved neighbourhood/bedroom corrections into the dashboard overrides
+    ONCE per reference version. After that the dashboard owns them again: any later edit there
+    wins, because a unit already stamped with this version is never touched again."""
+    ref = _gw_ab_ref()
+    ver = int(ref.get("version") or 0)
+    if not ver:
+        return 0
+    changed = 0
+    for lid, c in (ref.get("corrections") or {}).items():
+        ov = _gw_overrides.get(str(lid), {}) or {}
+        if int(ov.get("ref_v") or 0) >= ver:
+            continue
+        if c.get("neighborhood"):
+            ov["neighborhood"] = c["neighborhood"]
+        if c.get("bedrooms") is not None:
+            ov["bedrooms"] = int(c["bedrooms"])
+        ov["ref_v"] = ver
+        _gw_overrides[str(lid)] = ov
+        changed += 1
+    if changed:
+        _gw_save_ov()
+        print(f"guest site: applied {changed} Airbnb-reference corrections (v{ver})")
+    return changed
+
 # ---- Riyadh neighborhoods (owner chose the FULL list) — assigned per-unit in the dashboard,
 # used for the neighborhood filter on /stay + /elite. key = stable slug; (ar, en) for display.
 RIYADH_NEIGHBORHOODS = [
@@ -60774,7 +60931,7 @@ RIYADH_NEIGHBORHOODS = [
     ("al_qirawan", "القيروان", "Al Qirawan"), ("al_arid", "العارض", "Al Arid"),
     ("al_nada", "الندى", "Al Nada"), ("al_taawun", "التعاون", "Al Taawun"),
     ("al_wuroud", "الورود", "Al Wurud"), ("al_nuzha", "النزهة", "Al Nuzha"),
-    ("al_muhammadiyah", "المحمدية", "Al Muhammadiyah"), ("al_rabi", "الربيع", "Al Rabi"),
+    ("al_muhammadiyah", "المحمدية", "Al Muhammadiyah"), ("al_rabi", "الربيع", "Al Rabi"), ("al_nafl", "النفل", "Al Nafl"),
     ("al_qadisiyah", "القادسية", "Al Qadisiyah"), ("al_mursalat", "المرسلات", "Al Mursalat"),
     ("kafd", "المركز المالي (كافد)", "KAFD"), ("al_safarat", "حي السفارات", "Diplomatic Quarter"),
     ("al_olaya", "العليا", "Al Olaya"), ("al_sulimaniyah", "السليمانية", "Al Sulimaniyah"),
@@ -60861,6 +61018,92 @@ def _gw_ratings_map(min_count=3, max_age=3600):
     c["t"], c["map"] = now, out
     return out
 
+# «وش قالوا ضيوفنا» — the best public guest reviews per unit, picked from the same in-memory
+# _reviews store the ratings come from (Airbnb reviews via Hostaway + the shipped seed). READ-ONLY.
+# Only 5/5, public, never the private note; a review that complains about anything is skipped
+# even at 5 stars; first name only (Airbnb itself shows guests by first name).
+_GW_REVIEW_NEG = re.compile(
+    r"(لكن|بس |للأسف|للاسف|مشكل|سيئ|سيء|وسخ|ريحة|رائحة|ريحه|ضعيف|إزعاج|ازعاج|تأخر|تاخر|خراب|خربان|"
+    r"ما اشتغل|ماشتغل|نظافة متوسط|عيب|ملاحظ|يحتاج|تحتاج|ناقص|صراصير|حشر|"
+    r"\bbut\b|however|unfortunately|dirty|smell|issue|problem|noisy|noise|broken|not working|"
+    r"disappoint|could be better|needs|lacking|missing|cockroach|bugs)", re.I)
+_gw_reviews_pick_cache = {"t": 0.0, "map": None}
+
+def _gw_first_name(n):
+    n = re.sub(r"\s+", " ", str(n or "")).strip()
+    if not n:
+        return ""
+    f = n.split(" ")[0]
+    return f[:16]
+
+def _gw_review_score(rv):
+    t = rv["text"]
+    ar = len(re.findall(r"[\u0600-\u06FF]", t)) > len(re.findall(r"[A-Za-z]", t))
+    ln = len(t)
+    fit = 1.0 if 70 <= ln <= 260 else (0.6 if ln <= 360 else 0.3)
+    return (1.4 if ar else 1.0) * fit + (0.15 if rv.get("date", "") >= "2025-06" else 0)
+
+def _gw_review_picks_map(max_age=3600, per_unit=3):
+    """{listing_id(int): [ {text, name, date}, ... ]} — best first. Cached for an hour."""
+    now = time.time()
+    c = _gw_reviews_pick_cache
+    if c["map"] is not None and (now - c["t"]) < max_age:
+        return c["map"]
+    by = {}
+    for rev in list(_reviews.values()):
+        if not isinstance(rev, dict) or rev.get("is_public") is False:
+            continue
+        try:
+            lid = int(rev.get("listing_id"))
+            rt = float(rev.get("rating") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rt < 5:
+            continue
+        t = re.sub(r"\s+", " ", str(rev.get("public_review") or "")).strip()
+        if len(t) < 45 or len(t) > 480 or _GW_REVIEW_NEG.search(t):
+            continue
+        by.setdefault(lid, []).append({"text": t, "name": _gw_first_name(rev.get("guest_name")),
+                                       "date": str(rev.get("date") or "")[:7]})
+    out = {}
+    for lid, lst in by.items():
+        seen, picks = set(), []
+        for rv in sorted(lst, key=_gw_review_score, reverse=True):
+            k = rv["text"][:40]
+            if k in seen:
+                continue
+            seen.add(k)
+            picks.append(rv)
+            if len(picks) >= per_unit:
+                break
+        out[lid] = picks
+    c["t"], c["map"] = now, out
+    return out
+
+def _gw_review_picks(lid):
+    try:
+        return _gw_review_picks_map().get(int(lid)) or []
+    except (TypeError, ValueError):
+        return []
+
+def _gw_review_wall(n=6):
+    """One review per unit across the visible units, for the home page — best first."""
+    pm = _gw_review_picks_map()
+    rows = []
+    for s, ov in _gw_visible_snaps():
+        try:
+            p = pm.get(int(s.get("id"))) or []
+        except (TypeError, ValueError):
+            continue
+        if not p:
+            continue
+        rv = dict(p[0])
+        rv["slug"] = _gw_slug(s, ov)
+        rv["unit"] = (ov.get("title_ar") or s.get("name") or "")
+        rows.append(rv)
+    rows.sort(key=_gw_review_score, reverse=True)
+    return rows[:n]
+
 _gw_overall_cache = {"t": 0.0, "val": None, "set": False}
 def _gw_ratings_overall(min_total=20, max_age=3600):
     """Weighted overall rating across ALL reviews — for the hero trust chip.
@@ -60892,6 +61135,7 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         _rt = _gw_ratings_map().get(int(snap.get("id")))
     except (TypeError, ValueError):
         _rt = None
+    _am = _gw_amenities_view(snap)
     return {
         "id": snap.get("id"), "slug": _gw_slug(snap, ov),
         "name_ar": (ov.get("title_ar") or snap.get("name") or ""),
@@ -60908,7 +61152,8 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "images": [im["url"] for im in (snap.get("images") or [])],
         "cover": ((ov.get("hero_image") or snap.get("cover")) or ""),
         "amenities": snap.get("amenities") or [],
-        "amenity_groups": _gw_amenity_groups(snap.get("amenities") or []),
+        "amenity_groups": _am[0],
+        "amenity_tiles": _am[1],
         # Owner-declared facts (match/facts.py) — NOT derived from the Hostaway
         # amenities above. Single source of truth for guest-matching amenity
         # signals; absent keys stay absent (never defaulted to False).
@@ -61011,6 +61256,34 @@ def _gw_structure_one(snap, ov):
     return _gw_structure_normalize(claude_json(_GW_STRUCTURE_SYS, user, max_tokens=1500,
                                                model=GUEST_DRAFT_MODEL))
 
+_GW_LAYOUT_RX = re.compile(r"^(studio|\d+br)$")
+
+def _gw_eff(s, ov):
+    """The unit as the guest site shows it. An owner-set «bedrooms» override (0 = studio)
+    replaces Hostaway's bedroom count AND its layout tag (studio/1br/2br/...) — for our
+    site only. Hostaway is never written: its listing data syncs out to Airbnb, and the
+    owner's rule (2026-11-17) is that Airbnb is the correct reference and is never touched.
+    Returns the cached snapshot itself when there is no override (no copy, no cost)."""
+    b = (ov or {}).get("bedrooms")
+    if b is None or b == "":
+        return s
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        return s
+    if b < 0 or b > 12:
+        return s
+    key = "studio" if b == 0 else (str(b) + "br")
+    if key not in _gw_taxonomy and key in _GW_SEED:
+        ar, en, cat, vis = _GW_SEED[key]
+        _gw_taxonomy[key] = {"key": key, "ar": ar, "en": en, "category": cat, "visibility": vis,
+                             "status": "mapped", "count": 0}
+    e = dict(s)
+    e["beds"] = b
+    e["bedrooms"] = b
+    e["tag_keys"] = [k for k in (s.get("tag_keys") or []) if not _GW_LAYOUT_RX.match(str(k))] + [key]
+    return e
+
 def _gw_visible_snaps():
     out = []
     for s in (_gw_cache.get("listings") or []):
@@ -61019,7 +61292,7 @@ def _gw_visible_snaps():
             continue
         if not s.get("active") and ov.get("visible") is not True:
             continue
-        out.append((s, ov))
+        out.append((_gw_eff(s, ov), ov))
     return out
 
 def _gw_noo_options():
@@ -61208,11 +61481,12 @@ def _gw_find_by_slug_or_id(token):
     for s in (_gw_cache.get("listings") or []):
         ov = _gw_overrides.get(str(s.get("id")), {}) or {}
         if token == _gw_slug(s, ov) or token == str(s.get("id")):
-            return s, ov
+            return _gw_eff(s, ov), ov
     if token.isdigit():
         for s in (_gw_cache.get("listings") or []):
             if str(s.get("id")) == token:
-                return s, (_gw_overrides.get(token, {}) or {})
+                ov = _gw_overrides.get(token, {}) or {}
+                return _gw_eff(s, ov), ov
     return None, None
 
 def _gw_track(ev):
@@ -61692,6 +61966,31 @@ body.unitpage .foot{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 @media(min-width:760px){.lb-strip{grid-template-columns:1fr 1fr;max-width:1200px;margin:0 auto;width:100%}}
 .lb-strip img{width:100%;border-radius:12px;background:var(--night2)}
 
+/* amenities as tiles: the few that make the stay, then the full list on demand */
+.am-tiles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:640px){.am-tiles{grid-template-columns:repeat(4,1fr)}}
+.am-tiles li{display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:14px;padding:16px;min-height:104px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);font-size:15px;font-weight:500;line-height:1.4}
+.am-tiles .ic{width:28px;height:28px;color:var(--ink);stroke-width:1.4}
+.am-all{margin-top:22px}
+.ag li .ic{width:19px;height:19px;color:var(--ink2);stroke-width:1.5}
+.ag li.ni:before{content:"";flex:none;width:5px;height:5px;border-radius:9px;background:var(--gold)}
+/* guest voices */
+.vhead{display:flex;align-items:center;gap:10px;margin:-4px 0 18px;font-size:15px;color:var(--ink2)}
+.vhead .ic{width:18px;height:18px;color:var(--gold)}
+.vhead b{font-family:var(--f-d);font-weight:700;font-size:24px;color:var(--ink)}
+.voices{list-style:none;margin:0;padding:0;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.voice{display:flex;flex-direction:column;gap:14px;padding:22px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2)}
+.voice .q{width:28px;height:28px;color:var(--gold);stroke-width:1.4}
+.voice blockquote{margin:0;font-size:16.5px;line-height:1.85;color:var(--ink)}
+.voice blockquote[dir=ltr]{text-align:left}
+.voice cite{margin-top:auto;font-style:normal;font-size:14px;color:var(--mut)}
+.voice cite b{color:var(--ink);font-weight:700}
+.voice .on{display:block;margin-top:4px;font-size:13.5px;color:var(--ink2);text-decoration:underline;text-underline-offset:4px;text-decoration-color:var(--gold)}
+.vrail{display:grid;grid-auto-flow:column;grid-auto-columns:84%;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding-inline:var(--pad);margin-inline:calc(var(--pad) * -1);scroll-padding-inline:var(--pad);scrollbar-width:none;list-style:none;margin-top:0;margin-bottom:0}
+.vrail::-webkit-scrollbar{display:none}
+.vrail>*{scroll-snap-align:start}
+@media(min-width:760px){.vrail{grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:repeat(3,1fr);overflow:visible;margin-inline:0;padding:0}}
+
 /* ---------- about ---------- */
 .about{max-width:760px;padding:clamp(36px,6vw,72px) 0 0}
 .about h1{font-family:var(--f-d);font-weight:700;font-size:clamp(36px,6vw,60px);line-height:1.12;margin:0 0 16px}
@@ -61843,6 +62142,28 @@ body.unitpage .foot{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
 <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/></symbol>
+<symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2.5v19M4 7l16 10M20 7 4 17M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/></symbol>
+<symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-pot" viewBox="0 0 24 24"><path d="M4 10h16v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM2 10h20M9 6.5c0-1 1-1.5 1-2.5M14 6.5c0-1 1-1.5 1-2.5"/></symbol>
+<symbol id="i-fridge" viewBox="0 0 24 24"><rect x="5.5" y="2.5" width="13" height="19" rx="2"/><path d="M5.5 10h13M9 6v1.5M9 13v2.5"/></symbol>
+<symbol id="i-washer" viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="2"/><circle cx="12" cy="13" r="4.5"/><path d="M8 6h.01M11 6h2"/></symbol>
+<symbol id="i-car" viewBox="0 0 24 24"><path d="M5 11l2-5h10l2 5M3.5 11h17v5h-17zM6.5 19v-3M17.5 19v-3"/><circle cx="7.5" cy="13.5" r=".8"/><circle cx="16.5" cy="13.5" r=".8"/></symbol>
+<symbol id="i-elevator" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M12 3v18M7.5 10l1.5-2 1.5 2M13.5 14l1.5 2 1.5-2"/></symbol>
+<symbol id="i-waves" viewBox="0 0 24 24"><path d="M2.5 16c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5M2.5 20c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5M8 12.5V5a2 2 0 0 1 4 0M14 12.5V5a2 2 0 0 1 4 0M8 8.5h6"/></symbol>
+<symbol id="i-dumbbell" viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></symbol>
+<symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol>
+<symbol id="i-cup" viewBox="0 0 24 24"><path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10.5h1.5a2.5 2.5 0 0 1 0 5H17M8 3.5v2M12 3.5v2"/></symbol>
+<symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-9-1 2-2 3-3.5 3.5C9 8 9 6 9 5c-2 2-3 5-3 8a6 6 0 0 0 6 8z"/></symbol>
+<symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></symbol>
+<symbol id="i-iron" viewBox="0 0 24 24"><path d="M2.5 17.5h18V14a6 6 0 0 0-6-6H9a5 5 0 0 0-4.7 3.3zM9 11.5h7"/></symbol>
+<symbol id="i-hanger" viewBox="0 0 24 24"><path d="M10 5.5a2 2 0 1 1 2 2v1.5L3.3 15.6a1 1 0 0 0 .6 1.9h16.2a1 1 0 0 0 .6-1.9L12 9"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+<symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 7.5h4l1.5-2.5h7L17 7.5h4V19H3z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+<symbol id="i-baby" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></symbol>
+<symbol id="i-quote" viewBox="0 0 24 24"><path d="M10 7H6.5A2.5 2.5 0 0 0 4 9.5V13h4.5v-2.5H10zM20 7h-3.5A2.5 2.5 0 0 0 14 9.5V13h4.5v-2.5H20zM4 13c0 3 1.3 4.8 4 5.7M14 13c0 3 1.3 4.8 4 5.7"/></symbol>
 </defs></svg>
 <header class="head" id="head"><div class="wrap"><a class="brand" href="/apartments" aria-label="عوجا، الصفحة الرئيسية"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE</span></a><nav class="nav" aria-label="الأقسام"><a href="/apartments/search" id="nv-s">الشقق</a><a href="/apartments/about" id="nv-a">عن الموقع</a></nav></div></header>
 <main id="view"></main>
@@ -61911,6 +62232,13 @@ function card(l,eager){
     +'<div class="u-meta">'+metaLine(l)+'</div>'+price+'</div></a>';
 }
 function skelCards(n){var s='';for(var i=0;i<n;i++){s+='<div class="unit skc" aria-hidden="true"><div class="ph sk"></div><div class="u-b"><div class="sk" style="height:14px;width:40%"></div><div class="sk" style="height:20px;width:85%;margin-top:6px"></div><div class="sk" style="height:14px;width:55%;margin-top:6px"></div></div></div>';}return s;}
+
+function monthLabel(ym){var m=/^(\d{4})-(\d{2})/.exec(ym||'');return m?(AR_M[(+m[2])-1]+' '+m[1]):'';}
+function voiceHtml(v,withUnit){
+  return '<li class="voice">'+svg('quote','q')+'<blockquote dir="'+(isLatin(v.text)?'ltr':'rtl')+'">'+he(v.text)+'</blockquote>'
+    +'<cite><b>'+he(v.name||'ضيف')+'</b>'+(v.date?(' · '+he(monthLabel(v.date))):'')
+    +(withUnit&&v.slug?('<a class="on" href="/apartments/'+he(v.slug)+location.search+'" dir="auto">'+he(v.unit||'')+'</a>'):'')+'</cite></li>';
+}
 
 /* ---------- the sheet: dates, guests, area, type ---------- */
 var SH=null;
@@ -62026,6 +62354,7 @@ function viewLanding(){
        all its code stay intact, but no guest-facing link points to it. */
     +'<div class="wrap">'
     +'<section class="sec" id="feat"><div class="sec-h"><div><h2>مختارات عوجا</h2></div><a class="link" href="/apartments/search'+he(buildQ(s))+'">كل الشقق '+svg('arw')+'</a></div><div class="rail">'+skelCards(3)+'</div></section>'
+    +((cfg.voices||[]).length>=2?('<section class="sec" id="voices"><div class="sec-h"><div><h2>وش قالوا ضيوفنا</h2>'+((ro&&ro.avg)?('<p>تقييمنا <span class="num">'+he(ro.avg)+'</span> من <span class="num">'+Number(ro.count||0).toLocaleString('en-US')+'</span> تقييم على Airbnb. هذي كلماتهم.</p>'):'')+'</div></div><ul class="vrail">'+cfg.voices.slice(0,6).map(function(v){return voiceHtml(v,true);}).join('')+'</ul></section>'):'')
     +'<section class="sec" id="sizes" hidden><div class="sec-h"><div><h2>على قد حاجتك</h2><p>اختر عدد الغرف، ونطلع لك الشقق اللي تناسبك.</p></div></div><div class="sizes" id="sizes-g"></div></section>'
     +((cfg.neighborhoods||[]).length?('<section class="sec" id="hoods"><div class="sec-h"><div><h2>اختر حيّك</h2><p>شققنا موزعة في أحياء الرياض. اختر الحي الأقرب لمشاويرك.</p></div></div><ul class="hoods">'
       +(cfg.neighborhoods||[]).map(function(o){return '<li><a href="/apartments/search?neighborhood='+encodeURIComponent(o.key)+he(carry())+'" data-nb="'+he(o.key)+'"><span>'+he(o.ar||o.en)+'</span>'+(o.en?('<span class="en" dir="ltr">'+he(o.en)+'</span>'):'')+svg('arw')+'</a></li>';}).join('')
@@ -62501,11 +62830,20 @@ function viewListing(){
       var desc=(l.desc_ar||l.short_ar||'');
       if(desc){var long=desc.length>420;about='<section class="ublock"><h2>عن الشقة</h2><div class="desc'+(long?' clip':'')+'" id="dsc" dir="'+(isLatin(desc)?'ltr':'rtl')+'">'+he(desc)+'</div>'+(long?'<button class="more" id="dmore">اقرأ الوصف كامل</button>':'')+'</section>';}
     }
-    var groups=(l.amenity_groups||[]),amen='';
-    if(groups.length){
-      var gh=function(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><ul>'+(gp.items||[]).map(function(a){return '<li>'+he(a)+'</li>';}).join('')+'</ul></div>';};
-      var rest=groups.slice(2);
-      amen='<section class="ublock"><h2>المميزات</h2><div>'+groups.slice(0,2).map(gh).join('')+'</div>'+(rest.length?('<div id="amr" hidden>'+rest.map(gh).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</section>';
+    var groups=(l.amenity_groups||[]),tiles=(l.amenity_tiles||[]),amen='';
+    if(groups.length||tiles.length){
+      var total=0;groups.forEach(function(g){total+=(g.items||[]).length;});
+      var gh=function(gp){var ics=gp.icons||[];return '<div class="ag"><h3>'+he(gp.ar)+'</h3><ul>'+(gp.items||[]).map(function(a,i){return ics[i]?('<li>'+svg(ics[i])+he(a)+'</li>'):('<li class="ni">'+he(a)+'</li>');}).join('')+'</ul></div>';};
+      var tl=tiles.length?('<ul class="am-tiles">'+tiles.map(function(t){return '<li>'+svg(t.icon)+'<span>'+he(t.ar)+'</span></li>';}).join('')+'</ul>'):'';
+      amen='<section class="ublock"><h2>وش في الشقة؟</h2>'+tl
+        +(tiles.length?('<div id="amr" class="am-all" hidden>'+groups.map(gh).join('')+'</div><button class="more" id="amtog">كل المميزات <span class="num">('+total+')</span></button>'):('<div>'+groups.map(gh).join('')+'</div>'))
+        +'</section>';
+    }
+    var gv=(l.guest_reviews||[]),voices='';
+    if(gv.length){
+      voices='<section class="ublock" id="voices"><h2>وش قالوا عنها ضيوفنا</h2>'
+        +((l.rating!=null&&l.reviews_count)?('<p class="vhead">'+svg('star','f')+'<b class="num">'+(Math.round(l.rating*100)/100)+'</b><span>من <span class="num">'+l.reviews_count+'</span> تقييم على Airbnb</span></p>'):'')
+        +'<ul class="voices">'+gv.slice(0,3).map(function(v){return voiceHtml(v,false);}).join('')+'</ul></section>';
     }
     // booking panel
     var hasP=(l.est_total!=null&&l.nights>0);
@@ -62528,7 +62866,7 @@ function viewListing(){
     V.innerHTML='<div class="wrap">'+gallery
       +'<div class="ulay"><div class="umain"><header class="uhead">'+loc+'<h1 dir="auto">'+he(name)+'</h1>'+tagline
       +(facts.length?('<ul class="facts">'+facts.map(function(f){return '<li>'+svg(f[0])+he(f[1])+'</li>';}).join('')+'</ul>'):'')+EMBL_LBL+'</header>'
-      +why+about+amen+'</div>'+bk+'</div></div>';
+      +why+voices+amen+about+'</div>'+bk+'</div></div>';
     // phone booking bar
     var info=(dated&&hasP)?('<b class="num">'+money(l.est_avg||l.est_total)+(l.est_avg?' / الليلة':'')+'</b><span>'+he(rangeLabel(dci,dco))+' · تقريبًا</span>')
       :(dated?('<b>'+he(rangeLabel(dci,dco))+'</b><span>السعر داخل Airbnb</span>'):('<button type="button" class="pickd">أضف تواريخك</button><span> للسعر التقريبي</span>'));
@@ -62545,7 +62883,7 @@ function viewListing(){
     V.querySelectorAll('.gal [data-i]').forEach(function(b){b.onclick=function(){openGallery(imgs,name,+b.getAttribute('data-i'));};});
     var ga=document.getElementById('gall');if(ga)ga.onclick=function(){openGallery(imgs,name,0);};
     var dm=document.getElementById('dmore');if(dm)dm.onclick=function(){var d=document.getElementById('dsc');var open=d.classList.toggle('clip');dm.textContent=open?'اقرأ الوصف كامل':'اختصر الوصف';};
-    var tg=document.getElementById('amtog');if(tg)tg.onclick=function(){var r=document.getElementById('amr');r.hidden=!r.hidden;tg.textContent=r.hidden?'عرض كل المميزات':'عرض أقل';};
+    var tg=document.getElementById('amtog');if(tg){var tgl=tg.innerHTML;tg.onclick=function(){var r=document.getElementById('amr');r.hidden=!r.hidden;tg.innerHTML=r.hidden?tgl:'عرض أقل';};}
   }
   function openGallery(imgs,alt,start){
     var ov=document.createElement('div');ov.className='lb';ov.setAttribute('role','dialog');ov.setAttribute('aria-modal','true');ov.setAttribute('aria-label','كل الصور');
@@ -62750,6 +63088,7 @@ def _stay_render(route="landing", listing=None, base=""):
                        "imgproxy": bool(ELITE_IMG_PROXY),
                        "neighborhoods": _gw_neighborhoods_with_counts(),
                        "rating_overall": _gw_ratings_overall(),
+                       "voices": (_gw_review_wall(6) if route == "landing" else []),
                        "price_bands": _gw_price_bands(_gw_visible_prices()),
                        # Owner-declared fact definitions (match/facts.py) — the single source of
                        # truth for labels. Exposed here so the /stay/match comparison view and
@@ -62813,6 +63152,8 @@ async def _handle_stay_detail(request):
     token = request.match_info.get("slug", "")
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov) if snap else None
+    if listing:
+        listing["guest_reviews"] = _gw_review_picks(listing.get("id"))
     return web.Response(text=_stay_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
 
 _MATCH_SLEEP = ("together", "pairs", "each")
@@ -63028,6 +63369,7 @@ async def _api_stay_listing(request):
     if not snap:
         return _json({"ok": False, "listing": None}, 404)
     pub = _gw_listing_public(snap, ov)
+    pub["guest_reviews"] = _gw_review_picks(pub.get("id"))
     ci, co = request.query.get("check_in"), request.query.get("check_out")
     if ci and co and _gw_valid_dates(ci, co):
         avail = await web_thread(unit_availability_price, snap.get("id"), ci, co)
@@ -67043,6 +67385,7 @@ async def _api_gw_listings(request):
                     "notes": ov.get("notes") or "",
                     "has_structured": bool(ov.get("structured")),
                     "neighborhood": ov.get("neighborhood") or "",
+                    "bedrooms_ov": ov.get("bedrooms"), "bedrooms_ha": s.get("beds"),
                     "hero": (ov.get("hero_image") or s.get("cover") or ""),
                     "image_urls": [im["url"] for im in (s.get("images") or [])][:30]})
     out.sort(key=lambda x: (-(x["sort"] or 0), x["name"] or ""))
@@ -67059,9 +67402,18 @@ async def _api_gw_listing(request):
     ov = _gw_overrides.get(lid, {}) or {}
     for k in ("visible", "title_ar", "title_en", "short_ar", "short_en", "full_ar", "full_en",
               "area", "neighborhood", "slug", "badge", "sort", "hero_image", "airbnb_override",
-              "notes", "structured", "featured"):
+              "notes", "structured", "featured", "bedrooms"):
         if k in b:
             ov[k] = b.get(k)
+    # bedrooms: "" / None = follow Hostaway; 0 = studio; 1..12 = that many bedrooms
+    if "bedrooms" in b:
+        try:
+            _bv = b.get("bedrooms")
+            ov["bedrooms"] = None if _bv in (None, "") else max(0, min(12, int(_bv)))
+        except (TypeError, ValueError):
+            ov["bedrooms"] = None
+        if ov.get("bedrooms") is None:
+            ov.pop("bedrooms", None)
     _gw_overrides[lid] = ov
     _gw_save_ov()
     return _json({"ok": True, "override": ov})
@@ -67771,6 +68123,10 @@ async def start_web_server():
     global _web_runner
     if _web_runner is not None or not _HAS_AIOHTTP:
         return
+    try:
+        _gw_apply_ref_corrections()      # owner-approved Airbnb-reference fixes, once per version
+    except Exception as e:
+        print("gw ref corrections error:", e)
     # 25 MB so an admin can upload a Hostaway reservations export (the real one
     # is ~6 MB). aiohttp defaults to 1 MB, which rejects it. Every write route is
     # role-gated, so the larger ceiling widens what an ALREADY-AUTHORISED admin
