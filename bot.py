@@ -23693,7 +23693,7 @@ DASHBOARD_HTML = """<!doctype html>
 <title>عوجا · Ouja Operations</title>
 <!-- PWA (installable app) — additive, no effect on existing behavior -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#F5F5F7">
+<meta name="theme-color" content="#F4EFE7">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Ouja">
@@ -23704,58 +23704,69 @@ DASHBOARD_HTML = """<!doctype html>
 <link rel="icon" type="image/png" sizes="32x32" href="/pwa/icons/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2">
 <style>
+/* «عوجا» type — the same Thmanyah files the guest site serves (/monthly/static/fonts). */
+@font-face{font-family:"Thmanyah Serif";font-weight:700;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-bold.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
 
 :root{
-  /* ===== Ouja OS — calm, high-contrast, Apple-grade. Arabic=Tajawal, Latin+numbers=Inter ===== */
-  --font-ar:'Tajawal','IBM Plex Sans Arabic',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
+  /* ===== «عوجا» look (2026-11-17) — the guest site's limestone paper, ink and Thmanyah, so the
+     dashboard, the Finance Center and the team app read as ONE brand. Gold marks only; ink acts.
+     OUJA-TOKENS: tests/test_ouja_tokens.py keeps these values identical in erp.css + staff/page.py. ===== */
+  --font-ar:'Thmanyah Sans','IBM Plex Sans Arabic',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
+  --font-display:'Thmanyah Serif','Thmanyah Sans',Georgia,serif;
   --font-en:'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
   --font-mono:'Inter','JetBrains Mono','SF Mono','Menlo',monospace;
 
-  --bg:#F5F5F7;
-  --surface:#FFFFFF;
-  --surface-2:#F1F1F4;
-  --surface-3:#E9E9EE;
-  --tint:#FBFBFD;
-  --line:#E8E8ED;
-  --line-strong:#DEDEE3;
+  --bg:#F4EFE7;
+  --surface:#FBF8F3;
+  --surface-2:#F1EBE1;
+  --surface-3:#E7DFD2;
+  --tint:#F8F4EE;
+  --line:#E8E1D5;
+  --line-strong:#DCD2C3;
   --border:var(--line);
   --hair:var(--line); --hair-2:var(--line-strong);
 
-  --text:#1D1D1F;
-  --text-2:#424245;
-  --text-3:#6E6E73;
-  --mut:#86868B;
+  --text:#1D1813;
+  --text-2:#463C33;
+  --text-3:#6B5F52;
+  --mut:#6F6255;
   --ink:var(--text); --ink-2:var(--text-2); --gray:var(--text-3); --gray-2:var(--mut);
 
-  /* interactive accent = blue ONLY. Old --gold* tokens remap to it so existing markup adopts the new accent. */
-  --accent:#0A84FF; --accent-soft:#E9F2FF;
+  /* the interactive accent is INK (buttons, links, focus, active). Old --gold* tokens remap to it so
+     existing markup adopts it. Real gold is --gold-logo: marks only (gold text fails contrast). */
+  --accent:#1D1813; --accent-soft:#EFE6D6;
   --gold:var(--accent);
-  --gold-2:#0060DF;
+  --gold-2:#463C33;
   --gold-soft:var(--accent-soft);
-  --gold-tint:rgba(10,132,255,0.10);
-  --gold-logo:#B08945;   /* brand mark ONLY */
+  --gold-tint:rgba(29,24,19,0.08);
+  --gold-logo:#A57A2C;   /* brand mark ONLY */
 
   /* status — the only non-neutral colors */
-  --green:#137333; --green-soft:#E7F5EC;
-  --red:#C5221F;   --red-soft:#FCEAE9;
-  --yellow:#9A6700; --yellow-soft:#FCF3DC;
-  --blue:#1A56DB;  --blue-soft:#E8EFFD;
-  --purple:#6D58C2; --purple-soft:#EDEAF8;
+  --green:#2E6A49; --green-soft:#E0EADF;
+  --red:#A2462F;   --red-soft:#F6E2DA;
+  --yellow:#8A5A12; --yellow-soft:#F5E8C8;
+  --blue:#2F5A8A;  --blue-soft:#E3EAF2;
+  --purple:#5E4B8B; --purple-soft:#ECE7F3;
   --good:var(--green); --good-bg:var(--green-soft);
   --warn:var(--yellow); --warn-bg:var(--yellow-soft);
   --bad:var(--red); --bad-bg:var(--red-soft);
   --info:var(--blue); --info-bg:var(--blue-soft);
 
   --r-xs:6px; --r-sm:10px; --r:14px; --r-md:14px; --r-lg:18px;
-  --sh-xs:0 1px 2px rgba(0,0,0,0.04);
-  --sh-sm:0 1px 2px rgba(0,0,0,0.04),0 1px 3px rgba(0,0,0,0.06);
-  --sh-md:0 4px 12px rgba(0,0,0,0.06),0 2px 4px rgba(0,0,0,0.04);
-  --sh-lg:0 12px 32px rgba(0,0,0,0.10),0 4px 10px rgba(0,0,0,0.06);
-  --sh-drawer:0 0 60px rgba(0,0,0,0.16);
-  --ease:cubic-bezier(0.22,0.61,0.36,1);   /* project ease-out */
+  --sh-xs:0 1px 2px rgba(29,24,19,0.05);
+  --sh-sm:0 1px 2px rgba(29,24,19,0.05),0 2px 6px rgba(29,24,19,0.05);
+  --sh-md:0 2px 4px rgba(29,24,19,0.05),0 8px 24px rgba(29,24,19,0.07);
+  --sh-lg:0 2px 4px rgba(29,24,19,0.06),0 18px 40px rgba(29,24,19,0.12);
+  --sh-drawer:0 0 60px rgba(29,24,19,0.18);
+  --ease:cubic-bezier(0.23,1,0.32,1);   /* project ease-out (the guest site's curve) */
 
   --side:232px;
   --drawer:520px;
@@ -23773,23 +23784,23 @@ DASHBOARD_HTML = """<!doctype html>
 }
 
 html[data-theme="dark"]{
-  --bg:#1C1C1E; --surface:#2C2C2E; --surface-2:#3A3A3C; --surface-3:#48484A; --tint:#242426;
-  --line:#38383A; --line-strong:#48484A;
-  --text:#F5F5F7; --text-2:#D1D1D6; --text-3:#98989D; --mut:#8E8E93;
-  --accent-soft:#0A2540; --gold-2:#409CFF; --gold-tint:rgba(10,132,255,0.22); --gold-logo:#C79A52;
-  --green:#30D158; --green-soft:#0C2A17; --red:#FF453A; --red-soft:#3A1412;
-  --yellow:#FFD60A; --yellow-soft:#332A05; --blue:#409CFF; --blue-soft:#0A2540;
-  --purple:#BF5AF2; --purple-soft:#241033;
+  --bg:#15110D; --surface:#201A15; --surface-2:#2A231D; --surface-3:#352C25; --tint:#1B1611;
+  --line:#332A22; --line-strong:#42372D;
+  --text:#F4EFE7; --text-2:#D9CFC1; --text-3:#A89A89; --mut:#9E907F;
+  --accent:#B07F2F; --accent-soft:#33291D; --gold-2:#C9A25A; --gold-tint:rgba(176,127,47,0.20); --gold-logo:#C9A25A;
+  --green:#7DC79A; --green-soft:#15291E; --red:#E8907A; --red-soft:#3A1C14;
+  --yellow:#E2B65A; --yellow-soft:#33270F; --blue:#94B4DC; --blue-soft:#18222E;
+  --purple:#BCA6E3; --purple-soft:#241C33;
 }
 @media (prefers-color-scheme:dark){
   html[data-theme="auto"]{
-    --bg:#1C1C1E; --surface:#2C2C2E; --surface-2:#3A3A3C; --surface-3:#48484A; --tint:#242426;
-    --line:#38383A; --line-strong:#48484A;
-    --text:#F5F5F7; --text-2:#D1D1D6; --text-3:#98989D; --mut:#8E8E93;
-    --accent-soft:#0A2540; --gold-2:#409CFF; --gold-tint:rgba(10,132,255,0.22); --gold-logo:#C79A52;
-    --green:#30D158; --green-soft:#0C2A17; --red:#FF453A; --red-soft:#3A1412;
-    --yellow:#FFD60A; --yellow-soft:#332A05; --blue:#409CFF; --blue-soft:#0A2540;
-    --purple:#BF5AF2; --purple-soft:#241033;
+    --bg:#15110D; --surface:#201A15; --surface-2:#2A231D; --surface-3:#352C25; --tint:#1B1611;
+    --line:#332A22; --line-strong:#42372D;
+    --text:#F4EFE7; --text-2:#D9CFC1; --text-3:#A89A89; --mut:#9E907F;
+    --accent:#B07F2F; --accent-soft:#33291D; --gold-2:#C9A25A; --gold-tint:rgba(176,127,47,0.20); --gold-logo:#C9A25A;
+    --green:#7DC79A; --green-soft:#15291E; --red:#E8907A; --red-soft:#3A1C14;
+    --yellow:#E2B65A; --yellow-soft:#33270F; --blue:#94B4DC; --blue-soft:#18222E;
+    --purple:#BCA6E3; --purple-soft:#241C33;
   }
 }
 
@@ -23830,7 +23841,7 @@ a:focus-visible,button:focus-visible,.icbtn:focus-visible,.side-nav .item:focus-
 
 /* ============== LOGIN ============== */
 #login{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;background:var(--bg);z-index:1000}
-#login .brand-lg{font-size:34px;font-weight:800;color:var(--gold-logo);letter-spacing:-.5px}
+#login .brand-lg{font-family:var(--font-display);font-size:40px;font-weight:900;color:var(--text);letter-spacing:0}
 #login .sub{color:var(--mut);font-size:12.5px;margin-top:-10px;letter-spacing:1.5px;text-transform:uppercase}
 #login input{max-width:340px;text-align:center;font-size:15px;padding:13px;border-radius:var(--r);box-shadow:var(--sh-sm);width:100%}
 #login .err{color:var(--red);font-size:12.5px;min-height:18px}
@@ -23928,7 +23939,7 @@ header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(
 
 /* ============== BUTTONS ============== */
 .btn{min-height:36px;padding:7px 13px;border-radius:7px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:.12s;border:1px solid transparent;line-height:1.2;white-space:nowrap}
-.btn.primary{background:linear-gradient(135deg,var(--gold),var(--gold-2));color:#fff;box-shadow:var(--sh-xs)}
+.btn.primary{background:var(--gold);color:#fff;box-shadow:var(--sh-xs)}
 .btn.primary:hover{filter:brightness(1.05);box-shadow:var(--sh-sm)}
 .btn.green{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.22)}
 .btn.green:hover{background:var(--green);color:#fff;border-color:var(--green)}
@@ -23965,12 +23976,12 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
   }
 }
 @media (prefers-reduced-transparency:reduce){ .page-head{background:var(--bg); backdrop-filter:none; -webkit-backdrop-filter:none} }
-.page-title{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.2px;line-height:1.15}
+.page-title{font-family:var(--font-display);font-size:24px;font-weight:900;color:var(--text);letter-spacing:0;line-height:1.15}
 .page-sub{color:var(--mut);font-size:12px;margin-top:2px}
 /* Reusable "what is this page?" help banner — soft gold-tinted card with
    a clear title and 2-4 short bullets. Employees with zero ramp-up see it
    before any data, so they always know what they're looking at. */
-.page-help{background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);border-radius:12px;padding:12px 14px;margin-bottom:14px;position:relative}
+.page-help{background:var(--surface-2);border:1px solid var(--line-strong);border-radius:12px;padding:12px 14px;margin-bottom:14px;position:relative}
 .page-help .ph-t{font-weight:700;font-size:13.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
 .page-help .ph-b{color:var(--text-2);font-size:12.5px;line-height:1.75}
 .page-help .ph-b b{color:var(--gold)}
@@ -24027,7 +24038,7 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 }
 
 /* ===== MORNING BRIEF (home) — one-glance headline + one-click alerts ===== */
-.mbrief{background:linear-gradient(135deg,var(--gold-tint),var(--surface));border:1px solid var(--gold);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px}
+.mbrief{background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:16px}
 .mbrief-line{font-size:14.5px;line-height:1.7;color:var(--text)}
 .mbrief-line b{color:var(--gold-2);font-weight:700}
 .mb-top{margin-top:9px;font-size:12.5px;color:var(--text-2)}
@@ -24619,8 +24630,21 @@ html[data-theme="dark"] .calday.cal-full{background:#13351F}
 
 /* ============== BOTTOM NAV (mobile) ============== */
 nav.bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);padding:5px 6px calc(6px + env(safe-area-inset-bottom));z-index:60}
-html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-filter:blur(12px)}
-@media (max-width:1023px){nav.bnav{display:grid;grid-template-columns:repeat(6,1fr);gap:2px}}
+html[data-theme="dark"] nav.bnav{background-color:var(--surface)}
+@media (max-width:1023px){nav.bnav{display:grid;grid-template-columns:repeat(5,1fr);gap:2px}}
+/* «المزيد» — every allowed page, big rows for a thumb */
+.more-cat{font-size:13px;font-weight:700;color:var(--text-3);margin:18px 4px 8px}
+.more-cat:first-child{margin-top:4px}
+.more-list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.more-row{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:10px 14px;border-top:1px solid var(--line);text-align:start;font-size:15.5px;font-weight:500;color:var(--text);transition:background-color .15s var(--ease)}
+.more-row:first-child{border-top:0}
+.more-row:active{background:var(--surface-2)}
+@media (hover:hover) and (pointer:fine){.more-row:hover{background:var(--surface-2)}}
+.more-ic{width:22px;height:22px;display:grid;place-items:center;color:var(--text-2);flex:none}
+.more-ic svg{width:20px;height:20px;stroke:var(--text-3);stroke-width:1.8;fill:none}
+.more-lbl{flex:1;min-width:0}
+.more-chev{color:var(--mut);display:grid;place-items:center}
+html[dir="ltr"] .more-chev{transform:scaleX(-1)}
 @media (max-width:1023px){.bn{padding:6px 2px;font-size:9px}}
 @media (max-width:1023px){.bn .ic{font-size:15px}}
 .bn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:7px 4px;border-radius:7px;color:var(--text-3);font-size:9.5px;font-weight:500;transition:.12s;position:relative}
@@ -26399,7 +26423,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <!-- What is this page? -->
-        <div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold)">
+        <div class="card" style="background:var(--surface-2);border:1px solid var(--line-strong)">
           <div style="padding:6px 4px">
             <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 ما هي هذي الصفحة؟</div>
             <div class="muted" style="font-size:12.5px;line-height:1.7">
@@ -26482,7 +26506,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
         </div>
 
         <!-- What is this page? -->
-        <div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold)">
+        <div class="card" style="background:var(--surface-2);border:1px solid var(--line-strong)">
           <div style="padding:6px 4px">
             <div style="font-weight:700;font-size:14px;margin-bottom:6px">💡 ما هي هذي الصفحة؟</div>
             <div class="muted" style="font-size:12.5px;line-height:1.7">
@@ -26532,7 +26556,7 @@ html[data-theme="dark"] nav.bnav{background-color:rgba(24,23,26,.95);backdrop-fi
       <!-- ============ MORE (mobile only) ============ -->
       <section class="view" id="view_more">
         <div class="page-head"><div><div class="page-title">المزيد</div></div></div>
-        <div class="card"><div id="moreNav"></div></div>
+        <div id="moreNav"></div>
       </section>
 
     </main>
@@ -28269,7 +28293,7 @@ function renderSchedLeave(){
   emps.forEach(function(e){
     var on=st.who.indexOf(e.id)>=0;
     h+='<button class="lv-chip'+(on?' on':'')+'" onclick="lvToggleWho('+e.id+')">'
-      +'<span class="lv-dot" style="background:'+esc(e.color||'#0A84FF')+'"></span>'
+      +'<span class="lv-dot" style="background:'+esc(e.color||'var(--accent)')+'"></span>'
       +(e.emoji?esc(e.emoji)+' ':'')+esc(e.name)+'</button>';
   });
   h+='</div>';
@@ -28434,7 +28458,7 @@ function lvImpactHtml(p){
     var uDelta=uNow-uWas;
     var pct=cap?Math.min(100, Math.round(perDay*100/cap)):0;
     var cls=cap?(perDay>cap?'b':(perDay>cap*0.85?'w':'')):'';
-    h+='<div class="lv-ic" style="--c:'+esc(e.color||'#0A84FF')+'">';
+    h+='<div class="lv-ic" style="--c:'+esc(e.color||'var(--accent)')+'">';
     h+='<div class="nm">'+(e.emoji?esc(e.emoji)+' ':'')+esc(e.name)+'</div>';
     h+='<div class="fig"><span class="from">'+uWas+'</span><span class="to">'+uNow+'</span>';
     if(uDelta){ h+='<span class="dl '+(uDelta>0?'up':'dn')+'">'+(uDelta>0?'+':'')+uDelta+'</span>'; }
@@ -28520,7 +28544,7 @@ function lvRenderSheet(){
       var on=(String(r.current_id)===String(c.id));
       h+='<button class="lv-cand'+(on?' on':'')+(i===0?' best':'')+'" onclick="lvChooseEl(this)"'
         +' data-apt="'+r.apartment_id+'" data-emp="'+c.id+'">'
-        +'<span class="lv-dot" style="background:'+esc(c.color||'#0A84FF')+'"></span>'
+        +'<span class="lv-dot" style="background:'+esc(c.color||'var(--accent)')+'"></span>'
         +(c.emoji?esc(c.emoji)+' ':'')+esc(c.name)
         +'<span class="why">'+esc(L==='ar'?c.reason_ar:c.reason_en)+'</span></button>';
     });
@@ -28632,7 +28656,7 @@ function lvListHtml(list){
   if(!list.length){ return h+'<div class="empty">'+labelText('ما فيه إجازات مسجّلة','No leave recorded')+'</div></div>'; }
   list.forEach(function(a){
     h+='<div class="lv-row2'+(a.past?' past':'')+'">';
-    h+='<span class="lv-dot" style="background:'+esc(a.color||'#0A84FF')+'"></span>';
+    h+='<span class="lv-dot" style="background:'+esc(a.color||'var(--accent)')+'"></span>';
     h+='<b>'+(a.emoji?esc(a.emoji)+' ':'')+esc(a.employee_name||'')+'</b>';
     h+='<span class="dates">'+esc(a.start_date)+' - '+esc(a.end_date)+'</span>';
     h+='<span class="lv-tag">'+esc(L==='ar'?a.type_ar:a.type_en)+'</span>';
@@ -28926,7 +28950,8 @@ function _permOf(id){
   if(me.role === 'admin') return {read:true, write:true, create:true, _admin:true};
   return (me.perms || {})[id] || {read:false, write:false, create:false};  // deny by default
 }
-function canRead(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).read; }
+function canRead(id){ if(id==='more') return true;   // «المزيد» is the phone menu itself, not a page — never permission-gated
+  const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).read; }
 function canWrite(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).write; }
 function canCreate(id){ const me=_meUser(); if(me.role==='admin') return true; return !!_permOf(id).create; }
 // The first sidebar page (in nav order) the user is allowed to see — where login lands and
@@ -28967,38 +28992,60 @@ function buildSideNav(){
     + '</div>';
   }).join('');
 }
+const MNAV_PRIORITY = {
+  admin: ['inbox', 'erp', 'clean_center'],
+  ops: ['inbox', 'clean_center', 'tickets'],
+  accountant: ['erp', 'expenses', 'finance'],
+  viewer: ['inbox', 'calendar', 'tickets']
+};
+function mobileNav(){
+  const role = _meUser().role || 'viewer';
+  const byId = {}; NAV.forEach(function(n){ byId[n.id]=n; });
+  const want = (MNAV_PRIORITY[role] || MNAV_PRIORITY.viewer).concat(['inbox', 'calendar', 'tickets', 'clean_center', 'erp', 'pricing']);
+  const out = [MNAV[0]], seen = {home: true};
+  want.forEach(function(id){
+    if(out.length >= 4 || seen[id] || !byId[id] || !canRead(id)) return;
+    seen[id] = true;
+    out.push({id: id, ic: byId[id].ic, tk: (id === 'inbox' ? 'nav_inbox' : byId[id].tk), badge: byId[id].badge});
+  });
+  out.push(MNAV[MNAV.length - 1]);
+  return out;
+}
 function buildBottomNav(){
   const el = document.getElementById('bottomNav'); if(!el) return;
-  el.innerHTML = MNAV.filter(function(n){ return n.id==='more' || canRead(n.id); }).map(function(n){
+  el.innerHTML = mobileNav().filter(function(n){ return n.id==='more' || canRead(n.id); }).map(function(n){
     const b = badgeInfo(n.badge);
     return '<button class="bn'+(view===n.id?' on':'')+'"'+(view===n.id?' aria-current="page"':'')+' onclick="go(\\''+n.id+'\\')" aria-label="'+esc(t()[n.tk])+'"><span class="ic">'+n.ic+'</span><span>'+t()[n.tk]+'</span>'+(b.count>0?'<span class="badge '+b.cls+'">'+b.count+'</span>':'')+'</button>';
   }).join('');
 }
 function buildMoreNav(){
   const el = document.getElementById('moreNav'); if(!el) return;
-  const items = [];
-  if(_pwaInstallable()) items.push({action:'install', tk:'pwaInstall'});   // phone: install lives in "More"
-  items.push(
-    {action:'team', tk:'staffApp'},
-    {id:'strat', tk:'strat'},
-    {id:'rev', tk:'rev'},
-    {id:'log', tk:'log'},
-    {action:'theme', tk:'theme'},
-    {action:'lang', tk:'EN/ع'},
-    {action:'logout', tk:'logout'}
-  );
-  el.innerHTML = '<div class="inbox-list">' + items.filter(function(i){ return !i.id || canRead(i.id); }).map(function(i){
-    const label = i.tk==='EN/ع' ? 'English / عربي' : t()[i.tk];
-    let click;
-    if(i.id) click = "go('"+i.id+"')";
-    else if(i.action==='install') click = 'pwaInstall()';
-    else if(i.action==='team') click = "location.href='/team'";
-    else if(i.action==='theme') click = 'toggleTheme()';
-    else if(i.action==='lang') click = 'toggleLang()';
-    else if(i.action==='logout') click = 'logout()';
-    const lead = i.action==='install' ? '<span style="color:var(--gold);font-weight:700;margin-inline-end:6px">⤓</span>' : '';
-    return '<div class="ibox"><div class="ibox-row" style="cursor:pointer" onclick="'+click+'"><div class="ibox-main"><div class="ibox-who">'+lead+label+'</div></div><span style="color:var(--mut)">←</span></div></div>';
-  }).join('') + '</div>';
+  // EVERY page this person may open, grouped like the sidebar (same NAV_CATS + canRead), so
+  // the phone reaches everything the desktop does — one list, never a second copy to keep in sync.
+  const me = _meUser(), isAdmin = me.role === 'admin';
+  const byId = {}; NAV.forEach(function(n){ byId[n.id]=n; });
+  function row(click, icon, label, extra){
+    return '<button class="more-row" onclick="'+click+'"><span class="more-ic">'+(icon||'')+'</span><span class="more-lbl">'+label+'</span>'+(extra||'')+'<span class="more-chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-6 6 6 6"/></svg></span></button>';
+  }
+  let html = '';
+  const top = [];
+  if(_pwaInstallable()) top.push(row('pwaInstall()', ICN.more, t().pwaInstall));
+  top.push(row('location.href=&quot;/team&quot;', ICN.cleanteams || '', t().staffApp));
+  html += '<div class="more-list">'+top.join('')+'</div>';
+  NAV_CATS.forEach(function(cat){
+    const items = cat.ids.map(function(id){ return byId[id]; }).filter(function(n){ return n && !(n.adminOnly && !isAdmin) && canRead(n.id); });
+    if(!items.length) return;
+    html += '<div class="more-cat">'+esc(t()[cat.tk]||'')+'</div><div class="more-list">' + items.map(function(n){
+      const b = badgeInfo(n.badge);
+      return row('go(&quot;'+n.id+'&quot;)', n.ic, esc(t()[n.tk]||n.id), b.count>0 ? '<span class="badge '+b.cls+'">'+b.count+'</span>' : '');
+    }).join('') + '</div>';
+  });
+  html += '<div class="more-cat">'+(L==='ar'?'الإعدادات':'Settings')+'</div><div class="more-list">'
+    + row('toggleTheme()', '', t().theme)
+    + row('toggleLang()', '', 'English / عربي')
+    + row('logout()', '', t().logout)
+    + '</div>';
+  el.innerHTML = html;
 }
 function buildInboxTabs(){
   const el = document.getElementById('ibFilterTabs'); if(!el) return;
@@ -29283,8 +29330,8 @@ function showIosInstallGuide(){
     ov.addEventListener('click', function(e){ if(e.target === ov) closeIosInstallGuide(); });
     document.body.appendChild(ov);
   }
-  var shareSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0A84FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8.5 6.5 12 3l3.5 3.5"/><path d="M6 12H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1"/></svg>';
-  var addSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#0A84FF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>';
+  var shareSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M8.5 6.5 12 3l3.5 3.5"/><path d="M6 12H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1"/></svg>';
+  var addSvg = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>';
   var note = safari ? '' :
     ('<div style="display:flex;gap:9px;align-items:flex-start;background:var(--yellow-soft);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:12px;font-size:12.5px;line-height:1.6">'
       + '<span style="flex:none">⚠️</span><span>'
@@ -33298,7 +33345,7 @@ function _wrRenderApt(i, apt){
   // common issues reminder strip
   let ciHtml = '';
   if(ci.length){
-    ciHtml = '<div style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+    ciHtml = '<div style="background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;margin-bottom:10px">'
       + '<div class="muted" style="font-size:10.5px;font-weight:700;margin-bottom:4px">📌 المشاكل المتكررة لهذي الشقة (من المراجعات) — ركّز عليها:</div>'
       + '<div style="display:flex;flex-wrap:wrap;gap:4px">'
       + ci.map(x=>'<span style="background:var(--surface);border:1px solid var(--bad,#c62828);color:var(--bad,#c62828);border-radius:99px;padding:1px 9px;font-size:11px">'+esc(x)+'</span>').join('')
@@ -34962,7 +35009,7 @@ function renderReviewInsights(d){
   let h = '';
   // Global scorecard
   const ov = d.overall || {};
-  h += '<div class="card" style="background:linear-gradient(135deg,var(--gold-tint),var(--surface-2));border:1px solid var(--gold);margin-bottom:12px">'
+  h += '<div class="card" style="background:var(--surface-2);border:1px solid var(--line-strong);margin-bottom:12px">'
      + '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;padding:6px 4px">'
      + '<div><div style="font-size:30px;font-weight:800;color:var(--gold)">'+(ov.avg?ov.avg.toFixed(2):'—')+'</div>'
      + '<div class="muted" style="font-size:11px">متوسط عام · '+(ov.count||0)+' مراجعة تاريخية'+(d.live_total?(' · '+d.live_total+' حية'):'')+'</div></div>';

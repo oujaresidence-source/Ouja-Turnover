@@ -36,7 +36,7 @@ HTML = """<!doctype html>
 :root{
   --paper:#F4EFE7;--paper2:#ECE5D9;--card:#FBF8F3;--ink:#1D1813;--ink2:#463C33;--mut:#6B5F52;
   --line:#DCD2C3;--line2:#E8E1D5;--gold:#A57A2C;--gold-soft:#EBDDC2;--night:#15110D;
-  --ok:#2E6A49;--ok-bg:#E0EADF;--warn:#8A4B2A;--warn-bg:#F2E4D2;--bad:#9A3F29;--bad-bg:#F4DFD6;
+  --ok:#2E6A49;--ok-bg:#E0EADF;--warn:#8A5A12;--warn-bg:#F5E8C8;--bad:#A2462F;--bad-bg:#F6E2DA;
   --f-d:"Thmanyah Serif","Thmanyah Sans",Georgia,serif;
   --f-t:"Thmanyah Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --ease:cubic-bezier(.23,1,.32,1);--drawer:cubic-bezier(.32,.72,0,1);
@@ -516,7 +516,33 @@ function renderMe(d){
   if (!standalone && (installEvt || isIOS)) html += link('', 'down', 'تثبيت التطبيق', isIOS ? 'من Safari: زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»' : 'يصير له أيقونة على شاشتك', 'install');
   html += link('', 'out2', 'تسجيل الخروج', '', 'logout') + '</div>';
   if (p.view_as) html += pickList(d);
+  html += '<div id="allPages"></div>';
   $('p-me').innerHTML = html;
+  loadNav();
+}
+/* «كل الصفحات»: every dashboard page this login may open, from the SAME /api/nav the dashboard
+   and the Finance Center read (one menu, one permission matrix — never a copy kept by hand). */
+var NAVP = null;
+function loadNav(){
+  if (NAVP) { renderAllPages(); return; }
+  getJSON('/api/nav').then(function(r){ if (r && r.ok) { NAVP = r; renderAllPages(); } }).catch(function(){});
+}
+function renderAllPages(){
+  var box = $('allPages'); if (!box || !NAVP) return;
+  var nav = NAVP.nav || {}, perms = NAVP.perms || {}, lab = (nav.labels || {}).ar || {}, admin = NAVP.role === 'admin';
+  var byId = {};
+  (nav.items || []).forEach(function(n){ byId[n.id] = n; });
+  var html = '';
+  (nav.cats || []).forEach(function(c){
+    var items = (c.ids || []).map(function(id){ return byId[id]; }).filter(function(n){
+      return n && (admin || (!n.adminOnly && (perms[n.id] || {}).read));
+    });
+    if (!items.length) return;
+    html += '<div class="group">' + esc(lab[c.tk] || '') + '</div>' + items.map(function(n){
+      return '<a class="row" href="' + esc(n.href || ('/dashboard#' + n.id)) + '"><span class="main"><span class="t1">' + esc(lab[n.tk] || n.id) + '</span></span>' + ic('chev', 's chev') + '</a>';
+    }).join('');
+  });
+  box.innerHTML = html ? '<h2>كل الصفحات</h2><div class="list">' + html + '</div>' : '';
 }
 function renderPick(){
   setGate(false);
