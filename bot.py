@@ -61293,7 +61293,7 @@ STAY_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__STAY_TITLE__</title>
 <meta name="description" content="__STAY_DESC__">
-<meta name="theme-color" content="#F7F1E6">
+<meta name="theme-color" content="#F4EFE7">
 <meta property="og:title" content="__STAY_TITLE__">
 <meta property="og:description" content="__STAY_DESC__">
 <meta property="og:image" content="__STAY_OG__">
@@ -61302,125 +61302,427 @@ STAY_HTML = r"""<!doctype html>
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="__STAY_URL__">
 <script type="application/ld+json">/*__STAY_JSONLD__*/null</script>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="/monthly/static/fonts/thmanyah-serif-display-bold.v20260827a.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-:root{--bg:#F7F1E6;--surface:#FFFDF8;--elev:#FFFFFF;--ink:#2F241B;--mut:#7A6A58;--gold:#B88935;--gold2:#966C28;--line:#E5D8C4;--amber:#F3E3C3;--green:#3e7d5a;--red:#b4543f;--radius:18px;--shadow:0 8px 28px rgba(47,36,27,.10);--shadow2:0 16px 40px rgba(47,36,27,.16);--ease:cubic-bezier(.23,1,.32,1)}
+@font-face{font-family:"Thmanyah Serif";font-weight:700;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-bold.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:700;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}
+/* Ouja guest site, 2026-11 redesign. One world: Riyadh limestone paper, Najdi night ink, one
+   saffron-gold accent used only for marks (stars, the active rule, the selected day). Buttons are
+   ink, never gold: gold under white text fails contrast. No letter-spacing on Arabic (it breaks
+   the joins); Latin-only labels may track. */
+:root{
+  --paper:#F4EFE7;--paper2:#ECE5D9;--card:#FBF8F3;--ink:#1D1813;--ink2:#463C33;--mut:#6B5F52;
+  --line:#DCD2C3;--line2:#E8E1D5;--gold:#A57A2C;--gold-soft:#EBDDC2;--night:#15110D;--night2:#231C16;
+  --ok:#2E6A49;--warn:#8A4B2A;
+  --f-d:"Thmanyah Serif","Thmanyah Sans",Georgia,serif;
+  --f-t:"Thmanyah Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --ease:cubic-bezier(.23,1,.32,1);--drawer:cubic-bezier(.32,.72,0,1);
+  --r:14px;--r-lg:22px;--pad:clamp(16px,4.4vw,44px);--maxw:1240px;
+  /* aliases kept for the paused /apartments/match quiz, which still styles itself with the old names */
+  --bg:var(--paper);--surface:var(--card);--elev:#fff;--gold2:#7E5B1E;--green:var(--ok);--red:#A2462F;--amber:var(--gold-soft);
+  --shadow:0 1px 2px rgba(29,24,19,.05),0 8px 24px rgba(29,24,19,.06);--shadow2:0 2px 4px rgba(29,24,19,.06),0 18px 40px rgba(29,24,19,.12);--radius:var(--r);
+}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;-webkit-text-size-adjust:100%;font-feature-settings:"ss01"}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:72px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-t);font-size:16px;line-height:1.7;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:var(--ink);color:var(--paper)}
 img{max-width:100%;display:block}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:780px;margin:0 auto;padding:0 16px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:0 20px;min-height:52px;font:inherit;font-size:15.5px;font-weight:700;cursor:pointer;background:var(--gold);color:#fff;box-shadow:0 6px 16px rgba(184,137,59,.28);transition:transform .15s var(--ease),background .15s var(--ease),box-shadow .15s var(--ease)}
-.btn:hover{background:var(--gold2);box-shadow:0 8px 20px rgba(150,108,40,.32)}
-.btn:active{transform:scale(.975)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:var(--pad)}
+.ic{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ic.f{fill:currentColor;stroke:none}
+.num{font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+bdi,.ltr-name{unicode-bidi:isolate}
+[hidden]{display:none!important}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:52px;padding:0 24px;border:0;border-radius:999px;background:var(--ink);color:var(--paper);font-family:var(--f-t);font-size:16px;font-weight:700;cursor:pointer;transition:transform .12s var(--ease),background-color .2s var(--ease)}
+.btn:hover{background:#3A3027}
+.btn:active{transform:scale(.97)}
 .btn.block{width:100%}
-.btn.sm{min-height:40px;padding:0 14px;font-size:13px;border-radius:11px;box-shadow:none}
-.btn.ghost{background:var(--surface);color:var(--ink);border:1.5px solid var(--gold);box-shadow:none}
-.btn.ghost:hover{background:var(--amber)}
-.btn[disabled],.btn.off{background:var(--surface2,#efe7d6);color:var(--mut);box-shadow:none;border:1px solid var(--line);cursor:not-allowed}
+.btn.sm{min-height:44px;padding:0 18px;font-size:14.5px}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.btn.ghost:hover{background:var(--paper2)}
+.btn.light{background:var(--paper);color:var(--ink)}
+.btn.light:hover{background:#fff}
+.btn.wa{background:transparent;color:var(--ok);box-shadow:inset 0 0 0 1.5px var(--ok)}
+.btn[disabled],.btn.off{background:var(--paper2);color:var(--mut);box-shadow:none;cursor:not-allowed;transform:none}
+.link{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:5px;text-decoration-color:var(--gold)}
+.link:hover{text-decoration-color:var(--ink)}
 .muted{color:var(--mut)}
-.head{position:sticky;top:0;z-index:40;background:rgba(247,241,230,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.head .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
-.brand{font-weight:700;font-size:20px;color:var(--ink);display:flex;align-items:center;gap:7px}
-.brand .dot{width:8px;height:8px;border-radius:99px;background:var(--gold);display:inline-block}
-.brand .en{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:1px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
-.field label{font-size:12.5px;font-weight:600;color:var(--ink)}
-.field input,.field select{font:inherit;font-size:16px;padding:14px 13px;min-height:52px;border:1.5px solid var(--line);border-radius:13px;background:var(--elev);color:var(--ink);width:100%;appearance:none}
-.field input:focus,.field select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,137,59,.16)}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.err{display:none;background:rgba(180,84,63,.08);border:1px solid rgba(180,84,63,.4);color:var(--red);font-size:12.5px;border-radius:11px;padding:9px 12px;margin-bottom:10px}
-.err.on{display:block}
-.hero{position:relative;border-radius:22px;overflow:hidden;margin:18px 0 14px;min-height:248px;display:flex;align-items:flex-end;box-shadow:var(--shadow2);background:linear-gradient(135deg,#cdaa6a,#8a6a34)}
-.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.04)}
-.hero .ov{position:absolute;inset:0;background:linear-gradient(0deg,rgba(28,19,9,.9),rgba(28,19,9,.45) 48%,rgba(28,19,9,.1))}
-.hero .in{position:relative;padding:24px 22px 22px;color:#fff}
-.hero h1{font-size:clamp(28px,6.4vw,40px);line-height:1.18;margin:0 0 9px;font-weight:700;text-wrap:balance;letter-spacing:-.02em}
-.hero p{font-size:15px;line-height:1.65;margin:0;color:rgba(255,255,255,.94);max-width:38ch}
-.trust{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
-.tchip{font-size:11.5px;padding:4px 11px;border-radius:99px;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(4px);white-space:nowrap}
-.chip{display:inline-block;font-size:11.5px;padding:4px 11px;border-radius:99px;border:1px solid var(--gold);color:var(--gold2);background:rgba(184,137,59,.08);white-space:nowrap}
-.chip.solid{background:var(--gold);color:#fff;border-color:var(--gold)}
-.pills{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.pills::-webkit-scrollbar{display:none}
-.pill{flex:0 0 auto;font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:99px;border:1.5px solid var(--line);background:var(--elev);color:var(--ink);cursor:pointer;white-space:nowrap;transition:all .14s var(--ease)}
-.pill.active{background:var(--gold);color:#fff;border-color:var(--gold)}
-.cred{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin:14px 0 26px}
-.cred b{color:var(--gold2)}
-.grid{display:grid;grid-template-columns:1fr;gap:14px}
-@media(min-width:700px){.grid{grid-template-columns:1fr 1fr}}
-.lc{cursor:pointer;display:flex;flex-direction:column;transition:transform .18s var(--ease),box-shadow .18s var(--ease)}
-.lc:hover{transform:translateY(-3px);box-shadow:var(--shadow2)}
-.lc:active{transform:translateY(-1px)}
-.ph{aspect-ratio:16/10;background:linear-gradient(135deg,#ece2cd,#ddcfb2);position:relative;overflow:hidden}
-.ph img{width:100%;height:100%;object-fit:cover}
-.noimg{display:flex;align-items:center;justify-content:center;height:100%;color:var(--mut);font-size:13px}
-.ov-row{position:absolute;top:10px;inset-inline:10px;display:flex;gap:6px;flex-wrap:wrap}
-.ov-chip{font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;background:rgba(34,24,13,.62);color:#fff;backdrop-filter:blur(4px)}
-.ov-chip.ok{background:rgba(62,125,90,.92)}
-.ov-chip.gold{background:var(--gold)}
-.bd{padding:13px 14px;display:flex;flex-direction:column;gap:7px;flex:1}
-.lc h3{margin:0;font-size:16px;font-weight:700;color:var(--ink);line-height:1.35}
-.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.meta{display:flex;gap:9px;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
-.badges{display:flex;gap:6px;flex-wrap:wrap}
-.rate{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ink);font-weight:700;margin:1px 0}
-.rate .st{color:var(--gold);font-size:14px;line-height:1}
-.rate .ct{color:var(--mut);font-weight:600;font-size:12px}
-.price{font-weight:700;font-size:15px;color:var(--ink)}
-.price.soft{color:var(--mut);font-weight:600;font-size:13.5px}
-.disc{font-size:11.5px;color:#6e5d4b;line-height:1.55}
-.note{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--bg);border:1px dashed var(--line);font-size:11.5px;color:#6e5d4b;line-height:1.65;text-align:center}
-.note a,.foot a{color:var(--gold2);font-weight:600;text-decoration:underline;text-underline-offset:2px}
-.about{padding:6px 0 34px}
-.about h1{font-size:24px;color:var(--ink);margin:16px 0 6px;letter-spacing:-.01em}
-.about h2{font-size:15.5px;color:var(--ink);margin:0 0 8px;font-weight:700}
-.about p,.about li{font-size:14.5px;line-height:1.8;color:#4d3f31;margin:0 0 8px}
-.about ul{padding-inline-start:20px;margin:0}
-.about .box{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:12px 0}
-.about .box.key{border-color:var(--gold);background:var(--amber)}
-.about .ensec{direction:ltr;text-align:left;border-top:1px solid var(--line);margin-top:28px;padding-top:20px}
-.about .ensec ul{padding-inline-start:20px}
-.sk{background:linear-gradient(90deg,#ece2cd 25%,#f3ecdd 50%,#ece2cd 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:10px}
+
+/* ---------- header ---------- */
+.head{position:sticky;top:0;z-index:50;background:rgba(244,239,231,.92);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid transparent;transition:background-color .3s var(--ease),border-color .3s var(--ease),color .3s var(--ease)}
+.head.scrolled{border-bottom-color:var(--line)}
+.head .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.brand{display:flex;align-items:baseline;gap:10px;line-height:1}
+.brand .ar{font-family:var(--f-d);font-weight:900;font-size:28px}
+.brand .en{font-size:10.5px;font-weight:700;letter-spacing:.22em;color:var(--mut)}
+@media(max-width:430px){.brand .en{display:none}}
+.nav{display:flex;align-items:center;gap:4px}
+.nav a{padding:10px 12px;border-radius:999px;font-size:15px;font-weight:500;min-height:44px;display:inline-flex;align-items:center}
+.nav a:hover{background:rgba(29,24,19,.06)}
+.nav a.on{font-weight:700}
+body.home .head{position:fixed;inset-inline:0;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;color:#fff}
+body.home .head .brand .en{color:rgba(255,255,255,.75)}
+body.home .head .nav a:hover{background:rgba(255,255,255,.12)}
+body.home .head.solid{background:rgba(244,239,231,.94);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);color:var(--ink);border-bottom-color:var(--line)}
+body.home .head.solid .brand .en{color:var(--mut)}
+
+/* ---------- landing hero ---------- */
+.hero{position:relative;min-height:100svh;min-height:100vh;display:flex;align-items:flex-end;color:#fff;overflow:hidden;background:var(--night)}
+@supports(min-height:100svh){.hero{min-height:100svh}}
+.hero .bgimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 60%}
+.hero .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(21,17,13,.55) 0%,rgba(21,17,13,0) 22%,rgba(21,17,13,0) 38%,rgba(21,17,13,.62) 70%,rgba(21,17,13,.9) 100%)}
+.hero .in{position:relative;width:100%;padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+@media(min-width:760px){.hero .shade{background:linear-gradient(180deg,rgba(21,17,13,.5) 0%,rgba(21,17,13,0) 20%),linear-gradient(270deg,rgba(21,17,13,.62) 0%,rgba(21,17,13,.3) 45%,rgba(21,17,13,0) 70%),linear-gradient(180deg,rgba(21,17,13,0) 55%,rgba(21,17,13,.8) 100%)}}
+.hero h1{font-family:var(--f-d);font-weight:900;font-size:clamp(44px,10vw,100px);line-height:1.16;margin:0 0 26px;max-width:11ch;text-wrap:balance}
+.hero .lede{font-size:clamp(17px,2.1vw,21px);line-height:1.6;margin:0 0 22px;max-width:40ch;color:rgba(255,255,255,.9)}
+.hero .proof{display:flex;align-items:center;gap:8px;font-size:14.5px;color:rgba(255,255,255,.88);margin:0 0 26px}
+.hero .proof .ic{width:17px;height:17px;color:#E7C27A}
+.hero .proof b{color:#fff;font-weight:700}
+.hero .proof .sep{width:4px;height:4px;border-radius:9px;background:rgba(255,255,255,.5)}
+.enter{animation:rise .9s var(--ease) both}
+.enter.d1{animation-delay:.08s}.enter.d2{animation-delay:.16s}.enter.d3{animation-delay:.24s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.hero .bgimg.enter{animation:settle 1.6s var(--ease) both}
+@keyframes settle{from{transform:scale(1.07)}to{transform:scale(1)}}
+
+/* ---------- the search bar (hero + search page) ---------- */
+.sbar{display:flex;align-items:stretch;background:var(--card);color:var(--ink);border-radius:999px;padding:6px;box-shadow:0 2px 6px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.28);max-width:760px}
+.sbar .seg{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:8px 20px;border:0;background:none;text-align:start;cursor:pointer;border-radius:999px;transition:background-color .2s var(--ease)}
+.sbar .seg:hover{background:var(--paper2)}
+.sbar .seg+.seg{position:relative}
+.sbar .seg+.seg:before{content:"";position:absolute;inset-inline-start:0;top:22%;bottom:22%;width:1px;background:var(--line)}
+.sbar .seg:hover:before,.sbar .seg:hover+.seg:before{opacity:0}
+.sbar .k{font-size:12.5px;font-weight:700;color:var(--ink)}
+.sbar .v{font-size:15px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbar .v.set{color:var(--ink)}
+.sbar .go{flex:none;width:56px;height:56px;min-height:0;padding:0;border-radius:50%}
+.sbar .go .ic{width:22px;height:22px}
+.sbar .go .t{display:none}
+@media(min-width:760px){.sbar .go{width:auto;padding:0 26px;border-radius:999px}.sbar .go .t{display:inline}}
+@media(max-width:600px){.sbar .seg.opt{display:none}.sbar .seg{padding:8px 16px}}
+.note{margin:16px 0 0;font-size:13.5px;line-height:1.7;color:rgba(255,255,255,.82);max-width:62ch}
+.note a{white-space:nowrap;color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:4px;text-decoration-color:rgba(255,255,255,.5)}
+
+/* ---------- sections ---------- */
+.sec{padding:clamp(64px,10vw,128px) 0 0}
+.sec-h{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:0 0 clamp(24px,3.4vw,40px)}
+.sec-h h2,.h2{font-family:var(--f-d);font-weight:700;font-size:clamp(30px,5vw,54px);line-height:1.12;margin:0;text-wrap:balance}
+.sec-h p{margin:10px 0 0;color:var(--mut);font-size:16.5px;max-width:46ch}
+
+/* unit cards: the photo is the card, no box around it */
+.grid{display:grid;grid-template-columns:1fr;gap:34px 22px}
+@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:1024px){.grid{grid-template-columns:repeat(3,1fr)}}
+.unit{display:flex;flex-direction:column;gap:14px;min-width:0;-webkit-tap-highlight-color:transparent}
+.unit .ph{position:relative;aspect-ratio:4/3;border-radius:var(--r-lg);overflow:hidden;background:var(--paper2);isolation:isolate}
+.unit .ph img{width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease)}
+@media(hover:hover) and (pointer:fine){.unit:hover .ph img{transform:scale(1.03)}}
+.unit:active .ph{transform:scale(.985);transition:transform .12s var(--ease)}
+.tagrow{position:absolute;top:12px;inset-inline-start:12px;display:flex;gap:6px;flex-wrap:wrap;z-index:1}
+.tag{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px;border-radius:999px;background:rgba(251,248,243,.94);color:var(--ink);font-size:12.5px;font-weight:700}
+.tag.ok{background:var(--ok);color:#fff}
+.tag.ok:before{content:"";width:6px;height:6px;border-radius:9px;background:#9BE3B9}
+.noimg{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--f-d);font-weight:900;font-size:44px;color:var(--line)}
+.u-b{display:flex;flex-direction:column;gap:4px;padding:0 2px}
+.u-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;color:var(--mut)}
+.u-area{display:inline-flex;align-items:center;gap:5px}
+.u-area .ic{width:16px;height:16px}
+.rate{display:inline-flex;align-items:center;gap:4px;color:var(--ink);font-weight:700;font-size:14px;white-space:nowrap}
+.rate .ic{width:14px;height:14px;color:var(--gold)}
+.rate i{font-style:normal;font-weight:400;color:var(--mut)}
+.unit h3{margin:0;font-size:18px;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.u-meta{font-size:14.5px;color:var(--ink2)}
+.u-meta .dot{display:inline-block;width:3px;height:3px;border-radius:9px;background:var(--mut);vertical-align:middle;margin:0 7px}
+.u-price{margin-top:4px;font-size:15px;color:var(--ink2)}
+.u-price b{font-size:17px;color:var(--ink)}
+
+/* featured rail: scroll on phones, grid on wide screens */
+.rail{display:grid;grid-auto-flow:column;grid-auto-columns:82%;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;padding-inline:var(--pad);margin-inline:calc(var(--pad) * -1);scroll-padding-inline:var(--pad);scrollbar-width:none;overscroll-behavior-x:contain}
+.rail::-webkit-scrollbar{display:none}
+.rail>*{scroll-snap-align:start}
+@media(min-width:640px){.rail{grid-auto-columns:46%}}
+@media(min-width:1024px){.rail{grid-auto-flow:row;grid-template-columns:repeat(3,1fr);grid-auto-columns:auto;overflow:visible;margin:0;padding:0;gap:40px 22px}}
+
+/* size triptych */
+.sizes{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:760px){.sizes{grid-template-columns:repeat(3,1fr);gap:18px}}
+.size{position:relative;display:block;aspect-ratio:4/3;border-radius:var(--r-lg);overflow:hidden;background:var(--night2);color:#fff;isolation:isolate}
+@media(min-width:760px){.size{aspect-ratio:3/4}}
+.size img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .7s var(--ease)}
+.size:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(21,17,13,0) 45%,rgba(21,17,13,.78))}
+.size .cap{position:absolute;inset-inline:22px;bottom:20px;z-index:1;display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.size .cap b{font-family:var(--f-d);font-weight:700;font-size:clamp(28px,3.4vw,40px);line-height:1.1}
+.size .arw{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(251,248,243,.16);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:background-color .25s var(--ease),transform .25s var(--ease)}
+@media(hover:hover) and (pointer:fine){.size:hover img{transform:scale(1.035)}.size:hover .arw{background:var(--paper);color:var(--ink);transform:translateX(-3px)}}
+.size:active{transform:scale(.99);transition:transform .12s var(--ease)}
+
+/* neighbourhood index: the page's one type moment */
+.hoods{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+@media(min-width:900px){.hoods{display:grid;grid-template-columns:1fr 1fr;column-gap:56px}.hoods li:nth-child(2){border-top:0}}
+.hoods li{border-bottom:1px solid var(--line)}
+.hoods a{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:clamp(14px,2.2vw,22px) 2px;font-family:var(--f-d);font-weight:700;font-size:clamp(30px,5.2vw,54px);line-height:1.2;transition:color .3s var(--ease),padding .35s var(--ease)}
+.hoods a .ic{width:28px;height:28px;color:var(--mut);transition:transform .35s var(--ease),color .3s var(--ease)}
+@media(max-width:600px){.hoods .en{display:none}}
+.hoods .en{font-family:var(--f-t);font-size:13px;font-weight:700;letter-spacing:.18em;color:var(--mut);margin-inline-start:auto;margin-inline-end:18px;text-transform:uppercase}
+@media(hover:hover) and (pointer:fine){
+  .hoods:hover a{color:#B9AE9F}
+  .hoods a:hover{color:var(--ink);padding-inline-start:18px}
+  .hoods a:hover .ic{color:var(--ink);transform:translateX(-6px)}
+}
+.peek{position:fixed;z-index:20;width:240px;aspect-ratio:4/5;border-radius:18px;overflow:hidden;pointer-events:none;opacity:0;transform:scale(.94) rotate(-2deg);transition:opacity .25s var(--ease),transform .35s var(--ease);box-shadow:0 30px 60px rgba(29,24,19,.28);background:var(--paper2)}
+.peek.on{opacity:1;transform:scale(1) rotate(-2deg)}
+.peek img{width:100%;height:100%;object-fit:cover}
+@media(hover:none),(pointer:coarse){.peek{display:none}}
+
+/* how booking works */
+.how{display:grid;grid-template-columns:1fr;gap:0;border-top:1px solid var(--line)}
+@media(min-width:860px){.how{grid-template-columns:repeat(3,1fr);border-top:0}}
+.how li{list-style:none;display:grid;grid-template-columns:auto 1fr;gap:4px 18px;padding:24px 0;border-bottom:1px solid var(--line)}
+@media(min-width:860px){.how li{grid-template-columns:1fr;padding:28px 28px 0 0;border-bottom:0;border-inline-start:1px solid var(--line)}.how li:first-child{border-inline-start:0;padding-inline-start:0}}
+.how .n{font-family:var(--f-d);font-weight:900;font-size:44px;line-height:1;color:var(--gold);grid-row:span 2}
+.how h3{margin:0;font-size:20px;font-weight:700;line-height:1.4}
+.how p{margin:0;color:var(--ink2);font-size:15.5px;max-width:34ch}
+.how-wrap{padding:0;margin:0}
+.lic{display:flex;align-items:center;gap:10px;margin:26px 0 0;font-size:15px;color:var(--ink2)}
+.lic .ic{color:var(--ok)}
+
+/* footer */
+.foot{margin-top:clamp(72px,10vw,140px);background:var(--night);color:rgba(244,239,231,.78);padding:56px 0 calc(34px + env(safe-area-inset-bottom));font-size:14.5px}
+.foot .wrap{display:flex;flex-direction:column;gap:26px}
+.foot .fb{display:flex;align-items:baseline;gap:10px;color:var(--paper)}
+.foot .fb .ar{font-family:var(--f-d);font-weight:900;font-size:40px;line-height:1}
+.foot .fb .en{font-size:11px;letter-spacing:.24em;font-weight:700;color:rgba(244,239,231,.6)}
+.foot .fl{display:flex;flex-wrap:wrap;gap:6px 22px}
+.foot a{color:var(--paper);text-decoration:underline;text-underline-offset:4px;text-decoration-color:rgba(244,239,231,.35)}
+.foot a:hover{text-decoration-color:var(--paper)}
+.foot .fine{border-top:1px solid rgba(244,239,231,.14);padding-top:20px;font-size:13px;color:rgba(244,239,231,.62)}
+body.unitpage .foot{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+@media(min-width:960px){body.unitpage .foot{padding-bottom:40px}}
+
+/* ---------- search page ---------- */
+.stop{position:sticky;top:64px;z-index:40;background:rgba(244,239,231,.94);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line);padding:10px 0}
+.stop .wrap{display:flex;align-items:center;gap:10px}
+.sum{flex:1;max-width:620px;min-width:0;display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 8px 6px 20px;border:0;border-radius:999px;background:var(--card);box-shadow:0 0 0 1px var(--line),0 4px 14px rgba(29,24,19,.06);cursor:pointer;text-align:start;transition:box-shadow .2s var(--ease)}
+.sum:hover{box-shadow:0 0 0 1px var(--ink2),0 4px 14px rgba(29,24,19,.08)}
+.sum .ic{color:var(--ink)}
+.sum .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.sum .t b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sum .t span{font-size:13px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fbtn{position:relative;flex:none;width:52px;height:52px;border-radius:50%;border:0;background:var(--card);box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;cursor:pointer}
+.fbtn:active,.sum:active{transform:scale(.97)}
+.fbtn i{position:absolute;top:-2px;inset-inline-end:-2px;min-width:20px;height:20px;border-radius:99px;background:var(--ink);color:var(--paper);font-style:normal;font-size:11.5px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.qchips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:14px var(--pad) 2px;margin-inline:calc(var(--pad) * -1)}
+.qchips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);font-size:14.5px;font-weight:500;color:var(--ink);cursor:pointer;white-space:nowrap;transition:background-color .18s var(--ease),color .18s var(--ease),box-shadow .18s var(--ease)}
+.chip:hover{box-shadow:inset 0 0 0 1px var(--ink2)}
+.chip.on{background:var(--ink);color:var(--paper);box-shadow:none}
+.chip:active{transform:scale(.97)}
+.res-h{padding:clamp(28px,4vw,48px) 0 clamp(20px,3vw,32px)}
+.res-h h1{font-family:var(--f-d);font-weight:700;font-size:clamp(32px,5vw,56px);line-height:1.12;margin:0;text-wrap:balance}
+.res-h p{margin:10px 0 0;color:var(--mut);font-size:16px;max-width:60ch}
+.res-h .cta{margin-top:18px}
+.banner{display:flex;gap:12px;align-items:flex-start;padding:14px 18px;border-radius:var(--r);background:var(--gold-soft);color:var(--ink);font-size:14.5px;margin:0 0 26px}
+.banner .ic{color:var(--warn);margin-top:3px}
+.empty{padding:clamp(40px,8vw,90px) 0;max-width:560px}
+.empty h2{font-family:var(--f-d);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.2;margin:0 0 10px}
+.empty p{margin:0 0 22px;color:var(--ink2)}
+.empty .acts{display:flex;gap:10px;flex-wrap:wrap}
+.sk{background:linear-gradient(90deg,var(--paper2) 25%,#F1EBE1 50%,var(--paper2) 75%);background-size:200% 100%;animation:sh 1.4s linear infinite;border-radius:10px}
 @keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.summary{position:sticky;top:58px;z-index:30;background:rgba(255,253,248,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:9px 0;margin-bottom:8px}
-.summary .wrap{display:flex;gap:8px;align-items:center}
-.summary .s{flex:1;font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.empty{text-align:center;padding:42px 16px}
-.empty .em{font-size:44px}
-.sec{margin:22px 0 0}
-.sec h2{font-size:18px;color:var(--ink);margin:0 0 10px;font-weight:700}
-.gal2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
-.gal2.one{grid-template-columns:1fr}
-.g-cell{position:relative;aspect-ratio:4/5;border-radius:16px;overflow:hidden;background:linear-gradient(135deg,#ece2cd,#ddcfb2);box-shadow:var(--shadow)}
-.gal2.one .g-cell{aspect-ratio:16/10}
-.g-cell img{width:100%;height:100%;object-fit:cover}
-@media(min-width:560px){.g-cell{aspect-ratio:4/3}}
-.g-all{position:absolute;bottom:10px;inset-inline-end:10px;font:inherit;font-size:12px;font-weight:600;padding:8px 13px;border:0;border-radius:99px;background:rgba(34,24,13,.66);color:#fff;cursor:pointer;backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px}
-.g-all:active{transform:scale(.96)}
-.lb{position:fixed;inset:0;z-index:90;background:rgba(28,20,11,.94);display:flex;flex-direction:column;animation:fade .2s var(--ease)}
+.skc .ph{aspect-ratio:4/3;border-radius:var(--r-lg)}
+.foot-n{margin:34px 0 0;font-size:13.5px;color:var(--mut)}
+
+/* ---------- the sheet: dates, guests, area, type ---------- */
+.scrim{position:fixed;inset:0;z-index:80;background:rgba(21,17,13,.46);opacity:0;transition:opacity .3s var(--ease)}
+.scrim.on{opacity:1}
+.sheet{position:fixed;z-index:81;inset-inline:0;bottom:0;max-height:calc(100% - 24px);display:flex;flex-direction:column;background:var(--card);border-radius:24px 24px 0 0;box-shadow:0 -10px 40px rgba(21,17,13,.2);transform:translateY(100%);transition:transform .42s var(--drawer)}
+.sheet.on{transform:none}
+@media(min-width:760px){
+  .sheet{inset:auto;top:50%;left:50%;bottom:auto;width:600px;max-height:min(860px,calc(100% - 64px));border-radius:26px;transform:translate(-50%,-48%) scale(.97);opacity:0;transition:transform .3s var(--ease),opacity .22s var(--ease)}
+  .sheet.on{transform:translate(-50%,-50%);opacity:1}
+}
+.sh-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px 12px;border-bottom:1px solid var(--line2)}
+.sh-top h2{margin:0;font-size:19px;font-weight:700}
+.xbtn{width:44px;height:44px;border-radius:50%;border:0;background:var(--paper2);display:grid;place-items:center;cursor:pointer}
+.xbtn:active{transform:scale(.94)}
+.grab{width:40px;height:5px;border-radius:9px;background:var(--line);margin:8px auto 0}
+@media(min-width:760px){.grab{display:none}}
+.sh-body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 20px 24px}
+.sh-sec{padding:20px 0;border-bottom:1px solid var(--line2)}
+.sh-sec:last-child{border-bottom:0}
+.sh-sec h3{margin:0 0 4px;font-size:17px;font-weight:700}
+.sh-sec .hint{margin:0 0 14px;font-size:14px;color:var(--mut)}
+.sh-foot{display:flex;align-items:center;gap:12px;padding:14px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line2);background:var(--card)}
+.sh-foot .clr{flex:none;border:0;background:none;font-weight:700;text-decoration:underline;text-underline-offset:4px;cursor:pointer;min-height:44px;padding:0 6px}
+.sh-foot .btn{flex:1}
+.err{display:none;margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#F6E2DA;color:#7A3420;font-size:14px}
+.err.on{display:block}
+/* calendar */
+.dpick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 14px}
+.dbox{padding:10px 14px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);min-height:62px}
+.dbox.cur{box-shadow:inset 0 0 0 2px var(--ink)}
+.dbox span{display:block;font-size:12.5px;font-weight:700}
+.dbox b{display:block;font-size:15.5px;font-weight:500;color:var(--mut)}
+.dbox b.set{color:var(--ink)}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin:2px 0 6px}
+.cal-nav b{font-size:16.5px}
+.cal-nav button{width:44px;height:44px;border-radius:50%;border:0;background:none;display:grid;place-items:center;cursor:pointer}
+.cal-nav button:hover{background:var(--paper2)}
+.cal-nav button[disabled]{opacity:.3;cursor:default;background:none}
+.cal-wd,.cal-g{display:grid;grid-template-columns:repeat(7,1fr)}
+.cal-wd span{font-size:12px;color:var(--mut);text-align:center;padding:6px 0}
+.cal-g button{position:relative;height:46px;border:0;background:none;cursor:pointer;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink);padding:0}
+.cal-g button span{position:relative;z-index:1;display:grid;place-items:center;width:42px;height:42px;margin:auto;border-radius:50%;transition:background-color .12s var(--ease),color .12s var(--ease)}
+.cal-g button:hover span{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.cal-g button[disabled]{color:#B8AD9F;cursor:default;text-decoration:line-through;text-decoration-color:rgba(184,173,159,.6)}
+.cal-g button[disabled] span{box-shadow:none}
+.cal-g .today span{font-weight:700;text-decoration:underline;text-underline-offset:4px;text-decoration-color:var(--gold)}
+.cal-g .in:before,.cal-g .s.hasE:before,.cal-g .e:before{content:"";position:absolute;top:2px;bottom:2px;inset-inline:0;background:var(--gold-soft)}
+.cal-g .s.hasE:before{inset-inline-start:50%}
+.cal-g .e:before{inset-inline-end:50%}
+.cal-g .s span,.cal-g .e span{background:var(--ink);color:var(--paper)}
+.cal-n{margin:10px 0 0;font-size:14px;color:var(--ink2);min-height:24px}
+/* guests stepper */
+.step{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.step .lbl b{display:block;font-size:16px}
+.step .lbl span{font-size:14px;color:var(--mut)}
+.step .ctl{display:flex;align-items:center;gap:14px}
+.step .ctl b{min-width:26px;text-align:center;font-size:18px;font-variant-numeric:tabular-nums}
+.pm{width:44px;height:44px;border-radius:50%;border:0;background:none;box-shadow:inset 0 0 0 1px var(--line);display:grid;place-items:center;cursor:pointer}
+.pm:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.pm[disabled]{opacity:.35;cursor:default;box-shadow:inset 0 0 0 1px var(--line)}
+.pm:active{transform:scale(.94)}
+.cwrap{display:flex;flex-wrap:wrap;gap:8px}
+
+/* ---------- unit page ---------- */
+.gal{position:relative;margin:0 calc(var(--pad) * -1)}
+.gal-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+.gal-strip::-webkit-scrollbar{display:none}
+.gal-strip button{flex:0 0 100%;scroll-snap-align:center;aspect-ratio:4/3;border:0;padding:0;background:var(--paper2);cursor:zoom-in}
+.gal-strip img{width:100%;height:100%;object-fit:cover}
+.gal .cnt{position:absolute;bottom:14px;inset-inline-start:14px;height:30px;padding:0 12px;border-radius:999px;background:rgba(21,17,13,.66);color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.gal .all{position:absolute;bottom:14px;inset-inline-end:14px;height:36px;min-height:0;padding:0 14px;font-size:13.5px}
+.mosaic{display:none}
+@media(min-width:900px){
+  .gal{margin:28px 0 0}
+  .gal-strip{display:none}
+  .gal .cnt{display:none}
+  .mosaic{display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:240px 240px;gap:8px;border-radius:var(--r-lg);overflow:hidden}
+  .mosaic button{border:0;padding:0;background:var(--paper2);cursor:zoom-in;overflow:hidden}
+  .mosaic button:first-child{grid-row:span 2}
+  .mosaic img{width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease),filter .3s var(--ease)}
+  .mosaic button:hover img{transform:scale(1.025);filter:brightness(.94)}
+  .mosaic.n1{grid-template-columns:1fr;grid-template-rows:480px}
+  .mosaic.n2,.mosaic.n3,.mosaic.n4{grid-template-columns:2fr 1fr;grid-template-rows:240px 240px}
+  .mosaic.n2 button:nth-child(2){grid-row:span 2}
+  .gal .all{bottom:18px;inset-inline-end:18px}
+}
+.ulay{display:grid;grid-template-columns:1fr;gap:0}
+@media(min-width:960px){.ulay{grid-template-columns:minmax(0,1fr) 380px;gap:72px;align-items:start}}
+.uhead{padding:24px 0 26px;border-bottom:1px solid var(--line)}
+.uhead .loc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:15px;color:var(--ink2);margin:0 0 10px}
+.uhead .loc .u-area .ic{width:17px;height:17px}
+.uhead h1{font-family:var(--f-d);font-weight:700;font-size:clamp(30px,4.6vw,48px);line-height:1.18;margin:0;text-wrap:balance}
+.uhead .tl{margin:14px 0 0;font-size:18px;color:var(--ink2);max-width:52ch}
+.facts{display:flex;flex-wrap:wrap;gap:10px 24px;margin:18px 0 0;padding:0;list-style:none;font-size:15.5px}
+.facts li{display:flex;align-items:center;gap:8px}
+.facts .ic{color:var(--ink2)}
+.ublock{padding:30px 0;border-bottom:1px solid var(--line)}
+.ublock:last-child{border-bottom:0}
+.ublock h2{font-size:22px;font-weight:700;margin:0 0 16px;line-height:1.35}
+.why{list-style:none;margin:0;padding:0;display:grid;gap:18px}
+@media(min-width:640px){.why{grid-template-columns:1fr 1fr}}
+.why li{display:flex;gap:14px;align-items:flex-start;font-size:16px;line-height:1.55}
+.why .ic{width:26px;height:26px;color:var(--gold);margin-top:1px;stroke-width:1.5}
+.desc{font-size:16.5px;line-height:1.85;color:var(--ink2);white-space:pre-line;max-width:68ch}
+.desc[dir=ltr]{text-align:left}
+.desc.clip{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.more{margin-top:12px;border:0;background:none;padding:8px 0;min-height:44px;font-weight:700;text-decoration:underline;text-underline-offset:5px;text-decoration-color:var(--gold);cursor:pointer}
+.ag{margin:0 0 22px}
+.ag h3{font-size:15px;font-weight:700;margin:0 0 10px;color:var(--ink)}
+.ag ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:10px 20px}
+.ag li{display:flex;align-items:center;gap:10px;font-size:15.5px;color:var(--ink2)}
+.ag li:before{content:"";flex:none;width:5px;height:5px;border-radius:9px;background:var(--gold)}
+.stsec{margin:0 0 22px}
+.stsec h3{font-size:17px;font-weight:700;margin:0 0 6px}
+.emb{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}
+.emb span{display:inline-flex;align-items:center;min-height:34px;padding:0 14px;border-radius:999px;background:var(--paper2);font-size:14px;font-weight:500}
+/* booking panel (desktop) and bar (phone) */
+.bk{display:none}
+@media(min-width:960px){.bk{display:block;position:sticky;top:96px;margin-top:28px;padding:26px;border-radius:var(--r-lg);background:var(--card);box-shadow:0 0 0 1px var(--line),0 24px 60px rgba(29,24,19,.1)}}
+.bk .pr{font-size:15px;color:var(--ink2);margin:0 0 4px}
+.bk .pr b{font-family:var(--f-d);font-weight:700;font-size:30px;color:var(--ink)}
+.bk .tot{font-size:14.5px;color:var(--ink2);margin:0 0 18px}
+.bk .dates{display:grid;grid-template-columns:1fr 1fr;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);margin:0 0 12px;overflow:hidden}
+.bk .dates button{border:0;background:none;text-align:start;padding:12px 14px;cursor:pointer;min-height:62px}
+.bk .dates button+button{border-inline-start:1px solid var(--line)}
+.bk .dates button:hover{background:var(--paper)}
+.bk .dates span{display:block;font-size:12px;font-weight:700}
+.bk .dates b{display:block;font-weight:500;font-size:15px;color:var(--ink2)}
+.bk .hint{font-size:14.5px;color:var(--ink2);margin:0 0 16px}
+.bk .btn+.btn{margin-top:10px}
+.small{font-size:13px;line-height:1.65;color:var(--mut);margin:12px 0 0}
+.small a{color:var(--ink);font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.bbar{position:fixed;inset-inline:0;bottom:0;z-index:45;background:rgba(251,248,243,.97);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:12px 0 calc(10px + env(safe-area-inset-bottom))}
+@media(min-width:960px){.bbar{display:none}}
+.bbar .row{display:flex;align-items:center;gap:14px}
+.bbar .info{flex:1;min-width:0;line-height:1.35}
+.bbar .info b{display:block;font-size:16px}
+.bbar .info button{border:0;background:none;padding:0;font-weight:700;font-size:15px;text-decoration:underline;text-underline-offset:4px;cursor:pointer;min-height:44px}
+.bbar .info span{font-size:13px;color:var(--mut)}
+.bbar .btn{flex:none}
+.bbar .small{margin:8px 0 0;font-size:12px;text-align:center}
+/* lightbox */
+.lb{position:fixed;inset:0;z-index:90;background:var(--night);color:#fff;display:flex;flex-direction:column;animation:fade .22s var(--ease)}
 @keyframes fade{from{opacity:0}to{opacity:1}}
-.lb-x{position:absolute;top:calc(12px + env(safe-area-inset-top));inset-inline-end:14px;z-index:2;width:42px;height:42px;border:0;border-radius:99px;background:rgba(255,255,255,.16);color:#fff;font-size:18px;cursor:pointer;backdrop-filter:blur(6px)}
-.lb-strip{flex:1;display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding:64px 14px calc(20px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
-.lb-strip img{width:100%;border-radius:14px;background:#3a2c1c}
-.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:9px;margin:12px 0}
-.kv div{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center}
-.kv .k{font-size:11px;color:var(--mut)}.kv .v{font-size:17px;font-weight:700;color:var(--ink);margin-top:2px}
-.why{display:flex;flex-direction:column;gap:8px}
-.why div{display:flex;gap:9px;align-items:center;font-size:13.5px;color:var(--ink);background:var(--elev);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
-.why .i{color:var(--gold)}
-.ag{margin-bottom:12px}
-.ag h3{font-size:13px;color:var(--gold2);margin:0 0 7px;font-weight:700}
-.amen{display:flex;gap:7px;flex-wrap:wrap}
-.amen span{font-size:12.5px;background:var(--elev);border:1px solid var(--line);border-radius:11px;padding:7px 11px}
-.more{background:none;border:0;color:var(--gold2);font:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:6px 0;text-decoration:underline}
-.descblk{line-height:1.85;color:var(--ink);font-size:14.5px;background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:10px 0}
-.descblk.ltr{direction:ltr;text-align:left}
-.sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(247,241,230,.92);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:11px 0 calc(11px + env(safe-area-inset-bottom))}
-.sticky-cta .wrap{display:flex;flex-direction:column;gap:6px}
-.foot{text-align:center;color:var(--mut);font-size:12px;padding:26px 16px 34px}
+.lb-top{display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top)) var(--pad) 10px}
+.lb-top b{font-size:15px;font-variant-numeric:tabular-nums}
+.lb-x{width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer}
+.lb-strip{flex:1;overflow-y:auto;padding:0 var(--pad) calc(24px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr;gap:10px;align-content:start}
+@media(min-width:760px){.lb-strip{grid-template-columns:1fr 1fr;max-width:1200px;margin:0 auto;width:100%}}
+.lb-strip img{width:100%;border-radius:12px;background:var(--night2)}
+
+/* ---------- about ---------- */
+.about{max-width:760px;padding:clamp(36px,6vw,72px) 0 0}
+.about h1{font-family:var(--f-d);font-weight:700;font-size:clamp(36px,6vw,60px);line-height:1.12;margin:0 0 16px}
+.about h2{font-size:20px;font-weight:700;margin:0 0 10px}
+.about p,.about li{font-size:17px;line-height:1.85;color:var(--ink2);margin:0 0 10px}
+.about ul{margin:0;padding-inline-start:22px}
+.about .box{padding:26px 0;border-top:1px solid var(--line)}
+.about .box.key{padding:26px 28px;margin:26px 0;border:0;border-radius:var(--r-lg);background:var(--ink);color:var(--paper)}
+.about .box.key h2{color:var(--paper)}
+.about .box.key li{color:rgba(244,239,231,.86)}
+.about .ensec{direction:ltr;text-align:left;margin-top:56px;padding-top:40px;border-top:1px solid var(--line)}
+.about a{color:var(--ink);font-weight:700;text-decoration:underline;text-underline-offset:4px;text-decoration-color:var(--gold)}
+.about .btn{text-decoration:none}
+
+/* ---------- paused /apartments/match quiz: legacy parts it still draws ---------- */
+.card{background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line);overflow:hidden}
+.lc{display:flex;flex-direction:column}
+.lc .ph{position:relative;aspect-ratio:4/3;background:var(--paper2);overflow:hidden}
+.lc .ph img{width:100%;height:100%;object-fit:cover}
+.bd{padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1}
+.lc h3{margin:0;font-size:16px;line-height:1.4}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{display:flex;gap:9px;flex-wrap:wrap;font-size:13.5px;color:var(--mut)}
+.price{font-weight:700;font-size:15px}
+.price.soft{color:var(--mut);font-weight:500;font-size:14px}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.field label{font-size:13px;font-weight:700}
+.field input,.field select{font:inherit;font-size:16px;padding:12px 14px;min-height:52px;border:0;border-radius:14px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);color:var(--ink)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cta-row{display:flex}
+
 .mq-wrap{max-width:560px;margin:0 auto;padding:22px 4px 40px}
 .mq-prog{display:flex;gap:6px;justify-content:center;margin-bottom:22px}
 .mq-dot{width:26px;height:3px;border-radius:2px;background:var(--line);transition:background .25s cubic-bezier(.23,1,.32,1)}
@@ -61507,13 +61809,48 @@ a{color:inherit;text-decoration:none}
   .mq-entry:hover{transform:none}
   .mq-entry:hover .mq-entry-a{transform:none}
 }
-@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+#view>.mq-wrap{padding-inline:var(--pad)}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  .hero .bgimg.enter{transform:none}
+}
 </style>
 </head>
 <body>
-<header class="head"><div class="wrap"><a class="brand" href="/apartments"><span class="dot"></span>عوجا <span class="en">OUJA</span></a><span class="muted" style="font-size:12.5px">إقامات الرياض</span></div></header>
-<main id="view" class="wrap"></main>
-<div class="foot">عوجا · إقامات مختارة في الرياض · موقع تصفح فقط · الحجز والدفع داخل Airbnb · <a href="/apartments/about">عن هذا الموقع</a></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></symbol>
+<symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 18V6M3 14h18v4M21 14v-2.5A3.5 3.5 0 0 0 17.5 8H11v6"/><circle cx="7" cy="10.5" r="2"/></symbol>
+<symbol id="i-bath" viewBox="0 0 24 24"><path d="M4 12h16v3a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-3zM6 12V6a2 2 0 0 1 3.7-1M7 20l-1 1.5M17 20l1 1.5"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-chl" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+<symbol id="i-chr" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-arw" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M17 17 7 7M15 7H7v8"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 8.2 7 9.5 4-1.3 7-5.1 7-9.5V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></symbol>
+<symbol id="i-building" viewBox="0 0 24 24"><path d="M5 21V4.5A1.5 1.5 0 0 1 6.5 3h7A1.5 1.5 0 0 1 15 4.5V21M15 9h3.5A1.5 1.5 0 0 1 20 10.5V21M3 21h18M8.5 7h3M8.5 11h3M8.5 15h3"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7z"/></symbol>
+<symbol id="i-sofa" viewBox="0 0 24 24"><path d="M4 11V8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3"/><path d="M2.5 13a2 2 0 0 1 4 0v2h11v-2a2 2 0 0 1 4 0v5h-19zM5 18v2M19 18v2"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5z"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</defs></svg>
+<header class="head" id="head"><div class="wrap"><a class="brand" href="/apartments" aria-label="عوجا، الصفحة الرئيسية"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE</span></a><nav class="nav" aria-label="الأقسام"><a href="/apartments/search" id="nv-s">الشقق</a><a href="/apartments/about" id="nv-a">عن الموقع</a></nav></div></header>
+<main id="view"></main>
+<footer class="foot"><div class="wrap">
+<div class="fb"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE · RIYADH</span></div>
+<div class="fl"><a href="/apartments/search">كل الشقق</a><a href="/apartments/about">عن هذا الموقع</a></div>
+<div class="fine">عوجا · إقامات مختارة في الرياض · موقع تصفح فقط · الحجز والدفع داخل Airbnb · <a href="/apartments/about">عن هذا الموقع</a></div>
+</div></footer>
 <script>
 var STAY=/*__STAY_DATA__*/null;
 var V=document.getElementById('view');
@@ -61532,101 +61869,278 @@ function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_
 function nightsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ليلة وحدة';if(n==2)return 'ليلتين';if(n<=10)return n+' ليالٍ';return n+' ليلة';}
 function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
 function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
+// kept for the paused match quiz
 function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<span style="opacity:.4">·</span>');}
-function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
-function ratingHtml(l){if(l==null||l.rating==null||!l.reviews_count)return '';var r=Math.round(l.rating*100)/100;return '<div class="rate"><span class="st">★</span>'+r+' <span class="ct">('+l.reviews_count+' تقييم)</span></div>';}
-var EMBL={wifi:'📶',parking:'🅿️',pool:'🏊',kitchen:'🍳',ac:'❄️',tv:'📺',washer:'🧺',dryer:'🌀',view:'🌆',tower:'🏙️',balcony:'🪟',terrace:'🌿',garden:'🌳',bed:'🛏️',bath:'🛁',family:'👨‍👩‍👧',kids:'🧸',gym:'🏋️',elevator:'🛗',security:'🔒',location:'📍',coffee:'☕',workspace:'💻',self_entry:'🚪',bbq:'🍢',sauna:'🧖',jacuzzi:'♨️',netflix:'🎬',sound:'🔊',dishwasher:'🍽️',heating:'🔥',pets:'🐾',smart:'🤖',cleaning:'🧹',luxury:'✨',default:'✨'};
-function emblemsRow(st){if(!st||!st.emblems||!st.emblems.length)return '';return '<div class="badges" style="margin:12px 0">'+st.emblems.map(function(e){return '<span class="chip">'+(EMBL[e.icon]||EMBL.default)+' '+he(e.ar||e.en)+'</span>';}).join('')+'</div>';}
-function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEach(function(s){var ti=(s.title_ar||s.title_en||''),bo=(s.body_ar||s.body_en||'');if(!ti&&!bo)return;out+='<div class="sec"><h2>'+he(ti)+'</h2><div class="descblk'+(isLatin(bo)?' ltr':'')+'">'+he(bo)+'</div></div>';});var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)out+='<div class="sec"><h2>📍 الموقع والحي</h2><div class="descblk'+(isLatin(nb)?' ltr':'')+'">'+he(nb)+'</div></div>';return out;}
+function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="emb-t">'+he(t.ar||t.en)+'</span>';}).join('');}
 
+/* ---------- small shared pieces ---------- */
+function svg(id,cls){return '<svg class="ic'+(cls?(' '+cls):'')+'" aria-hidden="true"><use href="#i-'+id+'"/></svg>';}
+function CFG(){return (STAY&&STAY.config)||{};}
+function areaName(l){var a=l&&l.area;if(!a||a==='Riyadh')return 'الرياض';return a;}
+function guestsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ضيف واحد';if(n==2)return 'ضيفين';if(n<=10)return n+' ضيوف';return n+' ضيف';}
+function roomsLabel(n){if(n==null||n==='')return '';n=Number(n);if(n===0)return 'استوديو';if(n==1)return 'غرفة نوم';if(n==2)return 'غرفتين';if(n<=10)return n+' غرف';return n+' غرفة';}
+function bathsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'حمام';if(n==2)return 'حمامين';if(n<=10)return n+' حمامات';return n+' حمام';}
+function metaLine(l){var f=[guestsLabel(l.capacity),roomsLabel(l.beds),bathsLabel(l.baths)].filter(Boolean);return f.map(he).join('<span class="dot"></span>');}
+function ratingHtml(l){if(l==null||l.rating==null||!l.reviews_count)return '';var r=Math.round(l.rating*100)/100;return '<span class="rate" aria-label="التقييم '+r+' من 5">'+svg('star','f')+'<span class="num">'+r+'</span> <i>(<span class="num">'+l.reviews_count+'</span>)</i></span>';}
+var AR_M=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+var AR_D=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function ymd(d){var m=d.getMonth()+1,dd=d.getDate();return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;}
+function parseYmd(s){if(!s||!/^\d{4}-\d{2}-\d{2}$/.test(s))return null;var p=s.split('-');return new Date(+p[0],+p[1]-1,+p[2]);}
+function fmtD(s,day){var d=parseYmd(s);if(!d)return '';return (day?(AR_D[d.getDay()]+' '):'')+d.getDate()+' '+AR_M[d.getMonth()];}
+function nightsBetween(a,b){var x=parseYmd(a),y=parseYmd(b);if(!x||!y)return 0;return Math.round((y-x)/86400000);}
+function rangeLabel(ci,co){var a=parseYmd(ci),b=parseYmd(co);if(!a||!b)return '';if(a.getMonth()===b.getMonth()&&a.getFullYear()===b.getFullYear())return a.getDate()+' – '+b.getDate()+' '+AR_M[b.getMonth()];return fmtD(ci)+' – '+fmtD(co);}
+function nooOf(cats){return (CFG().noo||[]).filter(function(o){return cats.indexOf(o.category)>=0;});}
+function typeChips(){var lay=nooOf(['layout']).slice().sort(function(a,b){return String(a.key).localeCompare(String(b.key));});return lay.concat((CFG().noo||[]).filter(function(o){return o.category!=='layout'&&o.category!=='area';}));}
+function hoodName(k){var o=(CFG().neighborhoods||[]).filter(function(x){return x.key===k;})[0];return o?(o.ar||o.en):'';}
+function readQ(){var p=qs();return {ci:p.get('check_in')||'',co:p.get('check_out')||'',g:parseInt(p.get('guests'),10)||0,nb:p.get('neighborhood')||'',tags:(p.get('tags')||'').split(',').filter(Boolean),ty:p.get('type')||'all'};}
+function buildQ(s,only){var q=[];if(s.g)q.push('guests='+s.g);if(!only){if(s.tags&&s.tags.length)q.push('tags='+encodeURIComponent(s.tags.join(',')));if(s.nb)q.push('neighborhood='+encodeURIComponent(s.nb));}if(s.ci&&s.co){q.push('check_in='+s.ci);q.push('check_out='+s.co);}var c=carry();if(c)q.push(c.slice(1));return q.length?('?'+q.join('&')):'';}
+function imgTag(u,alt,w,eager,sizes){if(!u)return '<span class="noimg">عوجا</span>';var w2=Math.round(w*1.6);return '<img '+(eager?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="'+w+'" height="'+Math.round(w*0.75)+'" alt="'+he(alt||'')+'" src="'+he(pimg(u,w))+'" srcset="'+he(pimg(u,w))+' '+w+'w, '+he(pimg(u,w2))+' '+w2+'w" sizes="'+(sizes||'100vw')+'">';}
+
+/* ---------- unit card: the photo is the card ---------- */
+function card(l,eager){
+  var tags=[];if(l.available===true)tags.push('<span class="tag ok">متاحة</span>');if(l.badge)tags.push('<span class="tag">'+he(l.badge)+'</span>');
+  var price='';
+  if(l.est_total!=null&&l.nights>0){
+    price='<div class="u-price">'+((l.est_avg!=null&&l.est_avg>0)?('<b class="num">'+money(l.est_avg)+'</b> / الليلة تقريبًا · '):'')+'الإجمالي <span class="num">'+money(l.est_total)+'</span> لـ'+nightsLabel(l.nights)+'</div>';
+  }
+  var name=l.name_ar||l.name_en||'';
+  return '<a class="unit" href="/apartments/'+he(l.slug)+location.search+'">'
+    +'<div class="ph">'+imgTag(l.cover,name,560,eager,'(min-width:1024px) 400px, (min-width:640px) 48vw, 92vw')+(tags.length?('<div class="tagrow">'+tags.join('')+'</div>'):'')+'</div>'
+    +'<div class="u-b"><div class="u-top"><span class="u-area">'+svg('pin')+he(areaName(l))+'</span>'+ratingHtml(l)+'</div>'
+    +'<h3 dir="auto">'+he(name)+'</h3>'
+    +'<div class="u-meta">'+metaLine(l)+'</div>'+price+'</div></a>';
+}
+function skelCards(n){var s='';for(var i=0;i<n;i++){s+='<div class="unit skc" aria-hidden="true"><div class="ph sk"></div><div class="u-b"><div class="sk" style="height:14px;width:40%"></div><div class="sk" style="height:20px;width:85%;margin-top:6px"></div><div class="sk" style="height:14px;width:55%;margin-top:6px"></div></div></div>';}return s;}
+
+/* ---------- the sheet: dates, guests, area, type ---------- */
+var SH=null;
+function openSheet(mode,focus){
+  if(SH)return;
+  var s=readQ(),today=new Date();today.setHours(0,0,0,0);
+  var st={ci:s.ci,co:s.co,g:s.g||0,nb:s.nb,tags:s.tags.slice(),mode:mode};
+  var first=parseYmd(st.ci)||today;var view={y:first.getFullYear(),m:first.getMonth()};
+  var opener=document.activeElement;
+  var scrim=document.createElement('div');scrim.className='scrim';
+  var el=document.createElement('div');el.className='sheet';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-labelledby','sh-t');
+  var hoods=(CFG().neighborhoods||[]);
+  var types=typeChips();
+  el.innerHTML='<div class="grab"></div><div class="sh-top"><h2 id="sh-t">'+(mode==='unit'?'تواريخ إقامتك':'وش تدوّر؟')+'</h2><button class="xbtn" id="sh-x" aria-label="إغلاق">'+svg('x')+'</button></div>'
+    +'<div class="sh-body"><div class="err" id="sh-err" role="alert"></div>'
+    +'<section class="sh-sec" id="sh-dates"><h3>متى بتجي؟</h3><p class="hint">اختر يوم الدخول ثم يوم الخروج.</p><div class="dpick"><div class="dbox" id="db-ci"><span>الدخول</span><b></b></div><div class="dbox" id="db-co"><span>الخروج</span><b></b></div></div><div id="cal"></div><p class="cal-n" id="cal-n"></p></section>'
+    +'<section class="sh-sec" id="sh-guests"><div class="step"><div class="lbl"><b>الضيوف</b><span>كم شخص بيسكن؟</span></div><div class="ctl"><button class="pm" id="g-m" aria-label="أقل">'+svg('minus')+'</button><b id="g-v" aria-live="polite"></b><button class="pm" id="g-p" aria-label="أكثر">'+svg('plus')+'</button></div></div></section>'
+    +(mode!=='unit'&&hoods.length?('<section class="sh-sec" id="sh-hood"><h3>الحي</h3><p class="hint">اختر حي واحد، أو خلّها على كل الأحياء.</p><div class="cwrap" id="hd">'+['<button type="button" class="chip" data-nb="">كل الأحياء</button>'].concat(hoods.map(function(o){return '<button type="button" class="chip" data-nb="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';})).join('')+'</div></section>'):'')
+    +(mode!=='unit'&&types.length?('<section class="sh-sec" id="sh-type"><h3>نوع الشقة</h3><p class="hint">تقدر تختار أكثر من وحدة، ونعرض اللي فيها كلها.</p><div class="cwrap" id="ty">'+types.map(function(o){return '<button type="button" class="chip" data-k="'+he(o.key)+'" aria-pressed="false">'+he(o.ar||o.en)+'</button>';}).join('')+'</div></section>'):'')
+    +'</div><div class="sh-foot"><button class="clr" id="sh-c">مسح</button><button class="btn" id="sh-go">'+svg('search')+(mode==='unit'?'اعرض السعر لتواريخك':'اعرض الشقق')+'</button></div>';
+  document.body.appendChild(scrim);document.body.appendChild(el);
+  document.body.style.overflow='hidden';
+  function $(id){return el.querySelector('#'+id);}
+  function paint(){
+    var ci=$('db-ci'),co=$('db-co');
+    ci.querySelector('b').textContent=st.ci?fmtD(st.ci,true):'أضف تاريخ';ci.querySelector('b').className=st.ci?'set':'';
+    co.querySelector('b').textContent=st.co?fmtD(st.co,true):'أضف تاريخ';co.querySelector('b').className=st.co?'set':'';
+    ci.classList.toggle('cur',!st.ci||!!st.co);co.classList.toggle('cur',!!st.ci&&!st.co);
+    var n=nightsBetween(st.ci,st.co);$('cal-n').textContent=(st.ci&&st.co&&n>0)?(nightsLabel(n)+' · '+rangeLabel(st.ci,st.co)):'';
+    var gv=st.g||1;$('g-v').textContent=gv;$('g-m').disabled=gv<=1;$('g-p').disabled=gv>=16;
+    var hd=$('hd');if(hd)hd.querySelectorAll('.chip').forEach(function(b){var on=(b.getAttribute('data-nb')||'')===(st.nb||'');b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');});
+    var ty=$('ty');if(ty)ty.querySelectorAll('.chip').forEach(function(b){var on=st.tags.indexOf(b.getAttribute('data-k'))>=0;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');});
+    drawCal();
+  }
+  function drawCal(){
+    var y=view.y,m=view.m,firstDay=new Date(y,m,1),off=firstDay.getDay(),days=new Date(y,m+1,0).getDate();
+    var minView=(y<today.getFullYear())||(y===today.getFullYear()&&m<=today.getMonth());
+    var h='<div class="cal-nav"><button type="button" id="cal-p" aria-label="الشهر السابق"'+(minView?' disabled':'')+'>'+svg('chr')+'</button><b>'+AR_M[m]+' '+y+'</b><button type="button" id="cal-x" aria-label="الشهر الجاي">'+svg('chl')+'</button></div>';
+    h+='<div class="cal-wd">'+['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'].map(function(d){return '<span>'+d+'</span>';}).join('')+'</div><div class="cal-g">';
+    for(var i=0;i<off;i++)h+='<span></span>';
+    for(var d=1;d<=days;d++){
+      var dt=new Date(y,m,d),k=ymd(dt),c=[];
+      var past=dt<today;
+      if(k===ymd(today))c.push('today');
+      if(k===st.ci){c.push('s');if(st.co)c.push('hasE');}
+      if(k===st.co)c.push('e');
+      if(st.ci&&st.co&&k>st.ci&&k<st.co)c.push('in');
+      h+='<button type="button" data-d="'+k+'" class="'+c.join(' ')+'"'+(past?' disabled':'')+' aria-label="'+fmtD(k,true)+'"'+((k===st.ci||k===st.co)?' aria-pressed="true"':'')+'><span>'+d+'</span></button>';
+    }
+    $('cal').innerHTML=h+'</div>';
+    var p=$('cal-p'),x=$('cal-x');
+    p.onclick=function(){if(view.m===0){view.m=11;view.y--;}else view.m--;drawCal();};
+    x.onclick=function(){if(view.m===11){view.m=0;view.y++;}else view.m++;drawCal();};
+  }
+  el.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    var k=b.getAttribute('data-d');
+    if(k){if(!st.ci||(st.ci&&st.co)){st.ci=k;st.co='';}else if(k<=st.ci){st.ci=k;}else{st.co=k;}$('sh-err').classList.remove('on');paint();return;}
+    if(b.hasAttribute('data-nb')){st.nb=b.getAttribute('data-nb');paint();return;}
+    if(b.hasAttribute('data-k')){var t=b.getAttribute('data-k'),i=st.tags.indexOf(t);if(i>=0)st.tags.splice(i,1);else st.tags.push(t);paint();return;}
+    if(b.id==='g-m'){st.g=Math.max(1,(st.g||1)-1);paint();}
+    else if(b.id==='g-p'){st.g=Math.min(16,(st.g||1)+1);paint();}
+    else if(b.id==='sh-c'){st.ci='';st.co='';st.g=0;st.nb='';st.tags=[];paint();}
+    else if(b.id==='sh-x'){close();}
+    else if(b.id==='sh-go'){
+      var ev=validateDates(st.ci,st.co);if(ev){var er=$('sh-err');er.textContent=ev;er.classList.add('on');el.querySelector('.sh-body').scrollTop=0;return;}
+      var keep=readQ();var q={ci:st.ci,co:st.co,g:st.g,nb:st.nb,tags:st.tags};
+      track('stay_search_submit',{mode:mode});
+      if(mode==='unit'){location.href=location.pathname+buildQ({ci:q.ci,co:q.co,g:q.g},true);}
+      else if(mode==='search-inplace'){close();history.replaceState(null,'','/apartments/search'+buildQ(q));runSearch();}
+      else{location.href='/apartments/search'+buildQ(q);}
+    }
+  });
+  function onKey(e){if(e.key==='Escape')close();}
+  function close(){
+    document.removeEventListener('keydown',onKey);
+    el.classList.remove('on');scrim.classList.remove('on');
+    setTimeout(function(){el.remove();scrim.remove();},380);
+    document.body.style.overflow='';SH=null;try{if(opener&&opener.focus)opener.focus();}catch(e){}
+  }
+  scrim.onclick=close;document.addEventListener('keydown',onKey);
+  paint();
+  SH=el;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){el.classList.add('on');scrim.classList.add('on');
+    var tgt=focus&&$(focus);if(tgt&&focus!=='sh-dates'){el.querySelector('.sh-body').scrollTop=tgt.offsetTop-12;}
+    $('sh-x').focus({preventScroll:true});});});
+}
+
+/* ---------- home ---------- */
 function viewLanding(){
   track('stay_page_view',{});
-  var cfg=(STAY&&STAY.config)||{noo:[],count:0,hero:''};var hc=cfg.hero_cfg||{};var p=qs();
-  var nbs=(cfg.neighborhoods||[]);var nbopts='<option value="">كل الأحياء</option>'+nbs.map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('neighborhood')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+(o.count?(' ('+o.count+')'):'')+'</option>';}).join('');
-  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
-  var fpos=({center:'center',top:'top center',bottom:'bottom center',left:'center left',right:'center right'})[hc.focal||'center']||'center';
-  var heroBg=cfg.hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(pimg(cfg.hero,1280)).replace(/"/g,'&quot;')+');background-position:'+fpos+'"></div>'):'';
-  var ovOp=(hc.overlay!=null?(hc.overlay/100):1);
+  document.body.classList.add('home');
+  var cfg=CFG();var hc=cfg.hero_cfg||{};var s=readQ();
+  var fpos=({center:'center',top:'center top',bottom:'center bottom',left:'left center',right:'right center'})[hc.focal||'center']||'center';
+  var heroBg=cfg.hero?('<img class="bgimg enter" alt="" fetchpriority="high" decoding="async" src="'+he(pimg(cfg.hero,1600))+'" srcset="'+he(pimg(cfg.hero,900))+' 900w, '+he(pimg(cfg.hero,1600))+' 1600w, '+he(pimg(cfg.hero,2400))+' 2400w" sizes="100vw" style="object-position:'+fpos+'">'):'';
+  var ovOp=(hc.overlay!=null?Math.max(.35,hc.overlay/100):1);
   var ro=(cfg.rating_overall||null);
-  var ratingChip=(ro&&ro.avg)?('<span class="tchip">★ '+ro.avg+' · '+ro.count+' تقييم</span>'):'';
-  var hTrust=hc.trust?('<div class="trust">'+ratingChip+'<span class="tchip">'+he(hc.trust)+'</span></div>'):('<div class="trust">'+(ratingChip||'<span class="tchip">وحدات مختارة</span>')+'<span class="tchip">دخول ذاتي</span><span class="tchip">الحجز عبر Airbnb</span></div>');
-  var chips=(cfg.noo||[]).slice(0,16).map(function(o){return '<button type="button" class="pill" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
-  V.innerHTML='<section class="hero">'+heroBg+'<div class="ov" style="opacity:'+ovOp+'"></div><div class="in"><h1>'+he(hc.title||'اختر إقامتك مع عوجا')+'</h1>'
-    +'<p>'+he(hc.subtitle||'حط تاريخك وعدد الضيوف ونوع الإقامة، ونطلع لك وحدات عوجا المتاحة في الرياض.')+'</p>'
-    +hTrust+'</div></section>'
-    +'<div class="card" style="padding:16px;margin-bottom:14px">'
-    +'<div id="err" class="err"></div>'
-    +'<div class="row2"><div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div><div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div></div>'
-    +'<div class="row2"><div class="field"><label>عدد الضيوف</label><select id="g">'+gopt+'</select></div><div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div></div>'
-    +(chips?('<div class="field" style="margin-top:2px"><label>نوع الإقامة (تقدر تختار أكثر من وسم)</label><div class="pills" id="chips" style="margin:2px 0 12px">'+chips+'</div></div>'):'')
-    +'<button class="btn block" id="go">اعرض الوحدات المتاحة</button>'
-    +'<div class="note">هذا الموقع للتصفح والبحث فقط · الحجز والدفع يتمّان داخل Airbnb · لا يتم أي حجز أو دفع هنا. <a href="/apartments/about">عن هذا الموقع</a></div></div>'
+  var proof=[];
+  if(ro&&ro.avg)proof.push(svg('star','f')+'<span><b class="num">'+he(ro.avg)+'</b> من <span class="num">'+Number(ro.count||0).toLocaleString('en-US')+'</span> تقييم ضيف</span>');
+  proof.push('<span>'+he(hc.trust||'مرخّصة من وزارة السياحة')+'</span>');
+  var dv=(s.ci&&s.co)?rangeLabel(s.ci,s.co):'',gv=s.g?guestsLabel(s.g):'',nv=s.nb?hoodName(s.nb):'';
+  V.innerHTML='<section class="hero">'+heroBg+'<div class="shade" style="opacity:'+ovOp+'"></div><div class="in wrap">'
+    +'<h1 class="enter">'+he(hc.title||'شقق مفروشة في الرياض')+'</h1>'
+    +'<p class="lede enter d1">'+he(hc.subtitle||'دخول ذاتي بدون انتظار. تختار شقتك هنا، وتحجزها داخل Airbnb بنفس تواريخك.')+'</p>'
+    +'<div class="proof enter d1">'+proof.join('<span class="sep"></span>')+'</div>'
+    +'<div class="sbar enter d2" role="search"><button class="seg" data-f="sh-dates"><span class="k">متى؟</span><span class="v'+(dv?' set':'')+'">'+he(dv||'أضف التواريخ')+'</span></button>'
+    +'<button class="seg" data-f="sh-guests"><span class="k">الضيوف</span><span class="v'+(gv?' set':'')+'">'+he(gv||'كم شخص؟')+'</span></button>'
+    +((cfg.neighborhoods||[]).length?('<button class="seg opt" data-f="sh-hood"><span class="k">الحي</span><span class="v'+(nv?' set':'')+'">'+he(nv||'كل الأحياء')+'</span></button>'):'')
+    +'<a class="btn go" id="go" href="/apartments/search'+he(buildQ(s))+'" aria-label="اعرض الشقق">'+svg('search')+'<span class="t">اعرض الشقق</span></a></div>'
+    +'<div class="enter d3"><p class="note">هذا الموقع للتصفح والبحث فقط · الحجز والدفع يتمّان داخل Airbnb · لا يتم أي حجز أو دفع هنا. <a href="/apartments/about">عن هذا الموقع</a></p></div>'
+    +'</div></section>'
     /* Stay Match entry PAUSED (owner request 2026-07-23): the /apartments/match route and
-       all its code stay intact, but no guest-facing link points to it. Re-enable by
-       restoring this card + the search zero-results button below it. */
-    +'<div class="cred"><span>إقامات عوجا في الرياض</span>·<span>الحجز داخل Airbnb</span>'+(cfg.count?('·<span><b>'+cfg.count+'</b> وحدة</span>'):'')+'</div>'
-    +'<div id="feat" class="sec" style="margin-top:4px"></div>';
-  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err');
-  var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
-  ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
-  if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
-  ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
-  var chipsEl=document.getElementById('chips');
-  var preTags=(p.get('tags')||'').split(',').filter(Boolean);
-  if(chipsEl){chipsEl.querySelectorAll('.pill').forEach(function(b){if(preTags.indexOf(b.getAttribute('data-k'))>=0)b.classList.add('active');b.onclick=function(){b.classList.toggle('active');track('stay_filter_changed',{});};});}
-  document.getElementById('go').onclick=function(){
-    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value;
-    var nb=(document.getElementById('nb')||{}).value||'';var tg=[];if(chipsEl){chipsEl.querySelectorAll('.pill.active').forEach(function(x){tg.push(x.getAttribute('data-k'));});}
-    var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
-    err.classList.remove('on');
-    var q='?guests='+encodeURIComponent(g);
-    if(tg.length)q+='&tags='+encodeURIComponent(tg.join(','));
-    if(nb)q+='&neighborhood='+encodeURIComponent(nb);
-    if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
-    location.href='/apartments/search'+q;
-  };
-  // Featured available units — show real inventory on the landing so a visitor sees
-  // product immediately instead of an empty search form (browse mode, no dates).
-  (function(){
-    var fe=document.getElementById('feat');if(!fe)return;
-    var skel='<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:16px;width:60%"></div><div class="sk" style="height:12px;width:40%"></div><div class="sk" style="height:38px;width:100%;margin-top:6px"></div></div></div>';
-    fe.innerHTML='<h2 style="font-size:18px;color:var(--ink);margin:0 0 10px;font-weight:700">إقامات مختارة</h2><div class="grid">'+skel+skel+'</div>';
-    fetch('/api/stay/featured').then(function(r){return r.json();}).then(function(d){
-      var res=((d&&d.results)||[]).slice(0,6);
-      if(!res.length){fe.innerHTML='';return;}
-      fe.innerHTML='<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 10px"><h2 style="font-size:18px;color:var(--ink);margin:0;font-weight:700">إقامات مختارة</h2><a class="more" href="/apartments/search'+location.search+'">عرض الكل</a></div><div class="grid">'+res.map(card).join('')+'</div>';
-      track('stay_featured_view',{count:res.length});
-    }).catch(function(){fe.innerHTML='';});
-  })();
-}
-
-function card(l){
-  var avail=(l.available===true);
-  var img=l.cover?('<img loading="lazy" width="600" height="400" alt="'+he(l.name_ar)+'" src="'+he(pimg(l.cover,720))+'">'):'<div class="noimg">صورة غير متوفرة</div>';
-  var ov=[];if(avail)ov.push('<span class="ov-chip ok">متاحة</span>');if(l.badge)ov.push('<span class="ov-chip gold">'+he(l.badge)+'</span>');
-  var price;
-  if(l.est_total!=null&&l.nights>0){
-    var perNight=(l.est_avg!=null&&l.est_avg>0)?('<b>من '+money(l.est_avg)+' / الليلة</b> · '):'';
-    price='<div class="price">'+perNight+'الإجمالي التقريبي: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div>';
+       all its code stay intact, but no guest-facing link points to it. */
+    +'<div class="wrap">'
+    +'<section class="sec" id="feat"><div class="sec-h"><div><h2>مختارات عوجا</h2></div><a class="link" href="/apartments/search'+he(buildQ(s))+'">كل الشقق '+svg('arw')+'</a></div><div class="rail">'+skelCards(3)+'</div></section>'
+    +'<section class="sec" id="sizes" hidden><div class="sec-h"><div><h2>على قد حاجتك</h2><p>اختر عدد الغرف، ونطلع لك الشقق اللي تناسبك.</p></div></div><div class="sizes" id="sizes-g"></div></section>'
+    +((cfg.neighborhoods||[]).length?('<section class="sec" id="hoods"><div class="sec-h"><div><h2>اختر حيّك</h2><p>شققنا موزعة في أحياء الرياض. اختر الحي الأقرب لمشاويرك.</p></div></div><ul class="hoods">'
+      +(cfg.neighborhoods||[]).map(function(o){return '<li><a href="/apartments/search?neighborhood='+encodeURIComponent(o.key)+he(carry())+'" data-nb="'+he(o.key)+'"><span>'+he(o.ar||o.en)+'</span>'+(o.en?('<span class="en" dir="ltr">'+he(o.en)+'</span>'):'')+svg('arw')+'</a></li>';}).join('')
+      +'</ul></section>'):'')
+    +'<section class="sec" id="how"><div class="sec-h"><div><h2>كيف تحجز؟</h2></div></div><ol class="how how-wrap">'
+    +'<li><span class="n num">١</span><h3>اختر شقتك من هنا</h3><p>صور كل شقة ومواصفاتها وحيّها، وسعر تقريبي لما تحط تواريخك.</p></li>'
+    +'<li><span class="n num">٢</span><h3>احجز وادفع داخل Airbnb</h3><p>ننقلك لصفحة الشقة في Airbnb بنفس التواريخ وعدد الضيوف. الحجز والدفع هناك فقط.</p></li>'
+    +'<li><span class="n num">٣</span><h3>ادخل بنفسك</h3><p>دخول ذاتي بدون انتظار استقبال، في الوقت اللي يناسبك.</p></li>'
+    +'</ol><p class="lic">'+svg('shield')+'وحدات عوجا مرخّصة من وزارة السياحة.</p></section>'
+    +'</div>';
+  V.querySelectorAll('.sbar .seg').forEach(function(b){b.onclick=function(){openSheet('search',b.getAttribute('data-f'));};});
+  document.getElementById('go').addEventListener('click',function(){track('stay_search_submit',{mode:'bar'});});
+  // header: clear over the photo, solid once the photo has scrolled away
+  var head=document.getElementById('head'),hero=V.querySelector('.hero');
+  function hs(){head.classList.toggle('solid',window.scrollY>hero.offsetHeight-80);}
+  window.addEventListener('scroll',hs,{passive:true});hs();
+  // featured: the owner's picks (falls back to the best browse units on the server)
+  var fe=document.querySelector('#feat .rail');
+  fetch('/api/stay/featured').then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,6);
+    if(!res.length){document.getElementById('feat').remove();return;}
+    fe.innerHTML=res.map(function(l){return card(l,false);}).join('');
+    track('stay_featured_view',{count:res.length});
+  }).catch(function(){var f=document.getElementById('feat');if(f)f.remove();});
+  // sizes + hood photos come from the browse list, fetched once the visitor heads down the page
+  var once=false;
+  function more(){if(once)return;once=true;
+    fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
+      var all=((d&&d.results)||[]).filter(function(l){return l.cover;});
+      var score=function(l){return (l.rating||4)*Math.log(2+(l.reviews_count||0));};
+      all.sort(function(a,b){return score(b)-score(a);});
+      var used={};
+      var lay=nooOf(['layout']).slice().sort(function(a,b){return String(a.key).localeCompare(String(b.key));});
+      var tiles=lay.map(function(o){var u=all.filter(function(l){return (l.tag_keys||[]).indexOf(o.key)>=0&&!used[l.cover];})[0];if(!u)return '';used[u.cover]=1;
+        return '<a class="size" href="/apartments/search?tags='+encodeURIComponent(o.key)+he(carry())+'">'+imgTag(u.cover,'',600,false,'(min-width:760px) 33vw, 92vw')+'<span class="cap"><b>'+he(o.ar||o.en)+'</b><span class="arw">'+svg('arw')+'</span></span></a>';}).filter(Boolean);
+      if(tiles.length>=2){var sz=document.getElementById('sizes');sz.hidden=false;var g=document.getElementById('sizes-g');g.style.setProperty('grid-template-columns','');if(window.matchMedia('(min-width:760px)').matches)g.style.gridTemplateColumns='repeat('+tiles.length+',1fr)';g.innerHTML=tiles.join('');}
+      var cov={};all.forEach(function(l){if(l.neighborhood&&!cov[l.neighborhood])cov[l.neighborhood]=l.cover;});
+      peekInit(cov);
+    }).catch(function(){});
   }
-  else{price='<div class="price soft">السعر يظهر داخل Airbnb</div>';}
-  return '<a class="card lc" href="/apartments/'+he(l.slug)+location.search+'">'
-    +'<div class="ph">'+img+(ov.length?('<div class="ov-row">'+ov.join('')+'</div>'):'')+'</div>'
-    +'<div class="bd"><h3 class="clamp2">'+he(l.name_ar||l.name_en)+'</h3>'
-    +ratingHtml(l)
-    +(l.area?('<div class="meta">📍 '+he(l.area)+'</div>'):'')
-    +'<div class="meta">'+metaRow(l)+'</div>'
-    +(badges(l,3)?('<div class="badges">'+badges(l,3)+'</div>'):'')
-    +price+'<div class="cta-row" style="margin-top:auto;padding-top:4px"><span class="btn block sm">شوف التفاصيل</span></div></div></a>';
+  var watch=document.getElementById('feat')||document.getElementById('how');
+  if(watch&&'IntersectionObserver' in window){var io=new IntersectionObserver(function(es){if(es.some(function(e){return e.isIntersecting;})){io.disconnect();more();}},{rootMargin:'600px 0px'});io.observe(watch);}else more();
+}
+function peekInit(cov){
+  var list=document.querySelector('.hoods');if(!list||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;
+  var pk=document.createElement('div');pk.className='peek';pk.innerHTML='<img alt="">';document.body.appendChild(pk);var im=pk.querySelector('img');
+  list.addEventListener('mousemove',function(e){pk.style.left=(e.clientX-260)+'px';pk.style.top=(e.clientY-150)+'px';});
+  list.querySelectorAll('a').forEach(function(a){var k=a.getAttribute('data-nb');if(!cov[k])return;
+    a.addEventListener('mouseenter',function(){im.src=pimg(cov[k],480);pk.classList.add('on');});
+    a.addEventListener('mouseleave',function(){pk.classList.remove('on');});});
 }
 
-function searchSummary(ci,co,g,ty){
-  var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفح');if(g)bits.push(he(g)+' ضيوف');
-  var pp=qs();var noo=((STAY&&STAY.config&&STAY.config.noo)||[]);
-  var nb=pp.get('neighborhood')||'';var nbl=((STAY&&STAY.config&&STAY.config.neighborhoods)||[]).filter(function(o){return o.key===nb;})[0];if(nb&&nbl)bits.push('📍 '+he(nbl.ar||nbl.en));
-  (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
-  var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
-  return '<div class="summary"><div class="wrap"><span class="s">'+bits.join(' · ')+'</span><a class="btn ghost sm" href="/apartments'+location.search+'">تعديل البحث</a></div></div>';
+/* ---------- search ---------- */
+function summaryText(s){
+  var a=(s.ci&&s.co)?rangeLabel(s.ci,s.co):'أي وقت';
+  var b=[s.g?guestsLabel(s.g):'',s.nb?hoodName(s.nb):'كل الأحياء'].filter(Boolean).join(' · ');
+  return '<b>'+he(a)+'</b><span>'+he(b)+'</span>';
+}
+function viewSearch(){
+  document.getElementById('nv-s').classList.add('on');
+  var s=readQ();
+  var nf=(s.nb?1:0)+s.tags.length;
+  V.innerHTML='<div class="stop"><div class="wrap"><button class="sum" id="sum" aria-label="عدّل البحث">'+svg('search')+'<span class="t" id="sum-t">'+summaryText(s)+'</span></button><button class="fbtn" id="fb" aria-label="الفلاتر">'+svg('sliders')+'<i id="fb-n"'+(nf?'':' hidden')+'>'+nf+'</i></button></div></div>'
+    +'<div class="wrap"><div class="qchips" id="qc"></div><div class="res-h" id="rh"></div><div id="rs"></div></div>';
+  document.getElementById('sum').onclick=function(){openSheet('search-inplace','sh-dates');};
+  document.getElementById('fb').onclick=function(){openSheet('search-inplace','sh-hood');};
+  runSearch();
+}
+function runSearch(){
+  var s=readQ(),ci=s.ci,co=s.co,g=s.g?String(s.g):'',ty=s.ty;
+  var nf=(s.nb?1:0)+s.tags.length,fbn=document.getElementById('fb-n');if(fbn){fbn.textContent=nf;fbn.hidden=!nf;}
+  var st=document.getElementById('sum-t');if(st)st.innerHTML=summaryText(s);
+  var qc=document.getElementById('qc'),rh=document.getElementById('rh'),rs=document.getElementById('rs');
+  qc.innerHTML=typeChips().map(function(o){var on=s.tags.indexOf(o.key)>=0;return '<button type="button" class="chip'+(on?' on':'')+'" aria-pressed="'+on+'" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  qc.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){var t=b.getAttribute('data-k'),q=readQ(),i=q.tags.indexOf(t);if(i>=0)q.tags.splice(i,1);else q.tags.push(t);history.replaceState(null,'','/apartments/search'+buildQ(q));track('stay_filter_changed',{});runSearch();};});
+  var verr=validateDates(ci,co);
+  if(verr){rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>'+he(verr)+'</h2><div class="acts"><button class="btn" id="fix">'+svg('cal')+'عدّل التواريخ</button></div></div>';document.getElementById('fix').onclick=function(){openSheet('search-inplace','sh-dates');};return;}
+  rh.innerHTML='<div class="sk" style="height:44px;width:min(420px,70%)"></div><div class="sk" style="height:16px;width:min(320px,55%);margin-top:14px"></div>';
+  rs.innerHTML='<div class="grid">'+skelCards(6)+'</div>';
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(s.tags.length?('&tags='+encodeURIComponent(s.tags.join(','))):'')+(s.nb?('&neighborhood='+encodeURIComponent(s.nb)):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
+  var my=(runSearch.n=(runSearch.n||0)+1);
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    if(my!==runSearch.n)return;
+    var res=(d&&d.results)||[],browse=d&&d.browse;
+    if(d&&d.invalid_dates){rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div>';return;}
+    var where=s.nb?hoodName(s.nb):'';
+    var h1,p,cta='';
+    if(browse){h1=where?('شقق '+where):'كل الشقق';p='حط تواريخك عشان نوريك المتاح وسعره التقريبي.';cta='<div class="cta"><button class="btn ghost sm" id="pick">'+svg('cal')+'اختر التواريخ</button></div>';}
+    else{h1='متاحة '+rangeLabel(ci,co)+(where?(' في '+where):'');p=nightsLabel(nightsBetween(ci,co))+' · السعر النهائي والتوفر يتأكدون داخل Airbnb.';}
+    rh.innerHTML='<h1>'+he(h1)+'</h1><p>'+he(p)+'</p>'+cta;
+    var pk=document.getElementById('pick');if(pk)pk.onclick=function(){openSheet('search-inplace','sh-dates');};
+    var head='';
+    if(d&&d.avail_error)head+='<div class="banner" role="status">'+svg('alert')+'<span>تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</span></div>';
+    if(res.length){
+      track('stay_results_view',{type:ty,count:res.length});
+      rs.innerHTML=head+'<div class="grid">'+res.map(function(l,i){return card(l,i<2);}).join('')+'</div><p class="foot-n">الأسعار تقريبية. السعر النهائي والتوفر يتأكدون داخل Airbnb.</p>';
+    } else {
+      track('stay_no_results',{type:ty,check_in:ci,check_out:co});
+      rs.innerHTML=head+'<div class="empty"><h2>ما لقينا شقة تطابق كل اختياراتك</h2><p>جرّب تواريخ ثانية، أو شيل فلتر أو اثنين.</p><div class="acts"><button class="btn" id="ed">عدّل البحث</button>'+(nf?'<button class="btn ghost" id="clr">شيل الفلاتر</button>':'')+'</div></div><div id="sim"></div>';
+      document.getElementById('ed').onclick=function(){openSheet('search-inplace','sh-dates');};
+      var cl=document.getElementById('clr');if(cl)cl.onclick=function(){var q=readQ();q.tags=[];q.nb='';history.replaceState(null,'','/apartments/search'+buildQ(q));runSearch();};
+      if(ci&&co){loadSimilar(ty);}
+    }
+  }).catch(function(){
+    if(my!==runSearch.n)return;
+    rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>ما قدرنا نجيب الشقق الحين</h2><p>تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p><div class="acts"><button class="btn" id="re">حاول مرة ثانية</button></div></div>';
+    document.getElementById('re').onclick=runSearch;
+  });
+}
+function loadSimilar(ty){
+  fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,3);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
+    el.innerHTML='<div class="sec-h" style="margin-top:12px"><div><h2 class="h2" style="font-size:clamp(24px,3.4vw,34px)">شقق تقدر تجرّب لها تواريخ ثانية</h2></div></div><div class="grid">'+res.map(function(l){l=Object.assign({},l,{available:null,est_total:null});return card(l);}).join('')+'</div>';
+  }).catch(function(){});
 }
 
 var MQ={party:1,sleep:null,purpose:null,budget:null,ci:'',co:'',step:0,facts:[]};
@@ -61953,130 +62467,111 @@ function viewMatch(){
   },{once:true});
 }
 
-function viewSearch(){
-  var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
-  var verr=validateDates(ci,co);
-  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0 4px;color:var(--ink)">'+he(verr)+'</h2><div style="margin-top:14px"><a class="btn" href="/apartments'+location.search+'">عدّل التواريخ</a></div></div>';return;}
-  V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="grid" style="margin:6px 0 18px">'+'<div class="card lc"><div class="ph sk"></div><div class="bd"><div class="sk" style="height:18px;width:62%"></div><div class="sk" style="height:13px;width:42%"></div><div class="sk" style="height:40px;width:100%;margin-top:6px"></div></div></div>'.repeat(4)+'</div>';
-  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+((p.get('tags'))?('&tags='+encodeURIComponent(p.get('tags'))):'')+((p.get('neighborhood'))?('&neighborhood='+encodeURIComponent(p.get('neighborhood'))):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
-  track('stay_search',{type:ty,guests:g,check_in:ci,check_out:co});
-  fetch(url).then(function(r){return r.json();}).then(function(d){
-    var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
-    if(d&&d.invalid_dates){V.innerHTML=sm+'<div class="empty"><div class="em">📅</div><h2 style="margin:10px 0;color:var(--ink)">تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div>';return;}
-    var head=sm;
-    if(d&&d.avail_error)head+='<div class="card" style="padding:13px 14px;margin:6px 0;color:var(--gold2);font-size:13px">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';
-    if(browse)head+='<div style="margin:8px 0 2px"><span class="chip">وضع التصفح — حط تاريخ لعرض المتاح</span></div>';
-    if(res.length){
-      track('stay_results_view',{type:ty,count:res.length});
-      head+='<h2 class="sec" style="margin:10px 0 2px">'+(browse?('عندنا '+res.length+' وحدة'):('لقينا لك '+res.length+' وحدة متاحة'))+'</h2>';
-      head+='<div class="disc" style="margin-bottom:6px">السعر النهائي والتوفر النهائي يتم تأكيده داخل Airbnb</div>';
-      V.innerHTML=head+'<div class="grid" style="margin:6px 0 30px">'+res.map(card).join('')+'</div>';
-    } else {
-      track('stay_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=head+'<div class="card" style="padding:30px 18px;text-align:center;margin:8px 0"><div style="font-size:42px">🔍</div><h2 style="margin:8px 0 4px;color:var(--ink)">ما لقينا وحدات بنفس الاختيارات</h2><p class="muted" style="margin:0">جرّب تغيير التاريخ أو نوع الإقامة.</p><div style="margin-top:14px"><a class="btn" href="/apartments'+location.search+'">عدّل البحث</a></div></div><div id="sim"></div>';
-      if(ci&&co){loadSimilar(ty);}
-    }
-  }).catch(function(){V.innerHTML='<div class="empty"><div class="em">⚠</div><p class="muted">تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</p></div>';});
-}
-function loadSimilar(ty){
-  fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
-    var res=((d&&d.results)||[]).slice(0,4);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
-    el.innerHTML='<h2 class="sec">وحدات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:6px 0 30px">'+res.map(function(l){l=Object.assign({},l,{available:null,est_total:null});return card(l);}).join('')+'</div>';
-  }).catch(function(){});
-}
-
+/* ---------- one apartment ---------- */
+var WHY={cinema:['film','سينما خاصة داخل الشقة'],balcony:['sun','بلكونة لجلسة هادية'],boulevard:['spark','قريبة من البوليفارد'],tower_view:['building','إطلالة من برج'],self_entry:['key','دخول ذاتي بدون انتظار'],family:['users','مساحة تكفي العائلة'],studio:['sofa','استوديو عملي للإقامات القصيرة'],'1br':['bed','غرفة وصالة مريحة'],'2br':['bed','غرفتين تكفي مجموعة'],'3br':['bed','ثلاث غرف لعائلة أو شلة']};
 function viewListing(){
+  document.body.classList.add('unitpage');
   var l=(STAY&&STAY.listing)||null;
   function render(l){
-    if(!l){V.innerHTML='<div class="empty"><div class="em">🏠</div><p class="muted">ما لقينا هالوحدة. <a href="/apartments">ارجع للبحث</a></p></div>';return;}
+    if(!l){V.innerHTML='<div class="wrap"><div class="empty"><h2>ما لقينا هالشقة</h2><p>يمكن تغيّر رابطها أو انشالت من القائمة.</p><div class="acts"><a class="btn" href="/apartments/search">شوف كل الشقق</a></div></div></div>';return;}
     track('stay_listing_view',{listing_id:l.id});
-    var imgs=(l.images||[]);
-    var gallery;
+    var name=l.name_ar||l.name_en||'';
+    var imgs=(l.images||[]).slice();if(!imgs.length&&l.cover)imgs=[l.cover];
+    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dg=pq.get('guests'),dated=(dci&&dco&&dco>dci);
+    var gallery='';
     if(imgs.length){
-      var c1='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(imgs[0],1080))+'" alt="'+he(l.name_ar)+'"></div>';
-      var c2='';
-      if(imgs.length>1){
-        var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">🖼️ عرض كل الصور · '+imgs.length+'</button>'):'';
-        c2='<div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(imgs[1],1080))+'" alt="'+he(l.name_ar)+'">'+moreBtn+'</div>';
-      }
-      gallery='<div class="gal2'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal2 one"><div class="g-cell"><img loading="lazy" width="800" height="600" src="'+he(pimg(l.cover,1080))+'" alt="'+he(l.name_ar)+'"></div></div>';}
-    else{gallery='<div class="card" style="padding:46px;text-align:center;color:var(--mut);margin:14px 0">لا توجد صور لهذه الوحدة</div>';}
-    var kvitems=[];if(l.capacity)kvitems.push(['الضيوف',l.capacity]);if(l.beds!=null)kvitems.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kvitems.push(['الحمامات',l.baths]);if(l.self_entry)kvitems.push(['الدخول','ذاتي']);
-    var kv=kvitems.length?('<div class="kv">'+kvitems.map(function(x){return '<div><div class="k">'+he(x[0])+'</div><div class="v">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
-    var WHY={cinema:['🎬','سينما خاصة لتجربة مشاهدة أهدى'],balcony:['🌿','بلكونة مناسبة لجلسة خفيفة'],boulevard:['✨','قريبة من البوليفارد وأهم وجهات الرياض'],tower_view:['🏙️','إطلالة من برج مميز'],self_entry:['🔑','دخول ذاتي بدون انتظار'],family:['👨‍👩‍👧','مساحة مناسبة للعائلة'],studio:['🛋️','استوديو عملي للإقامات القصيرة'],'1br':['🛏️','غرفة وصالة مريحة'],'2br':['🏠','مساحة أوسع تكفي مجموعة']};
-    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k])wr.push('<div><span class="i">'+WHY[k][0]+'</span><span>'+he(WHY[k][1])+'</span></div>');});
-    if(l.area&&wr.length<4)wr.push('<div><span class="i">📍</span><span>موقع مميز في '+he(l.area)+'</span></div>');
-    var why=wr.length?('<div class="sec"><h2>ليش هالوحدة؟</h2><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
-    var groups=(l.amenity_groups||[]);
-    var amen='';
+      var strip=imgs.map(function(u,i){return '<button type="button" data-i="'+i+'" aria-label="صورة '+(i+1)+' من '+imgs.length+'"><img '+(i===0?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="900" height="675" alt="'+he(name)+'" src="'+he(pimg(u,900))+'"></button>';}).join('');
+      var mo=imgs.slice(0,5).map(function(u,i){return '<button type="button" data-i="'+i+'" aria-label="صورة '+(i+1)+'"><img '+(i===0?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="'+(i===0?1200:600)+'" height="'+(i===0?900:450)+'" alt="'+he(name)+'" src="'+he(pimg(u,i===0?1400:700))+'"></button>';}).join('');
+      gallery='<div class="gal"><div class="gal-strip" id="gs">'+strip+'</div><div class="mosaic n'+Math.min(imgs.length,5)+'">'+mo+'</div>'
+        +(imgs.length>1?('<span class="cnt" id="gc">1 / '+imgs.length+'</span><button type="button" class="btn light sm all" id="gall">'+svg('grid')+'كل الصور <span class="num">('+imgs.length+')</span></button>'):'')+'</div>';
+    }
+    var facts=[];if(l.capacity)facts.push(['users',guestsLabel(l.capacity)]);if(l.beds!=null)facts.push(['bed',roomsLabel(l.beds)]);if(l.baths)facts.push(['bath',bathsLabel(l.baths)]);if(l.self_entry)facts.push(['key','دخول ذاتي']);
+    var st=l.structured;
+    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<p class="tl" dir="auto">'+he(st.tagline_ar||st.tagline_en)+'</p>'):'';
+    var EMBL_LBL=(st&&st.emblems&&st.emblems.length)?('<div class="emb">'+st.emblems.map(function(e){return '<span>'+he(e.ar||e.en)+'</span>';}).join('')+'</div>'):'';
+    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k]&&wr.length<5)wr.push('<li>'+svg(WHY[k][0])+'<span>'+he(WHY[k][1])+'</span></li>');});
+    if(l.area&&l.area!=='Riyadh'&&wr.length<4)wr.push('<li>'+svg('pin')+'<span>في حي '+he(l.area)+'</span></li>');
+    var why=wr.length?('<section class="ublock"><h2>ليش هالشقة؟</h2><ul class="why">'+wr.join('')+'</ul></section>'):'';
+    var about='';
+    if(st&&st.sections&&st.sections.length){
+      about=st.sections.map(function(x){var ti=(x.title_ar||x.title_en||''),bo=(x.body_ar||x.body_en||'');if(!ti&&!bo)return '';return '<div class="stsec"><h3 dir="auto">'+he(ti)+'</h3><div class="desc" dir="'+(isLatin(bo)?'ltr':'rtl')+'">'+he(bo)+'</div></div>';}).join('');
+      var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)about+='<div class="stsec"><h3>الموقع والحي</h3><div class="desc" dir="'+(isLatin(nb)?'ltr':'rtl')+'">'+he(nb)+'</div></div>';
+      about='<section class="ublock"><h2>عن الشقة</h2>'+about+'</section>';
+    } else {
+      var desc=(l.desc_ar||l.short_ar||'');
+      if(desc){var long=desc.length>420;about='<section class="ublock"><h2>عن الشقة</h2><div class="desc'+(long?' clip':'')+'" id="dsc" dir="'+(isLatin(desc)?'ltr':'rtl')+'">'+he(desc)+'</div>'+(long?'<button class="more" id="dmore">اقرأ الوصف كامل</button>':'')+'</section>';}
+    }
+    var groups=(l.amenity_groups||[]),amen='';
     if(groups.length){
-      var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);
-      amen='<div class="sec"><h2>المميزات</h2><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';
+      var gh=function(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><ul>'+(gp.items||[]).map(function(a){return '<li>'+he(a)+'</li>';}).join('')+'</ul></div>';};
+      var rest=groups.slice(2);
+      amen='<section class="ublock"><h2>المميزات</h2><div>'+groups.slice(0,2).map(gh).join('')+'</div>'+(rest.length?('<div id="amr" hidden>'+rest.map(gh).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</section>';
     }
-    var desc=(l.desc_ar||l.short_ar||'');
-    var descBlk=desc?('<div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div>'):'';
-    var st=l.structured, embl=emblemsRow(st), stcards=structuredCards(st);
-    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<p style="font-size:15px;color:var(--gold,#a9803f);font-weight:600;margin:2px 0 8px;line-height:1.5">'+he(st.tagline_ar||st.tagline_en)+'</p>'):'';
-    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dsum='';
-    if(dci&&dco&&dco>dci){dsum='<div class="card" style="padding:11px 13px;margin:10px 0;font-size:13px;display:flex;gap:8px;align-items:center"><span>🗓️</span><b>حجزك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div>';}
-    var price;
-    if(l.est_total!=null&&l.nights>0){price='<div class="card" style="padding:13px 15px;margin:10px 0"><div class="price">الإجمالي التقريبي للإقامة: '+money(l.est_total)+' · '+nightsLabel(l.nights)+'</div><div class="disc" style="margin-top:3px">السعر النهائي يظهر داخل Airbnb</div></div>';}
-    else{price='';}
-    V.innerHTML=gallery+dsum
-      +'<h1 style="font-size:23px;color:var(--ink);margin:8px 0 4px;line-height:1.3">'+he(l.name_ar||l.name_en)+'</h1>'
-      +(l.area?('<div class="muted" style="font-size:13.5px;margin-bottom:6px">📍 '+he(l.area)+'</div>'):'')
-      +(ratingHtml(l)?('<div style="margin:0 0 8px">'+ratingHtml(l)+'</div>'):'')
-      +(l.badge?('<span class="chip solid" style="margin-bottom:6px">'+he(l.badge)+'</span>'):'')
-      +(badges(l,6)?('<div class="badges" style="margin:8px 0">'+badges(l,6)+'</div>'):'')
-      +tagline
-      +(!st&&l.short_ar&&!l.desc_ar?('<p class="muted" style="line-height:1.7;font-size:14px">'+he(l.short_ar)+'</p>'):'')
-      +kv+price+embl+(stcards||descBlk)+why+amen
-      +'<div style="height:96px"></div>';
-    var cta;
-    if(l.has_airbnb){cta='<a class="btn block" id="abtn" target="_blank" rel="noopener" href="'+he(airbnbUrl(l.airbnb_url,dci,dco,pq.get('guests')))+'">احجزها في Airbnb ↗</a>';}
-    else{cta='<button class="btn block off" disabled>رابط Airbnb غير متوفر حاليًا</button>';}
-    // Direct-booking WhatsApp CTA (fee-free) — renders ONLY when a number is configured.
-    var waNum=((STAY&&STAY.config&&STAY.config.whatsapp)||'');
-    var waCta='';
+    // booking panel
+    var hasP=(l.est_total!=null&&l.nights>0);
+    var priceTop='';
+    if(dated&&hasP){priceTop=(l.est_avg?('<p class="pr"><b class="num">'+money(l.est_avg)+'</b> / الليلة تقريبًا</p>'):'')+'<p class="tot">الإجمالي التقريبي <span class="num">'+money(l.est_total)+'</span> لـ'+nightsLabel(l.nights)+'</p>';}
+    else if(dated){priceTop='<p class="hint">السعر والتوفر لتواريخك يظهرون داخل Airbnb.</p>';}
+    else{priceTop='<p class="hint">حط تواريخك عشان نوريك السعر التقريبي.</p>';}
+    var abUrl=l.has_airbnb?airbnbUrl(l.airbnb_url,dci,dco,dg):'';
+    var cta=l.has_airbnb?('<a class="btn block abtn" target="_blank" rel="noopener" href="'+he(abUrl)+'">احجزها في Airbnb'+svg('ext')+'</a>'):'<button class="btn block off" disabled>رابط Airbnb غير متوفر حاليًا</button>';
+    var waNum=(CFG().whatsapp||''),waCta='';
     if(waNum){
-      var waMsg='مرحبا، عندي استفسار عن: '+(l.name_ar||l.name_en||'')+(dci&&dco?(' · '+dci+' إلى '+dco):'')+(pq.get('guests')?(' · '+pq.get('guests')+' ضيوف'):'');
-      waCta='<a class="btn block ghost" id="wabtn" target="_blank" rel="noopener" style="margin-top:7px;background:transparent;border:1.5px solid var(--green);color:var(--green)" href="https://wa.me/'+he(waNum)+'?text='+encodeURIComponent(waMsg)+'">تواصل معنا عبر واتساب 💬</a>';
+      var waMsg='مرحبا، عندي استفسار عن: '+name+(dci&&dco?(' · '+dci+' إلى '+dco):'')+(dg?(' · '+dg+' ضيوف'):'');
+      waCta='<a class="btn block wa wabtn" target="_blank" rel="noopener" href="https://wa.me/'+he(waNum)+'?text='+encodeURIComponent(waMsg)+'">'+svg('chat')+'تواصل معنا عبر واتساب</a>';
     }
-    var note=l.has_airbnb?'<div class="disc" style="text-align:center;margin-bottom:3px">بننقلك إلى Airbnb بنفس التواريخ وعدد الضيوف.</div>':'';
-    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+waCta+note+'<div class="disc" style="text-align:center">السعر والتوفر والدفع كلها داخل Airbnb · لا يتم أي حجز أو دفع في هذا الموقع.</div></div>';
+    var legal='بننقلك إلى Airbnb بنفس التواريخ وعدد الضيوف. السعر والتوفر والدفع كلها داخل Airbnb · لا يتم أي حجز أو دفع في هذا الموقع. <a href="/apartments/about">عن هذا الموقع</a>';
+    var bk='<aside class="bk" aria-label="الحجز">'+priceTop
+      +'<div class="dates"><button type="button" class="pickd"><span>الدخول</span><b>'+he(dated?fmtD(dci,true):'أضف تاريخ')+'</b></button><button type="button" class="pickd"><span>الخروج</span><b>'+he(dated?fmtD(dco,true):'أضف تاريخ')+'</b></button></div>'
+      +cta+waCta+'<p class="small">'+legal+'</p></aside>';
+    var loc='<div class="loc"><span class="u-area">'+svg('pin')+he(areaName(l))+'</span>'+ratingHtml(l)+(l.badge?('<span class="tag" style="background:var(--paper2)">'+he(l.badge)+'</span>'):'')+'</div>';
+    V.innerHTML='<div class="wrap">'+gallery
+      +'<div class="ulay"><div class="umain"><header class="uhead">'+loc+'<h1 dir="auto">'+he(name)+'</h1>'+tagline
+      +(facts.length?('<ul class="facts">'+facts.map(function(f){return '<li>'+svg(f[0])+he(f[1])+'</li>';}).join('')+'</ul>'):'')+EMBL_LBL+'</header>'
+      +why+about+amen+'</div>'+bk+'</div></div>';
+    // phone booking bar
+    var info=(dated&&hasP)?('<b class="num">'+money(l.est_avg||l.est_total)+(l.est_avg?' / الليلة':'')+'</b><span>'+he(rangeLabel(dci,dco))+' · تقريبًا</span>')
+      :(dated?('<b>'+he(rangeLabel(dci,dco))+'</b><span>السعر داخل Airbnb</span>'):('<button type="button" class="pickd">أضف تواريخك</button><span> للسعر التقريبي</span>'));
+    var bar=document.createElement('div');bar.className='bbar';
+    bar.innerHTML='<div class="wrap"><div class="row"><div class="info">'+info+'</div>'+(l.has_airbnb?('<a class="btn abtn" target="_blank" rel="noopener" href="'+he(abUrl)+'">احجز في Airbnb'+svg('ext')+'</a>'):'<button class="btn off" disabled>رابط Airbnb غير متوفر</button>')+'</div>'
+      +'<p class="small">السعر والتوفر والدفع كلها داخل Airbnb · لا يتم أي حجز أو دفع في هذا الموقع.</p></div>';
     document.body.appendChild(bar);
-    var ab=document.getElementById('abtn');
-    if(ab){ab.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});}
-    var wb=document.getElementById('wabtn');
-    if(wb){wb.addEventListener('click',function(){track('stay_whatsapp_click',{listing_id:l.id});});}
-    else{track('stay_missing_airbnb_url',{listing_id:l.id});}
-    var gall=document.getElementById('gall');
-    if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
-    var tg=document.getElementById('amtog');
-    if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
+    document.querySelectorAll('.abtn').forEach(function(a){a.addEventListener('click',function(){track('stay_airbnb_click',{listing_id:l.id});});});
+    document.querySelectorAll('.wabtn').forEach(function(a){a.addEventListener('click',function(){track('stay_whatsapp_click',{listing_id:l.id});});});
+    if(!l.has_airbnb)track('stay_missing_airbnb_url',{listing_id:l.id});
+    document.querySelectorAll('.pickd').forEach(function(b){b.onclick=function(){openSheet('unit','sh-dates');};});
+    var gs=document.getElementById('gs'),gc=document.getElementById('gc');
+    if(gs&&gc){gs.addEventListener('scroll',function(){var i=Math.round(Math.abs(gs.scrollLeft)/Math.max(1,gs.clientWidth));gc.textContent=(i+1)+' / '+imgs.length;},{passive:true});}
+    V.querySelectorAll('.gal [data-i]').forEach(function(b){b.onclick=function(){openGallery(imgs,name,+b.getAttribute('data-i'));};});
+    var ga=document.getElementById('gall');if(ga)ga.onclick=function(){openGallery(imgs,name,0);};
+    var dm=document.getElementById('dmore');if(dm)dm.onclick=function(){var d=document.getElementById('dsc');var open=d.classList.toggle('clip');dm.textContent=open?'اقرأ الوصف كامل':'اختصر الوصف';};
+    var tg=document.getElementById('amtog');if(tg)tg.onclick=function(){var r=document.getElementById('amr');r.hidden=!r.hidden;tg.textContent=r.hidden?'عرض كل المميزات':'عرض أقل';};
   }
-  function agHtml(gp){return '<div class="ag"><h3>'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
-  function openGallery(imgs,alt){
-    var ov=document.createElement('div');ov.className='lb';
-    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(pimg(u,1280))+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+  function openGallery(imgs,alt,start){
+    var ov=document.createElement('div');ov.className='lb';ov.setAttribute('role','dialog');ov.setAttribute('aria-modal','true');ov.setAttribute('aria-label','كل الصور');
+    ov.innerHTML='<div class="lb-top"><b><span class="num">'+imgs.length+'</span> صورة</b><button class="lb-x" aria-label="إغلاق">'+svg('x')+'</button></div><div class="lb-strip">'+imgs.map(function(u,i){return '<img loading="'+(Math.abs(i-start)<3?'eager':'lazy')+'" decoding="async" width="1200" height="900" src="'+he(pimg(u,1400))+'" alt="'+he(alt||'')+'" data-i="'+i+'">';}).join('')+'</div>';
     function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
     function esc(e){if(e.key==='Escape')close();}
-    ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
+    ov.querySelector('.lb-x').onclick=close;
     document.addEventListener('keydown',esc);document.body.style.overflow='hidden';document.body.appendChild(ov);
+    ov.querySelector('.lb-x').focus();
+    if(start>0){var t=ov.querySelector('[data-i="'+start+'"]');if(t)requestAnimationFrame(function(){t.scrollIntoView({block:'start'});});}
   }
   var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
   var token=(l&&l.slug)||location.pathname.replace(/^\/apartments\/(id\/)?/,'').split('?')[0];
   var dated=(ci&&co&&co>ci);
   if(l && !dated){ render(l); }
   else{
+    V.innerHTML='<div class="wrap"><div class="sk" style="aspect-ratio:16/7;margin-top:24px;border-radius:22px"></div><div class="sk" style="height:40px;width:60%;margin-top:28px"></div></div>';
     fetch('/api/stay/listing/'+encodeURIComponent(token)+(dated?('?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)):'')).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||l);}).catch(function(){render(l);});
   }
 }
 
+/* ---------- about: the page an inspector reads ---------- */
 function viewAbout(){
   document.title='عن هذا الموقع · عوجا';
-  V.innerHTML='<div class="about">'
+  document.getElementById('nv-a').classList.add('on');
+  V.innerHTML='<div class="wrap"><div class="about">'
     +'<h1>عن هذا الموقع</h1>'
     +'<p>موقع «عوجا» هذا هو محرك بحث وتصفح لوحدات عوجا السكنية في الرياض. يعرض الوحدات وصورها ومواصفاتها فقط، ولا يقدّم أي خدمة حجز أو دفع.</p>'
     +'<div class="box key"><h2>ما الذي لا يتم في هذا الموقع نهائيًا</h2><ul>'
@@ -62093,7 +62588,7 @@ function viewAbout(){
     +'<p>عند اختيار وحدة يتم تحويل الزائر إلى صفحة الوحدة نفسها داخل منصة Airbnb. الحجز والدفع والتأكيد تتم حصريًا داخل منصات الحجز المرخّصة ووفق شروطها وأنظمتها.</p></div>'
     +'<div class="box"><h2>الترخيص</h2>'
     +'<p>وحدات عوجا السكنية مرخّصة من وزارة السياحة، وتُدار بواسطة Ouja Residence (عوجا) في الرياض.</p></div>'
-    +'<p class="muted" style="font-size:13px">للاستفسارات: <a href="mailto:oujaresidence@gmail.com" style="color:var(--gold2)">oujaresidence@gmail.com</a></p>'
+    +'<p class="muted" style="font-size:15px">للاستفسارات: <a href="mailto:oujaresidence@gmail.com">oujaresidence@gmail.com</a></p>'
     +'<div class="ensec">'
     +'<h1>About this website</h1>'
     +'<p>This Ouja website is a search and browsing engine for Ouja residential units in Riyadh. It shows the units, their photos and details only. It offers no booking or payment service.</p>'
@@ -62106,14 +62601,16 @@ function viewAbout(){
     +'<p>When a visitor picks a unit, they are taken to that unit&#39;s own page on Airbnb. Booking, payment and confirmation happen exclusively inside licensed booking platforms, under their terms and rules.</p></div>'
     +'<div class="box"><h2>Licensing</h2>'
     +'<p>Ouja residential units are licensed by the Ministry of Tourism and managed by Ouja Residence in Riyadh.</p></div>'
-    +'<p class="muted" style="font-size:13px">Enquiries: <a href="mailto:oujaresidence@gmail.com" style="color:var(--gold2)">oujaresidence@gmail.com</a></p>'
-    +'<p style="margin-top:18px"><a class="btn ghost sm" href="/apartments">Browse the units · تصفح الوحدات</a></p>'
-    +'</div></div>';
+    +'<p class="muted" style="font-size:15px">Enquiries: <a href="mailto:oujaresidence@gmail.com">oujaresidence@gmail.com</a></p>'
+    +'<p style="margin-top:26px"><a class="btn ghost sm" href="/apartments">Browse the units · تصفح الوحدات</a></p>'
+    +'</div></div></div>';
   track('stay_about_view',{});
 }
 
 (function(){
   var path=location.pathname;
+  var head=document.getElementById('head');
+  if(!(path==='/apartments'||path==='/apartments/')){window.addEventListener('scroll',function(){head.classList.toggle('scrolled',window.scrollY>4);},{passive:true});}
   if(path==='/apartments'||path==='/apartments/'){viewLanding();}
   else if(path==='/apartments/search'){viewSearch();}
   else if(path==='/apartments/match'){viewMatch();}
@@ -62121,7 +62618,8 @@ function viewAbout(){
   else{viewListing();}
 })();
 </script>
-</body></html>"""
+</body>
+</html>"""
 
 # WhatsApp number for the direct-booking CTA on unit pages (digits, intl format e.g.
 # 9665XXXXXXXX). Unset = the button simply doesn't render — we never fake a contact.
