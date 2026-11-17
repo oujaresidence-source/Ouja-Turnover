@@ -33,15 +33,16 @@ HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>اشتراكات النت — تعبئة</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#9C958A;
-    --gold:#B29A6A; --gold-soft:#F0E8D8; --maroon:#8B3748; --maroon-soft:#F3E2E4;
-    --green:#4A7C59; --green-soft:#E4EFE6; --amber:#B4802F; --amber-soft:#F7EBD6;
-    --border:#E7DFD1; --r:16px; --r-sm:11px;
+  @font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+:root{
+    --bg:#F4EFE7; --panel:#FBF8F3; --ink:#1D1813; --body:#463C33; --muted:#6B5F52;
+    --gold:#1D1813; --gold-soft:#EFE6D6; --maroon:#A2462F; --maroon-soft:#F6E2DA;
+    --green:#2E6A49; --green-soft:#E0EADF; --amber:#8A5A12; --amber-soft:#F5E8C8;
+    --border:#E8E1D5; --r:16px; --r-sm:11px;
     --sh:0 1px 2px rgba(41,41,37,.04),0 10px 30px rgba(41,41,37,.07);
-    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Tajawal',-apple-system,system-ui,sans-serif;
+    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Thmanyah Sans',-apple-system,system-ui,sans-serif;
     --num:'Inter',sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}

@@ -17,16 +17,16 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#F1EDE6">
+<meta name="theme-color" content="#F4EFE7">
 <title>عقد عوجا — التوقيع</title>
 <style>
 @font-face{font-family:'Thmanyah';font-weight:400;font-display:swap;src:url(/guide/fonts/thmanyahsans-Regular.woff2) format('woff2')}
 @font-face{font-family:'Thmanyah';font-weight:500;font-display:swap;src:url(/guide/fonts/thmanyahsans-Medium.woff2) format('woff2')}
 @font-face{font-family:'Thmanyah';font-weight:700;font-display:swap;src:url(/guide/fonts/thmanyahsans-Bold.woff2) format('woff2')}
 :root{
-  --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#6B655A;
-  --gold:#B29A6A; --gold-ink:#7E6A40; --gold-soft:#F0E8D8; --maroon:#8B3748; --maroon-soft:#F5E4E6;
-  --green:#4A7C59; --green-soft:#E4EEE6; --border:#E7DFD1; --focus:#7E6A40;
+  --bg:#F4EFE7; --panel:#FBF8F3; --ink:#1D1813; --body:#463C33; --muted:#6B5F52;
+  --gold:#A57A2C; --gold-ink:#7E6A40; --gold-soft:#EFE6D6; --maroon:#A2462F; --maroon-soft:#F6E2DA;
+  --green:#2E6A49; --green-soft:#E0EADF; --border:#E8E1D5; --focus:#1D1813;
   --r:14px; --ease:cubic-bezier(0.23,1,0.32,1);
 }
 *{box-sizing:border-box}

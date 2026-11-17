@@ -23758,7 +23758,7 @@ DASHBOARD_HTML = """<!doctype html>
   --good:var(--green); --good-bg:var(--green-soft);
   --warn:var(--yellow); --warn-bg:var(--yellow-soft);
   --bad:var(--red); --bad-bg:var(--red-soft);
-  --info:var(--blue); --info-bg:var(--blue-soft);
+  --info:var(--blue); --info-bg:var(--blue-soft); --up:var(--green); --down:var(--red); --muted:var(--text-3);
 
   --r-xs:6px; --r-sm:10px; --r:14px; --r-md:14px; --r-lg:18px;
   --sh-xs:0 1px 2px rgba(29,24,19,0.05);
@@ -23895,15 +23895,15 @@ html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5
 .badge{display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;unicode-bidi:isolate}
 .nav-group-h .badge{background:var(--surface-2);color:var(--text-2);font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;min-width:16px;text-align:center;line-height:1.3}
 .nav-group-h .badge.danger,.side-nav .item .badge.danger,.bn .badge.danger{background:var(--bad-bg);color:var(--bad)}
-.nav-group-h .badge.warn,.side-nav .item .badge.warn,.bn .badge.warn{background:var(--yellow-soft);color:var(--yellow);border:1px solid rgba(201,150,23,.24)}
-.nav-group-h .badge.info,.side-nav .item .badge.info,.bn .badge.info{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(47,111,208,.20)}
+.nav-group-h .badge.warn,.side-nav .item .badge.warn,.bn .badge.warn{background:var(--yellow-soft);color:var(--yellow);border:1px solid color-mix(in srgb,var(--yellow) 24%,transparent)}
+.nav-group-h .badge.info,.side-nav .item .badge.info,.bn .badge.info{background:var(--blue-soft);color:var(--blue);border:1px solid color-mix(in srgb,var(--blue) 20%,transparent)}
 .nav-caret{font-size:10px;opacity:.6;transition:transform .18s ease}
 .nav-group.collapsed .nav-caret{transform:rotate(-90deg)}
 .nav-group-items{display:flex;flex-direction:column;gap:1px}
 .nav-group.collapsed .nav-group-items{display:none}
 @media (prefers-reduced-motion:reduce){ .nav-caret{transition:none} }
 .side-nav .item{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:var(--r-sm);color:var(--text-2);font-size:13px;font-weight:500;cursor:pointer;transition:.12s;position:relative;user-select:none}
-.side-nav .item:hover{background:rgba(0,0,0,.045);color:var(--text)}
+.side-nav .item:hover{background:rgba(29,24,19,.045);color:var(--text)}
 .side-nav .item.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:var(--sh-sm)}
 .side-nav .item .ic{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .side-nav .item .ic svg{width:19px;height:19px;stroke:var(--text-3);stroke-width:1.8;fill:none;transition:stroke .15s}
@@ -23913,8 +23913,8 @@ html[lang="ar"] .nav-group-h{text-transform:none;letter-spacing:0;font-size:11.5
 .side-nav .item.on .badge:not(.danger):not(.warn):not(.info){background:var(--gold);color:#fff}
 .side-foot{display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line);margin-top:6px}
 .side-status{font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:6px;padding:0 8px;margin-bottom:6px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(14,158,95,.18);flex-shrink:0}
-.dot.warm{background:var(--yellow);box-shadow:0 0 0 3px rgba(201,150,23,.18)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent);flex-shrink:0}
+.dot.warm{background:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 18%,transparent)}
 .side-tools{display:flex;gap:5px}
 .side-tools .icbtn{flex:1}
 /* PWA install entry — discreet, matches the nav items */
@@ -23941,9 +23941,9 @@ header.mhead{display:none;background:var(--surface);border-bottom:1px solid var(
 .btn{min-height:36px;padding:7px 13px;border-radius:7px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:.12s;border:1px solid transparent;line-height:1.2;white-space:nowrap}
 .btn.primary{background:var(--gold);color:#fff;box-shadow:var(--sh-xs)}
 .btn.primary:hover{filter:brightness(1.05);box-shadow:var(--sh-sm)}
-.btn.green{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.22)}
+.btn.green{background:var(--green-soft);color:var(--green);border-color:color-mix(in srgb,var(--green) 22%,transparent)}
 .btn.green:hover{background:var(--green);color:#fff;border-color:var(--green)}
-.btn.red{background:var(--red-soft);color:var(--red);border-color:rgba(196,67,67,.20)}
+.btn.red{background:var(--red-soft);color:var(--red);border-color:color-mix(in srgb,var(--red) 20%,transparent)}
 .btn.red:hover{background:var(--red);color:#fff;border-color:var(--red)}
 .btn.ghost{background:var(--surface);color:var(--text-2);border-color:var(--line)}
 .btn.ghost:hover{color:var(--gold);border-color:var(--gold);background:var(--gold-tint)}
@@ -23997,36 +23997,36 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .ops-card .oc-l{font-size:11.5px;color:var(--mut);font-weight:600;line-height:1.35}
 .ops-card .oc-v{font-size:21px;color:var(--text);font-weight:800;font-family:var(--font-mono);line-height:1.1;margin-top:4px}
 .ops-card .oc-s{font-size:11px;color:var(--text-2);line-height:1.4;margin-top:5px}
-.ops-card.ok{background:var(--green-soft);border-color:rgba(14,158,95,.22)}
+.ops-card.ok{background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 22%,transparent)}
 .ops-card.ok .oc-v{color:var(--green)}
-.ops-card.warn{background:var(--yellow-soft);border-color:rgba(201,150,23,.24)}
+.ops-card.warn{background:var(--yellow-soft);border-color:color-mix(in srgb,var(--yellow) 24%,transparent)}
 .ops-card.warn .oc-v{color:var(--yellow)}
-.ops-card.danger{background:var(--red-soft);border-color:rgba(196,67,67,.24)}
+.ops-card.danger{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 24%,transparent)}
 .ops-card.danger .oc-v{color:var(--red)}
-.ops-card.info{background:var(--blue-soft);border-color:rgba(62,120,210,.20)}
+.ops-card.info{background:var(--blue-soft);border-color:color-mix(in srgb,var(--blue) 20%,transparent)}
 .ops-card.info .oc-v{color:var(--blue)}
 .risk-panel{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px 14px;margin:0 0 14px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;box-shadow:var(--sh-xs)}
 .risk-panel .rp-ic{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--gold-soft);color:var(--gold)}
 .risk-panel .rp-t{font-weight:800;color:var(--text);font-size:13.5px}
 .risk-panel .rp-b{color:var(--text-2);font-size:12px;line-height:1.55;margin-top:2px}
-.risk-panel.warn{background:var(--yellow-soft);border-color:rgba(201,150,23,.28)}
-.risk-panel.danger{background:var(--red-soft);border-color:rgba(196,67,67,.28)}
-.risk-panel.ok{background:var(--green-soft);border-color:rgba(14,158,95,.24)}
-.risk-panel.info{background:var(--blue-soft);border-color:rgba(62,120,210,.20)}
-.risk-panel.warn .rp-ic{background:rgba(201,150,23,.16);color:var(--yellow)}
-.risk-panel.danger .rp-ic{background:rgba(196,67,67,.14);color:var(--red)}
-.risk-panel.ok .rp-ic{background:rgba(14,158,95,.14);color:var(--green)}
-.risk-panel.info .rp-ic{background:rgba(62,120,210,.13);color:var(--blue)}
+.risk-panel.warn{background:var(--yellow-soft);border-color:color-mix(in srgb,var(--yellow) 28%,transparent)}
+.risk-panel.danger{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 28%,transparent)}
+.risk-panel.ok{background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 24%,transparent)}
+.risk-panel.info{background:var(--blue-soft);border-color:color-mix(in srgb,var(--blue) 20%,transparent)}
+.risk-panel.warn .rp-ic{background:color-mix(in srgb,var(--yellow) 16%,transparent);color:var(--yellow)}
+.risk-panel.danger .rp-ic{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)}
+.risk-panel.ok .rp-ic{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)}
+.risk-panel.info .rp-ic{background:color-mix(in srgb,var(--blue) 13%,transparent);color:var(--blue)}
 .action-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin:0 0 14px}
 .action-bar .ab-copy{font-size:12.5px;color:var(--text-2);line-height:1.55}
 .action-bar .ab-copy b{color:var(--text)}
 .action-bar .ab-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .status-rail{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 14px}
 .status-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--text-2);font-size:11px;font-weight:700;padding:4px 9px}
-.status-chip.ok{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.2)}
-.status-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(201,150,23,.22)}
-.status-chip.danger{background:var(--red-soft);color:var(--red);border-color:rgba(196,67,67,.22)}
-.status-chip.info{background:var(--blue-soft);color:var(--blue);border-color:rgba(62,120,210,.18)}
+.status-chip.ok{background:var(--green-soft);color:var(--green);border-color:color-mix(in srgb,var(--green) 20%,transparent)}
+.status-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:color-mix(in srgb,var(--yellow) 22%,transparent)}
+.status-chip.danger{background:var(--red-soft);color:var(--red);border-color:color-mix(in srgb,var(--red) 22%,transparent)}
+.status-chip.info{background:var(--blue-soft);color:var(--blue);border-color:color-mix(in srgb,var(--blue) 18%,transparent)}
 .data-empty{background:var(--surface-2);border:1px dashed var(--line-strong);border-radius:var(--r);padding:22px 14px;text-align:center;color:var(--mut);line-height:1.7}
 .data-empty .de-ic{font-size:22px;margin-bottom:5px}
 .data-empty .de-t{font-weight:800;color:var(--text-2);font-size:13px}
@@ -24049,9 +24049,9 @@ main.main{padding:20px var(--page-pad) 48px;overflow-x:hidden;min-width:0;max-wi
 .mb-alert b{color:var(--text);font-weight:700}
 .mb-alert .mb-go{margin-inline-start:auto;color:var(--text-3);font-weight:700}
 .mb-alert:active{transform:scale(.99)}
-.mb-alert.red{background:var(--red-soft);border-color:rgba(196,67,67,.22)}
+.mb-alert.red{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 22%,transparent)}
 .mb-alert.red:hover{border-color:var(--red)}
-.mb-alert.amber{background:var(--yellow-soft);border-color:rgba(201,150,23,.22)}
+.mb-alert.amber{background:var(--yellow-soft);border-color:color-mix(in srgb,var(--yellow) 22%,transparent)}
 .mb-alert.amber:hover{border-color:var(--yellow)}
 
 /* ============== KPI STRIP ============== */
@@ -24285,7 +24285,7 @@ select.kb-chip{padding-inline-end:24px;height:auto}
 .ibox-act.rev{background:var(--blue-soft);color:var(--blue)}
 .ibox-act.esc{background:var(--red-soft);color:var(--red)}
 /* Bulk-approve bar (item 9) */
-.bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--green-soft);border:1px solid rgba(14,158,95,.22);border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:12.5px;color:var(--text)}
+.bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--green-soft);border:1px solid color-mix(in srgb,var(--green) 22%,transparent);border-radius:var(--r);padding:10px 13px;margin-bottom:10px;font-size:12.5px;color:var(--text)}
 .bulkbar b{color:var(--green)}
 /* Loud DRY-RUN banner (item 24) */
 .dry-banner{background:var(--red-soft);border:1px solid var(--red);color:var(--red);border-radius:var(--r);padding:11px 14px;margin-bottom:12px;font-size:12.5px;font-weight:700;text-align:center}
@@ -24394,8 +24394,8 @@ select.kb-chip{padding-inline-end:24px;height:auto}
 .cc-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
 .cc-tab{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:750;min-height:38px}
 .cc-tab.on{background:var(--gold);border-color:var(--gold);color:white}
-.cc-urgent{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--gold-tint);border:1px solid rgba(163,119,40,.24);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:12px}
-.cc-urgent.danger{background:var(--red-soft);border-color:rgba(196,67,67,.25)}
+.cc-urgent{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--gold-tint);border:1px solid color-mix(in srgb,var(--gold-logo) 24%,transparent);border-radius:var(--r-lg);padding:12px 14px;margin-bottom:12px}
+.cc-urgent.danger{background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 25%,transparent)}
 .cc-urgent .cc-ut{font-weight:850;color:var(--text);font-size:13px}
 .cc-urgent .cc-us{color:var(--text-2);font-size:12px;margin-top:2px}
 .cc-filter{display:flex;gap:7px;flex-wrap:wrap;margin:2px 0 12px}
@@ -24406,16 +24406,16 @@ select.kb-chip{padding-inline-end:24px;height:auto}
 .cc-col-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:12px;font-weight:850;color:var(--text)}
 .cc-count{background:var(--surface);border:1px solid var(--line);border-radius:999px;color:var(--mut);font-size:10px;font-weight:800;padding:1px 7px}
 .cc-job{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px;margin-bottom:8px;box-shadow:var(--sh-xs)}
-.cc-job.urgent{border-color:rgba(196,67,67,.38);background:linear-gradient(135deg,var(--red-soft),var(--surface))}
+.cc-job.urgent{border-color:color-mix(in srgb,var(--red) 38%,transparent);background:linear-gradient(135deg,var(--red-soft),var(--surface))}
 .cc-job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px}
 .cc-name{font-size:14px;font-weight:850;color:var(--text);line-height:1.3}
 .cc-meta{font-size:11px;color:var(--mut);line-height:1.55}
 .cc-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}
 .cc-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);color:var(--text-2);font-size:10.5px;font-weight:750;padding:3px 8px}
-.cc-chip.ok{background:var(--green-soft);color:var(--green);border-color:rgba(14,158,95,.18)}
-.cc-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(201,150,23,.22)}
-.cc-chip.danger{background:var(--red-soft);color:var(--red);border-color:rgba(196,67,67,.22)}
-.cc-chip.info{background:var(--blue-soft);color:var(--blue);border-color:rgba(62,120,210,.18)}
+.cc-chip.ok{background:var(--green-soft);color:var(--green);border-color:color-mix(in srgb,var(--green) 18%,transparent)}
+.cc-chip.warn{background:var(--yellow-soft);color:var(--yellow);border-color:color-mix(in srgb,var(--yellow) 22%,transparent)}
+.cc-chip.danger{background:var(--red-soft);color:var(--red);border-color:color-mix(in srgb,var(--red) 22%,transparent)}
+.cc-chip.info{background:var(--blue-soft);color:var(--blue);border-color:color-mix(in srgb,var(--blue) 18%,transparent)}
 .cc-primary{width:100%;margin-top:8px;min-height:38px}
 .cc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
 .cc-mobile-list{display:none}
@@ -24467,7 +24467,7 @@ select.kb-chip{padding-inline-end:24px;height:auto}
 .bub.h .bub-meta{text-align:end}
 .bub-tx{padding:8px 12px;border-radius:11px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
 .bub.g .bub-tx{background:var(--surface);color:var(--text-2);border-bottom-inline-start-radius:3px;border:1px solid var(--line)}
-.bub.h .bub-tx{background:var(--gold-tint);color:var(--text);border-bottom-inline-end-radius:3px;border:1px solid rgba(163,119,40,.18)}
+.bub.h .bub-tx{background:var(--gold-tint);color:var(--text);border-bottom-inline-end-radius:3px;border:1px solid color-mix(in srgb,var(--gold-logo) 18%,transparent)}
 .bub.auto .bub-tx{background:var(--surface-3);color:var(--text-3);font-style:italic}
 .bub-auto-tag{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;padding:0 5px}
 
@@ -24479,8 +24479,8 @@ select.kb-chip{padding-inline-end:24px;height:auto}
 .context-h{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin:10px 0 6px}
 .context-h:first-child{margin-top:0}
 
-.reasoning-box{background:var(--purple-soft);border:1px solid rgba(109,88,194,.18);border-radius:var(--r);padding:11px;margin-bottom:12px}
-html[data-theme="dark"] .reasoning-box{background:rgba(109,88,194,.10)}
+.reasoning-box{background:var(--purple-soft);border:1px solid color-mix(in srgb,var(--purple) 18%,transparent);border-radius:var(--r);padding:11px;margin-bottom:12px}
+html[data-theme="dark"] .reasoning-box{background:color-mix(in srgb,var(--purple) 10%,transparent)}
 .reasoning-box .h{font-size:11px;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:5px}
 .reasoning-box .reason-txt{font-size:12.5px;color:var(--text);line-height:1.55}
 .reasoning-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
@@ -24676,11 +24676,11 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
 
 /* ============== DISCOUNT STATUS BANNER ============== */
 .discount-banner{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-radius:var(--r-lg);margin-bottom:14px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--sh-xs);gap:10px;flex-wrap:wrap}
-.discount-banner.paused{background:var(--yellow-soft);border-color:rgba(201,150,23,.25)}
+.discount-banner.paused{background:var(--yellow-soft);border-color:color-mix(in srgb,var(--yellow) 25%,transparent)}
 .discount-banner .info{display:flex;align-items:center;gap:9px}
-.discount-banner .pulse{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(14,158,95,.18);animation:pulse 2s infinite}
-.discount-banner.paused .pulse{background:var(--yellow);box-shadow:0 0 0 3px rgba(201,150,23,.20);animation:none}
-@keyframes pulse{50%{box-shadow:0 0 0 5px rgba(14,158,95,.08)}}
+.discount-banner .pulse{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent);animation:pulse 2s infinite}
+.discount-banner.paused .pulse{background:var(--yellow);box-shadow:0 0 0 3px color-mix(in srgb,var(--yellow) 20%,transparent);animation:none}
+@keyframes pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--green) 8%,transparent)}}
 .discount-banner .txt{font-size:13px;color:var(--text-2)}
 .discount-banner .txt b{color:var(--text)}
 
@@ -24812,9 +24812,9 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
 .lv-tag{border-radius:var(--r-xs);padding:1px 7px;font-size:10.5px;font-weight:800;background:var(--surface-2);color:var(--text-2)}
 .lv-sp{margin-inline-start:auto;display:flex;gap:6px}
 /* reassignment sheet */
-.lv-scrim{position:fixed;inset:0;background:rgba(0,0,0,.38);opacity:0;pointer-events:none;transition:opacity .22s var(--ease,cubic-bezier(0.23,1,0.32,1));z-index:80}
+.lv-scrim{position:fixed;inset:0;background:rgba(29,24,19,.38);opacity:0;pointer-events:none;transition:opacity .22s var(--ease,cubic-bezier(0.23,1,0.32,1));z-index:80}
 .lv-scrim.on{opacity:1;pointer-events:auto}
-.lv-sheet{position:fixed;inset-block-end:0;inset-inline:0;background:var(--surface);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.16);z-index:81;transform:translateY(101%);transition:transform .28s var(--ease,cubic-bezier(0.23,1,0.32,1));max-height:84vh;overflow-y:auto;padding:17px 16px 24px}
+.lv-sheet{position:fixed;inset-block-end:0;inset-inline:0;background:var(--surface);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:0 -8px 40px rgba(29,24,19,.16);z-index:81;transform:translateY(101%);transition:transform .28s var(--ease,cubic-bezier(0.23,1,0.32,1));max-height:84vh;overflow-y:auto;padding:17px 16px 24px}
 .lv-sheet.on{transform:translateY(0)}
 .lv-sheeth{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
 .lv-sheeth .t{font-weight:800;font-size:17px;color:var(--ink)}
@@ -24865,22 +24865,22 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
   <div class="sub">Ouja Operations</div>
 
   <!-- Method A: username + password (default + recommended) -->
-  <div style="margin-top:18px;background:#fff;padding:14px;border-radius:12px;border:2px solid #c9a96e">
-    <div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:10px;text-align:center">👤 الدخول بحساب · Username login</div>
+  <div style="margin-top:18px;background:#fff;padding:14px;border-radius:12px;border:2px solid var(--gold-logo)">
+    <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;text-align:center">👤 الدخول بحساب · Username login</div>
     <input id="loginUsername" type="text" placeholder="اسم المستخدم (admin)" autocomplete="username" style="margin-bottom:8px">
     <input id="loginPassword" type="password" placeholder="كلمة المرور · Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doUserLogin()">
-    <button onclick="doUserLogin()" style="padding:12px 26px;font-size:14px;margin-top:10px;width:100%;background:#c9a96e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:700">دخول · Sign in</button>
-    <div style="font-size:11.5px;color:#666;text-align:center;margin-top:10px;line-height:1.6;background:#faf8f3;padding:9px;border-radius:6px">
-      💡 أول مرة؟ <b>admin</b> + قيمة <code style="background:#f5efe2;padding:1px 5px;border-radius:3px">DASHBOARD_TOKEN</code>
+    <button onclick="doUserLogin()" style="padding:12px 26px;font-size:14px;margin-top:10px;width:100%;background:var(--gold-logo);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:700">دخول · Sign in</button>
+    <div style="font-size:11.5px;color:var(--text-3);text-align:center;margin-top:10px;line-height:1.6;background:var(--surface-2);padding:9px;border-radius:6px">
+      💡 أول مرة؟ <b>admin</b> + قيمة <code style="background:var(--surface-2);padding:1px 5px;border-radius:3px">DASHBOARD_TOKEN</code>
     </div>
   </div>
 
   <!-- Method B: legacy token fallback -->
   <details style="margin-top:14px">
-    <summary style="font-size:12px;color:#888;cursor:pointer;text-align:center;padding:6px">🔑 أو ادخل بالتوكن مباشرة · Or use token</summary>
-    <div style="margin-top:8px;padding:12px;background:#faf8f3;border-radius:8px">
+    <summary style="font-size:12px;color:var(--text-3);cursor:pointer;text-align:center;padding:6px">🔑 أو ادخل بالتوكن مباشرة · Or use token</summary>
+    <div style="margin-top:8px;padding:12px;background:var(--surface-2);border-radius:8px">
       <input id="tok" type="password" placeholder="رمز الدخول · Access token" autocomplete="off" onkeydown="if(event.key==='Enter')saveTok()" style="margin-bottom:8px">
-      <button onclick="saveTok()" style="padding:10px 20px;font-size:13px;width:100%;background:#fff;color:#1a1a1a;border:1px solid #d4cfc1;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600">دخول بالتوكن</button>
+      <button onclick="saveTok()" style="padding:10px 20px;font-size:13px;width:100%;background:#fff;color:var(--text);border:1px solid var(--line-strong);border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600">دخول بالتوكن</button>
     </div>
   </details>
 
@@ -25080,7 +25080,7 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
       <style>
         .pe-sum{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline}
         .pe-sum-k{font-size:13px;color:var(--text-2)} .pe-sum-k b{font-size:18px;color:var(--text)}
-        .pe-sum-k.up b{color:#2e9e6b} .pe-sum-k.down b{color:#c2683f}
+        .pe-sum-k.up b{color:var(--green)} .pe-sum-k.down b{color:var(--red)}
         .pe-sum-note{font-size:12px;color:var(--text-2);margin-top:8px;opacity:.85}
         .pe-row{display:grid;grid-template-columns:1fr auto auto auto;gap:14px;align-items:center;padding:12px 8px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .15s}
         .pe-row:hover{background:var(--gold-tint)} .pe-row:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
@@ -25088,17 +25088,17 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         .pe-meta{font-size:12px;color:var(--text-2);margin-top:3px}
         .pe-prices{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:end}
         .pe-cur{color:var(--text-2);text-decoration:line-through;font-size:13px} .pe-arr{margin:0 6px;color:var(--text-2)}
-        .pe-rec{font-weight:700;font-size:16px;color:var(--text)} .pe-rec.up{color:#2e9e6b} .pe-rec.down{color:#c2683f}
+        .pe-rec{font-weight:700;font-size:16px;color:var(--text)} .pe-rec.up{color:var(--green)} .pe-rec.down{color:var(--red)}
         .pe-cur2{font-size:11px;color:var(--text-2);margin-inline-start:3px}
         .pe-range{font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
         .pe-pill{font-size:11.5px;padding:3px 11px;border-radius:999px;white-space:nowrap;display:inline-block}
-        .pe-ahead{background:rgba(46,158,107,.14);color:#2e9e6b} .pe-behind{background:rgba(194,104,63,.14);color:#c2683f} .pe-normal{background:var(--gold-tint);color:var(--text-2)}
+        .pe-ahead{background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green)} .pe-behind{background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--red)} .pe-normal{background:var(--gold-tint);color:var(--text-2)}
         .pe-panel{padding:2px}
         .pe-hero{text-align:center;margin:6px 0 14px}
         .pe-hero-cur{color:var(--text-2);text-decoration:line-through;font-size:15px}
         .pe-hero-rec{font-size:40px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1.15}
         .pe-hero-unit{font-size:16px;font-weight:600}
-        .pe-delta{font-size:14px;font-weight:700;margin-top:4px} .pe-delta.up{color:#2e9e6b} .pe-delta.down{color:#c2683f}
+        .pe-delta{font-size:14px;font-weight:700;margin-top:4px} .pe-delta.up{color:var(--green)} .pe-delta.down{color:var(--red)}
         .pe-slider-wrap{background:var(--gold-tint);border-radius:12px;padding:14px 14px 10px;margin:10px 0 16px}
         #peSlider{width:100%;accent-color:var(--gold);cursor:pointer}
         .pe-slider-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--text-2)} .pe-slider-row b{font-size:16px;color:var(--text);font-variant-numeric:tabular-nums}
@@ -25120,7 +25120,7 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         .pe-apt-name{font-weight:600;color:var(--text);flex:1}
         .pe-apt-stats{display:flex;gap:9px;align-items:center}
         .pe-apt-opp{font-size:12px;color:var(--text-2)}
-        .pe-apt-up{font-size:13px;font-weight:700;color:#2e9e6b;background:rgba(46,158,107,.12);padding:3px 10px;border-radius:999px}
+        .pe-apt-up{font-size:13px;font-weight:700;color:var(--green);background:color-mix(in srgb,var(--green) 12%,transparent);padding:3px 10px;border-radius:999px}
         .pe-apt-body{max-height:0;overflow:hidden;opacity:.3;transition:max-height .3s cubic-bezier(0.23,1,0.32,1),opacity .3s ease}
         .pe-apt-body.open{max-height:1000px;opacity:1}
         .pe-cal-legend{font-size:11.5px;color:var(--text-2);padding:12px 14px 4px;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
@@ -25132,11 +25132,11 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         .pe-cell.pe-none{opacity:.45}
         .pe-cell.pe-has{cursor:pointer;transition:transform .12s cubic-bezier(0.23,1,0.32,1)}
         .pe-cell.pe-has:hover{transform:scale(1.06)} .pe-cell.pe-has:active{transform:scale(.96)}
-        .pe-cell.pe-raise{background:rgba(46,158,107,.15);border-color:rgba(46,158,107,.4)}
-        .pe-cell.pe-drop{background:rgba(194,104,63,.15);border-color:rgba(194,104,63,.4)}
-        .pe-lg.pe-raise{background:#2e9e6b} .pe-lg.pe-drop{background:#c2683f} .pe-lg.pe-holdc{background:#cdbfa6}
+        .pe-cell.pe-raise{background:color-mix(in srgb,var(--green) 15%,transparent);border-color:color-mix(in srgb,var(--green) 40%,transparent)}
+        .pe-cell.pe-drop{background:color-mix(in srgb,var(--red) 15%,transparent);border-color:color-mix(in srgb,var(--red) 40%,transparent)}
+        .pe-lg.pe-raise{background:var(--green)} .pe-lg.pe-drop{background:var(--red)} .pe-lg.pe-holdc{background:var(--line-strong)}
         .pe-cd{font-size:11px;color:var(--text-2)} .pe-cp{font-size:12px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
-        .pe-cell.pe-raise .pe-cp{color:#2e9e6b} .pe-cell.pe-drop .pe-cp{color:#c2683f}
+        .pe-cell.pe-raise .pe-cp{color:var(--green)} .pe-cell.pe-drop .pe-cp{color:var(--red)}
         @media(prefers-reduced-motion:reduce){.pe-apt-body,.pe-apt-caret,.pe-cell.pe-has{transition:none}}
         /* ---- Pricing redesign: analytics header + chips + per-apartment toggles ---- */
         .pr-an{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -25144,7 +25144,7 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         .pr-kpi-v{font-size:20px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;line-height:1.1}
         .pr-kpi-l{font-size:11px;color:var(--text-2);margin-top:3px}
         .pr-kpi .pe-chip{margin:3px 3px 0 0}
-        .pe-chip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--gold-tint);color:var(--gold);border:1px solid rgba(200,162,75,.3);white-space:nowrap}
+        .pe-chip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--gold-tint);color:var(--gold);border:1px solid color-mix(in srgb,var(--gold-logo) 30%,transparent);white-space:nowrap}
         .pe-chip.off{background:var(--surface-2);color:var(--mut);border-color:var(--line)}
         .pe-apt-chips{display:inline-flex;gap:4px;flex-wrap:wrap;margin-inline-start:6px}
         .pe-utogs{display:flex;flex-wrap:wrap;gap:8px;padding:4px 14px 14px;align-items:center}
@@ -25529,7 +25529,7 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <select id="dcInsertLid" style="flex:1;min-width:200px;padding:7px 10px;height:38px;font-size:13px"></select>
                 <input type="hidden" id="dcInsertDate">
-                <button id="dcInsertDate_lbl" onclick="openDatePicker('dcInsertDate','اختر تاريخ الإضافة')" style="background:var(--surface);border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
+                <button id="dcInsertDate_lbl" onclick="openDatePicker('dcInsertDate','اختر تاريخ الإضافة')" style="background:var(--surface);border:1.5px solid var(--line-strong);color:var(--text);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
                 <button class="btn primary sm" onclick="cleanInsertAt()">➕ أضف</button>
               </div>
             </div>
@@ -25539,7 +25539,7 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
               <div class="muted" style="font-size:11.5px;margin-bottom:10px">تمسح كل المواعيد المجدولة وتعيد توزيعها يومياً بدءاً من التاريخ المختار (الأقدم تنظيفاً أولاً). الشقق الموقفة ما تتأثر</div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <input type="hidden" id="dcResetDate">
-                <button id="dcResetDate_lbl" onclick="openDatePicker('dcResetDate','اختر تاريخ البداية')" style="background:var(--surface);border:1.5px solid var(--gold);color:var(--gold);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
+                <button id="dcResetDate_lbl" onclick="openDatePicker('dcResetDate','اختر تاريخ البداية')" style="background:var(--surface);border:1.5px solid var(--line-strong);color:var(--text);border-radius:8px;padding:0 14px;height:38px;font-size:13px;font-weight:600;cursor:pointer;min-width:170px;text-align:center">📅 اختر التاريخ</button>
                 <button class="btn ghost sm" onclick="cleanSetResetSunday()">⏩ الأحد القادم</button>
                 <button class="btn warn sm" onclick="cleanResetFrom()">🔄 إعادة جدولة الكل</button>
               </div>
@@ -26616,8 +26616,8 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
   </div>
 </div>
 
-<div id="datePickerOverlay" role="dialog" aria-modal="true" aria-label="اختيار التاريخ / Date picker" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)closeDatePicker()">
-  <div style="background:var(--surface);padding:18px;border-radius:16px;width:340px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)" id="datePickerBody"></div>
+<div id="datePickerOverlay" role="dialog" aria-modal="true" aria-label="اختيار التاريخ / Date picker" style="display:none;position:fixed;inset:0;background:rgba(29,24,19,.55);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)closeDatePicker()">
+  <div style="background:var(--surface);padding:18px;border-radius:16px;width:340px;max-width:92vw;box-shadow:0 24px 64px rgba(29,24,19,.5);border:1px solid var(--border)" id="datePickerBody"></div>
 </div>
 
 <script>
@@ -26758,11 +26758,11 @@ function showConfirm(opts){
   if(!ov){
     ov = document.createElement('div');
     ov.id = 'confirmOverlay';
-    ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+    ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.55);z-index:9998;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
     ov.onclick = function(e){ if(e.target === ov) closeConfirm(); };
     const inner = document.createElement('div');
     inner.id = 'confirmBody';
-    inner.style.cssText = 'background:var(--surface);padding:20px;border-radius:16px;width:420px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+    inner.style.cssText = 'background:var(--surface);padding:20px;border-radius:16px;width:420px;max-width:92vw;box-shadow:0 24px 64px rgba(29,24,19,.5);border:1px solid var(--border)';
     ov.appendChild(inner);
     document.body.appendChild(ov);
   }
@@ -29100,11 +29100,11 @@ function showWelcome(){
   if(!ov){
     ov = document.createElement('div');
     ov.id = 'welcomeOverlay';
-    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:14px';
+    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(29,24,19,.65);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:14px';
     document.body.appendChild(ov);
   }
   ov.innerHTML =
-      '<div style="background:var(--surface);padding:24px;border-radius:18px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 30px 80px rgba(0,0,0,.6);border:1px solid var(--border)">'
+      '<div style="background:var(--surface);padding:24px;border-radius:18px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 30px 80px rgba(29,24,19,.6);border:1px solid var(--border)">'
     +   '<div style="text-align:center;margin-bottom:18px">'
     +     '<div style="font-size:48px;margin-bottom:8px">👋</div>'
     +     '<div style="font-size:22px;font-weight:800;color:var(--gold);margin-bottom:4px">أهلاً بك في عوجا</div>'
@@ -29326,7 +29326,7 @@ function showIosInstallGuide(){
   if(!ov){
     ov = document.createElement('div');
     ov.id = 'iosInstallOverlay';
-    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:10001;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)';
+    ov.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(29,24,19,.62);z-index:10001;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px)';
     ov.addEventListener('click', function(e){ if(e.target === ov) closeIosInstallGuide(); });
     document.body.appendChild(ov);
   }
@@ -29346,7 +29346,7 @@ function showIosInstallGuide(){
       (ar ? 'اختر «إضافة إلى الشاشة الرئيسية»' : 'Choose "Add to Home Screen"'),
       (ar ? 'ثم اضغط «إضافة» بالأعلى' : 'then tap "Add" at the top'));
   ov.innerHTML =
-      '<div style="background:var(--surface);width:100%;max-width:460px;border-radius:22px 22px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -20px 60px rgba(0,0,0,.4);border:1px solid var(--border);border-bottom:0;animation:iosSheetUp .28s var(--ease,ease)">'
+      '<div style="background:var(--surface);width:100%;max-width:460px;border-radius:22px 22px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -20px 60px rgba(29,24,19,.4);border:1px solid var(--border);border-bottom:0;animation:iosSheetUp .28s var(--ease,ease)">'
     +   '<div style="width:38px;height:4px;border-radius:2px;background:var(--line-strong);margin:0 auto 14px"></div>'
     +   '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">'
     +     '<img src="/pwa/icons/icon-192.png" alt="Ouja" width="46" height="46" style="border-radius:12px;flex:none">'
@@ -29385,7 +29385,7 @@ function _pwaOfferUpdate(worker){
   if(!bar){
     bar = document.createElement('div');
     bar.id = 'pwaUpdateBar';
-    bar.style.cssText = 'position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:250;display:flex;align-items:center;gap:12px;background:var(--text);color:var(--bg);padding:9px 12px 9px 16px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 12px 40px rgba(0,0,0,.3);max-width:92vw';
+    bar.style.cssText = 'position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:250;display:flex;align-items:center;gap:12px;background:var(--text);color:var(--bg);padding:9px 12px 9px 16px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 12px 40px rgba(29,24,19,.3);max-width:92vw';
     document.body.appendChild(bar);
   }
   bar.innerHTML = '<span>'+t().pwaUpdate+'</span>'
@@ -29568,8 +29568,8 @@ async function inqRunNow(btn){
 /* ===== Pricing Command Center (Stage 2) — read-only owner decision surface over /api/pricing/command.
    No apply here; "Review Manually" opens the detailed list below. Max 4 status colors. ===== */
 var _pcc={action:'',q:'',risk:'',why:{}};
-function pccChip(txt,tone){ var c=({gold:['#7a5b14','rgba(184,137,59,.13)'],red:['#a23b30','rgba(196,67,67,.12)'],green:['#1f6e45','rgba(62,125,90,.13)'],info:['#2f5f7a','rgba(47,95,122,.12)'],mut:['var(--mut)','var(--surface-2)']})[tone||'mut']; return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;color:'+c[0]+';background:'+c[1]+'">'+esc(txt)+'</span>'; }
-function pccKpi(label,val,sub,tone){ var col=({gold:'#7a5b14',red:'#a23b30',green:'#1f6e45',info:'#2f5f7a'})[tone||'']||'var(--text)'; return '<div class="card" style="margin:0;padding:11px 13px"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:21px;font-weight:800;color:'+col+'">'+val+'</div>'+(sub?('<div class="muted" style="font-size:10px">'+esc(sub)+'</div>'):'')+'</div>'; }
+function pccChip(txt,tone){ var c=({gold:['var(--yellow)','color-mix(in srgb,var(--gold-logo) 13%,transparent)'],red:['var(--red)','color-mix(in srgb,var(--red) 12%,transparent)'],green:['var(--green)','color-mix(in srgb,var(--green) 13%,transparent)'],info:['var(--blue)','color-mix(in srgb,var(--blue) 12%,transparent)'],mut:['var(--mut)','var(--surface-2)']})[tone||'mut']; return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;color:'+c[0]+';background:'+c[1]+'">'+esc(txt)+'</span>'; }
+function pccKpi(label,val,sub,tone){ var col=({gold:'var(--yellow)',red:'var(--red)',green:'var(--green)',info:'var(--blue)'})[tone||'']||'var(--text)'; return '<div class="card" style="margin:0;padding:11px 13px"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:21px;font-weight:800;color:'+col+'">'+val+'</div>'+(sub?('<div class="muted" style="font-size:10px">'+esc(sub)+'</div>'):'')+'</div>'; }
 /* ===== Hostaway truth & sync (truth-check) — Hostaway calendar is the SOLE source of truth ===== */
 function pccSyncStrip(ar){
   var t=_pcc.truth, sm=(t&&t.summary)||null, tone, title, sub, mark;
@@ -29578,7 +29578,7 @@ function pccSyncStrip(ar){
   else if((sm.mismatched||0)>0){ tone='red'; mark='⚠'; title=(ar?('فيه '+sm.mismatched+' ليلة سعرها مختلف عن Hostaway'):(sm.mismatched+' nights differ from Hostaway')); sub=(ar?'لا تطبّق أي سعر قبل حل الاختلاف. سوّ Sync وراجع.':'Do not apply any price until resolved. Sync and review.'); }
   else { tone='green'; mark='✓'; title=(ar?'متطابق مع Hostaway':'Verified against Hostaway'); sub=(ar?('كل الأسعار المعروضة مقروءة من Hostaway · فُحص '+(sm.nights_checked||0)+' ليلة'):('All shown prices verified from Hostaway · '+(sm.nights_checked||0)+' nights checked')); }
   var when=(t&&t.generated_at)?(' · '+(ar?'آخر قراءة ':'last read ')+String(t.generated_at).replace('T',' ').slice(0,16)):'';
-  var c=({gold:['#7a5b14','rgba(184,137,59,.10)','var(--gold)'],red:['#a23b30','rgba(196,67,67,.07)','var(--red)'],green:['#1f6e45','rgba(62,125,90,.10)','#3e9665']})[tone];
+  var c=({gold:['var(--yellow)','color-mix(in srgb,var(--gold-logo) 10%,transparent)','var(--gold)'],red:['var(--red)','color-mix(in srgb,var(--red) 7%,transparent)','var(--red)'],green:['var(--green)','color-mix(in srgb,var(--green) 10%,transparent)','var(--green)']})[tone];
   var nIssues=sm?((sm.mismatched||0)+(sm.missing_hostaway||0)+(sm.errors||0)):0;
   var btns='<button class="btn primary sm" onclick="pccSync()">↻ '+(ar?'تحديث من Hostaway':'Sync from Hostaway now')+'</button>'+(t&&t.ok?('<button class="btn ghost sm" onclick="pccMismatches()">'+(ar?'عرض الاختلافات':'Show mismatches')+(nIssues?(' ('+nIssues+')'):'')+'</button>'):'');
   return '<div class="card" style="border:1px solid '+c[2]+';background:'+c[1]+';margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div style="min-width:200px"><div style="font-weight:800;font-size:13.5px;color:'+c[0]+'">'+mark+' '+esc(title)+'</div><div class="muted" style="font-size:11px;margin-top:3px">'+esc(sub+when)+'</div></div><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div></div></div>';
@@ -29612,7 +29612,7 @@ async function pccMismatches(){
     var hp=(r.hostaway_current_price!=null?fmt(r.hostaway_current_price):'—'), dp=(r.dashboard_displayed_price!=null?fmt(r.dashboard_displayed_price):'—');
     var diff=(r.hostaway_current_price!=null&&r.dashboard_displayed_price!=null)?(r.dashboard_displayed_price-r.hostaway_current_price):null;
     return '<div style="padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b>'+esc(r.name)+' · '+esc(r.date)+'</b>'+pccChip(st[0],st[1])+'</div>'
-      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'#a23b30':'#1f6e45')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div><div style="margin-top:7px"><button class="btn ghost xs" onclick="pccRefreshListing('+r.listing_id+')">↻ '+(ar?'حدّث هالشقة من Hostaway':'Refresh this apartment')+'</button></div></div>';
+      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:5px"><span>Hostaway: <b>'+hp+'</b></span><span class="muted">'+(ar?'المعروض':'shown')+': '+dp+'</span>'+((diff!=null&&diff!==0)?('<span style="color:'+(diff>0?'var(--red)':'var(--green)')+';font-weight:700">'+(diff>0?'+':'')+fmt(diff)+'</span>'):'')+((r.suggested_price!=null)?('<span class="muted">'+(ar?'اقتراح عوجا':'Ouja sugg')+': '+fmt(r.suggested_price)+'</span>'):'')+((r.baseline_price!=null)?('<span class="muted">'+(ar?'السابق':'prev')+': '+fmt(r.baseline_price)+'</span>'):'')+'</div><div style="margin-top:7px"><button class="btn ghost xs" onclick="pccRefreshListing('+r.listing_id+')">↻ '+(ar?'حدّث هالشقة من Hostaway':'Refresh this apartment')+'</button></div></div>';
   }).join('');
   setDrawerBody('<div class="muted" style="font-size:11.5px;margin-bottom:9px;line-height:1.7">'+(ar?'السعر المحفوظ بالعرض هنا أقدم من السعر الحالي في Hostaway (غالبًا لأنك فعّلت الشقة للتو أو تغيّر السعر). اضغط «تحديث من Hostaway» عشان نقرأ الأسعار الحالية ويتطابق العرض — وبعدها تقدر تطبّق بأمان. ما تغيّر شيء في Hostaway.':'The saved price shown here is older than the live Hostaway price (usually because you just activated the unit or the price changed). Click Sync from Hostaway to re-read the live prices — then you can apply safely. Nothing in Hostaway has changed.')+'</div>'+body);
   setDrawerFoot('<button class="btn primary sm" onclick="closeDrawer();pccSync()">↻ '+(ar?'تحديث من Hostaway':'Sync from Hostaway')+'</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>');
@@ -29627,19 +29627,19 @@ async function pccRefreshListing(lid){
 }
 function renderCommandCenter(){
   var ar=(L==='ar'); var el=document.getElementById('pcc'); if(!el) return; var d=D.pcc||{};
-  if(d.ok===false){ el.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:#a23b30">'+(ar?'⚠ تعذّر تحميل مركز التسعير':'⚠ Could not load Pricing Command Center')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. العرض التفصيلي تحت يشتغل عادي. جرّب تحديث.':'The engine did not respond. The detailed view below still works. Try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; return; }
+  if(d.ok===false){ el.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:var(--red)">'+(ar?'⚠ تعذّر تحميل مركز التسعير':'⚠ Could not load Pricing Command Center')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. العرض التفصيلي تحت يشتغل عادي. جرّب تحديث.':'The engine did not respond. The detailed view below still works. Try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; return; }
   if(!d.demand){ el.innerHTML='<div class="card"><div class="empty" style="padding:18px;text-align:center">'+(ar?'ما فيه بيانات كفاية للمحرّك بعد — افتح «العرض التفصيلي» تحت.':'Not enough engine data yet — open the detailed view below.')+'</div></div>'; return; }
   var dm=d.demand, sm=d.summary||{}, rt=d.recommended_today||{}, cf=sm.confidence||{};
   var sigTone=(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info'));
   var statusTone=(d.partial?'gold':'green'), statusTxt=(d.partial?(ar?'بيانات جزئية':'Partial'):(ar?'مباشر':'Live'));
-  var h=pccSyncStrip(ar)+'<div class="card" style="border:1px solid var(--gold);background:linear-gradient(180deg,rgba(184,137,59,.06),transparent)">'
+  var h=pccSyncStrip(ar)+'<div class="card" style="border:1px solid var(--line-strong);background:linear-gradient(180deg,color-mix(in srgb,var(--gold-logo) 6%,transparent),transparent)">'
     +'<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:16px">📊 '+(ar?'مركز التسعير':'Pricing Command Center')+'</b><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+pccChip(statusTxt,statusTone)+(d.dry_run?pccChip(ar?'وضع المعاينة':'Dry-run','info'):'')+'<button class="btn ghost sm" onclick="pccBatches()">🧾 '+(ar?'الدُفعات':'Batches')+'</button><button class="btn ghost sm" onclick="loadPricing()">↻</button></span></div>'
     +'<div style="font-size:14px;font-weight:800;margin-top:8px">'+(ar?'وش القرار السعري اليوم؟':'What pricing decision should we make today?')+'</div>'
     +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">'+pccChip(ar?dm.title_ar:dm.title_en,sigTone)+'<span style="font-size:13px">'+esc(ar?dm.reason_ar:dm.reason_en)+'</span></div>'
-    +(rt.title_ar?('<div style="margin-top:7px;font-size:13px;font-weight:700;color:#7a5b14">↪ '+esc(ar?rt.title_ar:rt.title_en)+'</div>'):'')
+    +(rt.title_ar?('<div style="margin-top:7px;font-size:13px;font-weight:700;color:var(--yellow)">↪ '+esc(ar?rt.title_ar:rt.title_en)+'</div>'):'')
     +'</div>';
   var emg=D.pccEmg||{count:0};
-  if(emg.count>0){ h+='<div class="card" style="border:1px solid var(--red);background:rgba(196,67,67,.05)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px;color:#a23b30">🚨 '+(ar?'طوارئ ٩م · معاينة فقط':'9PM emergency · preview only')+'</b><button class="btn ghost sm" onclick="pccEmergency()">'+(ar?'افتح المعاينة':'Open preview')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'+(ar?(emg.count+' شقة فاضية الليلة وما فيها حجز جديد من أكثر من يومين — خصم طوارئ مقترح. ما ينطبق تلقائيًا أبدًا.'):(emg.count+' units empty tonight with no booking in 2+ days — emergency discount suggested. Never auto-applied.'))+'</div></div>'; }
+  if(emg.count>0){ h+='<div class="card" style="border:1px solid var(--red);background:color-mix(in srgb,var(--red) 5%,transparent)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13.5px;color:var(--red)">🚨 '+(ar?'طوارئ ٩م · معاينة فقط':'9PM emergency · preview only')+'</b><button class="btn ghost sm" onclick="pccEmergency()">'+(ar?'افتح المعاينة':'Open preview')+'</button></div><div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'+(ar?(emg.count+' شقة فاضية الليلة وما فيها حجز جديد من أكثر من يومين — خصم طوارئ مقترح. ما ينطبق تلقائيًا أبدًا.'):(emg.count+' units empty tonight with no booking in 2+ days — emergency discount suggested. Never auto-applied.'))+'</div></div>'; }
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-bottom:10px">'
     +pccKpi(ar?'ليالٍ فاضية · ٧ أيام':'Empty · 7d',sm.empty_nights_7||0,'',(sm.empty_nights_7?'gold':''))
     +pccKpi(ar?'ليالٍ فاضية · ١٤ يوم':'Empty · 14d',sm.empty_nights_14||0,'','')
@@ -29745,9 +29745,9 @@ function pccPvRender(){
       return '<div style="display:grid;'+gcol+';align-items:center;font-size:12px;padding:5px 0;border-top:1px solid var(--line)">'
         +'<span class="muted">'+esc(String(r.date).slice(5))+'</span>'
         +'<span><b>'+fmt(r.current)+'</b>'+(r.stale?(' <span class="muted" style="font-size:9px">'+(ar?'قديم':'stale')+'</span>'):'')+'</span>'
-        +'<span style="color:'+(r.kind==='drop'?'#a23b30':(r.kind==='raise'?'#1f6e45':'var(--text)'))+'">'+(r.suggested!=null?fmt(r.suggested):'—')+'</span>'
+        +'<span style="color:'+(r.kind==='drop'?'var(--red)':(r.kind==='raise'?'var(--green)':'var(--text)'))+'">'+(r.suggested!=null?fmt(r.suggested):'—')+'</span>'
         +'<span>'+fmt(afterv)+'</span>'
-        +'<span style="color:'+(diff<0?'#a23b30':(diff>0?'#1f6e45':'var(--mut)'))+'">'+(diff>0?'+':'')+fmt(diff)+'</span>'
+        +'<span style="color:'+(diff<0?'var(--red)':(diff>0?'var(--green)':'var(--mut)'))+'">'+(diff>0?'+':'')+fmt(diff)+'</span>'
         +pccChip(stt.t,stt.c)+'</div>'
         +'<div style="margin:-1px 0 2px"><button class="btn ghost xs" onclick="var e=document.getElementById(&#39;'+wid+'&#39;);if(e)e.style.display=(e.style.display===&#39;none&#39;?&#39;block&#39;:&#39;none&#39;)">'+(ar?'ليش هالسعر؟':'Why this price?')+'</button>'
         +'<div id="'+wid+'" style="display:none;font-size:10.5px;line-height:1.8;color:var(--text-2);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-top:3px">'
@@ -29758,8 +29758,8 @@ function pccPvRender(){
   });
   if(!rows.length) body='<div class="empty" style="padding:22px;text-align:center">'+(ar?'ما فيه ليالٍ ضمن النطاق لهالإجراء. غيّر التواريخ أو الإجراء.':'No nights in range for this action. Change the dates or action.')+'</div>';
   var pvNote='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;margin-bottom:8px;line-height:1.7">'+(ar?'👁️ Preview فقط — ما يتغير شي في Hostaway إلا بعد «تطبيق» والتأكيد. كل سطر: الأول Hostaway الآن، والثاني اقتراح عوجا.':'👁️ Preview only — nothing changes in Hostaway until you press Apply and confirm. Each row: Hostaway now, then the Ouja suggestion.')+'</div>';
-  var mismNote=blockApply?('<div style="background:rgba(196,67,67,.07);border:1px solid var(--red);border-radius:8px;padding:8px 10px;font-size:11.5px;color:#a23b30;margin-bottom:8px">'+(ar?'⛔ فيه اختلاف مع Hostaway. التطبيق متوقف — سوّ «تحديث من Hostaway» وراجع الاختلافات أول.':'⛔ Hostaway mismatch detected. Apply is blocked — Sync from Hostaway and review first.')+'</div>'):'';
-  var staleNote=snapStale?('<div style="background:rgba(184,137,59,.10);border:1px solid var(--gold);border-radius:8px;padding:8px 10px;font-size:11.5px;color:#7a5b14;margin-bottom:8px">'+(ar?'⚠ المعاينة قديمة — تغيّرت بيانات Hostaway. أعد بناء المعاينة قبل التطبيق.':'⚠ Preview is stale — Hostaway data changed. Rebuild the preview before applying.')+'</div>'):'';
+  var mismNote=blockApply?('<div style="background:color-mix(in srgb,var(--red) 7%,transparent);border:1px solid var(--red);border-radius:8px;padding:8px 10px;font-size:11.5px;color:var(--red);margin-bottom:8px">'+(ar?'⛔ فيه اختلاف مع Hostaway. التطبيق متوقف — سوّ «تحديث من Hostaway» وراجع الاختلافات أول.':'⛔ Hostaway mismatch detected. Apply is blocked — Sync from Hostaway and review first.')+'</div>'):'';
+  var staleNote=snapStale?('<div style="background:color-mix(in srgb,var(--gold-logo) 10%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 40%,transparent);border-radius:8px;padding:8px 10px;font-size:11.5px;color:var(--yellow);margin-bottom:8px">'+(ar?'⚠ المعاينة قديمة — تغيّرت بيانات Hostaway. أعد بناء المعاينة قبل التطبيق.':'⚠ Preview is stale — Hostaway data changed. Rebuild the preview before applying.')+'</div>'):'';
   setDrawerBody(pvNote+mismNote+staleNote+scope+belowT+sum+body);
   var dryNote=(D.pcc&&D.pcc.dry_run)?('<div class="muted" style="font-size:10.5px;margin-top:4px;text-align:center">'+(ar?'وضع المعاينة مفعّل':'Dry-run is ON')+'</div>'):'';
   setDrawerFoot('<button class="btn ghost sm" '+(canN?'':'disabled')+' onclick="pccApply(true)">'+(ar?'اختبار آمن':'Safe test')+'</button><button class="btn primary sm" '+((canN&&!blockApply&&!snapStale)?'':'disabled')+' '+((blockApply||snapStale)?('title="'+(snapStale?(ar?'المعاينة قديمة — أعد بناءها':'Preview stale — rebuild it'):(ar?'فيه اختلاف مع Hostaway — سوّ Sync أول':'Hostaway mismatch — Sync first'))+'"'):'')+' onclick="pccApply(false)">'+(ar?'تطبيق على Hostaway':'Apply to Hostaway')+' ('+canN+')</button><button class="btn ghost sm" onclick="closeDrawer()">'+(ar?'إغلاق':'Close')+'</button>'+dryNote);
@@ -29809,11 +29809,11 @@ function pccEmergency(){ _pcc.emgBelow=false; var ar=(L==='ar'); var emg=D.pccEm
   openDrawer((ar?'طوارئ ٩م · معاينة':'9PM Emergency · preview'), (ar?'فاضية الليلة + ما حجزت من ':'empty tonight + no booking in ')+(emg.no_booking_days||2)+(ar?' أيام':'d'));
   pccEmgRender(); }
 function pccEmgRender(){ var ar=(L==='ar'); var emg=D.pccEmg||{candidates:[]}; var cs=emg.candidates||[]; var below=!!_pcc.emgBelow;
-  var note='<div style="background:rgba(196,67,67,.07);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;margin-bottom:8px">'+(ar?'هذي معاينة طوارئ — ما تنطبق تلقائيًا. التطبيق قرارك أنت، بمعاينة وتأكيد، ويعيد القراءة من Hostaway للتأكد.':'Emergency preview — never auto-applied. Applying is your deliberate, confirmed action that re-reads Hostaway to verify.')+'</div>';
+  var note='<div style="background:color-mix(in srgb,var(--red) 7%,transparent);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;margin-bottom:8px">'+(ar?'هذي معاينة طوارئ — ما تنطبق تلقائيًا. التطبيق قرارك أنت، بمعاينة وتأكيد، ويعيد القراءة من Hostaway للتأكد.':'Emergency preview — never auto-applied. Applying is your deliberate, confirmed action that re-reads Hostaway to verify.')+'</div>';
   var bt='<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:8px;cursor:pointer"><input type="checkbox" '+(below?'checked':'')+' onchange="_pcc.emgBelow=this.checked;pccEmgRender()"> '+(ar?'اسمح بأسعار تحت الحد الأدنى — استثناء طوارئ':'Allow below-floor emergency prices — exception')+'</label>';
   var rowsH=cs.length?cs.map(function(c){ var use=(below&&c.below_floor_price!=null)?c.below_floor_price:c.emergency_price; var bf=(c.floor!=null&&use<c.floor);
     return '<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">'+esc(c.name||('#'+c.listing_id))+'</b>'+(bf?pccChip(ar?'تحت الحد الأدنى':'below floor','red'):pccChip(ar?'عند/فوق الحد الأدنى':'at/above floor','green'))+'</div>'
-      +'<div style="font-size:12.5px;margin-top:5px">'+fmt(c.current_price)+' → <b style="color:#a23b30">'+fmt(use)+'</b>'+(c.floor!=null?(' <span class="muted" style="font-size:11px">'+(ar?'· الحد الأدنى ':'· floor ')+fmt(c.floor)+'</span>'):'')+'</div>'
+      +'<div style="font-size:12.5px;margin-top:5px">'+fmt(c.current_price)+' → <b style="color:var(--red)">'+fmt(use)+'</b>'+(c.floor!=null?(' <span class="muted" style="font-size:11px">'+(ar?'· الحد الأدنى ':'· floor ')+fmt(c.floor)+'</span>'):'')+'</div>'
       +'<div class="muted" style="font-size:10.5px;margin-top:3px">'+esc(ar?c.reason_ar:c.reason_en)+'</div></div>'; }).join(''):('<div class="empty" style="padding:20px;text-align:center">'+(ar?'ما فيه حالات طوارئ الحين.':'No emergencies right now.')+'</div>');
   setDrawerBody(note+bt+rowsH);
   var n=cs.length;
@@ -29883,10 +29883,10 @@ function pccCard(u){
   var h='<div class="card" style="margin:0 0 8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;align-items:center"><b style="font-size:13.5px">'+esc(u.name||('#'+u.listing_id))+'</b><span style="display:flex;gap:5px;flex-wrap:wrap">'+pccChip(rkTxt,rkTone)+pccChip(confTxt,'info')+(u.enabled_for_pricing?'':pccChip(ar?'غير مفعّلة':'Off','mut'))+'</span></div>'
     +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'Hostaway الآن':'Hostaway now')+'</div><b>'+(cp!=null?fmt(cp):'—')+'</b></div>'
-    +'<div><div class="muted" style="font-size:10px">'+(ar?'اقتراح عوجا':'Ouja suggestion')+'</div><b style="color:'+(delta!=null&&delta<0?'#a23b30':(delta!=null&&delta>0?'#1f6e45':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span> '+pccChip(rrChip.t,rrChip.c)+'</div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'اقتراح عوجا':'Ouja suggestion')+'</div><b style="color:'+(delta!=null&&delta<0?'var(--red)':(delta!=null&&delta>0?'var(--green)':'var(--text)'))+'">'+(sp!=null?fmt(sp):'—')+'</b> <span class="muted" style="font-size:10.5px">'+deltaTxt+'</span> '+pccChip(rrChip.t,rrChip.c)+'</div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'الحد الأدنى':'Floor')+'</div><b>'+(fl.final_floor!=null?fmt(fl.final_floor):(ar?'—':'n/a'))+'</b></div>'
     +'<div><div class="muted" style="font-size:10px">'+(ar?'فاضي ٧/١٤':'Empty 7/14')+'</div><b>'+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+'</b></div>'
-    +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:#a23b30">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
+    +'<div><div class="muted" style="font-size:10px">'+(ar?'مهدد ٧ أيام':'At risk 7d')+'</div><b style="color:var(--red)">'+fmt(rk.revenue_at_risk_7||0)+'</b></div></div>'
     +pccMini(u)
     +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="pccWhy('+u.listing_id+')">'+(ar?'ليش هالسعر؟':'Why this price?')+'</button></div>'
     +'</div>';
@@ -29896,7 +29896,7 @@ function pccMini(u){
   var cal=(u.calendar_14||[]); if(!cal.length) return '';
   // C-2 one-brain: the 14-day strip colors by the SERVER PE rec per night.
   var cells=cal.slice(0,14).map(function(x){ var cp=x.current_price, sp=x.suggested_price;
-    var col=(sp!=null&&cp!=null&&sp<cp)?'#c98a3a':((sp!=null&&cp!=null&&sp>cp)?'#3e9665':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
+    var col=(sp!=null&&cp!=null&&sp<cp)?'var(--yellow)':((sp!=null&&cp!=null&&sp>cp)?'var(--green)':'var(--line)'); return '<span title="'+esc(x.date||'')+'" style="width:13px;height:13px;border-radius:3px;background:'+col+';display:inline-block"></span>'; }).join('');
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:8px;align-items:center"><span class="muted" style="font-size:10px;margin-inline-end:4px">'+(L==='ar'?'١٤ يوم:':'14d:')+'</span>'+cells+'</div>';
 }
 function pccWhy(lid){
@@ -29923,7 +29923,7 @@ function pccWhy(lid){
     +(ar?'٧٥٪ من المتوسط ':'75% of median ')+(med!=null?fmt(med):'—')+' ≈ '+(adr75!=null?fmt(adr75):'—')+'<br>'
     +'<b>'+(ar?'الحد الأدنى النهائي: ':'Final floor: ')+(fl.final_floor!=null?(fmt(fl.final_floor)+' '+(ar?'ر.س':'SAR')):(ar?'غير محدد':'n/a'))+'</b>'
     +(fl.final_floor==null&&fl.missing_reason?('<br><span class="muted" style="font-size:10.5px">'+esc(fl.missing_reason)+'</span>'):'')+'</div>'
-    +(belowFloor?('<div style="margin-top:8px;background:rgba(196,67,67,.1);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:#a23b30;font-weight:700">'+(ar?'⚠ المقترح أقل من الحد الأدنى. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
+    +(belowFloor?('<div style="margin-top:8px;background:color-mix(in srgb,var(--red) 10%,transparent);border:1px solid var(--red);border-radius:9px;padding:9px 11px;font-size:12px;color:var(--red);font-weight:700">'+(ar?'⚠ المقترح أقل من الحد الأدنى. لا ينطبق تلقائيًا — استثناء يحتاج موافقتك فقط لإنقاذ ليلة فاضية.':'⚠ Suggested is below floor. Never automatic — an exception that needs your explicit OK only to save an empty night.')+'</div>'):'');
   // demand context
   var demandInner='<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.8">'+pccChip(ar?dm.title_ar:dm.title_en,(dm.signal==='weak'?'gold':(dm.signal==='strong'?'green':'info')))+' '+esc(ar?dm.reason_ar:dm.reason_en)+'<br>'+(ar?'فاضي لهالشقة: ':'This unit empty: ')+(cur.empty_nights_7||0)+' / '+(cur.empty_nights_14||0)+(ar?' (٧/١٤)':' (7/14)')+' · '+(ar?'إيراد مهدد ٧ أيام: ':'at risk 7d: ')+fmt(rk.revenue_at_risk_7||0)+' '+(ar?'ر.س':'SAR')+'</div>';
   // confidence
@@ -29934,7 +29934,7 @@ function pccWhy(lid){
   // plain-language
   var plain=(ar?('باختصار: نشتغل على سعرك الحالي '+fmt(cp)+' ر.س — مو على المتوسط التاريخي. الطلب '+(dm.signal==='weak'?'ضعيف':(dm.signal==='strong'?'قوي':'طبيعي'))+'، والشقة فيها '+(cur.empty_nights_7||0)+' ليلة فاضية خلال ٧ أيام. '+(rr.reason_ar||'')+(rr.kind==='hold_low'?' — رفع السعر ما يجيب حجز وانت أصلًا تحت الحد الأدنى.':''))
     :('In short: we work from your live price '+fmt(cp)+' SAR, not the historical median. Demand is '+(dm.signal||'normal')+', this unit has '+(cur.empty_nights_7||0)+' empty nights in 7 days. '+(rr.kind==='hold_low'?'Already below floor — raising would not win a booking.':(rr.kind==='drop'?('Lower toward '+fmt(sp)+' SAR to fill.'):(rr.kind==='raise'?('Gentle raise to '+fmt(sp)+' SAR.'):'Hold the current price.')))));
-  var plainInner='<div style="background:rgba(184,137,59,.08);border:1px solid var(--gold);border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.85">'+esc(plain)+'</div>';
+  var plainInner='<div style="background:color-mix(in srgb,var(--gold-logo) 8%,transparent);border:1px solid var(--line-strong);border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.85">'+esc(plain)+'</div>';
   setDrawerBody(summary
     +sec(ar?'الحد الأدنى الآمن':'Safe floor',floorInner)
     +sec(ar?'سياق الطلب':'Demand context',demandInner)
@@ -29956,7 +29956,7 @@ function renderPricingHeader(){
   var sp=a.spark||[]; var max=Math.max.apply(null,sp.map(function(x){return x.rev||0;}).concat([1]));
   var bars=sp.map(function(x,i){ var h=Math.round((x.rev||0)/max*100); return '<i class="'+(i===sp.length-1?'last':'')+'" style="height:'+Math.max(h,4)+'%" title="'+esc(x.m)+': '+fmt(x.rev)+'"></i>'; }).join('');
   var momTxt=(a.mom==null?'—':((a.mom>0?'▲ +':(a.mom<0?'▼ ':''))+a.mom+'%'));
-  var momCol=(a.mom>0?'#2e9e6b':(a.mom<0?'#c2683f':'var(--mut)'));
+  var momCol=(a.mom>0?'var(--green)':(a.mom<0?'var(--red)':'var(--mut)'));
   var graph='<div class="pr-kpi"><div class="pr-kpi-l">'+(L==='ar'?'الإيراد الشهري (آخر ٦)':'Monthly revenue (last 6)')+' · <b style="color:'+momCol+'">'+momTxt+'</b></div><div class="pe-spark">'+bars+'</div></div>';
   var hitKpi=hit.have
     ? kpi(hit.rate+'%', (L==='ar'?('توصيات طُبّقت ثم انحجزت ('+hit.booked+'/'+hit.applied+')'):('applied recs that booked ('+hit.booked+'/'+hit.applied+')')))
@@ -30009,7 +30009,7 @@ function renderPricingTable(){
   var tt=document.getElementById('t_pr_table'); if(tt) tt.textContent=(ar?'إدارة الأسعار — الشقق':'Price manager — listings');
   var ts=document.getElementById('t_pr_sync'); if(ts) ts.textContent=(ar?'تحديث من Hostaway':'Sync from Hostaway');
   var d=D.pcc||{};
-  if(d.ok===false){ body.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:#a23b30">'+(ar?'⚠ تعذّر تحميل قائمة الشقق':'⚠ Could not load listings')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. جرّب تحديث.':'Engine did not respond — try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; if(cnt) cnt.textContent=''; return; }
+  if(d.ok===false){ body.innerHTML='<div class="card" style="border:1px solid var(--red)"><b style="color:var(--red)">'+(ar?'⚠ تعذّر تحميل قائمة الشقق':'⚠ Could not load listings')+'</b><div class="muted" style="font-size:12px;margin-top:5px">'+(ar?'المحرّك ما استجاب. جرّب تحديث.':'Engine did not respond — try refresh.')+'</div><button class="btn ghost sm" style="margin-top:8px" onclick="loadPricing()">↻ '+(ar?'تحديث':'Refresh')+'</button></div>'; if(cnt) cnt.textContent=''; return; }
   var us=_prFilterUnits(); var compounds={}; (d.units||[]).forEach(function(u){ if(u.group) compounds[u.group]=(compounds[u.group]||0)+1; });
   if(cnt) cnt.textContent=us.length+(ar?' شقة':' units');
   var inp='padding:7px 10px;height:34px;font-size:12.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;color:var(--text);font-family:inherit';
@@ -30055,7 +30055,7 @@ async function openDnaPanel(lid){
     return;
   }
   setDrawerTitle(t().dna_title, (u.name||'')+' · '+(ar?'شريحة ':'segment ')+u.segment);
-  var CONF={own:[ar?'من حجوزاتها':'own data','var(--green)'],blended:[ar?'مزيج':'blended','var(--blue,#2f5f7a)'],pooled:[ar?'من الشريحة':'pooled','var(--gold)'],learning:[ar?'يتعلم':'learning','var(--mut)']};
+  var CONF={own:[ar?'من حجوزاتها':'own data','var(--green)'],blended:[ar?'مزيج':'blended','var(--blue,var(--blue))'],pooled:[ar?'من الشريحة':'pooled','var(--gold)'],learning:[ar?'يتعلم':'learning','var(--mut)']};
   var SEASON={normal:ar?'عادي':'normal',riyadh_season:ar?'موسم الرياض':'Riyadh Season',ramadan:ar?'رمضان':'Ramadan',eid_fitr:ar?'عيد الفطر':'Eid al-Fitr',eid_adha:ar?'عيد الأضحى':'Eid al-Adha',hajj:ar?'الحج':'Hajj',national_day:ar?'اليوم الوطني':'National Day',founding_day:ar?'يوم التأسيس':'Founding Day'};
   var DT={weekday:ar?'أيام الأسبوع':'Weekdays',weekend:ar?'نهاية الأسبوع':'Weekend',event:ar?'مناسبات':'Events'};
   var h='<div class="muted" style="font-size:11.5px;line-height:1.7;margin-bottom:12px">'+t().dna_explain+'</div>';
@@ -30114,13 +30114,13 @@ function pccCalTile(lid, ds, day, x){
       +'<div style="font-size:12.5px;font-weight:600;margin-top:3px;color:var(--mut)">'+(sug!=null?fmt(sug):(hp!=null?fmt(hp):'—'))+'</div></div>';
   }
   // future / today — clickable. Calm colors: red=drop, green=raise, neutral=hold.
-  var col=(x.action==='drop'?'#a23b30':(x.action==='raise'?'#1f6e45':'var(--text)'));
+  var col=(x.action==='drop'?'var(--red)':(x.action==='raise'?'var(--green)':'var(--text)'));
   var badge=(x.badge==='weekend'?(ar?'نهاية أسبوع':'weekend'):(x.badge==='event'?(ar?'مناسبة':'event'):(x.badge==='last_minute'?(ar?'اللحظة الأخيرة':'last-minute'):'')));
-  var badgeH=badge?('<div style="margin-top:4px"><span style="font-size:8.5px;background:var(--gold-tint);color:#7a5b14;padding:1px 5px;border-radius:6px;font-weight:700">'+badge+'</span></div>'):'';
+  var badgeH=badge?('<div style="margin-top:4px"><span style="font-size:8.5px;background:var(--gold-tint);color:var(--yellow);padding:1px 5px;border-radius:6px;font-weight:700">'+badge+'</span></div>'):'';
   var tip=(ar?'Hostaway الآن ':'Hostaway now ')+(hp!=null?fmt(hp):'—')+' · '+(ar?'اقتراح عوجا ':'Ouja sugg ')+(sug!=null?fmt(sug):'—')+' · '+(ar?'الحد الأدنى ':'floor ')+(x.floor!=null?fmt(x.floor):'—')+(x.why_short?(' — '+x.why_short):'');
   return '<div title="'+esc(tip)+'" onclick="openPeNight('+lid+',&#39;'+ds+'&#39;)" style="border:1px solid var(--line)'+ring+';border-radius:8px;padding:6px;min-height:66px;cursor:pointer;background:var(--surface)">'+dayH
     +'<div style="font-size:14px;font-weight:800;margin-top:3px;color:'+col+'">'+(sug!=null?fmt(sug):(hp!=null?fmt(hp):'—'))+'</div>'
-    +((prev!=null&&dp!=null)?('<div style="font-size:9px;color:#c98a3a;margin-top:1px">'+fmt(prev)+' ⟶ '+(dp>0?'+':'')+dp+'%</div>'):'')
+    +((prev!=null&&dp!=null)?('<div style="font-size:9px;color:var(--yellow);margin-top:1px">'+fmt(prev)+' ⟶ '+(dp>0?'+':'')+dp+'%</div>'):'')
     +badgeH+'</div>';
 }
 function renderPricingCalendar(){
@@ -30340,7 +30340,7 @@ function pePanelHtml(det){
   if(before!=null && det.final!=null){
     var diff=det.final-before;
     beforeNow='<div class="pe-summary"><b>'+(L==='ar'?'السعر قبل ← الآن:':'Before → now:')+'</b> '+fmt(before)+' ← <b>'+fmt(det.final)+'</b> ر.س'
-      +' <span style="color:'+(diff>0?'var(--up,#2e9e5b)':(diff<0?'var(--down,#cc4b4b)':'var(--mut)'))+'">('+(diff>0?'+':'')+fmt(diff)+')</span>'
+      +' <span style="color:'+(diff>0?'var(--up,var(--green))':(diff<0?'var(--down,var(--red))':'var(--mut)'))+'">('+(diff>0?'+':'')+fmt(diff)+')</span>'
       +(det.baseline!=null&&det.baseline!==cur?(' <span class="muted" style="font-size:10.5px">· '+(L==='ar'?'الأساس مجمّد':'baseline frozen')+'</span>'):'')
       +(det.final_source&&det.final_source!=='engine'?' · '+(det.final_source==='strategy'?(L==='ar'?'مصدره استراتيجية ديناميكية':'via dynamic strategy'):esc(det.final_source)):'')+'</div>';
   }
@@ -30470,7 +30470,7 @@ function renderStratSafety(){
   var ar=(L==='ar'); var el=document.getElementById('stratSafety'); if(!el) return;
   var dry=(D.pcc&&typeof D.pcc.dry_run!=='undefined')?D.pcc.dry_run:null;
   var dryChip=(dry===true)?pccChip(ar?'وضع المعاينة مفعّل':'Dry-run ON','green'):((dry===false)?pccChip(ar?'الكتابة الفعلية مفعّلة':'Live writes ON','gold'):'');
-  el.innerHTML='<div class="card" style="border:1px solid #3e7d5a;background:rgba(62,125,90,.06)"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13.5px;color:#1f6e45">🛡️ '+(ar?'أمان الاستراتيجيات':'Strategy safety')+'</b>'+dryChip+'</div>'
+  el.innerHTML='<div class="card" style="border:1px solid var(--green);background:color-mix(in srgb,var(--green) 6%,transparent)"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:13.5px;color:var(--green)">🛡️ '+(ar?'أمان الاستراتيجيات':'Strategy safety')+'</b>'+dryChip+'</div>'
     +'<div style="font-size:12.5px;margin-top:6px;line-height:1.8">'+(ar?'«مفعّلة» تعني الشقة داخل التوصيات والمعاينة فقط — ما يُطبّق أي سعر تلقائيًا على Hostaway. كل كتابة فعلية تمر بمعاينة وتأكيد، وتُتحقّق بإعادة القراءة من Hostaway، وتنحفظ في السجل.':'“Enabled” means the unit is included in recommendations and previews only — no price is ever written to Hostaway automatically. Every live write goes through preview + confirm, is verified by re-reading Hostaway, and is logged.')+'</div>'
     +'<div style="margin-top:8px"><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح التسعير الديناميكي':'Open Dynamic Pricing')+'</button></div></div>';
 }
@@ -30489,7 +30489,7 @@ function renderStrategiesHeader(){
   var capV = h.have_outcome
     ? '+'+fmt(h.captured||0)+' <span style="font-size:12px;font-weight:600">ر.س</span>'+(h.captured_pct!=null?(' <span style="font-size:12px;color:var(--green)">+'+h.captured_pct+'%</span>'):'')
     : '<span style="font-size:14px;font-weight:600;color:var(--mut)">'+(ar?'ما فيه نتيجة بعد':'No outcome yet')+'</span>';
-  var capKpi='<div class="pr-kpi" style="border-color:rgba(14,158,95,.4)"><div class="pr-kpi-v" style="color:var(--green)">'+capV+'</div><div class="pr-kpi-l">'+(ar?'صافي اللي كسبناه فوق الأساسي (ليالي انحجزت)':'captured over baseline (booked nights)')+'</div></div>';
+  var capKpi='<div class="pr-kpi" style="border-color:color-mix(in srgb,var(--green) 40%,transparent)"><div class="pr-kpi-v" style="color:var(--green)">'+capV+'</div><div class="pr-kpi-l">'+(ar?'صافي اللي كسبناه فوق الأساسي (ليالي انحجزت)':'captured over baseline (booked nights)')+'</div></div>';
   // due-hit gauge (bullet bar): booked / due
   var rate=dh.rate; var gauge='<div class="pr-kpi"><div class="pr-kpi-l" style="margin-bottom:4px">'+(ar?'هل تشتغل؟ — ليالي مستحقّة انحجزت':'Is it working? — due nights booked')+'</div>'
     +'<div style="display:flex;align-items:center;gap:8px"><span style="flex:1;height:9px;background:var(--surface-2);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:'+(rate==null?0:rate)+'%;background:'+(rate!=null&&rate>=50?'var(--green)':'var(--gold)')+';border-radius:99px"></span></span>'
@@ -30512,7 +30512,7 @@ function renderStrategiesHeader(){
           +'<span style="flex:1">'+esc(ar?a.ar:a.en)+'</span>'
           +(a.lid?'<button class="btn ghost xs" onclick="openApartment('+a.lid+')">'+(ar?'تفاصيل':'Details')+'</button>':'')+'</div>';
       }).join('')+'</div>'
-    : '<div style="background:rgba(14,158,95,.08);border:1px solid rgba(14,158,95,.25);border-radius:8px;padding:11px;font-size:12.5px;color:#0B7A4A">'+(ar?'كل شي تمام — ما فيه شي يحتاج انتباهك الحين.':'All good — nothing needs your attention right now.')+'</div>';
+    : '<div style="background:color-mix(in srgb,var(--green) 8%,transparent);border:1px solid color-mix(in srgb,var(--green) 25%,transparent);border-radius:8px;padding:11px;font-size:12.5px;color:var(--green)">'+(ar?'كل شي تمام — ما فيه شي يحتاج انتباهك الحين.':'All good — nothing needs your attention right now.')+'</div>';
   html+='</div>';
   // per-source breakdown — WHICH price change actually happened
   var sb=d.source_breakdown||[];
@@ -30563,7 +30563,7 @@ function renderRevDiag(){
   }
   var sm=(D.pcc||{}).summary||{}; var hr=sm.high_risk_units||0, en7=sm.empty_nights_7||0;
   var extra=(hr>0)?(ar?(' أكثر الخطر الحالي من '+hr+' شقة عالية الخطر و'+en7+' ليلة فاضية خلال ٧ أيام.'):(' Most current risk is '+hr+' high-risk units and '+en7+' empty nights in 7 days.')):'';
-  var pal=({green:['#1f6e45','rgba(62,125,90,.08)','#3e7d5a'],gold:['#7a5b14','rgba(184,137,59,.07)','#A37728'],info:['#2f5f7a','rgba(47,95,122,.07)','#2f5f7a']})[tone];
+  var pal=({green:['var(--green)','color-mix(in srgb,var(--green) 8%,transparent)','var(--green)'],gold:['var(--yellow)','color-mix(in srgb,var(--gold-logo) 7%,transparent)','var(--yellow)'],info:['var(--blue)','color-mix(in srgb,var(--blue) 7%,transparent)','var(--blue)']})[tone];
   function chip(lbl,v,t){ return pccChip(lbl+' '+v,t); }
   el.innerHTML='<div class="card" style="border:1px solid '+pal[2]+';background:'+pal[1]+'"><b style="font-size:15px;color:'+pal[0]+'">'+(ar?'ليش تغيّر الإيراد؟':'Why revenue changed')+'</b><div style="font-size:13.5px;margin-top:6px;line-height:1.85">'+esc(sentence+extra)+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">'+chip(ar?'الإيراد':'Revenue',(drP!=null?((drP>0?'+':'')+drP+'%'):'—'),(drP==null?'info':(drP>=0?'green':'gold')))+chip('ADR',(adP!=null?((adP>0?'+':'')+adP+'%'):'—'),(adP==null?'info':(adP>=0?'green':'gold')))+chip(ar?'الإشغال':'Occupancy',(ocP!=null?((ocP>0?'+':'')+ocP+'%'):'—'),(ocP==null?'info':(ocP>=0?'green':'gold')))+'</div>'
@@ -30721,7 +30721,7 @@ function renderUrgentStrip(){
   const d = D.urgent || {items:[], counts:{}};
   const items = d.items || [];
   if(!items.length){
-    el.innerHTML = '<div class="card" style="background:var(--good-bg);border-color:rgba(19,115,51,.20);text-align:center;padding:15px"><span style="color:var(--good);font-weight:700">'+t().urgent_none+'</span></div>';
+    el.innerHTML = '<div class="card" style="background:var(--good-bg);border-color:color-mix(in srgb,var(--green) 20%,transparent);text-align:center;padding:15px"><span style="color:var(--good);font-weight:700">'+t().urgent_none+'</span></div>';
     return;
   }
   // "Needs your decision now" hero — real urgent items, ranked by impact (already sorted by the API).
@@ -30902,7 +30902,7 @@ function ccFunnelHtml(allJobs){
   // in one glance, computed from the snapshot already in hand (no extra fetch).
   var n = {to_clean:0, in_progress:0, review:0, approved:0, redo:0};
   (allJobs||[]).forEach(function(j){ var s=j.stage||'to_clean'; if(n[s]!=null) n[s]++; });
-  var steps = [['to_clean',n.to_clean,'var(--gold)'],['in_progress',n.in_progress,'var(--blue,#2f5f7a)'],
+  var steps = [['to_clean',n.to_clean,'var(--gold)'],['in_progress',n.in_progress,'var(--blue,var(--blue))'],
                ['review',n.review+n.redo,'var(--gold)'],['approved',n.approved,'var(--green)']];
   var total = (allJobs||[]).length;
   return '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">'
@@ -32240,9 +32240,9 @@ function _lsRowBadges(u){
   var out=[];
   if(!u.active){ out.push(_lsBadge(t().ls_badge_inactive, 'background:var(--surface-2);color:var(--mut)')); }
   else {
-    if(u.change==='new')         out.push(_lsBadge(t().ls_badge_new, 'background:rgba(200,162,75,.18);color:var(--gold)'));
-    else if(u.change==='changed')out.push(_lsBadge(t().ls_badge_changed, 'background:rgba(95,117,150,.15);color:#5f7596'));
-    if(u.needs_setup)            out.push(_lsBadge(t().ls_badge_needs, 'background:rgba(204,140,40,.16);color:#bd7a1c'));
+    if(u.change==='new')         out.push(_lsBadge(t().ls_badge_new, 'background:color-mix(in srgb,var(--gold-logo) 18%,transparent);color:var(--gold)'));
+    else if(u.change==='changed')out.push(_lsBadge(t().ls_badge_changed, 'background:color-mix(in srgb,var(--blue) 15%,transparent);color:var(--blue)'));
+    if(u.needs_setup)            out.push(_lsBadge(t().ls_badge_needs, 'background:color-mix(in srgb,var(--yellow) 16%,transparent);color:var(--yellow)'));
   }
   return out.join(' ');
 }
@@ -32334,7 +32334,7 @@ function renderOujact(){
       +'<input type="checkbox" '+(u.oujact?'checked':'')+' onchange="listingsSetField('+u.id+',&#39;oujact&#39;,this.checked)" style="accent-color:var(--gold);width:16px;height:16px;cursor:pointer">'
       +'<span style="font-weight:600">'+esc(u.internal_name||('#'+u.id))+'</span>'
       +'<span class="muted" style="font-size:11px">'+esc(u.public_name||'')+'</span>'
-      +(u.oujact&&u.missing_maps?'<span class="chip" style="margin-inline-start:auto;background:var(--gold-tint);color:var(--gold);font-size:10px;padding:2px 7px;border-radius:99px">⚠ '+esc(t().ct_missing_map)+'</span>':(u.oujact?'<span class="chip" style="margin-inline-start:auto;background:rgba(65,160,105,.14);color:#3e9665;font-size:10px;padding:2px 7px;border-radius:99px">✓ '+esc(t().ct_geo_ok)+'</span>':dir))
+      +(u.oujact&&u.missing_maps?'<span class="chip" style="margin-inline-start:auto;background:var(--gold-tint);color:var(--gold);font-size:10px;padding:2px 7px;border-radius:99px">⚠ '+esc(t().ct_missing_map)+'</span>':(u.oujact?'<span class="chip" style="margin-inline-start:auto;background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--green);font-size:10px;padding:2px 7px;border-radius:99px">✓ '+esc(t().ct_geo_ok)+'</span>':dir))
       +'</label>';
     // assigned apartments get both a safe coordinate search and the legacy Google Maps link field.
     if(u.oujact){
@@ -32376,7 +32376,7 @@ async function renderOujactDispatch(){
   if(!d||!d.ok) return;
   var to=d.totals||{}; var ar=(L==='ar');
   el.innerHTML=esc(t().ct_dispatch)+': <b>'+(to.apartments||0)+'</b> '+(ar?'شقة':'units')
-    +' · <b style="color:var(--down,#cc4b4b)">'+(to.urgent||0)+'</b> '+esc(t().ct_urgent)
+    +' · <b style="color:var(--down,var(--red))">'+(to.urgent||0)+'</b> '+esc(t().ct_urgent)
     +(to.missing_maps?(' · <b style="color:var(--gold)">'+to.missing_maps+'</b> '+esc(t().ct_missing_map)):'')
     +(to.first?(' · '+(ar?'أول':'first')+': '+esc(to.first)):'');
 }
@@ -32571,11 +32571,11 @@ function _ensureTicketModal(){
   if(ov) return ov;
   ov = document.createElement('div');
   ov.id = 'ticketOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
   ov.onclick = function(e){ if(e.target === ov) closeTicketModal(); };
   const box = document.createElement('div');
   box.id = 'ticketModalBody';
-  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(29,24,19,.5);border:1px solid var(--border)';
   ov.appendChild(box);
   document.body.appendChild(ov);
   return ov;
@@ -32786,7 +32786,7 @@ function _ensureQuoteOv(){
   if(ov) return ov;
   ov = document.createElement('div');
   ov.id = 'quoteOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9996;padding:18px;overflow-y:auto';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.7);z-index:9996;padding:18px;overflow-y:auto';
   ov.innerHTML = '<div id="quoteEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov);
   // Click the dark backdrop (not the card) to dismiss — matches the drawer's behaviour.
@@ -33082,9 +33082,9 @@ function _renderWeeklyBody(){
   for(const r of items){
     const sm = r.summary||{};
     let badges = '';
-    if(sm.unresolved) badges += '<span style="background:#fee2e2;color:#991b1b;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">⚠ '+sm.unresolved+' غير محلول</span>';
-    if(sm.carried) badges += '<span style="background:#fef3c7;color:#92400e;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">↪ '+sm.carried+' مُرحّل</span>';
-    if(sm.resolved) badges += '<span style="background:#d1fae5;color:#065f46;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">✓ '+sm.resolved+'</span>';
+    if(sm.unresolved) badges += '<span style="background:var(--red-soft);color:var(--red);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">⚠ '+sm.unresolved+' غير محلول</span>';
+    if(sm.carried) badges += '<span style="background:var(--yellow-soft);color:var(--yellow);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">↪ '+sm.carried+' مُرحّل</span>';
+    if(sm.resolved) badges += '<span style="background:var(--green-soft);color:var(--green);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:5px">✓ '+sm.resolved+'</span>';
     h += '<div onclick="openWeeklyEditor(&#39;'+esc(r.id)+'&#39;)" style="background:var(--surface-2);padding:13px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.borderColor=&#39;var(--gold)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
       + '<div><div class="strong" style="font-size:13.5px">📅 '+esc(r.date||'')+' · '+esc(r.employee||'—')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:3px">'+(r.apt_count||0)+' شقة'+badges+'</div></div>'
@@ -33096,7 +33096,7 @@ function _renderWeeklyBody(){
 function _ensureWeeklyOv(){
   let ov = document.getElementById('weeklyOverlay'); if(ov) return ov;
   ov = document.createElement('div'); ov.id='weeklyOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9995;padding:18px;overflow-y:auto';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.7);z-index:9995;padding:18px;overflow-y:auto';
   ov.innerHTML = '<div id="weeklyEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov);
   return ov;
@@ -33300,17 +33300,17 @@ function _wrSummaryHtml(apts, r){
   function pill(lbl,val,col){ return '<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:7px 10px;text-align:center;min-width:62px"><div style="font-size:17px;font-weight:800;color:'+(col||'var(--text)')+'">'+val+'</div><div class="muted" style="font-size:9.5px">'+lbl+'</div></div>'; }
   let banner = '';
   if(r && r._carried_from){
-    banner = '<div style="background:linear-gradient(135deg,#fff3cd,var(--surface-2));border:1px solid #f0ad4e;border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:11.5px;color:#92400e">↪ تم ترحيل المشاكل غير المحلولة من تقرير '+esc(r._carried_from)+' (مع عدّاد الأسابيع)</div>';
+    banner = '<div style="background:linear-gradient(135deg,var(--yellow-soft),var(--surface-2));border:1px solid var(--yellow);border-radius:8px;padding:7px 11px;margin-bottom:8px;font-size:11.5px;color:var(--yellow)">↪ تم ترحيل المشاكل غير المحلولة من تقرير '+esc(r._carried_from)+' (مع عدّاد الأسابيع)</div>';
   }
   return banner
     + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">'
     + pill('شقة', s.total)
-    + pill('فيها مشاكل', s.withIssue, s.withIssue?'#d97706':'var(--text)')
-    + pill('غير محلول', s.unresolved, s.unresolved?'#c62828':'#16a34a')
-    + pill('تم حلها', s.resolved, '#16a34a')
-    + pill('مُرحّلة', s.carried, s.carried?'#c62828':'var(--text)')
-    + pill('خطورة عالية', s.high, s.high?'#c62828':'var(--text)')
-    + pill('مؤجّرة الآن', s.occupied, '#2563eb')
+    + pill('فيها مشاكل', s.withIssue, s.withIssue?'var(--yellow)':'var(--text)')
+    + pill('غير محلول', s.unresolved, s.unresolved?'var(--red)':'var(--green)')
+    + pill('تم حلها', s.resolved, 'var(--green)')
+    + pill('مُرحّلة', s.carried, s.carried?'var(--red)':'var(--text)')
+    + pill('خطورة عالية', s.high, s.high?'var(--red)':'var(--text)')
+    + pill('مؤجّرة الآن', s.occupied, 'var(--blue)')
     + '</div>';
 }
 function _wrRenderApt(i, apt){
@@ -33320,13 +33320,13 @@ function _wrRenderApt(i, apt){
   let nOk=0, nIssue=0;
   WR_CHECK_ITEMS.forEach(function(it){ const v=checks[it]; if(v==='ok')nOk++; else if(v==='issue')nIssue++; });
   const ci = apt.common_issues || [];
-  const ciBadge = ci.length ? '<span style="background:var(--bad,#c62828);color:#fff;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">⚠ '+ci.length+' متكررة</span>' : '';
-  const asgBadge = apt.assignee ? '<span style="background:var(--gold-tint);border:1px solid var(--gold);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">👤 '+esc(apt.assignee)+'</span>' : '';
+  const ciBadge = ci.length ? '<span style="background:var(--bad,var(--red));color:#fff;border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">⚠ '+ci.length+' متكررة</span>' : '';
+  const asgBadge = apt.assignee ? '<span style="background:var(--gold-tint);border:1px solid var(--line-strong);border-radius:99px;padding:1px 8px;font-size:10px;margin-inline-start:6px">👤 '+esc(apt.assignee)+'</span>' : '';
   const head = '<div onclick="_wrToggleApt('+i+')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px">'
     + '<div class="strong" style="font-size:13.5px">'+(open?'▾':'▸')+' 🏠 '+esc(apt.name||'')+asgBadge+ciBadge+'</div>'
     + '<div style="display:flex;align-items:center;gap:6px">'
-    + (nIssue?'<span style="background:#fff3cd;color:#92400e;border-radius:99px;padding:1px 8px;font-size:10px">⚠ '+nIssue+'</span>':'')
-    + (nOk?'<span style="background:#d1fae5;color:#065f46;border-radius:99px;padding:1px 8px;font-size:10px">✓ '+nOk+'</span>':'')
+    + (nIssue?'<span style="background:var(--yellow-soft);color:var(--yellow);border-radius:99px;padding:1px 8px;font-size:10px">⚠ '+nIssue+'</span>':'')
+    + (nOk?'<span style="background:var(--green-soft);color:var(--green);border-radius:99px;padding:1px 8px;font-size:10px">✓ '+nOk+'</span>':'')
     + (apt.status?'<span style="background:var(--gold-tint);border-radius:99px;padding:1px 8px;font-size:10px">'+esc(apt.status)+'</span>':'')
     + '<button onclick="event.stopPropagation();_wrDelApt('+i+')" style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button>'
     + '</div></div>';
@@ -33348,7 +33348,7 @@ function _wrRenderApt(i, apt){
     ciHtml = '<div style="background:var(--surface-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;margin-bottom:10px">'
       + '<div class="muted" style="font-size:10.5px;font-weight:700;margin-bottom:4px">📌 المشاكل المتكررة لهذي الشقة (من المراجعات) — ركّز عليها:</div>'
       + '<div style="display:flex;flex-wrap:wrap;gap:4px">'
-      + ci.map(x=>'<span style="background:var(--surface);border:1px solid var(--bad,#c62828);color:var(--bad,#c62828);border-radius:99px;padding:1px 9px;font-size:11px">'+esc(x)+'</span>').join('')
+      + ci.map(x=>'<span style="background:var(--surface);border:1px solid var(--bad,var(--red));color:var(--bad,var(--red));border-radius:99px;padding:1px 9px;font-size:11px">'+esc(x)+'</span>').join('')
       + '</div></div>';
   }
   // MCQ checklist
@@ -33362,8 +33362,8 @@ function _wrRenderApt(i, apt){
       + '<span style="font-size:12px">'+esc(it)+'</span><div class="wr-segs" style="display:flex;gap:4px;flex-shrink:0">';
     WR_CHECK_STATES.forEach(function(st){
       const active = cur===st[0];
-      const col = st[0]==='ok'?'#065f46':st[0]==='issue'?'#92400e':'var(--text-2)';
-      const bg  = active ? (st[0]==='ok'?'#d1fae5':st[0]==='issue'?'#fff3cd':'var(--surface-2)') : 'transparent';
+      const col = st[0]==='ok'?'var(--green)':st[0]==='issue'?'var(--yellow)':'var(--text-2)';
+      const bg  = active ? (st[0]==='ok'?'var(--green-soft)':st[0]==='issue'?'var(--yellow-soft)':'var(--surface-2)') : 'transparent';
       chk += '<button class="wr-seg" onclick="_wrSetCheck('+i+','+JSON.stringify(it).replace(/"/g,'&quot;')+','+JSON.stringify(st[0]).replace(/"/g,'&quot;')+')" style="padding:3px 9px;border-radius:99px;border:1px solid '+(active?col:'var(--border)')+';background:'+bg+';color:'+(active?col:'var(--text-2)')+';font-size:10.5px;cursor:pointer;font-weight:'+(active?'700':'400')+'">'+st[1]+'</button>';
     });
     chk += '</div></div>';
@@ -33373,9 +33373,9 @@ function _wrRenderApt(i, apt){
   const nr = apt.new_reviews||0; const ot = apt.open_tickets||[];
   function fact(txt,bg,col){ return '<span style="background:'+bg+';color:'+col+';border-radius:99px;padding:2px 10px;font-size:10.5px;font-weight:600">'+txt+'</span>'; }
   let auto = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">'
-    + (apt.occupied ? fact('🟢 مؤجّرة الآن','#d1fae5','#065f46') : fact('⚪ شاغرة الآن','var(--surface)','var(--text-2)'))
-    + (nr ? fact('⭐ '+nr+' مراجعة جديدة','#fef3c7','#92400e') : '')
-    + (ot.length ? fact('🔧 '+ot.length+' تذكرة مفتوحة','#fee2e2','#991b1b') : '')
+    + (apt.occupied ? fact('🟢 مؤجّرة الآن','var(--green-soft)','var(--green)') : fact('⚪ شاغرة الآن','var(--surface)','var(--text-2)'))
+    + (nr ? fact('⭐ '+nr+' مراجعة جديدة','var(--yellow-soft)','var(--yellow)') : '')
+    + (ot.length ? fact('🔧 '+ot.length+' تذكرة مفتوحة','var(--red-soft)','var(--red)') : '')
     + '</div>';
   if(ot.length){
     auto += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:6px 9px;margin-bottom:10px">'
@@ -33410,11 +33410,11 @@ function _wrIssuesHtml(i, apt){
   }
   issues.forEach(function(it, j){
     const wk = it.weeks||1;
-    const wkBadge = wk>1 ? '<span style="background:#fee2e2;color:#991b1b;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700">↪ مفتوحة منذ '+wk+' أسابيع</span>' : '<span style="background:var(--gold-tint);border-radius:99px;padding:1px 8px;font-size:10px">جديدة</span>';
+    const wkBadge = wk>1 ? '<span style="background:var(--red-soft);color:var(--red);border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700">↪ مفتوحة منذ '+wk+' أسابيع</span>' : '<span style="background:var(--gold-tint);border-radius:99px;padding:1px 8px;font-size:10px">جديدة</span>';
     let sevSel = '<select onchange="_wrIssueSet('+i+','+j+',\\'severity\\',this.value)" style="padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px">';
     WR_SEVERITY.forEach(function(sv){ sevSel += '<option value="'+sv[0]+'"'+(it.severity===sv[0]?' selected':'')+'>'+sv[1]+'</option>'; });
     sevSel += '</select>';
-    h += '<div style="background:'+(it.resolved?'var(--surface)':'var(--surface-2)')+';border:1px solid '+(it.severity==='high'?'#ef4444':'var(--border)')+';border-radius:8px;padding:8px;margin-bottom:6px'+(it.resolved?';opacity:.6':'')+'">'
+    h += '<div style="background:'+(it.resolved?'var(--surface)':'var(--surface-2)')+';border:1px solid '+(it.severity==='high'?'var(--red)':'var(--border)')+';border-radius:8px;padding:8px;margin-bottom:6px'+(it.resolved?';opacity:.6':'')+'">'
       + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;flex-wrap:wrap">'+wkBadge+sevSel
       + '<button onclick="_wrIssueResolve('+i+','+j+')" class="btn ghost sm" style="padding:2px 9px;font-size:10.5px">'+(it.resolved?'↩ إعادة فتح':'✓ تم الحل')+'</button>'
       + '<button onclick="_wrIssueDel('+i+','+j+')" style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:15px;margin-inline-start:auto">×</button></div>'
@@ -33575,7 +33575,7 @@ function _expTime(iso){ return esc(String(iso||'').replace('T',' ').slice(0,16))
 function _ensureExpOv(){
   var ov=document.getElementById('expOverlay'); if(ov) return ov;
   ov=document.createElement('div'); ov.id='expOverlay';
-  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(29,24,19,.7);z-index:9994;padding:18px;overflow-y:auto';
   ov.innerHTML='<div id="expEditBody" style="background:var(--surface);max-width:680px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov); return ov;
 }
@@ -33649,7 +33649,7 @@ function _renderDesignsBody(){
 function _ensureDesignOv(){
   let ov = document.getElementById('designOverlay'); if(ov) return ov;
   ov = document.createElement('div'); ov.id='designOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.7);z-index:9994;padding:18px;overflow-y:auto';
   ov.innerHTML = '<div id="designEditorBody" style="background:var(--surface);max-width:880px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov); return ov;
 }
@@ -33790,11 +33790,11 @@ var _pmoSort = 'updated';
 var _pmoSearch = '';
 
 var PMO_ST = {
-  not_started:   {ar:'لم يبدأ',        en:'Not started',   c:'#6b7280'},
-  in_progress:   {ar:'جاري التنفيذ',   en:'In progress',   c:'#2563eb'},
-  final_touches: {ar:'اللمسات الأخيرة',en:'Final touches',  c:'#d97706'},
-  done:          {ar:'مكتمل',          en:'Done',          c:'#16a34a'},
-  blocked:       {ar:'متوقف / بانتظار',en:'Blocked',       c:'#dc2626'}
+  not_started:   {ar:'لم يبدأ',        en:'Not started',   c:'#6B5F52'},
+  in_progress:   {ar:'جاري التنفيذ',   en:'In progress',   c:'#2F5A8A'},
+  final_touches: {ar:'اللمسات الأخيرة',en:'Final touches',  c:'#8A5A12'},
+  done:          {ar:'مكتمل',          en:'Done',          c:'#2E6A49'},
+  blocked:       {ar:'متوقف / بانتظار',en:'Blocked',       c:'#A2462F'}
 };
 var PMO_ST_ORDER = ['not_started','in_progress','final_touches','done','blocked'];
 function _pmoStLbl(s){ var o=PMO_ST[s]||PMO_ST.not_started; return L==='ar'?o.ar:o.en; }
@@ -33903,7 +33903,7 @@ function _pmoRenderCards(){
       + '<div style="flex:1"><div class="strong" style="font-size:14px">'+esc(p.unit_name||'—')+(late?(' <span class="pill danger">'+(ar?'متأخر':'LATE')+'</span>'):'')+(p.signoff?(' <span class="pill warn">⏳ '+(ar?'اعتماد فيصل':'Faisal sign-off')+'</span>'):'')+'</div>'
       + '<div class="muted" style="font-size:11.5px;margin-top:2px">'+esc(p.client_name||'')+(p.district?(' · '+esc(p.district)):'')+'</div></div>'
       + '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-weight:800;font-size:16px">'+prog+'</div></div></div>'
-      + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>'
+      + '<div style="height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:9px 0 7px"><div style="height:100%;width:'+bw+'%;background:var(--text)"></div></div>'
       + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
       + '<span class="muted" style="font-size:11px">'+(ms?('🚩 '+esc(ms)):'')+'</span>'
       + (dl?('<span style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</span>'):'')
@@ -33940,7 +33940,7 @@ function _rvCopyText(txt){
 function _pmoOv(){
   var ov = document.getElementById('pmoOverlay'); if(ov) return ov;
   ov = document.createElement('div'); ov.id='pmoOverlay';
-  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9994;padding:18px;overflow-y:auto';
+  ov.style.cssText='display:none;position:fixed;inset:0;background:rgba(29,24,19,.7);z-index:9994;padding:18px;overflow-y:auto';
   ov.innerHTML='<div id="pmoOvBody" style="background:var(--surface);max-width:720px;margin:0 auto;padding:20px;border-radius:16px;border:1px solid var(--border)"></div>';
   document.body.appendChild(ov); return ov;
 }
@@ -34017,7 +34017,7 @@ function _renderPmoProject(){
   h += '<div class="card" style="padding:16px;margin-bottom:12px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><div style="font-size:18px;font-weight:800">'+esc((p.unit||{}).name||'')+'</div><div class="muted" style="font-size:12px;margin-top:2px">'+esc((p.client||{}).name||'')+(((p.unit||{}).district)?(' · '+esc(p.unit.district)):'')+'</div></div>';
   h += '<div style="text-align:'+(ar?'left':'right')+'"><div style="font-size:30px;font-weight:800">'+prog+'</div>'+(dl?('<div style="font-size:11px;'+(dl.over?'color:var(--red)':'color:var(--green)')+'">'+esc(dl.txt)+'</div>'):'')+'</div></div>';
-  h += '<div style="height:10px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:10px 0 4px"><div style="height:100%;width:'+bw+'%;background:linear-gradient(90deg,var(--gold),#e8c977)"></div></div>';
+  h += '<div style="height:10px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin:10px 0 4px"><div style="height:100%;width:'+bw+'%;background:var(--text)"></div></div>';
   h += '<div class="muted" style="font-size:11px">'+(ar?'المرحلة الحالية':'Current stage')+': '+esc(ms[ci]?(ar?ms[ci].ar:ms[ci].en):'—')+'</div>';
   h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">';
   h += '<button class="btn primary xs" onclick="pmoAddTask(&#39;&#39;)">'+(ar?'+ مهمة':'+ Task')+'</button>';
@@ -34546,11 +34546,11 @@ function _ensureUserModal(){
   if(ov) return ov;
   ov = document.createElement('div');
   ov.id = 'userOverlay';
-  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(29,24,19,.55);z-index:9997;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:14px';
   ov.onclick = function(e){ if(e.target === ov) closeUserModal(); };
   const box = document.createElement('div');
   box.id = 'userModalBody';
-  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:580px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5);border:1px solid var(--border)';
+  box.style.cssText = 'background:var(--surface);padding:18px;border-radius:16px;width:580px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(29,24,19,.5);border:1px solid var(--border)';
   ov.appendChild(box);
   document.body.appendChild(ov);
   return ov;
@@ -34871,16 +34871,16 @@ function _renderReviewCard(r){
     const notRemovable = !isPos && (rm === 'low' || rm === 'none');
     // ---- REMOVABLE: tell the owner WHY + WHAT to send Airbnb + the policy ----
     if(removable){
-      html += '<div style="background:#ecfdf5;border:1px solid #10b981;padding:10px 12px;border-radius:8px;margin-bottom:8px">'
+      html += '<div style="background:var(--green-soft);border:1px solid var(--green);padding:10px 12px;border-radius:8px;margin-bottom:8px">'
            +    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
-           +      '<span style="font-size:11.5px;font-weight:700;color:#065f46">✅ يمكن طلب حذفها من Airbnb</span>'
+           +      '<span style="font-size:11.5px;font-weight:700;color:var(--green)">✅ يمكن طلب حذفها من Airbnb</span>'
            +      '<span class="pill '+(RV_REMOVE_PILL[rm]||'info')+'">'+RV_REMOVE_LABEL[rm]+'</span>'
            +    '</div>';
       if(r.ai.removability_reason_ar){
         html += '<div style="font-size:11.5px;line-height:1.65;color:var(--text-2)"><b>ليش تنحذف:</b> '+esc(r.ai.removability_reason_ar)+'</div>';
       }
       if(r.ai.policy_reference){
-        html += '<div dir="ltr" style="font-size:11px;line-height:1.6;color:#065f46;margin-top:6px;background:var(--surface);padding:6px 9px;border-radius:6px;text-align:start"><b>📖 Airbnb Policy:</b> '+esc(r.ai.policy_reference)+'</div>';
+        html += '<div dir="ltr" style="font-size:11px;line-height:1.6;color:var(--green);margin-top:6px;background:var(--surface);padding:6px 9px;border-radius:6px;text-align:start"><b>📖 Airbnb Policy:</b> '+esc(r.ai.policy_reference)+'</div>';
       }
       html += '</div>';
       // What to send Airbnb — open so it's obvious
@@ -34895,8 +34895,8 @@ function _renderReviewCard(r){
     }
     // ---- NOT REMOVABLE: the reply scenario — reply publicly (AAA) ----
     if(notRemovable){
-      html += '<div style="background:#fef2f2;border:1px solid #ef4444;padding:8px 12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-           +    '<span style="font-size:11.5px;font-weight:700;color:#991b1b">❌ ما تنحذف حسب سياسة Airbnb — الأفضل ترد عليها بأسلوب AAA</span>'
+      html += '<div style="background:var(--red-soft);border:1px solid var(--red);padding:8px 12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+           +    '<span style="font-size:11.5px;font-weight:700;color:var(--red)">❌ ما تنحذف حسب سياسة Airbnb — الأفضل ترد عليها بأسلوب AAA</span>'
            + '</div>';
     }
     // Public response — open for positives and for non-removable negatives (the reply)
@@ -34994,7 +34994,7 @@ async function loadReviewInsights(){
 function _catBar(label, val){
   const v = (typeof val==='number' && val>0) ? val : 0;
   const pct = Math.max(0, Math.min(100, (v/10)*100));
-  const col = v>=9.3 ? 'var(--good,#2e7d32)' : v>=8.5 ? 'var(--gold,#b8860b)' : 'var(--bad,#c62828)';
+  const col = v>=9.3 ? 'var(--good,var(--green))' : v>=8.5 ? 'var(--gold,var(--yellow))' : 'var(--bad,var(--red))';
   return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">'
     + '<span style="width:78px;color:var(--text-2)">'+label+'</span>'
     + '<div style="flex:1;height:6px;background:var(--surface-2);border-radius:4px;overflow:hidden">'
@@ -35017,7 +35017,7 @@ function renderReviewInsights(d){
     h += '<div style="flex:1;min-width:240px"><div class="muted" style="font-size:11px;margin-bottom:5px">أكثر المشاكل تكراراً</div>'
        + '<div style="display:flex;flex-wrap:wrap;gap:5px">';
     d.issues.slice(0,12).forEach(function(it){
-      h += '<span style="background:var(--surface);border:1px solid var(--bad,#c62828);color:var(--bad,#c62828);border-radius:12px;padding:2px 9px;font-size:11px">'+it.tag+' <b>'+it.n+'</b></span>';
+      h += '<span style="background:var(--surface);border:1px solid var(--bad,var(--red));color:var(--bad,var(--red));border-radius:12px;padding:2px 9px;font-size:11px">'+it.tag+' <b>'+it.n+'</b></span>';
     });
     h += '</div></div>';
   }
@@ -35028,7 +35028,7 @@ function renderReviewInsights(d){
   apts.forEach(function(a){
     const nm = a.name || a.hist_name || ('#'+a.listing_id);
     const avg = a.hist_avg || a.live_avg || 0;
-    const acol = avg>=9.3?'var(--good,#2e7d32)':avg>=8.5?'var(--gold,#b8860b)':'var(--bad,#c62828)';
+    const acol = avg>=9.3?'var(--good,var(--green))':avg>=8.5?'var(--gold,var(--yellow))':'var(--bad,var(--red))';
     h += '<div class="card rvInsApt" data-name="'+String(nm).toLowerCase()+'" style="padding:12px">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">'
       + '<div style="font-weight:700;font-size:13px;line-height:1.35">'+nm+'</div>'
@@ -35552,7 +35552,7 @@ async function _uploadCleaning(ev, endpoint){
     const noDate = (r.no_date||[]).length;
     const bad = (r.unmatched||[]).length;
     box.style.display = 'block';
-    box.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.2)">'
+    box.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 20%,transparent)">'
       + '<div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ تم الاستيراد بنجاح</div>'
       + '<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px">'
         + '<span><b class="mono">'+dated+'</b> وحدة بتاريخ محدّد</span>'
@@ -35565,7 +35565,7 @@ async function _uploadCleaning(ev, endpoint){
     loadCleaning();
   }else{
     box.style.display = 'block';
-    box.innerHTML = '<div class="card" style="background:var(--red-soft);border-color:rgba(196,67,67,.2);color:var(--red)">⚠ '+esc(r.error||'فشل الاستيراد')+'</div>';
+    box.innerHTML = '<div class="card" style="background:var(--red-soft);border-color:color-mix(in srgb,var(--red) 20%,transparent);color:var(--red)">⚠ '+esc(r.error||'فشل الاستيراد')+'</div>';
   }
 }
 
@@ -35951,10 +35951,10 @@ function renderNeedsBanner(){
   const reps = ib.replies||[];
   const el = document.getElementById('needsBanner');
   if(escs.length===0 && reps.length===0){
-    el.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:rgba(14,158,95,.18);text-align:center;padding:14px"><span style="color:var(--green);font-weight:600">✓ '+t().no_needs+'</span></div>';
+    el.innerHTML = '<div class="card" style="background:var(--green-soft);border-color:color-mix(in srgb,var(--green) 18%,transparent);text-align:center;padding:14px"><span style="color:var(--green);font-weight:600">✓ '+t().no_needs+'</span></div>';
     return;
   }
-  el.innerHTML = '<div class="card" style="background:var(--yellow-soft);border-color:rgba(201,150,23,.20);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px">'
+  el.innerHTML = '<div class="card" style="background:var(--yellow-soft);border-color:color-mix(in srgb,var(--yellow) 20%,transparent);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:13px">'
     +'<div style="font-size:13px;color:var(--text)"><b style="color:var(--yellow)">⚠ '+t().needs_alert+':</b> '+(escs.length?escs.length+' '+t().open_esc:'')+(escs.length&&reps.length?' · ':'')+(reps.length?reps.length+' '+t().pending_rep:'')+'</div>'
     +'<button class="btn primary sm" onclick="go(\\'inbox\\')">←</button>'
     +'</div>';
@@ -36493,7 +36493,7 @@ function _strDetail(u){
   var nightsH = moved.length
     ? '<div class="pr-kpi-l" style="margin:8px 14px 4px">'+(ar?'قبل ← بعد لكل ليلة تحرّكت (الأساس مجمّد):':'before → after per moved night (baseline frozen):')+'</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 8px">'+moved.map(function(n){
-        var col=n.color==='raise'?'#2e9e6b':(n.color==='drop'?'#c2683f':'var(--mut)');
+        var col=n.color==='raise'?'var(--green)':(n.color==='drop'?'var(--red)':'var(--mut)');
         return '<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:11px"><div class="muted">'+esc(n.date)+'</div><div><span class="muted">'+fmt(n.baseline)+'</span> ← <b style="color:'+col+'">'+fmt(n.final)+'</b></div></div>';
       }).join('')+'</div>'
     : '<div class="muted" style="padding:8px 14px;font-size:12px">'+(ar?'ما تحرّكت أي ليلة قادمة بعد عن الأساس.':'No upcoming night has moved off baseline yet.')+'</div>';
@@ -36502,9 +36502,9 @@ function _strDetail(u){
     ? '<div class="pr-kpi-l" style="margin:10px 14px 4px">'+(ar?'السجل الكامل — كل تغيير سعر ومصدره (الأحدث أولاً):':'full change log — every price change + its source (newest first):')+'</div>'
       +'<div style="max-height:300px;overflow-y:auto;padding:0 14px 12px">'+log.map(function(e){
         var mv=(e.old!=null&&e.new!=null&&e.old!==e.new);
-        var col=(e.new>e.old)?'#2e9e6b':(e.new<e.old?'#c2683f':'var(--mut)');
+        var col=(e.new>e.old)?'var(--green)':(e.new<e.old?'var(--red)':'var(--mut)');
         var tag=e.dry?(' <span style="color:var(--gold)">· '+(ar?'تجربة':'dry')+'</span>')
-               :(e.confirmed===true?(' <span style="color:#2e9e6b">· '+(ar?'مؤكّد بـHostaway':'confirmed')+'</span>')
+               :(e.confirmed===true?(' <span style="color:var(--green)">· '+(ar?'مؤكّد بـHostaway':'confirmed')+'</span>')
                :(e.confirmed===false?(' <span style="color:var(--red)">· '+(ar?'غير مؤكّد':'unconfirmed')+'</span>'):''));
         return '<div style="display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)">'
           +'<span style="font-size:14px">'+(e.source_icon||'•')+'</span>'
@@ -36527,8 +36527,8 @@ function _aptCellStyle(state){
   if(state==='baseline')  return {bg:'var(--surface-2)', tx:'var(--mut)', bd:'1px solid var(--line)', ic:''};
   if(state==='suggested') return {bg:'var(--gold-soft)', tx:'var(--gold-2)', bd:'1px solid var(--line)', ic:''};
   if(state==='applied')   return {bg:'var(--surface)', tx:'var(--green)', bd:'1.5px solid var(--green)', ic:_APT_SVG_CLOCK};
-  if(state==='booked')    return {bg:'rgba(14,158,95,.12)', tx:'#0B7A4A', bd:'1px solid rgba(14,158,95,.4)', ic:_APT_SVG_CHECK};
-  if(state==='empty')     return {bg:'rgba(204,75,75,.10)', tx:'#B3433F', bd:'1px solid rgba(204,75,75,.3)', ic:''};
+  if(state==='booked')    return {bg:'color-mix(in srgb,var(--green) 12%,transparent)', tx:'var(--green)', bd:'1px solid color-mix(in srgb,var(--green) 40%,transparent)', ic:_APT_SVG_CHECK};
+  if(state==='empty')     return {bg:'color-mix(in srgb,var(--red) 10%,transparent)', tx:'var(--red)', bd:'1px solid color-mix(in srgb,var(--red) 30%,transparent)', ic:''};
   return {bg:'var(--surface-2)', tx:'var(--mut)', bd:'1px solid var(--line)', ic:''};
 }
 function _aptLegend(){ var ar=(L==='ar');
@@ -36553,7 +36553,7 @@ function _aptCal(nights){
   }
   return _aptLegend()+'<div class="pe-cal">'+hdr+cells+'</div>';
 }
-function _aptBucketColor(b){ return (b==='ربح')?'#0B7A4A':(b==='أنقذنا ليلة')?'var(--green)':(b==='رفعنا زيادة')?'var(--gold-2)':'#B3433F'; }
+function _aptBucketColor(b){ return (b==='ربح')?'var(--green)':(b==='أنقذنا ليلة')?'var(--green)':(b==='رفعنا زيادة')?'var(--gold-2)':'var(--red)'; }
 async function openApartment(lid, from){
   _aptLid=lid; _aptFrom=from||view||'strat';
   try{ location.hash='apartment/'+lid; }catch(_){}
@@ -36762,13 +36762,13 @@ let learnEditingApt = false;
 /* ===== Pricing Lab (مختبر التسعير) — data-backed decision lab ===== */
 var _plab={tab:'decision', lid:null};
 function plabMoney(n){ return fmt(n)+' '+(L==='ar'?'ر.س':'SAR'); }
-function plabConf(c){ if(c==='high')return{t:t().plab_high,c:'#3e9665'}; if(c==='medium')return{t:t().plab_med,c:'#3b82c4'}; if(c==='low')return{t:t().plab_low,c:'var(--gold)'}; return{t:t().plab_nodata,c:'#8a8270'}; }
+function plabConf(c){ if(c==='high')return{t:t().plab_high,c:'var(--green)'}; if(c==='medium')return{t:t().plab_med,c:'var(--blue)'}; if(c==='low')return{t:t().plab_low,c:'var(--gold)'}; return{t:t().plab_nodata,c:'var(--text-3)'}; }
 function plabActionInfo(a){ var ar=(L==='ar');
-  if(a==='raise')return{t:t().plab_raise,c:'#3e9665',ic:'▲'};
+  if(a==='raise')return{t:t().plab_raise,c:'var(--green)',ic:'▲'};
   if(a==='lower')return{t:t().plab_lower,c:'var(--down)',ic:'▼'};
   if(a==='protect_floor')return{t:(ar?'حماية الحد':'protect floor'),c:'var(--gold)',ic:'⊥'};
-  if(a==='no_data')return{t:t().plab_nodata,c:'#8a8270',ic:'?'};
-  return{t:t().plab_hold,c:'#8a8270',ic:'='}; }
+  if(a==='no_data')return{t:t().plab_nodata,c:'var(--text-3)',ic:'?'};
+  return{t:t().plab_hold,c:'var(--text-3)',ic:'='}; }
 async function loadPlab(force){
   document.getElementById('t_plab').textContent='🧪 '+t().plab;
   var sub=document.getElementById('t_plab_sub'); if(sub) sub.textContent=t().plab_sub;
@@ -36805,7 +36805,7 @@ async function plabDecision(){
   var card='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px';
   var html='';
   html+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.7;margin-bottom:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><div>'+(ar?'🧪 <b>المختبر</b> = تحليل عميق لكل شقة + تطبيق آمن لكل ليلة. <b>التسعير الديناميكي</b> = تقويم لكل شقة بالأسعار المقترحة والتطبيق/التراجع. الاثنين يكتبون بنفس المحرّك ويتسجّلون.':'🧪 <b>The Lab</b> = deep per-apartment analysis + safe per-night apply. <b>Dynamic Pricing</b> = a per-apartment calendar with suggested prices and apply/revert. Both write via the same verified engine and are logged.')+'</div><button class="btn ghost sm" onclick="go(&#39;pricing&#39;)">'+(ar?'افتح التسعير الديناميكي':'Open Dynamic Pricing')+'</button></div>';
-  if(d.dry_run) html+='<div style="'+card+';border-color:#2f5f7a;color:#2f5f7a"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'أي تطبيق هنا ما يغيّر Hostaway فعليًا.':'any apply here will NOT change Hostaway.')+'</div>';
+  if(d.dry_run) html+='<div style="'+card+';border-color:var(--blue);color:var(--blue)"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'أي تطبيق هنا ما يغيّر Hostaway فعليًا.':'any apply here will NOT change Hostaway.')+'</div>';
   if(m.thin_units) html+='<div style="'+card+';border-color:var(--gold)">⚠ '+(ar?('بيانات قليلة لـ '+m.thin_units+' شقة — توصياتها بثقة منخفضة'):('thin data for '+m.thin_units+' units — low confidence'))+'</div>';
   html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+plabStat('🎯',(d.cards||[]).length,ar?'فرص للمراجعة':'opportunities')+plabStat('✅',o.booked_after_apply||0,ar?'طُبّق ثم انحجز':'applied then booked')+plabStat('⚠️',(d.failed||[]).length,ar?'يحتاج إجراء':'need action')+'</div>';
   if((d.failed||[]).length){ html+='<div style="'+card+';border-color:var(--down)"><b style="color:var(--down)">'+(ar?'فشل تزامن/رجوع':'Failed sync/revert')+'</b>'+d.failed.map(function(s){ return '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:6px"><span>'+esc(s.apartment)+' · '+esc(s.date)+'</span><button class="btn ghost xs" onclick="plabRevert(&#39;'+esc(s.snapshot_id)+'&#39;)">'+(ar?'حاول رجوع':'retry revert')+'</button></div>'; }).join('')+'</div>'; }
@@ -36884,8 +36884,8 @@ async function plabPreview(lid,date){
   if(rec.expected_revenue!=null) body+='<div style="'+box+'">'+t().plab_exprev+': <b>'+plabMoney(rec.expected_revenue)+'</b> <span class="muted" style="font-size:10px">('+t().plab_prob+' '+Math.round((rec.booking_prob||0)*100)+'%)</span></div>';
   if(lad&&(lad.rungs||[]).length) body+='<div style="'+box+'"><b>'+(ar?'سلّم النزول حسب قرب التاريخ':'Step-down by lead')+'</b><div style="margin-top:6px">'+lad.rungs.map(function(r){ return '<div style="display:flex;justify-content:space-between;font-size:11.5px"><span>'+esc(r.bucket)+'</span><b>'+plabMoney(r.price)+'</b></div>'; }).join('')+'</div></div>';
   var dry=!!(D.plab&&D.plab.over&&D.plab.over.dry_run);
-  if(dry) body+='<div style="background:rgba(47,95,122,.10);border:1px solid #2f5f7a;border-radius:9px;padding:9px 11px;font-size:11.5px;color:#2f5f7a;margin-bottom:8px"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'التطبيق ما يغيّر شيء في Hostaway. للكتابة الفعلية لازم PRICE_APPLY_DRYRUN=0.':'apply will NOT change Hostaway. Real writes need PRICE_APPLY_DRYRUN=0.')+'</div>';
-  body+='<div style="background:rgba(62,125,90,.07);border:1px solid #3e9665;border-radius:9px;padding:10px 11px;font-size:11.5px;line-height:1.7">'
+  if(dry) body+='<div style="background:color-mix(in srgb,var(--blue) 10%,transparent);border:1px solid var(--blue);border-radius:9px;padding:9px 11px;font-size:11.5px;color:var(--blue);margin-bottom:8px"><b>'+(ar?'وضع المعاينة شغّال [DRY-RUN]':'Dry-run mode is ON')+'</b> — '+(ar?'التطبيق ما يغيّر شيء في Hostaway. للكتابة الفعلية لازم PRICE_APPLY_DRYRUN=0.':'apply will NOT change Hostaway. Real writes need PRICE_APPLY_DRYRUN=0.')+'</div>';
+  body+='<div style="background:color-mix(in srgb,var(--green) 7%,transparent);border:1px solid var(--green);border-radius:9px;padding:10px 11px;font-size:11.5px;line-height:1.7">'
     +'<b>'+(ar?'تطبيق آمن — وش يصير بالضبط:':'Safe apply — exactly what happens:')+'</b>'
     +'<div style="margin-top:4px">'+(ar?'• يكتب السعر في Hostaway فعليًا':'• Writes the price to Hostaway for real')+'</div>'
     +'<div>'+(ar?'• ما ينكتب سعر تحت الحد الأدنى المحفوظ للشقة — يتوقف لو صار':'• Never writes below the saved floor for this unit — blocked if it would')+'</div>'
@@ -36950,7 +36950,7 @@ async function plabProfLoad(){
     if(typ==='sel'){ ctl='<select id="pf_'+key+'" style="'+inp+'"><option value="">—</option>'+opts.map(function(o){ return '<option value="'+o+'"'+(String(cur).toLowerCase()===o?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+'</select>'; }
     else { ctl='<input id="pf_'+key+'" type="number" min="1" max="10" step="1" value="'+esc(cur)+'" style="'+inp+'">'; }
     return '<div><div class="muted" style="font-size:10.5px;margin-bottom:2px">'+esc(lab)+'</div>'+ctl+'</div>'; }).join('');
-  var scoreCol=(p.score!=null)?(p.score>=70?'#3e9665':(p.score>=45?'var(--gold)':'var(--down)')):'#8a8270';
+  var scoreCol=(p.score!=null)?(p.score>=70?'var(--green)':(p.score>=45?'var(--gold)':'var(--down)')):'var(--text-3)';
   host.innerHTML='<div class="card" style="border-radius:12px;padding:14px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><div style="font-size:11px" class="muted">'+t().plab_score+(p.score_overridden?(' ('+(ar?'يدوي':'manual')+')'):'')+'</div><div style="font-size:30px;font-weight:800;color:'+scoreCol+'">'+(p.score!=null?p.score:'—')+'</div></div>'
     +'<div class="muted" style="font-size:11px;text-align:end">'+(ar?'اكتمال الملف':'completeness')+': <b>'+(p.completeness||0)+'%</b>'+(p.updated_at?('<br>'+(ar?'آخر تحديث ':'updated ')+esc((p.updated_at||'').slice(0,16).replace('T',' '))):'')+'</div></div>'
@@ -36974,7 +36974,7 @@ async function plabLogView(){
   head+='<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:11px;line-height:1.6;margin-bottom:12px" class="muted">'+(ar?'هذي تغييرات طبّقتها من المختبر — كلها مؤكدة بإعادة القراءة من Hostaway وترجع للسعر الأصلي بضغطة. دُفعات «مركز التسعير» لها سجلها الخاص داخل المركز.':'These are changes you applied from the Lab — each verified by re-reading Hostaway, revertible to the original in one click. Command Center batches have their own history inside the Center.')+'</div>';
   if(!rows.length){ b.innerHTML=head+'<div class="empty" style="padding:24px;text-align:center">'+(ar?'ما فيه تطبيقات بعد':'No applies yet')+'</div>'; return; }
   b.innerHTML=head+'<div style="display:flex;flex-direction:column;gap:6px">'+rows.map(function(s){
-    var st=s.status, col=(st==='applied'?'#3e9665':(st==='reverted'?'#8a8270':(st&&st.indexOf('fail')>=0?'var(--down)':'var(--gold)')));
+    var st=s.status, col=(st==='applied'?'var(--green)':(st==='reverted'?'var(--text-3)':(st&&st.indexOf('fail')>=0?'var(--down)':'var(--gold)')));
     var syn=(s.apply_status==='synced')?t().plab_synced:(s.apply_status==='dry_run'?'DRY-RUN':(s.apply_status?t().plab_notsynced:''));
     var canRevert=(st==='applied');
     return '<div style="padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px">'
@@ -36989,7 +36989,7 @@ async function plabSettings(){
   var d; try{ d=await api('/api/plab/settings'); }catch(_){ d=null; }
   var s=(d&&d.settings)||{};
   var inp='width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit';
-  var lab='display:block;font-size:11px;color:#8a8270;margin-bottom:3px';
+  var lab='display:block;font-size:11px;color:var(--text-3);margin-bottom:3px';
   b.innerHTML='<div class="card" style="border-radius:12px;padding:16px;max-width:520px">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
     +'<div><label style="'+lab+'">'+(ar?'بداية أيام الراتب':'Salary window start')+'</label><input id="ps_start" type="number" min="20" max="31" value="'+esc(s.salary_start)+'" style="'+inp+'"></div>'
@@ -37016,7 +37016,7 @@ async function plabSaveFloor(){
 }
 /* ===== shared style helpers (were part of the deleted fb view; GW uses them) ===== */
 function fbCard(){ return 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px'; }
-function fbChip(label,tone){ var c=(tone==='ok'?'#3e9665':(tone==='warn'?'var(--gold)':(tone==='bad'?'var(--down)':'#8a8270'))); return '<span style="font-size:10.5px;color:'+c+';border:1px solid '+c+';border-radius:99px;padding:1px 8px;white-space:nowrap">'+esc(label)+'</span>'; }
+function fbChip(label,tone){ var c=(tone==='ok'?'var(--green)':(tone==='warn'?'var(--gold)':(tone==='bad'?'var(--down)':'var(--text-3)'))); return '<span style="font-size:10.5px;color:'+c+';border:1px solid '+c+';border-radius:99px;padding:1px 8px;white-space:nowrap">'+esc(label)+'</span>'; }
 function fbInp(){ return 'width:100%;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 10px;font-family:inherit'; }
 function fbStatCard(label,val,color){ return '<div style="'+fbCard()+';margin:0"><div class="muted" style="font-size:10.5px">'+esc(label)+'</div><div style="font-size:17px;font-weight:800;color:'+(color||'var(--text)')+'">'+val+'</div></div>'; }
 /* ===== Company Profile (الملف التعريفي) dashboard ===== */
@@ -37039,7 +37039,7 @@ function cpGuardChip(g){ if(!g) return ''; return g.clean?fbChip(cpAr()?'الف�
 var CP_SECT_AR={contacts:'التواصل',copy:'النصوص',figures_manual:'الأرقام',benchmarks:'المقارنات',showcase:'الوحدات',reviews:'المراجعات',shots:'الدليل'};
 function cpDirtyBanner(d){ if(!d||!d.dirty) return ''; var ar=cpAr();
   var names=(d.dirty_sections||[]).map(function(k){ return ar?(CP_SECT_AR[k]||k):k; }).join('، ');
-  return '<div style="'+fbCard()+';border:1px solid var(--gold);margin-bottom:10px">'
+  return '<div style="'+fbCard()+';border:1px solid var(--line-strong);margin-bottom:10px">'
    +'<b>⏳ '+(ar?'لديك تعديلات لم تُنشر':'You have unpublished changes')+'</b>'
    +'<div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.6">'
    +(ar?('التعديلات محفوظة عندك لكن الصفحة العامة ما زالت تعرض آخر نسخة منشورة'
@@ -37367,23 +37367,23 @@ async function gwOverview(){ var ar=(L==='ar'), b=document.getElementById('gwBod
   var h='<div style="'+fbCard()+'"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>📱 '+(ar?'حالة الموقع':'Website status')+'</b>'+(d.total?fbChip(ar?'يعمل':'live','ok'):fbChip(ar?'لا توجد بيانات — اضغط تحديث':'no data — sync','warn'))+'</div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'تحكّم بعرض وحدات عوجا للضيوف القادمين من TikTok و Airbnb. آخر تحديث: ':'Control how Ouja units appear to TikTok/Airbnb visitors. Last sync: ')+esc(d.synced_at||'—')+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><button class="btn primary sm" onclick="gwSync()">⟳ '+esc(t().gw_sync)+'</button><button class="btn ghost sm" onclick="gwGo(&#39;hero&#39;)">🖼️ '+(ar?'صورة الواجهة':'Landing hero')+'</button><a class="btn ghost sm" href="/stay" target="_blank">↗ '+(ar?'فتح الموقع':'Open site')+'</a><a class="btn ghost sm" href="/stay/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyStay()">📋 '+(ar?'نسخ رابط /stay':'Copy /stay link')+'</button></div></div>';
-  h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>✦ '+(ar?'موقع عوجا إيليت — النسخة المميّزة':'Ouja Elite — VIP site')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
+  h+='<div style="'+fbCard()+';border:1px solid var(--line-strong);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>✦ '+(ar?'موقع عوجا إيليت — النسخة المميّزة':'Ouja Elite — VIP site')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'نفس وحدات عوجا — بدون Airbnb، والحجز عبر كونسيرج واتساب. مخفي عن جوجل افتراضيًا. يحتاج ضبط ELITE_WHATSAPP في Railway.':'Same Ouja units — no Airbnb, booking via WhatsApp concierge. Hidden from Google by default. Needs ELITE_WHATSAPP on Railway.')+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/elite" target="_blank">✦ '+(ar?'فتح موقع إيليت':'Open Elite')+'</a><a class="btn ghost sm" href="/elite/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="gwCopyElite()">📋 '+(ar?'نسخ رابط /elite':'Copy /elite link')+'</button></div></div>';
-  h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🗓️ '+(ar?'موقع عوجا بالشهر':'Ouja Monthly')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
+  h+='<div style="'+fbCard()+';border:1px solid var(--line-strong);margin-top:8px"><div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center"><b>🗓️ '+(ar?'موقع عوجا بالشهر':'Ouja Monthly')+'</b>'+fbChip(ar?'حجز عبر واتساب':'WhatsApp booking','ok')+'</div>'
     +'<div class="muted" style="font-size:11.5px;margin-top:6px">'+(ar?'سكن شهري مفروش بسعر رسمي واضح، وتحقق مستقل من النشر والتوفر وتحويل واتساب.':'Furnished monthly stays with one official price, independent publication checks, availability health, and WhatsApp handoff.')+'</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px"><a class="btn primary sm" href="/monthly" target="_blank">🗓️ '+(ar?'فتح موقع الشهري':'Open Monthly')+'</a><a class="btn ghost sm" href="/monthly/search" target="_blank">'+(ar?'معاينة البحث':'Preview search')+'</a><button class="btn ghost sm" onclick="mOpenMonthlyOps()">'+(ar?'فتح جاهزية الشهري ونتائج الطلبات':'Open monthly readiness and lead outcomes')+'</button><button class="btn ghost sm" onclick="mCopyMonthly()">📋 '+(ar?'نسخ رابط /monthly':'Copy /monthly link')+'</button></div>'
     +'<div id="mAdmin" style="margin-top:12px"><div class="muted" style="font-size:11px">⏳</div></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'
     +fbStatCard(ar?'إجمالي الوحدات':'Total listings',d.total||0,'var(--text)')
-    +fbStatCard(ar?'ظاهرة':'Visible',d.visible||0,'#3e9665')
-    +fbStatCard(ar?'بدون رابط Airbnb':'Missing Airbnb',d.missing_airbnb||0,((d.missing_airbnb||0)?'var(--down)':'#3e9665'))
-    +fbStatCard(ar?'بدون صور':'Missing images',d.missing_images||0,((d.missing_images||0)?'var(--gold)':'#3e9665'))
-    +fbStatCard(ar?'وسوم غير مربوطة':'Unmapped tags',d.unmapped_tags||0,((d.unmapped_tags||0)?'var(--gold)':'#3e9665'))
+    +fbStatCard(ar?'ظاهرة':'Visible',d.visible||0,'var(--green)')
+    +fbStatCard(ar?'بدون رابط Airbnb':'Missing Airbnb',d.missing_airbnb||0,((d.missing_airbnb||0)?'var(--down)':'var(--green)'))
+    +fbStatCard(ar?'بدون صور':'Missing images',d.missing_images||0,((d.missing_images||0)?'var(--gold)':'var(--green)'))
+    +fbStatCard(ar?'وسوم غير مربوطة':'Unmapped tags',d.unmapped_tags||0,((d.unmapped_tags||0)?'var(--gold)':'var(--green)'))
     +fbStatCard(ar?'بحث (٧ أيام)':'Searches (7d)',d.searches_7d||0,'var(--text)')
     +fbStatCard(ar?'نقرات Airbnb (٧ أيام)':'Airbnb clicks (7d)',d.clicks_7d||0,'var(--text)')
     +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
-  if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid var(--gold);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
+  if(d.missing_airbnb) h+='<div style="'+fbCard()+';border:1px solid color-mix(in srgb,var(--yellow) 40%,transparent);margin-top:8px;font-size:12px">'+(ar?('⚠ '+d.missing_airbnb+' وحدة بدون رابط Airbnb — صفحاتها ما تعرض زر الحجز. راجع تبويب «روابط Airbnb».'):('⚠ '+d.missing_airbnb+' listings missing Airbnb URL — their booking button is hidden. See Airbnb Links.'))+'</div>';
   b.innerHTML=h; mAdminLoad(); }
 async function mAdminLoad(){ var ar=(L==='ar'); var el=document.getElementById('mAdmin'); if(!el) return; var d; try{ d=await api('/api/monthly/admin'); }catch(_){ d=null; } if(!d||!d.config){ el.innerHTML='<div class="muted" style="font-size:11px">⚠</div>'; return; } _gw.m=d;
   var h='<div style="border-top:1px solid var(--border);padding-top:10px"><b style="font-size:12px">'+(ar?'أهلية وحدات الشهري':'Monthly publication eligibility')+'</b>'
@@ -37461,14 +37461,14 @@ function gwFactsRow(x,defs,side){
   var cells=defs.map(function(f){ return '<td style="padding:2px;text-align:center">'+gwFactBtn(x.id,f.key,(x.facts||{})[f.key])+'</td>'; }).join('');
   return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px;white-space:nowrap;position:sticky;'+side+':0;background:var(--surface)"><b>'+esc(x.name||('#'+x.id))+'</b></td>'
     +cells+'<td style="padding:6px 8px;text-align:center" class="muted" id="gwfc_'+x.id+'">'+(x.filled||0)+'/'+((defs&&defs.length)||17)+'</td></tr>'; }
-function gwFactBtn(id,key,v){ var label=(v===true?'✓':(v===false?'✗':'—')); var color=(v===true?'#3e9665':(v===false?'var(--down)':'var(--mut)'));
+function gwFactBtn(id,key,v){ var label=(v===true?'✓':(v===false?'✗':'—')); var color=(v===true?'var(--green)':(v===false?'var(--down)':'var(--mut)'));
   return '<button class="btn ghost xs" style="min-width:26px;padding:2px 6px;color:'+color+';border-color:'+color+'" onclick="gwFactCycle('+id+',&#39;'+key+'&#39;,this)">'+label+'</button>'; }
 async function gwFactCycle(id,key,btn){ var x=(_gw.factsById||{})[id]; if(!x) return; var cur=(x.facts||{})[key];
   var next=(cur===true?false:(cur===false?null:true)); var body={}; body[key]=next;
   var r; try{ r=await post('/api/gw/facts',{listing_id:String(id),facts:body}); }catch(_){ r=null; }
   if(!r||!r.ok){ toast('⚠'); return; }
   x.facts=r.facts||{}; x.filled=(r.filled!=null?r.filled:Object.keys(x.facts).length);
-  var v=x.facts[key]; var label=(v===true?'✓':(v===false?'✗':'—')); var color=(v===true?'#3e9665':(v===false?'var(--down)':'var(--mut)'));
+  var v=x.facts[key]; var label=(v===true?'✓':(v===false?'✗':'—')); var color=(v===true?'var(--green)':(v===false?'var(--down)':'var(--mut)'));
   if(btn){ btn.textContent=label; btn.style.color=color; btn.style.borderColor=color; }
   var fc=document.getElementById('gwfc_'+id); if(fc) fc.textContent=x.filled+'/'+((_gw.factsDef||[]).length||17);
   gwFactsSummary(); }
@@ -37508,7 +37508,7 @@ function gwTagRow(x){ var ar=(L==='ar'); var raw=(x.raw_values||[]).slice(0,3).j
     +'<td style="padding:6px 5px">'+fbChip(x.status||'unmapped',stTone)+'</td>'
     +'<td style="padding:6px 5px"><button class="btn ghost xs" onclick="gwTagEdit(&#39;'+esc(x.key)+'&#39;)">'+(ar?'ربط':'Map')+'</button></td></tr>'; }
 function gwTagSel(k,on){ _gw.tsel=_gw.tsel||{}; if(on) _gw.tsel[k]=true; else delete _gw.tsel[k]; gwTagsTable(); }
-function gwTagBulkBar(n){ var ar=(L==='ar'); return '<div style="background:var(--surface-2);border:1px solid var(--gold);border-radius:10px;padding:9px;margin-bottom:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center"><b style="font-size:12px">'+n+' '+(ar?'محدد':'selected')+'</b><button class="btn ghost xs" onclick="gwBulkTag(&#39;mark_amenity&#39;)">'+(ar?'علّم كمرفق':'Mark amenity')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;hide&#39;)">'+(ar?'إخفاء من نوع':'Hide from نوع')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;show&#39;)">'+(ar?'إظهار للضيف':'Show to guest')+'</button><button class="btn ghost xs" onclick="_gw.tsel={};gwTagsTable()">'+(ar?'إلغاء':'Clear')+'</button></div>'; }
+function gwTagBulkBar(n){ var ar=(L==='ar'); return '<div style="background:var(--surface-2);border:1px solid var(--line-strong);border-radius:10px;padding:9px;margin-bottom:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center"><b style="font-size:12px">'+n+' '+(ar?'محدد':'selected')+'</b><button class="btn ghost xs" onclick="gwBulkTag(&#39;mark_amenity&#39;)">'+(ar?'علّم كمرفق':'Mark amenity')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;hide&#39;)">'+(ar?'إخفاء من نوع':'Hide from نوع')+'</button><button class="btn ghost xs" onclick="gwBulkTag(&#39;show&#39;)">'+(ar?'إظهار للضيف':'Show to guest')+'</button><button class="btn ghost xs" onclick="_gw.tsel={};gwTagsTable()">'+(ar?'إلغاء':'Clear')+'</button></div>'; }
 async function gwBulkTag(action){ var keys=Object.keys(_gw.tsel||{}); if(!keys.length) return; var r; try{ r=await post('/api/gw/tags/bulk',{action:action,keys:keys}); }catch(_){ r=null; } if(r&&r.ok){ toast('✓ '+(r.count||0)); _gw.tsel={}; gwTags(); } else toast('⚠'); }
 function gwTagEdit(key){ var ar=(L==='ar'); var x=(_gw.tagById||{})[key]; if(!x){ toast('⚠'); return; }
   openDrawer((ar?'ربط وسم: ':'Map tag: ')+key,(x.raw_values||[]).join(', '));
@@ -37526,16 +37526,16 @@ async function gwTagHide(key){ try{ await post('/api/gw/tag',{key:key,action:'hi
 async function gwSeed(){ var ar=(L==='ar'); var r; try{ r=await post('/api/gw/tags/bulk',{action:'seed'}); }catch(_){ r=null; } if(r&&r.ok){ toast((ar?'تم ربط ':'mapped ')+(r.mapped||0)); gwTags(); } else toast('⚠'); }
 async function gwAirbnb(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/airbnb'); }catch(_){ d=null; } var ls=(d&&d.listings)||[]; var miss=ls.filter(function(x){return !x.has_airbnb;}); var found=ls.length-miss.length;
   var h='';
-  if(miss.length){ h+='<div style="background:rgba(180,84,63,.08);border:1px solid var(--down,#b4543f);border-radius:12px;padding:13px 15px;margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="font-size:22px;font-weight:800;color:var(--down,#b4543f)">'+miss.length+'</span><b style="font-size:13.5px">'+(ar?'وحدة بدون رابط Airbnb':'listings missing an Airbnb URL')+'</b></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?'صفحاتها تعرض زر حجز معطّل. عدّل الرابط من Hostaway ‹ Listing ‹ Airbnb/channel link ثم «تحديث من Hostaway» — أو حط رابط احتياطي محلي من تبويب «الوحدات».':'Their booking button is disabled. Set the link in Hostaway > Listing > Airbnb/channel link then Sync — or add a local fallback in Listings.')+'</div></div>'; }
-  else { h+='<div style="'+fbCard()+';border:1px solid var(--green,#3e7d5a)"><b>🔗 '+esc(t().gw_airbnb)+'</b> · '+fbChip((ar?'كل الوحدات مربوطة':'all linked')+' ('+found+')','ok')+'</div>'; }
+  if(miss.length){ h+='<div style="background:color-mix(in srgb,var(--red) 8%,transparent);border:1px solid var(--down,var(--red));border-radius:12px;padding:13px 15px;margin-bottom:10px"><div style="display:flex;gap:10px;align-items:center"><span style="font-size:22px;font-weight:800;color:var(--down,var(--red))">'+miss.length+'</span><b style="font-size:13.5px">'+(ar?'وحدة بدون رابط Airbnb':'listings missing an Airbnb URL')+'</b></div><div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'+(ar?'صفحاتها تعرض زر حجز معطّل. عدّل الرابط من Hostaway ‹ Listing ‹ Airbnb/channel link ثم «تحديث من Hostaway» — أو حط رابط احتياطي محلي من تبويب «الوحدات».':'Their booking button is disabled. Set the link in Hostaway > Listing > Airbnb/channel link then Sync — or add a local fallback in Listings.')+'</div></div>'; }
+  else { h+='<div style="'+fbCard()+';border:1px solid var(--green,var(--green))"><b>🔗 '+esc(t().gw_airbnb)+'</b> · '+fbChip((ar?'كل الوحدات مربوطة':'all linked')+' ('+found+')','ok')+'</div>'; }
   h+='<div style="display:flex;gap:8px;margin:0 2px 8px">'+fbChip((ar?'موجود ':'found ')+found,'ok')+fbChip((ar?'مفقود ':'missing ')+miss.length,(miss.length?'bad':'ok'))+'</div>';
-  h+='<div style="display:flex;flex-direction:column;gap:5px">'+ls.map(function(x){ var src=(x.source==='hostaway'?(ar?'Hostaway':'Hostaway'):(x.source==='override'?(ar?'احتياطي محلي':'local fallback'):'')); return '<div style="padding:9px 10px;background:var(--surface);border:1px solid '+(x.has_airbnb?'var(--border)':'var(--down,#b4543f)')+';border-radius:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12px">'+esc(x.name)+'</b>'+(x.has_airbnb?(fbChip('✓ '+esc(src),'ok')+'<a class="btn ghost xs" href="'+esc(x.url)+'" target="_blank">Airbnb ↗</a>'):fbChip(ar?'مفقود':'missing','bad'))+'<a class="btn ghost xs" href="/apartments/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'view')+'</a></div>'; }).join('')+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:5px">'+ls.map(function(x){ var src=(x.source==='hostaway'?(ar?'Hostaway':'Hostaway'):(x.source==='override'?(ar?'احتياطي محلي':'local fallback'):'')); return '<div style="padding:9px 10px;background:var(--surface);border:1px solid '+(x.has_airbnb?'var(--border)':'var(--down,var(--red))')+';border-radius:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="flex:1;min-width:120px;font-size:12px">'+esc(x.name)+'</b>'+(x.has_airbnb?(fbChip('✓ '+esc(src),'ok')+'<a class="btn ghost xs" href="'+esc(x.url)+'" target="_blank">Airbnb ↗</a>'):fbChip(ar?'مفقود':'missing','bad'))+'<a class="btn ghost xs" href="/apartments/'+esc(x.slug)+'" target="_blank">'+(ar?'معاينة':'view')+'</a></div>'; }).join('')+'</div>';
   b.innerHTML=h; }
 async function gwAnalytics(){ var ar=(L==='ar'), b=document.getElementById('gwBody'); if(!b) return; var d; try{ d=await api('/api/gw/analytics?days=7'); }catch(_){ d=null; } if(!d){ b.innerHTML='<div class="empty">⚠</div>'; return; }
   var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">'
     +fbStatCard(ar?'زيارات':'Visits',d.page_views||0,'var(--text)')+fbStatCard(ar?'عمليات بحث':'Searches',d.searches||0,'var(--text)')
-    +fbStatCard(ar?'بدون نتائج':'No-results',d.no_results||0,((d.no_results||0)?'var(--gold)':'#3e9665'))
-    +fbStatCard(ar?'مشاهدات وحدات':'Listing views',d.listing_views||0,'var(--text)')+fbStatCard(ar?'نقرات Airbnb':'Airbnb clicks',d.airbnb_clicks||0,'#3e9665')
+    +fbStatCard(ar?'بدون نتائج':'No-results',d.no_results||0,((d.no_results||0)?'var(--gold)':'var(--green)'))
+    +fbStatCard(ar?'مشاهدات وحدات':'Listing views',d.listing_views||0,'var(--text)')+fbStatCard(ar?'نقرات Airbnb':'Airbnb clicks',d.airbnb_clicks||0,'var(--green)')
     +fbStatCard('CTR',(d.ctr||0)+'%','var(--text)')+'</div>';
   function lst(title,arr,fmt){ if(!arr||!arr.length) return ''; return '<div style="'+fbCard()+';margin-top:8px"><b style="font-size:12.5px">'+esc(title)+'</b>'+arr.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--border)"><span>'+esc(fmt?fmt(it[0]):it[0])+'</span><b>'+it[1]+'</b></div>'; }).join('')+'</div>'; }
   h+=lst(ar?'أكثر الوحدات نقرًا':'Top listings by clicks',d.top_listings,function(id){ var x=(_gw.byId||{})[id]; return x?x.name:('#'+id); });
@@ -38232,7 +38232,7 @@ function _covMap(s){
     dots+='<div title="'+esc((c.label||'')+' — '+c.size+(ar?' شقة':' flats')+String.fromCharCode(10)+names)+'" '
       + 'style="position:absolute;left:'+(x/W*100).toFixed(3)+'%;top:'+(y/H*100).toFixed(3)+'%;'
       + 'transform:translate(-50%,-50%);width:'+r.toFixed(0)+'px;height:'+r.toFixed(0)+'px;border-radius:50%;'
-      + 'background:'+col+';opacity:.82;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);'
+      + 'background:'+col+';opacity:.82;border:2px solid #fff;box-shadow:0 1px 4px rgba(29,24,19,.4);'
       + 'display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700">'
       + (c.size>1?c.size:'')+'</div>';
   });
@@ -38392,26 +38392,26 @@ function _covRestorePending(){
 
 function _ctStageInfo(s){
   var ar=(L==='ar');
-  if(s==='in_progress') return {t:ar?'قيد التنظيف':'In progress', c:'#3b82c4', ic:'🔄'};
+  if(s==='in_progress') return {t:ar?'قيد التنظيف':'In progress', c:'var(--blue)', ic:'🔄'};
   if(s==='review') return {t:ar?'بانتظار المراجعة':'Needs review', c:'var(--gold)', ic:'📷'};
-  if(s==='approved') return {t:ar?'معتمد':'Approved', c:'#3e9665', ic:'✓'};
+  if(s==='approved') return {t:ar?'معتمد':'Approved', c:'var(--green)', ic:'✓'};
   if(s==='redo') return {t:ar?'يُعاد':'Redo', c:'var(--down)', ic:'↻'};
-  return {t:ar?'يحتاج تنظيف':'Needs cleaning', c:'#9a8a66', ic:'🧹'};
+  return {t:ar?'يحتاج تنظيف':'Needs cleaning', c:'var(--text-3)', ic:'🧹'};
 }
 function _ctPipe(c){
   var ar=(L==='ar'); c=c||{};
   var chip=function(ic,n,lab,col){ return '<div style="flex:1;text-align:center;padding:7px 4px;background:var(--surface-2);border-radius:8px"><div style="font-size:18px;font-weight:800;color:'+col+'">'+(n||0)+'</div><div class="muted" style="font-size:9.5px">'+ic+' '+lab+'</div></div>'; };
   return '<div style="display:flex;gap:6px;margin:10px 0">'
-    +chip('🧹',c.to_clean,(ar?'يحتاج تنظيف':'to clean'),'#9a8a66')
-    +chip('🔄',c.in_progress,(ar?'قيد التنظيف':'in progress'),'#3b82c4')
+    +chip('🧹',c.to_clean,(ar?'يحتاج تنظيف':'to clean'),'var(--text-3)')
+    +chip('🔄',c.in_progress,(ar?'قيد التنظيف':'in progress'),'var(--blue)')
     +chip('📷',c.review,(ar?'للمراجعة':'review'),'var(--gold)')
-    +((c.approved||c.redo)?chip('✓',(c.approved||0),(ar?'معتمد':'done'),'#3e9665'):'')
+    +((c.approved||c.redo)?chip('✓',(c.approved||0),(ar?'معتمد':'done'),'var(--green)'):'')
     +'</div>';
 }
 function _ctUnitRow(u){
   var ar=(L==='ar'); var si=_ctStageInfo(u.stage); var b='';
-  if(u.checkin_today) b+='<span style="background:rgba(204,75,75,.14);color:var(--down);font-size:9.5px;padding:2px 6px;border-radius:99px;font-weight:700">🔴 '+(ar?'دخول اليوم':'check-in')+(u.checkin_time?(' '+u.checkin_time):'')+'</span>';
-  if(u.early) b+='<span style="background:rgba(180,140,60,.16);color:var(--gold);font-size:9.5px;padding:2px 6px;border-radius:99px">⏰ '+(ar?'غادر بدري':'left early')+'</span>';
+  if(u.checkin_today) b+='<span style="background:color-mix(in srgb,var(--red) 14%,transparent);color:var(--down);font-size:9.5px;padding:2px 6px;border-radius:99px;font-weight:700">🔴 '+(ar?'دخول اليوم':'check-in')+(u.checkin_time?(' '+u.checkin_time):'')+'</span>';
+  if(u.early) b+='<span style="background:color-mix(in srgb,var(--gold-logo) 16%,transparent);color:var(--gold);font-size:9.5px;padding:2px 6px;border-radius:99px">⏰ '+(ar?'غادر بدري':'left early')+'</span>';
   if(u.manual) b+='<span style="background:var(--surface-2);border:1px solid var(--border);font-size:9.5px;padding:2px 6px;border-radius:99px">🧹 '+esc(ar?(u.reason_ar||''):(u.reason_en||''))+'</span>';
   var meta=(u.manual?(ar?'مهمة يدوية':'manual task'):((ar?'خروج ':'out ')+(u.checkout_time||'')+(u.checkout_passed?'':(ar?' (لسه)':' (later)'))));
   var act='';
@@ -38435,11 +38435,11 @@ function renderCleanTeams(){
   var summaryHtml='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
     +bigStat('🧹',(sm.total||0),(ar?'تنظيفات اليوم':'cleanings today'),'var(--text)')
     +bigStat('🔴',(sm.urgent||0),(ar?'عاجل · دخول اليوم':'urgent · check-in'),'var(--down)')
-    +bigStat('🔄',(sm.in_progress||0),(ar?'قيد التنظيف':'in progress'),'#3b82c4')
+    +bigStat('🔄',(sm.in_progress||0),(ar?'قيد التنظيف':'in progress'),'var(--blue)')
     +bigStat('📷',(sm.review||0),(ar?'بانتظار المراجعة':'needs review'),'var(--gold)')
     +'</div>';
   var early=(d.apartments||[]).filter(function(a){ return a.early; });
-  var earlyHtml = early.length ? ('<div style="background:rgba(204,75,75,.1);border:1px solid var(--down);border-radius:10px;padding:12px;margin-bottom:14px"><b style="color:var(--down)">⏰ '+(ar?'مغادرة مبكرة رصدها المساعد':'Early departures (Musaed)')+' — '+early.length+'</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+early.map(function(a){ return '<span class="exp-reason">'+esc(a.name)+' <button class="btn ghost xs" onclick="ctClearEarly('+a.lid+')">✓</button></span>'; }).join('')+'</div></div>') : '';
+  var earlyHtml = early.length ? ('<div style="background:color-mix(in srgb,var(--red) 10%,transparent);border:1px solid var(--down);border-radius:10px;padding:12px;margin-bottom:14px"><b style="color:var(--down)">⏰ '+(ar?'مغادرة مبكرة رصدها المساعد':'Early departures (Musaed)')+' — '+early.length+'</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+early.map(function(a){ return '<span class="exp-reason">'+esc(a.name)+' <button class="btn ghost xs" onclick="ctClearEarly('+a.lid+')">✓</button></span>'; }).join('')+'</div></div>') : '';
   var teams=(d.teams||[]).map(function(t){
     var a=anById[t.id]||{}; var fullLink=location.origin+t.link;
     var units=(a.units||[]);
@@ -38546,7 +38546,7 @@ async function ctAddTask(teamId){
   var typeOpts=types.map(function(x){return '<option value="'+x.key+'"'+(x.key==='checkout'?' selected':'')+'>'+esc(ar?x.ar:x.en)+'</option>';}).join('');
   openDrawer((ar?'➕ تنظيف · ':'➕ Clean · ')+esc(team.name||''), ar?'أضف شقة تحتاج تنظيف':'Add an apartment that needs cleaning');
   var inp='width:100%;padding:9px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin:3px 0 11px;font-family:inherit';
-  var lab='display:block;font-size:11px;color:var(--muted,#8a8270)';
+  var lab='display:block;font-size:11px;color:var(--muted,var(--text-3))';
   setDrawerBody('<label style="'+lab+'">'+(ar?'الشقة':'Apartment')+'</label><select id="ctkLid" style="'+inp+'">'+grp(mine,ar?'شقق الفريق':'Team apartments')+grp(others,ar?'شقق أخرى':'Other apartments')+'</select>'
     +'<label style="'+lab+'">'+(ar?'التاريخ':'Date')+'</label><input id="ctkDate" type="date" style="'+inp+'">'
     +'<label style="'+lab+'">'+(ar?'نوع التنظيف':'Cleaning type')+'</label><select id="ctkType" style="'+inp+'">'+typeOpts+'</select>'
@@ -39091,10 +39091,10 @@ function renderLearnCharts(){
   const autos = days.map(function(d){return d.auto_rate || 0});
   const vols  = days.map(function(d){return d.replies_total || 0});
   const escs  = days.map(function(d){return d.escalation_rate || 0});
-  document.getElementById('learnChartConf').innerHTML = _lineChartSvg(confs, '#6D58C2', '%');
-  document.getElementById('learnChartAuto').innerHTML = _lineChartSvg(autos, '#0E9E5F', '%');
-  document.getElementById('learnChartVol').innerHTML  = _barChartSvg(vols, '#A37728');
-  document.getElementById('learnChartEsc').innerHTML  = _lineChartSvg(escs, '#C44343', '%');
+  document.getElementById('learnChartConf').innerHTML = _lineChartSvg(confs, '#5E4B8B', '%');
+  document.getElementById('learnChartAuto').innerHTML = _lineChartSvg(autos, '#2E6A49', '%');
+  document.getElementById('learnChartVol').innerHTML  = _barChartSvg(vols, '#A57A2C');
+  document.getElementById('learnChartEsc').innerHTML  = _lineChartSvg(escs, '#A2462F', '%');
 }
 
 function renderLearnRecent(){

@@ -77,11 +77,12 @@ TEMPLATE = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>مركز الالتزام — عوجا للإقامة</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#F3EFE8;--panel:#FBF8F2;--ink:#26231F;--body:#3B3731;--muted:#8B8477;--gold:#B29A6A;--gold-deep:#8C7443;--gold-soft:#F0E8D8;
---maroon:#8B3748;--maroon-soft:#F5E4E6;--green:#3F7451;--green-soft:#E3EFE6;--amber:#B4802F;--amber-soft:#F7EBD6;--border:#E5DDCF;
---r:18px;--ease:cubic-bezier(.23,1,.32,1);--font:'IBM Plex Sans Arabic','Tajawal',system-ui,sans-serif;--num:'Inter',sans-serif}
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+:root{--bg:#F4EFE7;--panel:#FBF8F3;--ink:#1D1813;--body:#463C33;--muted:#6B5F52;--gold:#1D1813;--gold-deep:#463C33;--gold-soft:#EFE6D6;
+--maroon:#A2462F;--maroon-soft:#F6E2DA;--green:#2E6A49;--green-soft:#E0EADF;--amber:#8A5A12;--amber-soft:#F5E8C8;--border:#E8E1D5;
+--r:18px;--ease:cubic-bezier(.23,1,.32,1);--font:'Thmanyah Sans',system-ui,sans-serif;--num:'Inter',sans-serif}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--body);font-family:var(--font);font-size:16px;line-height:1.7}
@@ -114,7 +115,7 @@ section .lead{margin:0 0 16px;color:var(--muted);font-size:15px}
 .seg2{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:#fff}
 .seg2 button{border:0;background:transparent;font:inherit;font-weight:700;padding:6px 14px;cursor:pointer;color:var(--muted)}
 .seg2 button.on{background:var(--gold);color:#fff}
-.phone{margin:14px auto 0;max-width:390px;background:#FBF8F2;border:1px solid var(--border);border-radius:34px;padding:10px;box-shadow:0 20px 50px rgba(38,35,31,.14)}
+.phone{margin:14px auto 0;max-width:390px;background:#FBF8F3;border:1px solid var(--border);border-radius:34px;padding:10px;box-shadow:0 20px 50px rgba(38,35,31,.14)}
 .screen{background:var(--bg);border-radius:26px;overflow:hidden;height:640px;display:flex;flex-direction:column}
 .ptop{padding:14px 16px 10px;background:rgba(243,239,232,.96);border-bottom:1px solid var(--border)}
 .ptop b{display:block;font-size:15px;color:var(--ink)}
@@ -174,7 +175,7 @@ section .lead{margin:0 0 16px;color:var(--muted);font-size:15px}
 .quote tbody td{padding:8px 6px;border-bottom:1px solid #efe9da;text-align:center;color:#333}
 .quote tbody td.d{text-align:start;color:#1c1c1c}
 .quote tbody td.amt{font-weight:700;color:#b08d4f}
-.quote tbody tr.sep td{background:#faf7f0;color:#8c7443;font-weight:700;font-size:11.5px}
+.quote tbody tr.sep td{background:#faf7f0;color:#463C33;font-weight:700;font-size:11.5px}
 .quote .tot{display:flex;justify-content:flex-end;margin-top:12px}
 .quote .tbl{width:240px;font-size:12px}
 .quote .row{display:flex;justify-content:space-between;padding:5px 2px;color:#555;border-bottom:1px solid #f0ece0}

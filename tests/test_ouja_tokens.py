@@ -135,5 +135,73 @@ class PhoneMenu(unittest.TestCase):
         self.assertIn("كل الصفحات", STAFF)
 
 
+SIDE_PAGES = ["kb/page.py", "wifi/page.py", "watchdog/routes.py", "schedule/page.py", "ops/page.py",
+              "onboarding/page.py", "onboarding/emp_page.py", "mot/page.py", "mot/check_page.py",
+              "mot/center_page.py", "aqd/sign_page.py"]
+
+
+def _read(rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+        return fh.read()
+
+
+class EveryPage(unittest.TestCase):
+    """Stage 2: the pages around the dashboard — Finance login, contracts signing, the team calendar,
+    compliance, knowledge base, Wi-Fi, onboarding — wear the same paper, ink and type."""
+
+    def test_no_old_blue_or_tajawal_anywhere_the_team_looks(self):
+        for rel in SIDE_PAGES + ["finance/__init__.py", "finance/templates/erp.html", "pwa/manifest.webmanifest"]:
+            with self.subTest(page=rel):
+                s = _read(rel)
+                self.assertNotIn("Tajawal", s)
+                self.assertNotIn("#0A84FF", s.upper())
+                self.assertNotIn("#F5F5F7", s.upper())
+
+    def test_side_pages_load_thmanyah(self):
+        for rel in SIDE_PAGES + ["finance/__init__.py"]:
+            with self.subTest(page=rel):
+                self.assertIn("Thmanyah", _read(rel))
+
+    def test_side_pages_sit_on_the_same_paper(self):
+        for rel in SIDE_PAGES:
+            with self.subTest(page=rel):
+                self.assertIn("#F4EFE7", _read(rel).upper())
+
+    def test_installed_app_colour(self):
+        import json
+        m = json.loads(_read("pwa/manifest.webmanifest"))
+        self.assertEqual(m["theme_color"].upper(), "#F4EFE7")
+        self.assertEqual(m["background_color"].upper(), "#F4EFE7")
+
+    def test_finance_gate_is_ink_not_blue(self):
+        s = _read("finance/__init__.py")
+        i = s.index("_GATE_HTML = ")
+        gate = s[i:s.index('"""', s.index('"""', i) + 3)]
+        self.assertIn("background:#1D1813", gate)
+        self.assertIn("font-size:16px", gate)          # iOS zooms into inputs under 16px
+
+    def test_aliases_the_pricing_pages_use_are_defined(self):
+        # var(--down)/var(--up)/var(--muted) were used ~30 times but never defined: red warnings
+        # rendered in plain text colour. They must exist in :root.
+        for k in ("up", "down", "muted"):
+            with self.subTest(token=k):
+                self.assertIn(k, D)
+
+    def test_colours_that_get_an_alpha_suffix_stay_hex(self):
+        # the project tracker builds `c+'1a'` (hex + alpha); a var() there would be invalid CSS
+        i = DASH.index("{ar:'لم يبدأ'")
+        block = DASH[i:i + 600]
+        self.assertNotIn("var(", block)
+        self.assertIn("'#2E6A49'", block)
+
+    def test_svg_chart_colours_stay_hex(self):
+        # SVG presentation attributes (fill="", stroke="") do not resolve var()
+        for line in DASH.split("\n"):
+            if "_lineChartSvg(" in line or "_barChartSvg(" in line:
+                if "function " in line:
+                    continue
+                self.assertNotIn("var(--", line)
+
+
 if __name__ == "__main__":
     unittest.main()

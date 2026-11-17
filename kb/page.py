@@ -24,11 +24,11 @@ DEAD_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>عوجا · قاعدة المعرفة</title>
 <style>
-body{margin:0;background:#F5F5F7;color:#1D1D1F;font-family:'IBM Plex Sans Arabic','SF Arabic','Segoe UI',system-ui,sans-serif;
+body{margin:0;background:#F4EFE7;color:#1D1813;font-family:'Thmanyah Sans','SF Arabic','Segoe UI',system-ui,sans-serif;
  display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
-.box{background:#fff;border:1px solid #E8E8ED;border-radius:16px;padding:34px 30px;max-width:430px;text-align:center}
+.box{background:#fff;border:1px solid #E8E1D5;border-radius:16px;padding:34px 30px;max-width:430px;text-align:center}
 h1{font-size:19px;margin:0 0 10px}
-p{color:#86868B;font-size:14px;line-height:1.8;margin:0}
+p{color:#6F6255;font-size:14px;line-height:1.8;margin:0}
 </style></head><body>
 <div class="box">
   <h1>الرابط ما عاد يشتغل</h1>
@@ -43,19 +43,20 @@ HTML = """<!DOCTYPE html>
 <title>عوجا · قاعدة المعرفة</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
 :root{
-  --bg:#F5F5F7; --surface:#FFFFFF; --surface-2:#F1F1F4;
-  --line:#E8E8ED; --line-strong:#DEDEE3;
-  --text:#1D1D1F; --text-2:#424245; --text-3:#6E6E73; --mut:#86868B;
-  --accent:#0A84FF; --accent-soft:#E9F2FF; --accent-tint:rgba(10,132,255,0.10);
-  --green:#137333; --green-soft:#E7F5EC;
-  --red:#C5221F;   --red-soft:#FCEAE9;
-  --yellow:#9A6700; --yellow-soft:#FCF3DC;
+  --bg:#F4EFE7; --surface:#FFFFFF; --surface-2:#F1EBE1;
+  --line:#E8E1D5; --line-strong:#DCD2C3;
+  --text:#1D1813; --text-2:#463C33; --text-3:#6B5F52; --mut:#6F6255;
+  --accent:#1D1813; --accent-soft:#EFE6D6; --accent-tint:rgba(29,24,19,0.08);
+  --green:#2E6A49; --green-soft:#E0EADF;
+  --red:#A2462F;   --red-soft:#F6E2DA;
+  --yellow:#8A5A12; --yellow-soft:#F5E8C8;
   --r:14px; --r-sm:10px;
   --ease:cubic-bezier(0.22,0.61,0.36,1);
-  --f:'IBM Plex Sans Arabic','SF Arabic','Segoe UI',system-ui,-apple-system,sans-serif;
+  --f:'Thmanyah Sans','SF Arabic','Segoe UI',system-ui,-apple-system,sans-serif;
   --mono:'Inter','SF Mono','Menlo',monospace;
 }
 *{box-sizing:border-box}

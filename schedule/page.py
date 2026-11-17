@@ -17,13 +17,14 @@ SCHEDULE_PAGE_HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>تقويم موظفي عوجا</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#9C958A;
-    --gold:#B29A6A; --gold-soft:#F0E8D8; --maroon:#8B3748; --maroon-soft:#F3E2E4; --border:#E7DFD1;
+  @font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+:root{
+    --bg:#F4EFE7; --panel:#FBF8F3; --ink:#1D1813; --body:#463C33; --muted:#6B5F52;
+    --gold:#1D1813; --gold-soft:#EFE6D6; --maroon:#A2462F; --maroon-soft:#F6E2DA; --border:#E8E1D5;
     --r:16px; --r-sm:11px; --sh:0 1px 2px rgba(41,41,37,.04),0 10px 30px rgba(41,41,37,.07);
-    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Tajawal',-apple-system,system-ui,sans-serif;
+    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Thmanyah Sans',-apple-system,system-ui,sans-serif;
     --num:'Inter',sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -165,10 +166,10 @@ function renderToday(){
   for (var i=0;i<7;i++){ h += '<button class="day" data-wd="'+i+'" aria-selected="'+(i===sel)+'">'+DAYS[i]+'</button>'; }
   h += '</div><div class="grid">';
   DAY.working.slice().sort(function(a,b){return a.sort_order-b.sort_order;}).forEach(function(w){
-    h += '<div class="ecard" data-emp="'+w.id+'" style="--c:'+esc(w.color||'#B29A6A')+'"><div class="nm">'+enm(w)+'</div><div class="lo">'+w.load+'</div><div class="meta">أصلي '+w.own.length+(w.coverage.length?(' · تغطية '+w.coverage.length):'')+'</div></div>';
+    h += '<div class="ecard" data-emp="'+w.id+'" style="--c:'+esc(w.color||'#1D1813')+'"><div class="nm">'+enm(w)+'</div><div class="lo">'+w.load+'</div><div class="meta">أصلي '+w.own.length+(w.coverage.length?(' · تغطية '+w.coverage.length):'')+'</div></div>';
   });
   DAY.off.forEach(function(o){
-    h += '<div class="ecard offc" data-emp="'+o.id+'" style="--c:'+esc(o.color||'#8B3748')+'"><div class="nm">'+enm(o)+'</div><div class="tag">'+(o.reason==='leave'?'إجازة':'في إجازة اليوم')+'</div><div class="meta">'+o.apartments.length+' شقة يغطّيها الفريق</div></div>';
+    h += '<div class="ecard offc" data-emp="'+o.id+'" style="--c:'+esc(o.color||'#A2462F')+'"><div class="nm">'+enm(o)+'</div><div class="tag">'+(o.reason==='leave'?'إجازة':'في إجازة اليوم')+'</div><div class="meta">'+o.apartments.length+' شقة يغطّيها الفريق</div></div>';
   });
   h += '</div>';
   document.getElementById('root').innerHTML = h;

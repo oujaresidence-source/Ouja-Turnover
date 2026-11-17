@@ -161,19 +161,25 @@ def version_info():
 _GATE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>عوجا — المركز المالي</title>
-<style>body{margin:0;font-family:'Tajawal',-apple-system,system-ui,sans-serif;background:#F5F5F7;color:#1D1D1F;
-display:flex;align-items:center;justify-content:center;min-height:100vh}
-.c{background:#fff;border:1px solid #E8E8ED;border-radius:18px;padding:36px 40px;width:min(360px,calc(100vw - 48px));
-text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.06)}
-h1{font-size:19px;margin:0 0 6px}p{font-size:13.5px;color:#6E6E73;line-height:1.8;margin:0 0 18px}
+<meta name="theme-color" content="#F4EFE7">
+<style>@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+body{margin:0;font-family:'Thmanyah Sans',-apple-system,system-ui,sans-serif;background:#F4EFE7;color:#1D1813;
+display:flex;align-items:center;justify-content:center;min-height:100vh;-webkit-tap-highlight-color:transparent}
+.c{background:#FBF8F3;border:1px solid #E8E1D5;border-radius:18px;padding:36px 40px;width:min(360px,calc(100vw - 48px));
+text-align:center;box-shadow:0 2px 4px rgba(29,24,19,.05),0 8px 24px rgba(29,24,19,.07)}
+h1{font-family:'Thmanyah Serif','Thmanyah Sans',serif;font-weight:900;font-size:24px;margin:0 0 6px}
+p{font-size:14px;color:#6B5F52;line-height:1.8;margin:0 0 18px}
 input{display:block;width:100%;box-sizing:border-box;min-height:46px;margin:0 0 10px;padding:0 14px;
-font:inherit;font-size:15px;border:1px solid #DEDEE3;border-radius:11px;background:#fff;color:inherit}
-input:focus{outline:2px solid #0A84FF;outline-offset:1px;border-color:#0A84FF}
-button{width:100%;min-height:46px;border:none;border-radius:11px;background:#0A84FF;color:#fff;
-font:inherit;font-size:15px;font-weight:700;cursor:pointer}
-button:hover{background:#0060DF}button:disabled{opacity:.55;cursor:default}
-#err{display:none;font-size:13px;color:#C62828;background:#FDECEA;border-radius:9px;padding:9px 12px;margin:0 0 12px}</style></head>
-<body><div class="c"><h1>المركز المالي 🔒</h1>
+font:inherit;font-size:16px;border:1px solid #DCD2C3;border-radius:11px;background:#fff;color:inherit}
+input:focus{outline:2px solid #1D1813;outline-offset:1px;border-color:#1D1813}
+button{width:100%;min-height:46px;border:none;border-radius:11px;background:#1D1813;color:#F4EFE7;
+font:inherit;font-size:15px;font-weight:700;cursor:pointer;transition:transform .16s cubic-bezier(0.23,1,0.32,1)}
+button:active{transform:scale(.97)}
+@media (hover:hover){button:hover{background:#463C33}}button:disabled{opacity:.55;cursor:default}
+#err{display:none;font-size:13px;color:#A2462F;background:#F6E2DA;border-radius:9px;padding:9px 12px;margin:0 0 12px}</style></head>
+<body><div class="c"><h1>المركز المالي</h1>
 <p>سجّل دخولك بنفس حساب لوحة عوجا</p>
 <div id="err"></div>
 <form id="f" autocomplete="on">
@@ -942,10 +948,12 @@ async def _h_api_owners_link(request):
 
 _RECEIPT_NOTE_HTML = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
-<title>عوجا — الفاتورة</title><style>body{margin:0;font-family:'IBM Plex Sans Arabic','Tajawal',system-ui,sans-serif;
-background:#F7F1E6;color:#2F241B;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.c{background:#FFFDF8;border:1px solid #E5D8C4;border-radius:14px;padding:36px 40px;max-width:400px;text-align:center}
-h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#7A6A58;line-height:1.9;margin:0}</style></head>
+<title>عوجا — الفاتورة</title><style>@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}
+body{margin:0;font-family:'Thmanyah Sans',system-ui,sans-serif;
+background:#F4EFE7;color:#1D1813;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{background:#FBF8F3;border:1px solid #E8E1D5;border-radius:14px;padding:36px 40px;max-width:400px;text-align:center}
+h1{font-size:17px;margin:0 0 8px}p{font-size:13.5px;color:#6B5F52;line-height:1.9;margin:0}</style></head>
 <body><div class="c"><h1>__T__</h1><p>__P__</p></div></body></html>"""
 
 

@@ -3127,7 +3127,7 @@
       return '<div class="wq-sub" style="padding:1px 0"><code>' + esc(x.date || '') + '</code> · ' + fmtAmt(x.amount) + ' ' + esc(t('sar')) +
         (x.apartment ? ' · ' + esc(x.apartment) : '') + (x.submitter ? ' · ' + esc(x.submitter) : '') + '</div>';
     }).join('');
-    return '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,rgba(0,0,0,.08))">' +
+    return '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line,rgba(29,24,19,.08))">' +
       '<div style="font-weight:600;font-size:13px">' + esc(head) + '</div>' +
       '<div class="bb-row" style="gap:6px;flex-wrap:wrap;margin-top:6px">' + bits.join('') + '</div>' +
       prior + (samp ? '<div style="margin-top:6px">' + samp + '</div>' : '') + '</div>';
@@ -5028,7 +5028,7 @@
       /* per-month cleaning form */
       '<div class="om-form" data-form="clmonth" hidden>' +
         '<b>' + esc(t('om_clm_title')) + '</b><div class="grp-hint" style="padding:0">' + esc(t('om_clm_hint')) + '</div>' +
-        (clIsOwner ? '' : '<div class="wq-sub" style="color:var(--warn,#B88935)">' + esc(t('om_clm_needs_owner')) + '</div>') +
+        (clIsOwner ? '' : '<div class="wq-sub" style="color:var(--yellow)">' + esc(t('om_clm_needs_owner')) + '</div>') +
         (clOvChips ? ('<div class="wq-sub" style="margin:6px 0">' + clOvChips + '</div>') : '') +
         '<div class="om-grid">' +
         '<label>' + esc(t('om_clm_month')) + '<input type="month" class="in om-clm-month"></label>' +
@@ -5582,7 +5582,7 @@
         : '') +
       '</span></header>' +
       (nofee
-        ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
+        ? '<div class="grp-hint" style="padding-top:0;color:var(--red);font-weight:700">⚠️ ' +
           esc(t('o_nofee_on')) + '</div>'
         : '') +
       // internal only — the owner's own copy says nothing (his call), so this
@@ -5592,10 +5592,10 @@
         : '') +
       mmStrip(mm) +
       (d.published_stale && pub
-        ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' +
+        ? '<div class="grp-hint" style="padding-top:0;color:var(--red);font-weight:700">⚠️ ' +
           esc(t('se_pub_stale').replace('{v}', pub.version)) + '</div>'
         : '') +
-      (s.degraded ? '<div class="grp-hint" style="padding-top:0;color:var(--danger,#b4232a);font-weight:700">⚠️ ' + esc(t('se_degraded')) + '</div>' : '') +
+      (s.degraded ? '<div class="grp-hint" style="padding-top:0;color:var(--red);font-weight:700">⚠️ ' + esc(t('se_degraded')) + '</div>' : '') +
       (d.computed_at ? '<div class="grp-hint" style="padding-top:0">' + esc(t('se_asof')) + ': <code>' + esc(String(d.computed_at).slice(0, 16)) + '</code></div>' : '') +
       '<div class="wsnav" style="position:static;border:none;padding:4px 16px">' +
       '<a class="ws' + (seUI.tab === 'stmt' ? ' on' : '') + '" data-act="se-tab" data-tab="stmt">' + esc(t('se_tab_stmt')) + '</a>' +
@@ -5787,7 +5787,7 @@
           '<button class="btn ghost sm" data-act="dw-introspect">' + esc(t('dw_introspect')) + '</button>' +
           '<button class="btn primary sm" data-act="dw-write-test">' + esc(t('dw_write_test')) + '</button>' +
         '</div>' +
-        '<pre id="dwOut" style="white-space:pre-wrap;font-size:11.5px;background:rgba(0,0,0,.04);padding:10px;border-radius:8px;margin:10px 16px;overflow:auto;max-height:340px"></pre>' +
+        '<pre id="dwOut" style="white-space:pre-wrap;font-size:11.5px;background:rgba(29,24,19,.04);padding:10px;border-radius:8px;margin:10px 16px;overflow:auto;max-height:340px"></pre>' +
       '</section>';
     $('#view').innerHTML = html;
     loadSetupContracts();

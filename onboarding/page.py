@@ -22,14 +22,15 @@ ONBOARDING_PAGE_HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>ضم الوحدات · عوجا</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#9C958A;
-    --gold:#B29A6A; --gold-soft:#F0E8D8; --maroon:#8B3748; --maroon-soft:#F3E2E4; --border:#E7DFD1;
-    --green:#4A7C59; --green-soft:#E3EDE5;
+  @font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+:root{
+    --bg:#F4EFE7; --panel:#FBF8F3; --ink:#1D1813; --body:#463C33; --muted:#6B5F52;
+    --gold:#1D1813; --gold-soft:#EFE6D6; --maroon:#A2462F; --maroon-soft:#F6E2DA; --border:#E8E1D5;
+    --green:#2E6A49; --green-soft:#E0EADF;
     --r:16px; --r-sm:11px; --sh:0 1px 2px rgba(41,41,37,.04),0 10px 30px rgba(41,41,37,.07);
-    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Tajawal',-apple-system,system-ui,sans-serif;
+    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Thmanyah Sans',-apple-system,system-ui,sans-serif;
     --num:'Inter',sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -199,8 +200,8 @@ function toast(msg){
 }
 function ring(pct){
   var r = 18, c = 2*Math.PI*r, off = c*(1-(pct||0)/100);
-  return '<div class="ring"><svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none" stroke="#E7DFD1" stroke-width="4"></circle>'
-    + '<circle cx="22" cy="22" r="18" fill="none" stroke="#B29A6A" stroke-width="4" stroke-linecap="round" stroke-dasharray="'
+  return '<div class="ring"><svg width="44" height="44"><circle cx="22" cy="22" r="18" fill="none" stroke="#E8E1D5" stroke-width="4"></circle>'
+    + '<circle cx="22" cy="22" r="18" fill="none" stroke="#1D1813" stroke-width="4" stroke-linecap="round" stroke-dasharray="'
     + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"></circle></svg>'
     + '<div class="pv">' + (pct||0) + '</div></div>';
 }
@@ -208,7 +209,7 @@ function avatars(list){
   var h = '';
   for (var i=0;i<(list||[]).length;i++){
     var a = list[i], nm = String(a.employee_name||'?');
-    h += '<span class="av" style="background:' + (a.color||'#B29A6A') + '">' + esc(nm.charAt(0)) + '</span>';
+    h += '<span class="av" style="background:' + (a.color||'#1D1813') + '">' + esc(nm.charAt(0)) + '</span>';
   }
   return h;
 }
@@ -250,7 +251,7 @@ function renderList(filter){
         + '<div class="mt">' + esc(p.client_name||'') + (p.district?(' · ' + esc(p.district)):'') + '</div></div>'
         + ring(p.progress) + '</div>'
         + '<div class="row" style="margin-top:11px">' + pill
-        + '<span class="num" style="color:#9C958A;font-size:11.5px">' + esc(p.ref||'') + '</span></div>'
+        + '<span class="num" style="color:#6B5F52;font-size:11.5px">' + esc(p.ref||'') + '</span></div>'
         + '<div class="row" style="margin-top:9px"><span class="chip">' + esc(p.stage_label||'') + '</span>'
         + '<span>' + avatars(p.assignees) + '</span></div>'
         + '</div>';
@@ -490,7 +491,7 @@ function renderStages(){
     var open = S.openStages[st.id] ? ' open' : '';
     h += '<div class="stg' + open + '" data-stage="' + st.id + '"><div class="hd" data-toggle="' + st.id + '">'
       + '<span>' + esc(st.label) + '</span>'
-      + '<span class="num" style="color:#9C958A;font-size:13px">' + cnt.resolved + '/' + cnt.total + '</span></div><div class="bd">';
+      + '<span class="num" style="color:#6B5F52;font-size:13px">' + cnt.resolved + '/' + cnt.total + '</span></div><div class="bd">';
     var rows = tasks.filter(function(t){ return t.stage===st.id; });
     for (var i=0;i<rows.length;i++){
       var t = rows[i], res = t.resolution || 'open';

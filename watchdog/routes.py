@@ -122,15 +122,16 @@ WATCHDOG_PAGE_HTML = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>الرقيب — عوجا</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;800&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F1EDE6; --panel:#FAF7F1; --ink:#292925; --body:#33302B; --muted:#8F887C;
-    --gold:#B29A6A; --gold-soft:#F0E8D8; --red:#B93A3A; --red-soft:#F6E3E3;
-    --green:#3E7D4E; --green-soft:#E4EFE7; --amber:#A8762A; --amber-soft:#F5EBDA;
-    --border:#E7DFD1; --r:18px; --r-sm:12px;
+  @font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Sans";font-weight:600 800;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+:root{
+    --bg:#F4EFE7; --panel:#FBF8F3; --ink:#1D1813; --body:#463C33; --muted:#6B5F52;
+    --gold:#1D1813; --gold-soft:#EFE6D6; --red:#A2462F; --red-soft:#F6E2DA;
+    --green:#2E6A49; --green-soft:#E0EADF; --amber:#8A5A12; --amber-soft:#F5E8C8;
+    --border:#E8E1D5; --r:18px; --r-sm:12px;
     --sh:0 1px 2px rgba(41,41,37,.05),0 12px 32px rgba(41,41,37,.08);
-    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Tajawal',-apple-system,system-ui,sans-serif;
+    --ease:cubic-bezier(0.23,1,0.32,1); --font:'Thmanyah Sans',-apple-system,system-ui,sans-serif;
     --num:'Inter',sans-serif;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -197,7 +198,7 @@ WATCHDOG_PAGE_HTML = """<!doctype html>
   .rowline .nm{font-size:14px;font-weight:600;min-width:0;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap}
   .toast{position:fixed;bottom:18px;right:50%;transform:translateX(50%);background:var(--ink);
-    color:#FAF7F1;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;
+    color:#FBF8F3;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;
     pointer-events:none;transition:opacity .25s var(--ease);z-index:99}
   .toast.show{opacity:1}
   details.settings{margin-top:26px}
