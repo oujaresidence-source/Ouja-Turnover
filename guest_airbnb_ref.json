@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "fetched": "2026-11-17",
  "source": "public Airbnb listing pages (read only) + map pins",
  "units": {
@@ -1339,6 +1339,21 @@
   "592599": {
    "neighborhood": "al_nuzha",
    "why": "Airbnb: Al-Nuzha"
+  },
+  "462594": {
+   "bedrooms": 3,
+   "v": 2,
+   "why": "owner 2026-11-17: Dyar 20 is 3 bedrooms"
+  },
+  "417977": {
+   "visible": false,
+   "v": 2,
+   "why": "owner 2026-11-17: Airbnb link is dead (404) - hide from the site"
+  },
+  "535907": {
+   "visible": false,
+   "v": 2,
+   "why": "owner 2026-11-17: Airbnb link is dead (404) - hide from the site"
   }
  }
 }

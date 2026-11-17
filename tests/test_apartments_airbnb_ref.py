@@ -131,6 +131,29 @@ class CorrectionsApplyOnce(unittest.TestCase):
             self.assertEqual(bot._gw_apply_ref_corrections(), 0)
             self.assertEqual(ovs["5"]["neighborhood"], "al_malqa")
 
+    def test_a_new_batch_only_applies_its_own_fixes(self):
+        ref = {"version": 2, "corrections": {
+            "5": {"neighborhood": "al_rabi", "v": 1},
+            "6": {"visible": False, "v": 2},
+            "7": {"bedrooms": 3, "v": 2}}}
+        ovs = {"5": {"neighborhood": "al_malqa", "ref_v": 1},      # v1 applied, then edited by the owner
+               "7": {"neighborhood": "al_qirawan"}}
+        with mock.patch.object(bot, "_gw_ab_ref_cache", {"data": ref}), \
+             mock.patch.object(bot, "_gw_overrides", ovs), \
+             mock.patch.object(bot, "_gw_save_ov", lambda: None):
+            self.assertEqual(bot._gw_apply_ref_corrections(), 2)
+        self.assertEqual(ovs["5"]["neighborhood"], "al_malqa", "v1 fix not re-applied over the owner's edit")
+        self.assertIs(ovs["6"]["visible"], False)
+        self.assertEqual(ovs["7"]["bedrooms"], 3)
+        self.assertEqual(ovs["7"]["neighborhood"], "al_qirawan")
+
+    def test_owner_decisions_are_in_the_shipped_reference(self):
+        bot._gw_ab_ref_cache["data"] = None
+        c = bot._gw_ab_ref()["corrections"]
+        self.assertEqual(c["462594"]["bedrooms"], 3)          # Dyar 20
+        self.assertIs(c["417977"]["visible"], False)          # dead Airbnb link
+        self.assertIs(c["535907"]["visible"], False)          # dead Airbnb link
+
     def test_shipped_reference_names_only_known_neighbourhoods(self):
         keys = {k for k, _ar, _en in bot.RIYADH_NEIGHBORHOODS}
         bot._gw_ab_ref_cache["data"] = None

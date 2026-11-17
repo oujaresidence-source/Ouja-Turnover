@@ -60904,13 +60904,16 @@ def _gw_apply_ref_corrections():
     changed = 0
     for lid, c in (ref.get("corrections") or {}).items():
         ov = _gw_overrides.get(str(lid), {}) or {}
-        if int(ov.get("ref_v") or 0) >= ver:
+        cv = int(c.get("v") or 1)            # the reference version that introduced THIS fix
+        if int(ov.get("ref_v") or 0) >= cv:
             continue
         if c.get("neighborhood"):
             ov["neighborhood"] = c["neighborhood"]
         if c.get("bedrooms") is not None:
             ov["bedrooms"] = int(c["bedrooms"])
-        ov["ref_v"] = ver
+        if c.get("visible") is not None:
+            ov["visible"] = bool(c["visible"])
+        ov["ref_v"] = cv
         _gw_overrides[str(lid)] = ov
         changed += 1
     if changed:
