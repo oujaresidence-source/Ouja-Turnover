@@ -62053,7 +62053,7 @@ body.unitpage .foot{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 .lb-x{width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer}
 .lb-strip{flex:1;overflow-y:auto;padding:0 var(--pad) calc(24px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr;gap:10px;align-content:start}
 @media(min-width:760px){.lb-strip{grid-template-columns:1fr 1fr;max-width:1200px;margin:0 auto;width:100%}}
-.lb-strip img{width:100%;border-radius:12px;background:var(--night2)}
+.lb-strip img{display:block;width:100%;height:auto;border-radius:12px;background:var(--night2)}
 
 /* amenities as tiles: the few that make the stay, then the full list on demand */
 .am-tiles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
@@ -63711,7 +63711,7 @@ a{color:inherit;text-decoration:none}
 .lb{position:fixed;inset:0;z-index:90;background:rgba(15,22,30,.95);display:flex;flex-direction:column;animation:fade .25s var(--ease)}
 .lb-x{position:absolute;top:calc(14px + env(safe-area-inset-top));inset-inline-end:16px;z-index:2;width:44px;height:44px;border:0;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:17px;cursor:pointer;backdrop-filter:blur(6px)}
 .lb-strip{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding:66px 16px calc(22px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
-.lb-strip img{width:100%;border-radius:10px;background:#243039}
+.lb-strip img{display:block;flex:none;width:100%;height:auto;border-radius:10px;background:#243039}
 .l-eyebrow{margin-top:6px}
 .l-title{font-family:"Reem Kufi",serif;font-size:27px;font-weight:500;color:var(--ink);line-height:1.3;margin:2px 0 6px;text-wrap:balance}
 .l-area{font-size:14px;color:var(--mut);font-family:"Cormorant Garamond",serif;letter-spacing:.04em;text-transform:uppercase;font-weight:600;margin-bottom:10px}
