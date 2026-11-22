@@ -690,9 +690,13 @@ Three design skills live in `.claude/skills/` and MUST be applied to any UI work
 - **superpowers** (methodology only — NOT installed as a plugin; can't self-install the
   marketplace plugin from inside a session): plan → build → verify, evidence over claims,
   simplicity, no skipping.
-The locked design system already lives in `DASHBOARD_HTML`'s `:root` (tinted warm neutrals +
-gold accent scale, IBM Plex Sans Arabic / Inter / JetBrains Mono). Reuse those tokens; don't
-invent per-view colors.
+**THE design reference is «لوك عوجا» — `docs/brand/OUJA_LOOK.md`** (owner decision 2026-11-22:
+oujares.com/apartments is the model for EVERYTHING — pages, dashboard, PDFs, Word, studies, decks,
+charts, 2D drawings). Read it before any design work; the `ouja-look` skill (`~/.claude/skills/`)
+loads the same rules. Values come ONLY from `docs/brand/ouja-tokens.css` / `.json` (paper
+#F4EFE7, ink #1D1813, gold #A57A2C for marks only, Thmanyah Serif + Thmanyah Sans). PDFs:
+`docs/brand/templates/report-a4.html` + `build_pdf.py`; Word: `ouja-word-template.docx`. The old
+IBM Plex / Inter / Almarai stacks are retired — don't reintroduce them; don't invent per-view colors.
 
 ## RR Desk «طلبات سام» — `rrdesk/`
 Every message in an open RR room (and its threads, and non-ticket RR-family rooms like

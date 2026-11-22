@@ -96,6 +96,26 @@ def _bench_value(overlay_bench, key):
     return entry.get("value", "")
 
 
+def _score(value):
+    """A category score, or "" when the nightly snapshot has none — never the
+    word "None" on a page a prospect reads (it showed on «تسجيل الدخول»,
+    2026-11-22). The empty tile is then removed by _drop_empty_scores."""
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return ""
+    return _fmt("rating_avg", value)
+
+
+_EMPTY_SCORE_RE = re.compile(
+    r'\s*<div class="score"><div class="v num"></div><div class="k">[^<]*</div>'
+    r'<div class="bar"><i[^>]*></i></div></div>')
+
+
+def _drop_empty_scores(markup):
+    return _EMPTY_SCORE_RE.sub("", markup)
+
+
 def _pct_width(value, top, scale=100.0):
     try:
         w = float(value) / float(top) * float(scale)
@@ -222,8 +242,8 @@ def build_head_extra(base):
         '<link rel="canonical" href="/cp/ar">',
         '<link rel="icon" href="/cp/icon.png" type="image/png" sizes="64x64">',
         '<link rel="apple-touch-icon" href="/cp/icon-192.png">',
-        '<link rel="preload" href="/cp/font/ThmanyahDisplay-500.woff2" as="font" type="font/woff2" crossorigin>',
-        '<link rel="preload" href="/cp/font/Almarai-400.woff2" as="font" type="font/woff2" crossorigin>',
+        '<link rel="preload" href="/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2" as="font" type="font/woff2" crossorigin>',
+        '<link rel="preload" href="/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2" as="font" type="font/woff2" crossorigin>',
         "__FONT_FACES__",
     ]
     if b:
@@ -366,12 +386,12 @@ def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
         "__REPEAT_GUESTS__": f("repeat_guests"), "__REPEAT_PCT__": f("repeat_booking_pct"),
         "__TOP_GUEST__": f("top_guest_stays"),
         "__SOLO__": f("solo_guest_pct"), "__COUPLE__": f("couple_guest_pct"),
-        "__CAT_COMM__": _fmt("rating_avg", cat.get("communication")),
-        "__CAT_CHECKIN__": _fmt("rating_avg", cat.get("check_in")),
-        "__CAT_ACCURACY__": _fmt("rating_avg", cat.get("accuracy")),
-        "__CAT_LOCATION__": _fmt("rating_avg", cat.get("location")),
-        "__CAT_CLEAN__": _fmt("rating_avg", cat.get("cleanliness")),
-        "__CAT_VALUE__": _fmt("rating_avg", cat.get("value")),
+        "__CAT_COMM__": _score(cat.get("communication")),
+        "__CAT_CHECKIN__": _score(cat.get("check_in")),
+        "__CAT_ACCURACY__": _score(cat.get("accuracy")),
+        "__CAT_LOCATION__": _score(cat.get("location")),
+        "__CAT_CLEAN__": _score(cat.get("cleanliness")),
+        "__CAT_VALUE__": _score(cat.get("value")),
         "__RESPONSE__": f("median_response_minutes"),
         "__PER_PERSON__": f("residences_per_person_per_day"),
         "__LOC__": f("platform_lines_of_code"), "__MESSAGES__": f("messages_total"),
@@ -421,6 +441,7 @@ def render_v2(sections=None, snapshot=None, base="", photos=None, reviews=None,
         out = out.replace(token, str(value))
 
     out = _apply_modes(out, contacts)
+    out = _drop_empty_scores(out)
 
     # copy overrides: default string -> override, only when the overlay says so
     for key, override in copy_overrides.items():

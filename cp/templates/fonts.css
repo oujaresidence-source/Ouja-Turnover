@@ -1,13 +1,9 @@
-/* Self-hosted, subset. Headings: Thmanyah Serif Display — the family's display
-   cut, drawn for large sizes, which is what every var(--serif) usage here is.
-   Body stays Almarai (OFL) because long Arabic paragraphs read better in a
-   text face than a display one. size-adjust on the fallbacks keeps the swap
-   from reflowing the hero. */
-@font-face{font-family:"Thmanyah Display";font-weight:400;font-style:normal;font-display:swap;src:url("/cp/font/ThmanyahDisplay-400.woff2") format("woff2")}
-@font-face{font-family:"Thmanyah Display";font-weight:500 600;font-style:normal;font-display:swap;src:url("/cp/font/ThmanyahDisplay-500.woff2") format("woff2")}
-@font-face{font-family:"Thmanyah Display";font-weight:700 900;font-style:normal;font-display:swap;src:url("/cp/font/ThmanyahDisplay-700.woff2") format("woff2")}
-@font-face{font-family:"Almarai";font-weight:300;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-300.woff2") format("woff2")}
-@font-face{font-family:"Almarai";font-weight:400;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-400.woff2") format("woff2")}
-@font-face{font-family:"Almarai";font-weight:700;font-style:normal;font-display:swap;src:url("/cp/font/Almarai-700.woff2") format("woff2")}
-@font-face{font-family:"Display Fallback";src:local("Geeza Pro"),local("Times New Roman");size-adjust:104%}
-@font-face{font-family:"Almarai Fallback";src:local("Tahoma"),local("Arial");size-adjust:102%}
+/* «لوك عوجا» (docs/brand/OUJA_LOOK.md): the same two faces as /apartments, from the same files.
+   Thmanyah Serif Display (700, 900) for display moments — headings, big figures, the logo.
+   Thmanyah Sans (400, 500, 700) for everything that is read.
+   */
+@font-face{font-family:"Thmanyah Serif";font-weight:700;font-style:normal;font-display:swap;src:url("/monthly/static/fonts/thmanyah-serif-display-bold.v20260827a.woff2") format("woff2")}
+@font-face{font-family:"Thmanyah Serif";font-weight:900;font-style:normal;font-display:swap;src:url("/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2") format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-style:normal;font-display:swap;src:url("/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2") format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:500;font-style:normal;font-display:swap;src:url("/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2") format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:700;font-style:normal;font-display:swap;src:url("/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2") format("woff2")}

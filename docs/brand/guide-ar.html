@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>لوك عوجا — الدليل البصري</title>
+<!-- The visual guide for the owner and the team, built ON the A4 template it describes.
+     Build: python3 docs/brand/templates/build_pdf.py docs/brand/guide-ar.html out.pdf -->
+<style>
+@page{size:A4;margin:20mm 18mm 18mm 18mm;
+  @bottom-left{content:counter(page);font-family:"Thmanyah Sans";font-size:8.5pt;color:#6B5F52}
+  @bottom-right{content:"لوك عوجا · OUJA LOOK";font-family:"Thmanyah Sans";font-size:8pt;color:#6B5F52}}
+@page cover{margin:0;@bottom-left{content:none}@bottom-right{content:none}}
+@page opener{margin:0;@bottom-left{content:none}@bottom-right{content:none}}
+:root{--paper:#F4EFE7;--paper2:#ECE5D9;--card:#FBF8F3;--ink:#1D1813;--ink2:#463C33;--mut:#6B5F52;--line:#DCD2C3;--line2:#E8E1D5;--gold:#A57A2C;--gold-soft:#EBDDC2;--night:#15110D;--night2:#231C16;--ok:#2E6A49;--warn:#8A4B2A;
+  --f-d:"Thmanyah Serif","Thmanyah Sans",Georgia,serif;--f-t:"Thmanyah Sans",system-ui,sans-serif}
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;font-family:var(--f-t);font-size:10.5pt;line-height:1.75;color:var(--ink);background:#fff}
+h1,h2{font-family:var(--f-d);font-weight:700;margin:0;text-wrap:balance}
+h1{font-size:26pt;line-height:1.2;margin-bottom:4mm}
+h2{font-size:17pt;line-height:1.25;margin:8mm 0 3mm;break-after:avoid}
+h3{font-size:12pt;font-weight:700;line-height:1.4;margin:5mm 0 1.5mm;break-after:avoid}
+p{margin:0 0 3mm;color:var(--ink2);max-width:160mm}
+.num,.ltr{font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+.ltr{direction:ltr;display:inline-block}
+.eyebrow{display:flex;align-items:center;gap:3mm;font-size:9pt;font-weight:500;color:var(--mut);margin:0 0 3mm}
+.eyebrow:before{content:"";width:6mm;height:.6mm;background:var(--gold)}
+.lede{font-size:12.5pt;line-height:1.7;color:var(--ink2);max-width:150mm}
+.pg{break-before:page}
+.cover{page:cover;height:297mm;padding:26mm 22mm;background:var(--paper);display:flex;flex-direction:column;break-after:page}
+.brand{display:flex;align-items:baseline;gap:3mm}
+.brand .ar{font-family:var(--f-d);font-weight:900;font-size:22pt;line-height:1}
+.brand .en{font-size:7pt;font-weight:700;letter-spacing:.22em;color:var(--mut)}
+.cover .t{margin-top:auto}
+.cover h1{font-size:54pt;font-weight:900;line-height:1.1;margin:0}
+.cover .sub{font-size:14pt;color:var(--ink2);margin-top:6mm;max-width:125mm}
+.cover .meta{display:flex;gap:10mm;margin-top:16mm;padding-top:5mm;border-top:.3mm solid var(--line);font-size:9pt;color:var(--mut)}
+.cover .meta b{display:block;color:var(--ink);font-weight:700;font-size:10pt}
+.opener{page:opener;height:297mm;padding:26mm 22mm;background:var(--night);color:var(--paper);display:flex;flex-direction:column;justify-content:flex-end;break-before:page;break-after:page}
+.opener .n{font-family:var(--f-d);font-weight:900;font-size:64pt;line-height:1;color:var(--gold)}
+.opener h1{font-size:34pt;margin:6mm 0 0;max-width:13ch}
+.opener p{color:rgba(244,239,231,.78);margin-top:5mm;font-size:12pt}
+/* ten reasons */
+.ten{list-style:none;margin:2mm 0 0;padding:0;counter-reset:t;border-top:.3mm solid var(--line)}
+.ten li{counter-increment:t;display:grid;grid-template-columns:11mm 1fr;gap:3mm;padding:3.2mm 0;border-bottom:.3mm solid var(--line);break-inside:avoid}
+.ten li:before{content:counter(t,arabic-indic);font-family:var(--f-d);font-weight:900;font-size:17pt;line-height:1.05;color:var(--gold)}
+.ten b{display:block;font-size:11pt}
+.ten span{color:var(--ink2);font-size:9.5pt}
+/* swatches */
+.sw{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin:3mm 0 6mm}
+.sw div{border-radius:3mm;overflow:hidden;box-shadow:0 0 0 .3mm var(--line);break-inside:avoid}
+.sw i{display:block;height:20mm}
+.sw p{margin:0;padding:2mm 3mm 2.5mm;font-size:8.5pt;line-height:1.45;color:var(--ink2);background:#fff}
+.sw p b{display:block;color:var(--ink);font-size:9.5pt}
+.sw p em{font-style:normal;direction:ltr;display:inline-block;color:var(--mut)}
+.bar{display:flex;height:9mm;border-radius:2mm;overflow:hidden;margin:2mm 0 1mm;box-shadow:0 0 0 .3mm var(--line)}
+.small{font-size:8.5pt;color:var(--mut)}
+/* type specimen */
+.spec{border-top:.3mm solid var(--line)}
+.spec div{display:grid;grid-template-columns:36mm 1fr;gap:4mm;align-items:baseline;padding:3mm 0;border-bottom:.3mm solid var(--line2);break-inside:avoid}
+.spec small{font-size:8pt;color:var(--mut);line-height:1.4}
+.spec small b{display:block;color:var(--ink);font-size:9pt}
+/* components */
+.row{display:flex;flex-wrap:wrap;gap:3mm;align-items:center;margin:2mm 0 5mm}
+.btn{display:inline-flex;align-items:center;height:11mm;padding:0 6mm;border-radius:99mm;background:var(--ink);color:var(--paper);font-weight:700;font-size:10.5pt}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 .4mm var(--ink)}
+.btn.no{background:#C79A45;color:#fff;position:relative}
+.chip{display:inline-flex;align-items:center;height:8.5mm;padding:0 4mm;border-radius:99mm;background:var(--card);box-shadow:inset 0 0 0 .3mm var(--line);font-size:9.5pt;font-weight:500}
+.chip.on{background:var(--ink);color:var(--paper);box-shadow:none}
+.link{font-weight:700;text-decoration:underline;text-decoration-color:var(--gold);text-underline-offset:1.3mm;text-decoration-thickness:.4mm}
+.x{color:var(--warn);font-weight:700;font-size:9pt}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:5mm;margin:3mm 0 5mm}
+.pc .ph{aspect-ratio:4/3;border-radius:4mm;background:linear-gradient(160deg,#cdbfa9,#8d7b66);position:relative}
+.pc .ph .tag{position:absolute;top:2.5mm;right:2.5mm;height:6mm;padding:0 2.5mm;border-radius:9mm;background:rgba(251,248,243,.94);font-size:7.5pt;font-weight:700;display:flex;align-items:center}
+.pc .m{display:flex;justify-content:space-between;font-size:8pt;color:var(--mut);margin-top:2.5mm}
+.pc .m b{color:var(--ink)}.pc .m b:before{content:"★ ";color:var(--gold)}
+.pc h4{margin:1mm 0 0;font-size:10pt;line-height:1.4}
+.pc .pr{font-size:8.5pt;color:var(--ink2)}.pc .pr b{color:var(--ink);font-size:9.5pt}
+.boxed{border-radius:3mm;box-shadow:0 0 0 .3mm var(--line);padding:3mm;background:var(--card)}
+.boxed .boxed{margin-top:2mm}
+.dodont{display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin:3mm 0 5mm}
+.dodont h3{margin-top:0}
+.dodont .no h3{color:var(--warn)}
+/* tables */
+table{width:100%;border-collapse:collapse;margin:3mm 0 6mm;font-size:9pt}
+th{text-align:start;font-weight:700;font-size:8.5pt;color:var(--mut);padding:2mm;border-bottom:.4mm solid var(--ink)}
+td{padding:2.2mm 2mm;border-bottom:.25mm solid var(--line2);color:var(--ink2);vertical-align:top}
+td:first-child{color:var(--ink);font-weight:700;white-space:nowrap}
+.callout{background:var(--paper);border-radius:3mm;padding:4.5mm 6mm;margin:4mm 0;break-inside:avoid}
+.callout b{display:block;font-size:11pt;margin-bottom:1mm}
+.check{list-style:none;padding:0;margin:2mm 0;columns:2;column-gap:8mm}
+.check li{padding:1.6mm 0 1.6mm 0;border-bottom:.25mm solid var(--line2);break-inside:avoid;font-size:9.5pt;display:flex;gap:2.5mm}
+.check li:before{content:"";flex:none;width:3.2mm;height:3.2mm;margin-top:1.3mm;border-radius:.8mm;box-shadow:inset 0 0 0 .35mm var(--ink)}
+.end{page:opener;height:297mm;padding:26mm 22mm;background:var(--night);color:var(--paper);display:flex;flex-direction:column;justify-content:space-between;break-before:page}
+.end .brand .en{color:rgba(244,239,231,.6)}
+.end p{color:rgba(244,239,231,.78)}
+.end h1{font-size:30pt;max-width:14ch}
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="brand"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE</span></div>
+  <div class="t">
+    <p class="eyebrow">الدليل البصري</p>
+    <h1>لوك عوجا</h1>
+    <p class="sub">كل شيء نسويه يمشي على نفس خطوط موقع oujares.com/apartments: الصفحات والملفات والدراسات والعروض والرسومات.</p>
+    <div class="meta"><div>التاريخ<b class="num">22 نوفمبر 2026</b></div><div>المرجع<b class="ltr">oujares.com/apartments</b></div><div>النسخة<b class="num">1.0</b></div></div>
+  </div>
+</section>
+
+<main>
+  <p class="eyebrow">ليش الموقع حلو</p>
+  <h1>عشر أسباب، وكل قاعدة بعدها تطلع منها.</h1>
+  <p class="lede">إذا جا شيء جديد ما له قاعدة مكتوبة، ارجع لهالعشر وقرّر منها.</p>
+  <ol class="ten">
+    <li><div><b>عالم واحد، مو مجموعة ألوان</b><span>حجر الرياض بالنهار، وحبر الليل النجدي، وخيط ذهبي. كل لون له شغلة، وما فيه لون للزينة.</span></div></li>
+    <li><div><b>الذهبي علامة، مو خلفية</b><span>للنجوم واليوم المختار وأرقام الخطوات والخط تحت الرابط. الكتابة البيضاء على الذهبي ما تنقرى، فالأزرار حبر.</span></div></li>
+    <li><div><b>خطّين وكل واحد له شغلة</b><span>«ثمانية سيرف» للحظات الكبيرة: العنوان والأرقام والشعار. «ثمانية سانس» لكل شيء ينقرى. ما تنكتب فقرة بالسيرف أبد.</span></div></li>
+    <li><div><b>الترتيب يجي من الحجم</b><span>العنوان الرئيسي ست أضعاف النص. تقدر تفهم الصفحة من عناوينها بس.</span></div></li>
+    <li><div><b>الصورة هي الكرت</b><span>الشقق ما لها إطار ولا ظل ولا صندوق. صورة مدوّرة وتحتها الكلام. الصناديق للأشياء اللي تنضغط بس.</span></div></li>
+    <li><div><b>خطوط رفيعة بدل الصناديق</b><span>القوائم والخطوات تنفصل بخط رفيع، وما فيه صندوق داخل صندوق أبد.</span></div></li>
+    <li><div><b>الصفحة تتنفس</b><span>من 64 إلى 128 بكسل بين كل قسم، وعرض أقصى 1240. عشان كذا اللحظة الكبيرة تطلع كبيرة.</span></div></li>
+    <li><div><b>لحظة كتابة وحدة بكل صفحة</b><span>بالرئيسية هي قائمة الأحياء بخط ضخم. كل صفحة لها لحظة وحدة، مو أكثر.</span></div></li>
+    <li><div><b>الإصبع أول</b><span>الأزرار مدوّرة وطولها 52 بكسل، وما تقل عن 44. على الجوال القوائم تطلع من تحت.</span></div></li>
+    <li><div><b>حركة تحسها وما تشوفها</b><span>منحنى حركة واحد، الزر يصغر شوي إذا انضغط، وكل حركة أقل من ثلث ثانية.</span></div></li>
+  </ol>
+  <p style="margin-top:4mm">وفوقها: <b>كلام صادق</b>، يعني جُمل نجدية قصيرة، وتقييمات حقيقية بالاسم الأول، وبدون أعداد شقق ولا «فخامة». و<b>نهاية غامقة</b> تقفل الصفحة مثل ما الصورة الغامقة تفتحها.</p>
+
+  <h2 class="pg">الألوان</h2>
+  <p>تقريباً 80% ورق، و15% حبر، و5% ذهبي والباقي. إذا الصفحة شكلها ذهبي، فالذهبي زايد.</p>
+  <div class="bar"><i style="flex:80;background:var(--paper)"></i><i style="flex:15;background:var(--ink)"></i><i style="flex:5;background:var(--gold)"></i></div>
+  <p class="small">النسبة التقريبية في أي صفحة أو ملف</p>
+  <div class="sw">
+    <div><i style="background:#F4EFE7"></i><p><b>الورق</b><em>#F4EFE7</em><br>أرضية كل صفحة</p></div>
+    <div><i style="background:#ECE5D9"></i><p><b>الورق ٢</b><em>#ECE5D9</em><br>تعبئة هادية وأماكن الصور</p></div>
+    <div><i style="background:#FBF8F3"></i><p><b>الكرت</b><em>#FBF8F3</em><br>الأسطح المرفوعة، مو أبيض صافي</p></div>
+    <div><i style="background:#EBDDC2"></i><p><b>ذهبي فاتح</b><em>#EBDDC2</em><br>المدة المختارة والتنبيهات</p></div>
+    <div><i style="background:#1D1813"></i><p><b>الحبر</b><em>#1D1813</em><br>النص والأزرار والمختار</p></div>
+    <div><i style="background:#463C33"></i><p><b>حبر ٢</b><em>#463C33</em><br>نص الفقرات</p></div>
+    <div><i style="background:#6B5F52"></i><p><b>الهادي</b><em>#6B5F52</em><br>التفاصيل الصغيرة والتواريخ</p></div>
+    <div><i style="background:#A57A2C"></i><p><b>الذهبي</b><em>#A57A2C</em><br>علامات بس: نجوم، أرقام، خط</p></div>
+    <div><i style="background:#15110D"></i><p><b>الليل</b><em>#15110D</em><br>الفوتر والأقسام الغامقة</p></div>
+    <div><i style="background:#DCD2C3"></i><p><b>الخط</b><em>#DCD2C3</em><br>الخطوط الرفيعة والحدود</p></div>
+    <div><i style="background:#2E6A49"></i><p><b>الأخضر</b><em>#2E6A49</em><br>مرخّص، متاح، تم</p></div>
+    <div><i style="background:#8A4B2A"></i><p><b>البني المحمر</b><em>#8A4B2A</em><br>التنبيه والخطأ</p></div>
+  </div>
+  <div class="callout"><b>قاعدتين ما تنكسر</b>الذهبي ما يصير كتابة صغيرة على خلفية فاتحة (يطلع 3.4 من 4.5 المطلوبة)، يعني بس علامات وأرقام كبيرة. واللون «الهادي» ما ينحط على الليل.</div>
+
+  <h2 class="pg">الخطوط والأحجام</h2>
+  <p>خطّين بس، من «ثمانية». ما فيه تباعد بين الحروف العربية أبد لأنه يقطع وصلها. والأرقام إنجليزية (21,000) مثل الأوراق الرسمية.</p>
+  <div class="spec">
+    <div><small><b>العنوان الكبير</b>سيرف 900 · 44–100 بكسل</small><span style="font-family:var(--f-d);font-weight:900;font-size:40pt;line-height:1.1">شقق مفروشة</span></div>
+    <div><small><b>عنوان القسم</b>سيرف 700 · 30–54 بكسل</small><span style="font-family:var(--f-d);font-weight:700;font-size:24pt;line-height:1.2">على قد حاجتك</span></div>
+    <div><small><b>رقم كبير</b>سيرف 700 · أرقام متساوية</small><span class="num" style="font-family:var(--f-d);font-weight:700;font-size:24pt;line-height:1">76.9%</span></div>
+    <div><small><b>عنوان صغير</b>سانس 700 · 18–22 بكسل</small><span style="font-weight:700;font-size:13pt">ثلاث غرف واسعة ودخول ذاتي</span></div>
+    <div><small><b>المقدمة</b>سانس 400 · 17–21 بكسل</small><span style="font-size:12pt;color:var(--ink2)">دخول ذاتي بدون انتظار. اختار شقتك هنا واحجزها داخل Airbnb.</span></div>
+    <div><small><b>النص</b>سانس 400 · 16 بكسل · سطر 1.7</small><span style="font-size:10.5pt;color:var(--ink2)">النص العادي اللي ينقرى. ما يزيد السطر عن 68 حرف تقريباً.</span></div>
+    <div><small><b>التفاصيل</b>سانس 500 · 13–15 بكسل</small><span style="font-size:9pt;color:var(--mut)">قرطبة · 3 غرف · 6 ضيوف</span></div>
+    <div><small><b>عنوان لاتيني</b>سانس 700 · متباعد</small><span style="font-size:7.5pt;font-weight:700;letter-spacing:.22em;color:var(--mut)">OUJA RESIDENCE</span></div>
+  </div>
+  <table>
+    <thead><tr><th>للطباعة (A4)</th><th>الحجم</th></tr></thead>
+    <tbody>
+      <tr><td>الغلاف</td><td>40 نقطة، سيرف 900</td></tr>
+      <tr><td>عنوان صفحة</td><td>26 نقطة، سيرف 700</td></tr>
+      <tr><td>عنوان قسم</td><td>18 نقطة، سيرف 700</td></tr>
+      <tr><td>عنوان صغير</td><td>12.5 نقطة، سانس 700</td></tr>
+      <tr><td>النص</td><td>10.5 نقطة، سانس 400، سطر 1.75</td></tr>
+      <tr><td>التفاصيل والمصادر</td><td>8.5 نقطة، سانس، باللون الهادي</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="pg">الأشكال والقطع</h2>
+  <h3>الأزرار</h3>
+  <div class="row"><span class="btn">احجز الشقة</span><span class="btn ghost">السوق مقابل عوجا</span><span class="link">اعرف المزيد</span><span class="btn no">زر ذهبي</span><span class="x">✕ ممنوع</span></div>
+  <h3>الفلاتر</h3>
+  <div class="row"><span class="chip on">شقة غرفتين</span><span class="chip">استوديو</span><span class="chip">مع مسبح</span><span class="chip">قرطبة</span></div>
+  <h3>كرت الشقة: الصورة هي الكرت</h3>
+  <div class="cards">
+    <div class="pc"><div class="ph"><span class="tag">دخول ذاتي</span></div><div class="m"><span>قرطبة</span><b>4.88</b></div><h4>3 غرف واسعة وحديقة خاصة</h4><div class="pr"><b>680 ريال</b> لليلة</div></div>
+    <div class="pc"><div class="ph" style="background:linear-gradient(160deg,#8d7b66,#3a3027)"><span class="tag">متاحة</span></div><div class="m"><span>النرجس</span><b>4.96</b></div><h4>غرفتين وسينما خاصة</h4><div class="pr"><b>540 ريال</b> لليلة</div></div>
+    <div class="pc"><div class="ph" style="background:linear-gradient(160deg,#e3d6c2,#a8957d)"></div><div class="m"><span>حطين</span><b>4.71</b></div><h4>استوديو بإطلالة</h4><div class="pr"><b>390 ريال</b> لليلة</div></div>
+  </div>
+  <div class="dodont">
+    <div><h3>صح: خطوط رفيعة</h3><table style="margin:0"><tbody><tr><td>١</td><td>اختر شقتك من هنا</td></tr><tr><td>٢</td><td>احجز وادفع داخل Airbnb</td></tr><tr><td>٣</td><td>ادخل بنفسك</td></tr></tbody></table></div>
+    <div class="no"><h3>غلط: صندوق داخل صندوق</h3><div class="boxed">قسم<div class="boxed">كرت<div class="boxed">كرت ثاني</div></div></div></div>
+  </div>
+  <table>
+    <thead><tr><th>القياس</th><th>القيمة</th></tr></thead>
+    <tbody>
+      <tr><td>التدوير</td><td>14 للأزرار والحقول · 16 للمربعات · 22 للصور واللوحات · كامل للأزرار المدوّرة</td></tr>
+      <tr><td>الارتفاع</td><td>زر 52 · زر صغير 44 · فلتر 40 · حقل كتابة 52 · أقل شيء ينضغط 44</td></tr>
+      <tr><td>المسافات</td><td>حواف الصفحة 16–44 · بين الأقسام 64–128 · عرض أقصى 1240</td></tr>
+      <tr><td>الأيقونات</td><td>خطوط 20 بكسل، سماكة 1.6، أطراف مدوّرة. ما نستخدم الإيموجي كأيقونات</td></tr>
+      <tr><td>الحركة</td><td>منحنى واحد cubic-bezier(.23,1,.32,1) · الزر يصغر لـ 0.97 · أقل من 300 جزء من الثانية</td></tr>
+    </tbody>
+  </table>
+</main>
+
+<section class="opener">
+  <div class="n">٢</div>
+  <h1>كيف نطبّقه على كل شيء</h1>
+  <p>الموقع، والداشبورد، والـPDF، والوورد، والعروض، والرسومات.</p>
+</section>
+
+<main>
+  <p class="eyebrow">حسب نوع الشغل</p>
+  <h1>نفس النهج، بكل مكان.</h1>
+  <table>
+    <thead><tr><th>نسوي</th><th>كيف</th></tr></thead>
+    <tbody>
+      <tr><td>صفحة موقع جديدة</td><td>نبدأ من ملف الألوان والأحجام الجاهز. نحدد اللحظة الكبيرة قبل أي شيء، ونبني للجوال أول (375 بكسل) وبعدين الشاشة الكبيرة.</td></tr>
+      <tr><td>الداشبورد وأدوات الفريق</td><td>صارت على نفس الألوان من قبل. الوضع الليلي يستخدم الليل مع ذهبي أفتح شوي.</td></tr>
+      <tr><td>PDF: دراسة، تقرير، عرض سعر</td><td>نكتبها على قالب A4 الجاهز، ونطلعها بأمر واحد. الخطوط تنحفظ داخل الملف، فيطلع نفس الشكل على أي جوال. هذا الملف نفسه مسوّى بهالطريقة.</td></tr>
+      <tr><td>ملف Word</td><td>قالب Word جاهز فيه الأنماط. للمسودات اللي تنعدل بس. أي شيء رايح لبرا الشركة يطلع PDF.</td></tr>
+      <tr><td>عرض تقديمي</td><td>مقاس 16:9، أرضية الورق، فكرة وحدة بكل شريحة، رقم كبير واحد مع مصدره، وآخر شريحة غامقة.</td></tr>
+      <tr><td>رسم بياني</td><td>عوجا بالحبر، والهدف بالذهبي، والسوق أو المقارنة بلون هادي. خطوط شبكة رفيعة، وبدون تأثير ثلاثي الأبعاد.</td></tr>
+      <tr><td>رسم فني ومخطط بالمقاسات</td><td>جدران بالحبر 0.7 مم، والأثاث 0.25 مم، والمقاسات بالهادي، والمقاس المهم بالذهبي. سهم الشمال ومقياس الرسم بكل مخطط.</td></tr>
+      <tr><td>صور واتساب وسوشال</td><td>1080×1350 أو مربع. ورق أو صورة كاملة مع تدرّج غامق. عنوان سيرف بسطرين بالكثير، والشعار تحت.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>المهارات اللي نشتغل فيها</h2>
+  <table>
+    <thead><tr><th>المهارة</th><th>شغلتها</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ltr">ouja-look</span></td><td>جديدة: هذا الدليل نفسه. كل جلسة تقراها قبل أي تصميم.</td></tr>
+      <tr><td><span class="ltr">taste-skill</span></td><td>تمنع الشكل المصطنع: نظام واحد، صور حقيقية، ولحظة وحدة.</td></tr>
+      <tr><td><span class="ltr">impeccable</span></td><td>تراجع وتلمّع قبل التسليم: الخطوط والألوان والترتيب.</td></tr>
+      <tr><td><span class="ltr">emil-design-eng</span></td><td>الإحساس: ضغطة الزر، الحركة، القوائم اللي تطلع من تحت.</td></tr>
+      <tr><td><span class="ltr">oil-ui</span></td><td>تقارن ثلاث اتجاهات جنب بعض لما نبدأ صفحة جديدة.</td></tr>
+      <tr><td><span class="ltr">brand-identity</span></td><td>تقيس وضوح الألوان وتشيّك رخص الخطوط.</td></tr>
+      <tr><td><span class="ltr">dimensional-drawing</span></td><td>الرسومات الفنية بالمقاسات.</td></tr>
+      <tr><td><span class="ltr">dataviz</span></td><td>طريقة الرسوم البيانية.</td></tr>
+      <tr><td><span class="ltr">stop-slop</span></td><td>تشيل الكلام اللي يبان إنه مكتوب بالذكاء الاصطناعي.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="pg">ممنوعات</h2>
+  <ul class="check" style="columns:2">
+    <li>زر ذهبي، أو تدرّج ألوان على زر أو كلمة</li>
+    <li>أسود صافي أو رمادي بارد</li>
+    <li>صندوق داخل صندوق</li>
+    <li>إطار أو ظل على كرت الشقة</li>
+    <li>تباعد بين الحروف العربية، أو عربي مائل</li>
+    <li>خطوط Inter أو Almarai أو Tajawal أو Cairo كخط أساسي</li>
+    <li>إيموجي بدل الأيقونات</li>
+    <li>حركة تنطّ</li>
+    <li>أكثر من لحظة كبيرة بالصفحة</li>
+    <li>صور جاهزة من النت أو صور ذكاء اصطناعي</li>
+    <li>كلمات مثل «فخامة» و«اكتشف» و«استثنائية»</li>
+    <li>عدد الشقق، أو رقم بدون مصدر</li>
+    <li>كلمة «None» أو «undefined» توصل للقارئ</li>
+  </ul>
+
+  <h2>قبل ما نسلّم أي شيء</h2>
+  <ul class="check">
+    <li>الألوان كلها من الملف الجاهز، وما فيه لون جديد</li>
+    <li>خطّين بس، والأوزان الصح</li>
+    <li>لحظة كبيرة وحدة، والباقي هادي</li>
+    <li>الذهبي علامات بس، والأزرار حبر</li>
+    <li>كل كتابة واضحة على خلفيتها</li>
+    <li>كل شيء ينضغط 44 بكسل وأكثر</li>
+    <li>شفناه على الجوال وعلى الشاشة الكبيرة</li>
+    <li>الحركة خفيفة وأقل من ثلث ثانية</li>
+    <li>ما فيه عدد شقق، وكل رقم له مصدر</li>
+    <li>الكلام مراجَع ومشال منه الحشو</li>
+    <li>ملف الـPDF فيه الخطوط محفوظة، ومقاسه A4، وفيه أرقام الصفحات</li>
+  </ul>
+
+  <div class="callout"><b>رخصة خطوط «ثمانية»</b>الرخصة تسمح نحط الخط داخل ملفات PDF وWord نسويها. وتمنع نرسل ملفات الخط نفسها لأحد، أو نحوّلها لصيغة ثانية. وفيه سؤال مفتوح: مواقعنا تخلي ملفات الخط تنزل من رابط مباشر، والرخصة تشدد على هالشيء. الأسلم نطلب من «ثمانية» موافقة مكتوبة (ask@thmanyah.com).</div>
+</main>
+
+<section class="end">
+  <div class="brand"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE · RIYADH</span></div>
+  <div><h1>كل شيء نسويه، يبان إنه من عوجا.</h1><p class="ltr">docs/brand/OUJA_LOOK.md</p></div>
+</section>
+
+</body>
+</html>

@@ -70,23 +70,26 @@ class TokensAndGuard(unittest.TestCase):
     def test_no_google_fonts_on_the_live_page(self):
         self.assertNotIn("fonts.googleapis.com", render())
 
-    def test_headings_use_thmanyah_display_and_body_stays_almarai(self):
-        """Owner decision 2026-08-27: the family's DISPLAY cut for headings —
-        it is the one drawn for large sizes, and every var(--serif) usage here
-        is a heading, a big figure or the logo. Long Arabic paragraphs keep
-        Almarai, which is a text face."""
+    def test_the_page_wears_the_ouja_look_type(self):
+        """Owner decision 2026-11-22: /apartments is the reference for every
+        Ouja surface (docs/brand/OUJA_LOOK.md). Thmanyah Serif Display for
+        display moments, Thmanyah Sans for everything read — the 2026-08-27
+        Thmanyah Display + Almarai pairing is retired. The old names stay at
+        the END of each stack only so a rebuilt PDF still finds its faces."""
         html = render()
-        self.assertIn('--serif:"Thmanyah Display","Display Fallback",serif;', html)
-        self.assertIn('--sans:"Almarai","Almarai Fallback",Tahoma,sans-serif;', html)
+        self.assertIn('--serif:"Thmanyah Serif","Thmanyah Display","Thmanyah Sans",Georgia,serif;', html)
+        self.assertIn('--sans:"Thmanyah Sans","Almarai",system-ui,', html)
+        self.assertNotIn("/cp/font/Almarai", html)
+        self.assertNotIn("/cp/font/ThmanyahDisplay", html)
 
-    def test_the_three_weights_the_design_calls_for_are_declared(self):
+    def test_the_five_faces_the_look_calls_for_are_declared(self):
+        """The same files /apartments serves — one download for both sites."""
         html = render()
-        for weight in ("ThmanyahDisplay-400", "ThmanyahDisplay-500",
-                       "ThmanyahDisplay-700"):
-            with self.subTest(weight=weight):
-                self.assertIn(weight, html)
-        # 600 headings must resolve to the Medium cut, not synthesise a fake bold
-        self.assertIn("font-weight:500 600", html)
+        for face in ("thmanyah-serif-display-bold", "thmanyah-serif-display-black",
+                     "thmanyah-sans-regular", "thmanyah-sans-medium",
+                     "thmanyah-sans-bold"):
+            with self.subTest(face=face):
+                self.assertIn("/monthly/static/fonts/%s.v20260827a.woff2" % face, html)
 
     def test_the_replaced_face_is_gone(self):
         html = render()
@@ -94,8 +97,30 @@ class TokensAndGuard(unittest.TestCase):
         self.assertNotIn("NotoNaskhArabic", html)
 
     def test_the_display_weight_is_preloaded(self):
-        self.assertIn('rel="preload" href="/cp/font/ThmanyahDisplay-500.woff2"',
+        self.assertIn('rel="preload" href="/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2"',
                       render())
+
+    def test_a_missing_category_score_never_renders_as_none(self):
+        """2026-11-22: the nightly snapshot had no check-in score and the live
+        page printed «None» to prospects. A missing score drops its tile."""
+        from cp import stats
+        real = stats.load
+
+        def patched(snapshot=None):
+            cells = real(snapshot=snapshot)
+            cat = dict(cells["category_scores"]["value"] or {})
+            cat["check_in"] = None
+            cells["category_scores"] = dict(cells["category_scores"], value=cat)
+            return cells
+
+        stats.load = patched
+        try:
+            html = render()
+        finally:
+            stats.load = real
+        self.assertNotIn(">None<", html)
+        self.assertNotIn("تسجيل الدخول</div>", html)
+        self.assertIn("التواصل</div>", html)
 
     def test_the_form_posts_to_the_real_endpoint(self):
         html = render()
@@ -267,11 +292,15 @@ class DocumentShellAndContrast(unittest.TestCase):
             return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 
         html = render()
-        self.assertIn("--mute:#676057;", html)
-        self.assertIn("--mkt:#6F685D;", html)
-        self.assertGreaterEqual(ratio("#676057", "#EFE9DE"), 4.5)
-        self.assertGreaterEqual(ratio("#676057", "#E4DCCB"), 4.5)
-        self.assertGreaterEqual(ratio("#6F685D", "#FFFFFF"), 4.5)
+        # «لوك عوجا» tokens (2026-11-22): muted text on every light ground it sits on
+        self.assertIn("--mut:#6B5F52;", html)
+        self.assertIn("--mute:#6B5F52;", html)
+        for ground in ("#F4EFE7", "#ECE5D9", "#FBF8F3"):
+            with self.subTest(ground=ground):
+                self.assertGreaterEqual(ratio("#6B5F52", ground), 4.5)
+        # ink on paper, paper on ink (buttons), and the light-on-night text
+        self.assertGreaterEqual(ratio("#1D1813", "#F4EFE7"), 7)
+        self.assertGreaterEqual(ratio("#A89D8F", "#15110D"), 4.5)
 
     def test_faint_is_not_used_on_a_light_ground(self):
         """--faint is a light-on-dark token; on beige it measures 2.27:1."""

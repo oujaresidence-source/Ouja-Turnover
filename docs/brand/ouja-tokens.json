@@ -1,0 +1,53 @@
+{
+  "_about": "«لوك عوجا» tokens from oujares.com/apartments. Rules: docs/brand/OUJA_LOOK.md. Same values as ouja-tokens.css.",
+  "color": {
+    "paper": "#F4EFE7",
+    "paper2": "#ECE5D9",
+    "card": "#FBF8F3",
+    "ink": "#1D1813",
+    "ink2": "#463C33",
+    "mut": "#6B5F52",
+    "hover": "#3A3027",
+    "line": "#DCD2C3",
+    "line2": "#E8E1D5",
+    "gold": "#A57A2C",
+    "gold_soft": "#EBDDC2",
+    "night": "#15110D",
+    "night2": "#231C16",
+    "night_accent": "#B07F2F",
+    "on_night": "#C4BDB3",
+    "on_night2": "#9E968C",
+    "ok": "#2E6A49",
+    "warn": "#8A4B2A",
+    "err": "#7A3420",
+    "err_bg": "#F6E2DA",
+    "faint": "#B8AD9F"
+  },
+  "chart_series": ["#1D1813", "#A57A2C", "#6B5F52", "#B8AD9F", "#D3C7B5"],
+  "chart_meaning": {"good": "#2E6A49", "bad": "#8A4B2A", "market_or_comparison": "#D3C7B5", "grid": "#E8E1D5"},
+  "font": {
+    "display": {"family": "Thmanyah Serif Display", "css_family": "Thmanyah Serif", "weights": [700, 900],
+                "files": {"700": "thmanyah-serif-display-bold.v20260827a.woff2", "900": "thmanyah-serif-display-black.v20260827a.woff2"}},
+    "text": {"family": "Thmanyah Sans", "css_family": "Thmanyah Sans", "weights": [400, 500, 700],
+             "files": {"400": "thmanyah-sans-regular.v20260827a.woff2", "500": "thmanyah-sans-medium.v20260827a.woff2", "700": "thmanyah-sans-bold.v20260827a.woff2"}},
+    "font_dirs_in_repo": ["monthly_public/static/fonts", "fonts"],
+    "word_fallback": {"display": "Sakkal Majalla", "text": "Arial"}
+  },
+  "type_web_px": {
+    "hero": [44, 100], "title": [32, 56], "h2": [30, 54], "type_moment": [30, 54],
+    "block_title": 22, "item_title": 18, "lede": [17, 21], "body": 16, "read": 16.5, "ui": 15, "caption": 13, "latin_label": 11
+  },
+  "type_print_pt": {
+    "cover": 40, "h1": 26, "h2": 18, "h3": 12.5, "body": 10.5, "small": 9, "caption": 8.5, "big_figure": 30,
+    "line_height_body": 1.75, "line_height_heading": 1.2
+  },
+  "line_height": {"display": 1.12, "hero": 1.16, "body": 1.7, "read": 1.85},
+  "space": {"pad": "clamp(16px,4.4vw,44px)", "maxw_px": 1240, "read_maxw_px": 760, "section": "clamp(64px,10vw,128px)",
+            "grid_gap_px": [34, 22], "tile_gap_px": 10, "print_margin_mm": 18},
+  "radius_px": {"control": 14, "tile": 16, "review": 18, "photo_panel": 22, "sheet": 24, "pill": 999},
+  "control_px": {"button": 52, "button_sm": 44, "chip": 40, "tag": 28, "min_tap": 44, "input": 52},
+  "motion": {"ease": "cubic-bezier(.23,1,.32,1)", "drawer": "cubic-bezier(.32,.72,0,1)",
+             "press_scale": 0.97, "press_ms": 120, "hover_ms": 200, "sheet_ms": 420, "image_zoom": 1.03, "image_zoom_ms": 600, "entrance_ms": 900},
+  "icon": {"size_px": 20, "stroke": 1.6, "caps": "round"},
+  "drawing": {"wall_mm": 0.7, "furniture_mm": 0.25, "dimension_mm": 0.18, "wall": "#1D1813", "furniture": "#463C33", "dimension": "#6B5F52", "critical": "#A57A2C"}
+}

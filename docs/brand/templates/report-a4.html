@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>عنوان الدراسة — عوجا</title>
+<!-- «لوك عوجا» A4 print template (docs/brand/OUJA_LOOK.md §9).
+     Build: python3 docs/brand/templates/build_pdf.py this.html out.pdf
+     build_pdf.py injects the @font-face rules from local files, so do not add font links here.
+     Copy this file, keep the classes, replace the text. Delete any part you do not need. -->
+<style>
+@page{size:A4;margin:22mm 18mm 20mm 18mm;
+  @bottom-left{content:counter(page);font-family:"Thmanyah Sans";font-size:8.5pt;color:#6B5F52}
+  @bottom-right{content:"عوجا ريزيدنس · OUJA RESIDENCE";font-family:"Thmanyah Sans";font-size:8pt;color:#6B5F52}}
+@page cover{margin:0;@bottom-left{content:none}@bottom-right{content:none}}
+@page opener{margin:0;@bottom-left{content:none}@bottom-right{content:none}}
+:root{--paper:#F4EFE7;--paper2:#ECE5D9;--card:#FBF8F3;--ink:#1D1813;--ink2:#463C33;--mut:#6B5F52;--line:#DCD2C3;--line2:#E8E1D5;--gold:#A57A2C;--gold-soft:#EBDDC2;--night:#15110D;--ok:#2E6A49;--warn:#8A4B2A;
+  --f-d:"Thmanyah Serif","Thmanyah Sans",Georgia,serif;--f-t:"Thmanyah Sans",system-ui,sans-serif}
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;font-family:var(--f-t);font-size:10.5pt;line-height:1.75;color:var(--ink);background:#fff}
+h1,h2{font-family:var(--f-d);font-weight:700;margin:0;text-wrap:balance}
+h1{font-size:26pt;line-height:1.2}
+main h1{margin-bottom:4mm}
+h2{font-size:18pt;line-height:1.25;margin:9mm 0 3mm;break-after:avoid}
+h3{font-size:12.5pt;font-weight:700;line-height:1.4;margin:6mm 0 2mm;break-after:avoid}
+p{margin:0 0 3mm;color:var(--ink2);max-width:150mm}
+.num{font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+.eyebrow{display:flex;align-items:center;gap:3mm;font-size:9pt;font-weight:500;color:var(--mut);margin:0 0 3mm}
+.eyebrow:before{content:"";width:6mm;height:.6mm;background:var(--gold)}
+.lede{font-size:12.5pt;line-height:1.7;color:var(--ink2);max-width:140mm}
+.small{font-size:8.5pt;color:var(--mut);line-height:1.6}
+
+/* cover: paper, the wordmark, one serif title, the date */
+.cover{page:cover;height:297mm;padding:26mm 22mm;background:var(--paper);display:flex;flex-direction:column;break-after:page}
+.brand{display:flex;align-items:baseline;gap:3mm}
+.brand .ar{font-family:var(--f-d);font-weight:900;font-size:22pt;line-height:1}
+.brand .en{font-size:7pt;font-weight:700;letter-spacing:.22em;color:var(--mut)}
+.cover .t{margin-top:auto}
+.cover h1{font-size:40pt;font-weight:900;line-height:1.15;max-width:12ch}
+.cover .sub{font-size:13pt;color:var(--ink2);margin-top:6mm;max-width:120mm}
+.cover .meta{display:flex;gap:10mm;margin-top:16mm;padding-top:5mm;border-top:.3mm solid var(--line);font-size:9pt;color:var(--mut)}
+.cover .meta b{display:block;color:var(--ink);font-weight:700;font-size:10pt}
+
+/* section opener: night page, one line */
+.opener{page:opener;height:297mm;padding:26mm 22mm;background:var(--night);color:var(--paper);display:flex;flex-direction:column;justify-content:flex-end;break-before:page;break-after:page}
+.opener .n{font-family:var(--f-d);font-weight:900;font-size:60pt;line-height:1;color:var(--gold)}
+.opener h1{font-size:32pt;margin-top:6mm;max-width:13ch}
+.opener p{color:rgba(244,239,231,.78);margin-top:5mm;font-size:12pt}
+
+/* key figures: hairline-divided row */
+.figs{display:grid;grid-template-columns:repeat(4,1fr);border-top:.3mm solid var(--line);margin:6mm 0 8mm;break-inside:avoid}
+.figs div{padding:4mm 4mm 0 0;border-inline-start:.3mm solid var(--line2)}
+.figs div:first-child{border:0;padding-inline-start:0}
+.figs .v{font-family:var(--f-d);font-weight:700;font-size:24pt;line-height:1}
+.figs .k{font-size:8.5pt;color:var(--mut);margin-top:2mm;line-height:1.45}
+.figs .s{font-size:7.5pt;color:var(--mut)}
+
+/* table: hairlines only */
+table{width:100%;border-collapse:collapse;margin:4mm 0 7mm;font-size:9.5pt;break-inside:auto}
+th{text-align:start;font-weight:700;font-size:8.5pt;color:var(--mut);padding:2.5mm 2mm;border-bottom:.4mm solid var(--ink)}
+td{padding:2.5mm 2mm;border-bottom:.25mm solid var(--line2);color:var(--ink2)}
+td.n,th.n{text-align:end;font-variant-numeric:tabular-nums}
+tr.total td{border-bottom:0;border-top:.4mm solid var(--ink);font-weight:700;color:var(--ink)}
+tr{break-inside:avoid}
+
+/* callout, quote, steps */
+.callout{background:var(--paper);border-radius:3mm;padding:5mm 6mm;margin:5mm 0;break-inside:avoid}
+.callout b{display:block;font-size:11pt;margin-bottom:1mm}
+.quote{border-inline-start:.6mm solid var(--gold);padding:1mm 5mm 1mm 0;margin:5mm 0;font-size:11.5pt;line-height:1.85;color:var(--ink)}
+.quote cite{display:block;font-style:normal;font-size:8.5pt;color:var(--mut);margin-top:2mm}
+.steps{list-style:none;margin:4mm 0;padding:0;counter-reset:s;border-top:.3mm solid var(--line)}
+.steps li{counter-increment:s;display:grid;grid-template-columns:10mm 1fr;gap:3mm;padding:3.5mm 0;border-bottom:.3mm solid var(--line);break-inside:avoid}
+.steps li:before{content:counter(s,arabic-indic);font-family:var(--f-d);font-weight:900;font-size:16pt;line-height:1.1;color:var(--gold)}
+.steps b{display:block}
+.steps span{color:var(--mut);font-size:9.5pt}
+.src{font-size:7.5pt;color:var(--mut);margin-top:-4mm;margin-bottom:6mm}
+figure{margin:5mm 0;break-inside:avoid}
+figure img{width:100%;border-radius:3mm;display:block}
+figcaption{font-size:8.5pt;color:var(--mut);margin-top:2mm}
+.end{page:opener;height:297mm;padding:26mm 22mm;background:var(--night);color:var(--paper);display:flex;flex-direction:column;justify-content:space-between;break-before:page}
+.end .brand .en{color:rgba(244,239,231,.6)}
+.end p{color:rgba(244,239,231,.78)}
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="brand"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE</span></div>
+  <div class="t">
+    <p class="eyebrow">دراسة · سرّي</p>
+    <h1>عنوان الدراسة في سطرين بالكثير</h1>
+    <p class="sub">جملة وحدة تقول وش تلقى في هالملف، ولمين هو.</p>
+    <div class="meta"><div>التاريخ<b class="num">22 نوفمبر 2026</b></div><div>أعدّها<b>فريق عوجا</b></div><div>النسخة<b class="num">1.0</b></div></div>
+  </div>
+</section>
+
+<main>
+  <p class="eyebrow">الخلاصة</p>
+  <h1>الخلاصة في جملة وحدة واضحة.</h1>
+  <p class="lede">فقرة قصيرة تشرح القرار المطلوب أو النتيجة، بدون مقدمات. اكتب الجواب أول، والتفاصيل بعدين.</p>
+
+  <div class="figs">
+    <div><div class="v num">76.9%</div><div class="k">الإشغال</div><div class="s">النظام · حتى أغسطس 2026</div></div>
+    <div><div class="v num">582</div><div class="k">متوسط سعر الليلة · ريال</div><div class="s">النظام · حتى أغسطس 2026</div></div>
+    <div><div class="v num">4.77</div><div class="k">التقييم من 5</div><div class="s">المنصات · 2026</div></div>
+    <div><div class="v num">2.3</div><div class="k">دقيقة متوسط الرد</div><div class="s">النظام · 2026</div></div>
+  </div>
+
+  <h2>عنوان قسم</h2>
+  <p>نص القسم. الأرقام لها مصدر وتاريخ تحتها دايم. لا تذكر عدد الشقق.</p>
+
+  <table>
+    <thead><tr><th>البند</th><th class="n">القيمة · ريال</th><th class="n">النسبة</th></tr></thead>
+    <tbody>
+      <tr><td>بند أول</td><td class="n">12,400</td><td class="n">41%</td></tr>
+      <tr><td>بند ثاني</td><td class="n">9,800</td><td class="n">33%</td></tr>
+      <tr><td>بند ثالث</td><td class="n">7,900</td><td class="n">26%</td></tr>
+      <tr class="total"><td>المجموع</td><td class="n">30,100</td><td class="n">100%</td></tr>
+    </tbody>
+  </table>
+  <p class="src">المصدر: اسم المصدر، الشهر والسنة.</p>
+
+  <div class="callout"><b>ملاحظة مهمة</b>استخدم هذا الصندوق مرة أو مرتين بالملف كله، للشيء اللي لازم ما يفوت القارئ.</div>
+
+  <h3>الخطوات</h3>
+  <ol class="steps">
+    <li><div><b>الخطوة الأولى</b><span>سطر يشرحها.</span></div></li>
+    <li><div><b>الخطوة الثانية</b><span>سطر يشرحها.</span></div></li>
+    <li><div><b>الخطوة الثالثة</b><span>سطر يشرحها.</span></div></li>
+  </ol>
+
+  <div class="quote">«اقتباس من ضيف أو مالك، مكتوب مثل ما قاله.»<cite>الاسم الأول · الشهر 2026</cite></div>
+</main>
+
+<section class="opener">
+  <div class="n">٢</div>
+  <h1>فاصل قسم جديد</h1>
+  <p>سطر وحيد يمهّد للقسم.</p>
+</section>
+
+<main>
+  <h2>القسم الثاني</h2>
+  <p>كمّل المحتوى هنا.</p>
+</main>
+
+<section class="end">
+  <div class="brand"><span class="ar">عوجا</span><span class="en">OUJA RESIDENCE · RIYADH</span></div>
+  <div><p>للتواصل: oujares.com</p><p class="num">© 2026 عوجا ريزيدنس</p></div>
+</section>
+
+</body>
+</html>
