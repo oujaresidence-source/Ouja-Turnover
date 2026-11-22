@@ -24,6 +24,13 @@ def _json(data, status=200):
     return HOST.json_response(data, status)
 
 
+def _both(payload):
+    """The date bot first (unchanged), then the silent reader. Returns the date bot's result."""
+    out = service.handle(payload)
+    service.shadow(payload)
+    return out
+
+
 async def webhook(request):
     raw = await request.content.read(_MAX_BODY + 1)
     if len(raw) > _MAX_BODY:
@@ -39,7 +46,7 @@ async def webhook(request):
         bg = getattr(HOST, "background", None)
         if bg:
             try:
-                bg(lambda: service.handle(payload))
+                bg(lambda: _both(payload))
             except Exception as e:
                 print("[hatif] background schedule failed:", e)
     return _json({})

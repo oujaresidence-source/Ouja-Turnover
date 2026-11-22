@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS hatif_events (
     error           TEXT
 );
 CREATE INDEX IF NOT EXISTS hatif_events_created ON hatif_events(created_at);
+CREATE TABLE IF NOT EXISTS hatif_ai_events (
+    event_id        TEXT PRIMARY KEY,
+    created_at      TEXT,
+    door            TEXT,
+    body            TEXT,
+    reply           TEXT,
+    violations      TEXT
+);
+CREATE INDEX IF NOT EXISTS hatif_ai_created ON hatif_ai_events(created_at);
 CREATE TABLE IF NOT EXISTS hatif_convs (
     conversation_id TEXT PRIMARY KEY,
     fails           INTEGER DEFAULT 0,
@@ -78,6 +87,7 @@ def claim(event_id, conversation_id, body):
             cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=KEEP_DAYS)).isoformat()
             cx.execute("DELETE FROM hatif_events WHERE created_at < ?", (cutoff,))
             cx.execute("DELETE FROM hatif_convs WHERE updated_at < ?", (cutoff,))
+            cx.execute("DELETE FROM hatif_ai_events WHERE created_at < ?", (cutoff,))
         cx.commit()
     return won
 
@@ -127,3 +137,29 @@ def clear_fail(conversation_id):
     with closing(_bdb.connect()) as cx:
         cx.execute("DELETE FROM hatif_convs WHERE conversation_id = ?", (str(conversation_id or ""),))
         cx.commit()
+
+
+def ai_claim(event_id, body):
+    """True exactly once per event id for the reader (separate from the date bot's claim)."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute("INSERT OR IGNORE INTO hatif_ai_events(event_id, created_at, door, body) "
+                         "VALUES(?,?,?,?)", (str(event_id), now_iso(), "claimed", body))
+        cx.commit()
+        return cur.rowcount == 1
+
+
+def ai_finish(event_id, door, reply=None, violations=None):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cx.execute("UPDATE hatif_ai_events SET door=?, reply=?, violations=? WHERE event_id=?",
+                   (door, (reply or "")[:2000], ",".join(violations or []), str(event_id)))
+        cx.commit()
+
+
+def ai_recent(limit=30):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT created_at, door, body, reply, violations FROM hatif_ai_events "
+                          "ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+    return [{"at": r[0], "door": r[1], "body": r[2], "reply": r[3], "violations": r[4]} for r in rows]

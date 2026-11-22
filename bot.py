@@ -9665,6 +9665,20 @@ def _hatif_notify(text):
             await ch.send(str(text)[:1990])
     _stayhub_schedule(_post, "hatif:notify")
 
+def _hatif_notify_reader(text):
+    """HOST.notify_reader — the silent reader's posts. HATIF_AI_CHANNEL when that channel exists
+    (keeps ~100 posts/day out of the monitoring room), else HATIF_CHANNEL."""
+    async def _post():
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        name = os.environ.get("HATIF_AI_CHANNEL", "") or "قارئ-الواتساب"
+        ch = (discord.utils.get(guild.text_channels, name=name)
+              or discord.utils.get(guild.text_channels, name=HATIF_CHANNEL))
+        if ch is not None:
+            await ch.send(str(text)[:1990])
+    _stayhub_schedule(_post, "hatif:reader")
+
 def _hatif_background(fn):
     """HOST.background — run one blocking webhook job off the loop, fire-and-forget."""
     async def _run():
@@ -9685,6 +9699,13 @@ def _hatif_caps():
         "log_event": log_event, "search": _hatif_search,
         "neighborhoods": lambda: RIYADH_NEIGHBORHOODS,
         "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
+        # the WhatsApp «reader» (silent in Phase 1): one routing call per typed message, and the
+        # browse catalogue (names + map pins, no availability) for «that unit» / «near X».
+        "classify": lambda system, user: claude_json(
+            system, user, max_tokens=500,
+            model=os.environ.get("HATIF_AI_MODEL", "") or GUEST_DRAFT_MODEL),
+        "catalog": lambda: (_gw_search(None, None) or {}).get("results") or [],
+        "notify_reader": _hatif_notify_reader,
     }
 
 

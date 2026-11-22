@@ -20,16 +20,24 @@ import threading
 import time
 import traceback
 
-from . import client, config, db, engine, parse
+from . import answers, brain, client, config, db, engine, parse
 from .host import HOST
 
 _rate_lock = threading.Lock()
 _recent = collections.deque()
 
 
+_ai_lock = threading.Lock()
+_ai_recent = collections.deque()
+_catalog = {"at": 0.0, "units": []}
+
+
 def reset_for_tests():
     with _rate_lock:
         _recent.clear()
+    with _ai_lock:
+        _ai_recent.clear()
+    _catalog.update(at=0.0, units=[])
 
 
 def _allow_now():
@@ -203,6 +211,92 @@ def _handle(p):
         return done("error", error=e)
 
 
+# ============ the WhatsApp «reader» — Phase 1: SILENT (never sends, never assigns) ============
+
+def _ai_allow_now():
+    cap = config.ai_max_per_min()
+    now = time.time()
+    with _ai_lock:
+        while _ai_recent and now - _ai_recent[0] > 60:
+            _ai_recent.popleft()
+        if len(_ai_recent) >= cap:
+            return False
+        _ai_recent.append(now)
+        return True
+
+
+def _units():
+    """Browse-mode catalogue (names, area, map pin) — no availability claims. Cached 10 min."""
+    if time.time() - _catalog["at"] < 600 and _catalog["units"]:
+        return _catalog["units"]
+    fn = getattr(HOST, "catalog", None)
+    try:
+        units = list(fn() or []) if fn else []
+    except Exception:
+        traceback.print_exc()
+        units = []
+    if units:
+        _catalog.update(at=time.time(), units=units)
+    return units
+
+
+def shadow(p):
+    """Read one typed guest message, compose the reply the reader WOULD send, post it to
+    Discord. Sends nothing to the guest and never touches the conversation. Never raises."""
+    try:
+        return _shadow(p if isinstance(p, dict) else {})
+    except Exception as e:
+        traceback.print_exc()
+        return {"outcome": "error", "error": type(e).__name__}
+
+
+def _shadow(p):
+    if not (config.enabled() and config.ai_enabled()):
+        return {"outcome": "ignored"}
+    body = str(p.get("body") or "").strip()
+    if (p.get("direction") != "Inbound" or p.get("messageType") != "Text"
+            or p.get("interactiveReply") or not body):
+        return {"outcome": "ignored"}
+    ch = config.channel_id()
+    if ch and str(p.get("channelId") or "") != ch:
+        return {"outcome": "ignored"}
+    eid = p.get("conversationEventId") or p.get("messageId")
+    if not eid:
+        return {"outcome": "ignored"}
+    classify = getattr(HOST, "classify", None)
+    if classify is None:
+        return {"outcome": "ignored"}
+    shown = engine.mask(body)
+    if not db.ai_claim(eid, shown):
+        return {"outcome": "duplicate"}
+    if not _ai_allow_now():
+        db.ai_finish(eid, "throttled")
+        return {"outcome": "throttled"}
+    bank = answers.bank()
+    decision = brain.decide(body, classify, bank)
+    composed = brain.compose(body, _today(), _hoods(), decision, bank, _units(),
+                             HOST.require("search"), _site(), config.max_units(), config.max_nights())
+    db.ai_finish(eid, composed["door"], composed["reply"], composed["violations"])
+    if composed["door"] == "menu":
+        return {"outcome": "menu"}
+    head = "🧪 قارئ الواتساب (صامت، ما انرسل شي)"
+    why = brain.explain(decision, composed)
+    lines = [head, "الضيف: «%s»" % shown, "القرار: " + why]
+    if decision.get("summary_ar"):
+        lines.append("للموظف: " + engine.mask(decision["summary_ar"], 200))
+    if composed["violations"]:
+        lines.append("⛔ انحجز الرد: " + "، ".join(composed["violations"]))
+    lines += ["— كان بيرد —", composed["reply"] or "(لا شي)"]
+    fn = getattr(HOST, "notify_reader", None) or getattr(HOST, "notify", None)
+    if fn:
+        try:
+            fn("\n".join(lines)[:1900])
+        except Exception:
+            traceback.print_exc()
+    return {"outcome": "shadow", "door": composed["door"], "reply": composed["reply"],
+            "violations": composed["violations"]}
+
+
 def status():
     return {
         "enabled": config.enabled(), "configured": config.configured(), "dryrun": config.dryrun(),
@@ -210,4 +304,6 @@ def status():
         "channel_set": bool(config.channel_id()), "bot_seat_set": bool(config.bot_user_id()),
         "human_seat_set": bool(config.human_user_id()), "test_numbers": len(config.test_numbers()),
         "ack": config.ack(), "max_per_min": config.max_per_min(), "events": db.recent(30),
+        "reader": {"enabled": config.ai_enabled(), "mode": "silent",
+                   "max_per_min": config.ai_max_per_min(), "events": db.ai_recent(30)},
     }

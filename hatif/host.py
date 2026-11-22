@@ -18,6 +18,9 @@ class _Host:
     search = None           # (check_in, check_out, guests, type, neighborhood) -> _gw_search dict
     neighborhoods = None    # () -> [(key, arabic, english)]
     site_host = None        # () -> "oujares.com"
+    classify = None         # (system, user) -> dict|None   the reader's one AI call (claude_json)
+    notify_reader = None    # (text) -> None   the silent reader's Discord channel (falls back to notify)
+    catalog = None          # () -> [unit dicts]   browse-mode _gw_search results (no availability)
 
     def require(self, attr):
         v = getattr(self, attr, None)

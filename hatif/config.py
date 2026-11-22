@@ -120,3 +120,14 @@ def max_nights():
 
 def timeout_s():
     return max(3, _int("HATIF_TIMEOUT_S", 15))
+
+
+# ---- the WhatsApp «reader» (brain.py) — Phase 1 is SILENT: it composes, never sends ----
+def ai_enabled():
+    """HATIF_AI=0 switches the reader off entirely (back to exactly the pre-reader behaviour)."""
+    return _flag("HATIF_AI", "1")
+
+
+def ai_max_per_min():
+    """Cap on AI reads per minute (cost guard). Over it, messages are skipped, not queued."""
+    return max(1, _int("HATIF_AI_MAX_PER_MIN", 10))

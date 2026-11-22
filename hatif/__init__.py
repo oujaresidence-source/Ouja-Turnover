@@ -14,6 +14,13 @@ Layout (mirrors stayhub/):
     db.py       — hatif_* tables inside brain.db (no phone numbers stored)
     service.py  — one inbound message → at most one answer (handle)
     routes.py   — POST /hatif/webhook (signed, public) + GET /api/hatif/status (login)
+    answers.py  — the approved answer bank (answers_seed.json; $STATE_DIR/hatif_answers.json wins)
+    brain.py    — the «reader»: AI picks a door, the words come from the bank or the live search
+    firewall.py — PURE rules every reader reply must pass (count, booked, ready, price, blanks)
+
+THE READER (2026-11-22) is SILENT in Phase 1: service.shadow composes the reply for every typed
+message and posts it to Discord. It has NO send path at all — going live is a later, separate
+change. HATIF_AI=0 turns it off.
 
 THE TRAPS THIS PACKAGE CLOSES — do not simplify:
     * Hatif's webhook fires for OUR OWN outgoing messages too. Only direction=Inbound is ever
@@ -32,7 +39,7 @@ THE TRAPS THIS PACKAGE CLOSES — do not simplify:
     * One delivery is handled once (hatif_events primary key) — Hatif retries up to 5 times.
 """
 
-from . import client, config, db, engine, parse, routes, service  # noqa: F401
+from . import answers, brain, client, config, db, engine, firewall, parse, routes, service  # noqa: F401
 from .host import HOST, wire  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
