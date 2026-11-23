@@ -407,6 +407,17 @@ except Exception as _oc_err:            # pragma: no cover
     _oncall = None
     _HAS_ONCALL = False
 
+# «المقاولات» contracting projects — a signed quote becomes a project: one date per line, a
+# Discord channel per project (category «المقاولات»), «خلص؟» reminders that close only with
+# photos, Asil then Faisal on silence. CONTRACTING_DRYRUN=1 by default. Additive.
+try:
+    import contracting as _contracting
+    _HAS_CONTRACTING = bool(_contracting.notify.enabled())
+except Exception as _ct_err:            # pragma: no cover
+    print("[contracting] import failed (contracting disabled, bot unaffected):", _ct_err)
+    _contracting = None
+    _HAS_CONTRACTING = False
+
 # «الأهداف ودفتر العملاء» — per-unit occupancy targets + the employees' client book. Cash only
 # from bookings that follow a LOGGED contact, capped by a hidden comparison group. No dry-run
 # switch. TG_ENABLED=0 leaves the dashboard byte-for-byte unchanged.
@@ -11671,6 +11682,299 @@ async def oncall_loop():
             print("[oncall] tick:", rep)
     except Exception as e:
         print("[oncall] loop error:", e)
+
+
+# ==== «المقاولات» contracting projects (contracting/ package) =================================
+# The package decides WHAT and WHEN (tick, claims, words); this block only does Discord: the
+# category + one channel per project + #مقاولات-الإدارة, the «خلص/تأخر/واقف» buttons (a
+# LISTENER keyed on custom_id, so a press survives every redeploy) and photos dropped in a
+# project channel. Every delivery is reported back so an undelivered question never escalates.
+CT_DONE_PREFIX = "ct_done:"
+CT_DELAY_PREFIX = "ct_delay:"
+CT_BLOCK_PREFIX = "ct_block:"
+_CT_IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif")
+
+
+def _ct_lookup_did(name):
+    """Discord id for a team name: the ops identity map (assignments < env < typed in
+    /compliance), then the member cache when the members intent is on."""
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    try:
+        if _HAS_OPS:
+            hit = _ops.notify._id_map().get(_ops.notify._norm(name))
+            if hit and hit[0]:
+                return str(hit[0])
+    except Exception as e:
+        print("[contracting] ops id map unavailable:", e)
+    try:
+        g = bot.get_guild(GUILD_ID)
+        for m in list(getattr(g, "members", []) or []):
+            if name in (m.display_name, m.name, getattr(m, "global_name", None) or ""):
+                return str(m.id)
+    except Exception:
+        pass
+    return ""
+
+
+def _ct_wire():
+    if not _HAS_CONTRACTING:
+        return False
+    _contracting.wire({"now": now_riyadh, "send": _ct_send, "lookup_did": _ct_lookup_did,
+                       "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
+                       "json_response": _json, "web": web, "web_thread": web_thread})
+    return True
+
+
+def _ct_ready():
+    """Usable as soon as Discord is (before start_web_server). Same boot-window fix as
+    _oc_ready: hand brain.db its folder first."""
+    if not _HAS_CONTRACTING:
+        return False
+    if _HAS_BRAIN:
+        try:
+            from brain.host import HOST as _brain_host
+            if _brain_host.state_path is None:
+                _brain_host.state_path = _state_path
+        except Exception as e:
+            print("[contracting] brain path hand-over failed:", e)
+    if _contracting.HOST.send is None:
+        _ct_wire()
+    return True
+
+
+def _ct_send(payload):
+    """HOST.send — called from the tick's worker thread and from request handlers, so
+    run_coroutine_threadsafe (the _ops_notify lesson: create_task there drops messages)."""
+    if not _HAS_CONTRACTING:
+        return
+    coro = _ct_deliver(payload)
+    try:
+        loop = getattr(bot, "loop", None)
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+    except Exception as e:
+        print("[contracting] cross-thread delivery failed:", e)
+    try:
+        asyncio.create_task(coro)
+    except RuntimeError:
+        coro.close()
+        print("[contracting] no event loop — NOT delivered:", payload.get("key"))
+
+
+def _ct_chunks(text, limit=1900):
+    """Discord refuses > 2000 characters: split on line breaks."""
+    out, cur = [], ""
+    for line in str(text or "").split(chr(10)):
+        if len(cur) + len(line) + 1 > limit and cur:
+            out.append(cur)
+            cur = ""
+        cur = (cur + chr(10) + line) if cur else line
+    if cur:
+        out.append(cur)
+    return out or [""]
+
+
+async def _ct_category(guild, name):
+    cat = discord.utils.get(guild.categories, name=name)
+    if cat is None:
+        cat = await guild.create_category(name, reason="«المقاولات» — مشاريع المقاولات")
+    return cat
+
+
+async def _ct_admin_channel(guild, cat_name, ch_name):
+    ch = discord.utils.get(guild.text_channels, name=ch_name)
+    if ch is None:
+        cat = await _ct_category(guild, cat_name)
+        ch = await guild.create_text_channel(ch_name, category=cat,
+                                             topic="ملخص المقاولات الصباحي والتصعيد")
+    return ch
+
+
+class CtAskView(discord.ui.View):
+    def __init__(self, item_id):
+        super().__init__(timeout=None)
+        iid = str(item_id)
+        self.add_item(discord.ui.Button(label="خلص", style=discord.ButtonStyle.success,
+                                        custom_id=CT_DONE_PREFIX + iid))
+        self.add_item(discord.ui.Button(label="تأخر", style=discord.ButtonStyle.primary,
+                                        custom_id=CT_DELAY_PREFIX + iid))
+        self.add_item(discord.ui.Button(label="واقف", style=discord.ButtonStyle.danger,
+                                        custom_id=CT_BLOCK_PREFIX + iid))
+
+
+async def _ct_deliver(payload):
+    rep = {"key": payload.get("key"), "type": payload.get("type"),
+           "item_id": payload.get("item_id"), "ok": False}
+    mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            raise RuntimeError("السيرفر مو جاهز")
+        if payload.get("kind") == "open":
+            # Discord's hard caps: 500 channels a server, 50 a category (both hit before).
+            if len(guild.channels) >= 495:
+                raise RuntimeError("السيرفر قرب حد الـ500 قناة — أرشف قنوات قديمة أول")
+            cat = await _ct_category(guild, payload["category"])
+            ch = discord.utils.get(cat.text_channels, name=payload["channel_name"])
+            if ch is None:
+                if len(cat.channels) >= 50:
+                    raise RuntimeError("فئة «%s» فيها 50 قناة — الحد" % payload["category"])
+                ch = await guild.create_text_channel(payload["channel_name"], category=cat,
+                                                     topic="مشروع مقاولات — التحديثات والصور هنا")
+            for part in _ct_chunks(payload.get("text")):
+                await ch.send(part, allowed_mentions=mentions)
+            await _ct_admin_channel(guild, payload["category"], payload["admin_channel"])
+            rep.update(ok=True, channel_id=str(ch.id))
+        else:
+            if payload.get("target") == "project":
+                ch = guild.get_channel(int(payload.get("channel_id") or 0))
+                if ch is None:
+                    raise RuntimeError("قناة المشروع مو موجودة")
+            else:
+                ch = await _ct_admin_channel(guild, payload["category"], payload["admin_channel"])
+            parts = _ct_chunks(payload.get("text"))
+            m = None
+            for i, part in enumerate(parts):
+                last = i == len(parts) - 1
+                view = CtAskView(payload["item_id"]) if (last and payload.get("view") == "ask") else None
+                m = await ch.send(part, allowed_mentions=mentions, **({"view": view} if view else {}))
+            rep.update(ok=True, msg_id=str(m.id) if m else "")
+    except Exception as e:
+        rep["error"] = str(e)[:300]
+        print("[contracting] deliver failed (%s): %s" % (payload.get("key"), e))
+    try:
+        await asyncio.to_thread(_contracting.notify.delivered, rep)
+    except Exception as e:
+        print("[contracting] delivery report failed:", e)
+
+
+async def _ct_post_admin(text):
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        n = _contracting.notify
+        ch = await _ct_admin_channel(guild, n.category_name(), n.admin_channel_name())
+        for part in _ct_chunks(text):
+            await ch.send(part, allowed_mentions=discord.AllowedMentions(users=True))
+    except Exception as e:
+        print("[contracting] admin post failed:", e)
+
+
+class CtDelayModal(discord.ui.Modal, title="تأخير البند"):
+    def __init__(self, item_id):
+        super().__init__(timeout=600)
+        self.item_id = item_id
+        self.reason = discord.ui.TextInput(
+            label="السبب", max_length=200,
+            placeholder="المورد تأخر · المقاول ما حضر · المالك ما رد · تغيير بالنطاق · مشكلة بالموقع")
+        self.new_date = discord.ui.TextInput(label="الموعد الجديد", max_length=20,
+                                             placeholder="مثل 5/12")
+        self.add_item(self.reason)
+        self.add_item(self.new_date)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        now = interaction.created_at.astimezone(TZ)
+        r = await asyncio.to_thread(_contracting.notify.on_delay, self.item_id,
+                                    interaction.user.display_name, str(self.reason.value),
+                                    str(self.new_date.value), now)
+        if not r.get("ok"):
+            await _cw_reply(interaction, r.get("error") or "ما انحفظ")
+            return
+        await interaction.channel.send(r["channel_text"][:1990])
+        await _ct_post_admin(r["admin_text"])
+
+
+class CtBlockModal(discord.ui.Modal, title="البند واقف"):
+    def __init__(self, item_id):
+        super().__init__(timeout=600)
+        self.item_id = item_id
+        self.what = discord.ui.TextInput(label="وش اللي موقف الشغل؟ ومين يفكه؟",
+                                         style=discord.TextStyle.paragraph, max_length=300)
+        self.add_item(self.what)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer()
+        now = interaction.created_at.astimezone(TZ)
+        r = await asyncio.to_thread(_contracting.notify.on_block, self.item_id,
+                                    interaction.user.display_name, str(self.what.value), now)
+        if not r.get("ok"):
+            await _cw_reply(interaction, r.get("error") or "ما انحفظ")
+            return
+        await interaction.channel.send(r["channel_text"][:1990])
+        await _ct_post_admin(r["admin_text"])
+
+
+async def _ct_interaction(interaction):
+    """«خلص / تأخر / واقف». A LISTENER, not a bound view — works on messages from before
+    the last redeploy. The line is found from the custom_id, never from memory."""
+    try:
+        if not _HAS_CONTRACTING or interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id") or ""
+        if not cid.startswith((CT_DONE_PREFIX, CT_DELAY_PREFIX, CT_BLOCK_PREFIX)):
+            return
+        _ct_ready()
+        item_id = cid.split(":", 1)[1]
+        if cid.startswith(CT_DELAY_PREFIX):
+            await interaction.response.send_modal(CtDelayModal(item_id))
+            return
+        if cid.startswith(CT_BLOCK_PREFIX):
+            await interaction.response.send_modal(CtBlockModal(item_id))
+            return
+        await interaction.response.defer()
+        r = await asyncio.to_thread(_contracting.notify.on_done_press, item_id,
+                                    interaction.user.display_name)
+        if r.get("ok"):
+            await interaction.channel.send(r["text"][:1990])
+        else:
+            await _cw_reply(interaction, r.get("text") or "ما انحفظ")
+    except Exception as e:
+        print("[contracting] button error:", e)
+        try:
+            await _cw_reply(interaction, "صار خطأ — جرب مرة ثانية.")
+        except Exception:
+            pass
+
+
+async def _ct_on_message(message):
+    """Photos dropped in a project channel count toward the line waiting for proof."""
+    try:
+        if not _HAS_CONTRACTING or message.author.bot or not message.attachments:
+            return
+        cat = getattr(message.channel, "category", None)
+        if cat is None or cat.name != _contracting.notify.category_name():
+            return
+        urls = [a.url for a in message.attachments
+                if (a.content_type or "").startswith("image/")
+                or (a.filename or "").lower().endswith(_CT_IMG_EXT)]
+        if not urls:
+            return
+        _ct_ready()
+        r = await asyncio.to_thread(_contracting.notify.on_photos, str(message.channel.id),
+                                    urls, message.author.display_name)
+        if r:
+            await message.channel.send(r["text"][:1990])
+    except Exception as e:
+        print("[contracting] photo hook failed:", e)
+
+
+@tasks.loop(minutes=2)
+async def contracting_loop():
+    """«المقاولات» — opens channels for started projects and sends whatever reminders are due.
+    Idempotent by contracting_sent (one key, one message), so a restart never double-posts."""
+    if not _HAS_CONTRACTING:
+        return
+    await bot.wait_until_ready()
+    try:
+        _ct_ready()
+        rep = await asyncio.to_thread(_contracting.notify.tick)
+        if any(rep.get(k) for k in ("opened", "sent", "logged")):
+            print("[contracting] tick:", rep)
+    except Exception as e:
+        print("[contracting] loop error:", e)
 
 
 # ==== «طلبات سام» RR Desk (rrdesk/ package) ===================================================
@@ -25765,6 +26069,20 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         <div id="rdBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «المقاولات» contracting projects (one date per quote line · «خلص؟» · photos) ============ -->
+      <section class="view" id="view_contr">
+        <div class="page-head">
+          <div>
+            <div class="page-title">🏗️ المقاولات</div>
+            <div class="page-sub">كل بند له تاريخ · «خلص؟» يوم الموعد · يقفل بالصور</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadContr(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="ctBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -29239,6 +29557,7 @@ function go(id){
   if(id==='rvpush') loadRvpush();
   if(id==='oncall') loadOncall();
   if(id==='rrdesk') loadRrdesk();
+  if(id==='contr') loadContr();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -39325,6 +39644,17 @@ function loadOncall(force){
   s.onerror=function(){ window.__ocLoading=0; putHtml('ocBody', errorState('loadOncall(1)')); };
   document.head.appendChild(s);
 }
+/* «المقاولات» — the tab's code is the real file /contracting/static/contracting_tab.js (no backslash trap here) */
+function loadContr(force){
+  if(window.__ctJs){ return window.ContrTab.load(force); }
+  if(window.__ctLoading){ return; }
+  window.__ctLoading=1;
+  var s=document.createElement('script');
+  s.src='/contracting/static/contracting_tab.js?v=__CONTR_JS_V__';
+  s.onload=function(){ window.__ctJs=1; window.ContrTab.load(force); };
+  s.onerror=function(){ window.__ctLoading=0; putHtml('ctBody', errorState('loadContr(1)')); };
+  document.head.appendChild(s);
+}
 /* «طلبات سام» — the tab's code is the real file /rrdesk/static/rrdesk_tab.js (no backslash trap here) */
 function loadRrdesk(force){
   if(window.__rdJs){ return window.RrdeskTab.load(force); }
@@ -48221,7 +48551,7 @@ NAV_DEF = {
     "cats": [
         {"tk": "cat_overview", "ids": ["home"]},
         {"tk": "cat_ops", "ids": ["inbox", "promises", "decor", "dpay", "calendar", "schedule", "clean_center", "cphotos", "tickets", "rrdesk", "clean",
-                                  "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design"]},
+                                  "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design", "contr"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote", "aqd"]},
         {"tk": "cat_content", "ids": ["studio", "digest"]},
@@ -48252,6 +48582,7 @@ NAV_DEF = {
         {"id": "rvpush", "ic": "reviews", "tk": "rvpush"},                          # «رفع التقييم»
         {"id": "oncall", "ic": "calendar", "tk": "oncall"},                         # «المناوبة»
         {"id": "rrdesk", "ic": "tickets", "tk": "rrdesk"},                          # «طلبات سام»
+        {"id": "contr", "ic": "design", "tk": "contr"},                             # «المقاولات»
         {"id": "listings", "ic": "listings", "tk": "listings", "badge": "listings"},
         {"id": "tickets", "ic": "tickets", "tk": "tickets", "badge": "tickets"},
         {"id": "schedule", "ic": "cleanteams", "tk": "schedule"},
@@ -48296,7 +48627,7 @@ NAV_DEF = {
             "plab": "مختبر التسعير", "monthlylab": "التسعير الشهري",
             "strat": "الاستراتيجيات", "clean": "التنظيف العميق",
             "cleanteams": "فرق التنظيف", "coverage": "تغطية التنظيف", "wifi": "اشتراكات النت", "permits": "التصاريح", "rvpush": "رفع التقييم",
-            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة", "rrdesk": "طلبات سام",
+            "listings": "الشقق", "tickets": "الصيانة", "schedule": "تقويم الموظفين", "oncall": "المناوبة", "rrdesk": "طلبات سام", "contr": "المقاولات",
             "reviews": "المراجعات", "users": "المستخدمون", "quote": "عروض الأسعار", "aqd": "العقود",
             "weekly": "التقرير الأسبوعي", "design": "طلبات التصميم", "pmo": "تجهيز الشقق",
             "onb": "ضم الوحدات", "mot": "مطابقة وزارة السياحة",
@@ -48320,7 +48651,7 @@ NAV_DEF = {
             "plab": "Pricing Lab", "monthlylab": "Monthly Pricing",
             "strat": "Strategies", "clean": "Deep clean",
             "cleanteams": "Cleaning Teams", "coverage": "Cleaning Coverage", "wifi": "Internet subscriptions", "permits": "Permits", "rvpush": "Review Push",
-            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call", "rrdesk": "Sam's requests",
+            "listings": "Listings", "tickets": "Maintenance", "schedule": "Team Calendar", "oncall": "On-call", "rrdesk": "Sam's requests", "contr": "Contracting",
             "reviews": "Reviews", "users": "Users", "quote": "Quotations", "aqd": "Contracts",
             "weekly": "Weekly report", "design": "Design requests", "pmo": "Fit-out projects",
             "onb": "Unit onboarding", "mot": "Tourism compliance",
@@ -48383,6 +48714,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace(
 # «المناوبة»: same pattern — the tab script lives in oncall/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__ONCALL_JS_V__", (_oncall.routes.js_version() if _oncall is not None else "0"), 1)
+# «المقاولات»: same pattern — the tab script lives in contracting/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__CONTR_JS_V__", (_contracting.routes.js_version() if _contracting is not None else "0"), 1)
 # «طلبات سام»: same pattern — the tab script lives in rrdesk/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__RRDESK_JS_V__", (_rrdesk.routes.js_version() if _rrdesk is not None else "0"), 1)
@@ -67789,6 +68123,7 @@ _ROLE_WRITE_RULES = [
     ("/api/meet/", "meet"),                  # «اجتماع المالك» — no public door; owner links live outside /api/meet/
     ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
     ("/api/oncall/", "oncall"),              # «المناوبة» — writes re-check admin/ops inside
+    ("/api/contr/", "contr"),                # «المقاولات» — writes re-check admin/ops inside
     ("/api/rrdesk/", "rrdesk"),              # «طلبات سام» — settings re-check admin inside
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
@@ -67856,6 +68191,9 @@ _ROLE_READ_RULES = [
     ("/api/reviewask/", "rvpush"),
     # «المناوبة»: who missed a check-in, warnings. The tab script is /oncall/static/ (outside /api/).
     ("/api/oncall/", "oncall"),
+    # «المقاولات»: owners' names, quote amounts, who missed what. The tab script is
+    # /contracting/static/ (outside /api/), so this prefix cannot lock it out.
+    ("/api/contr/", "contr"),
     # «طلبات سام»: per-person KPIs + Sam's request text. Public door is /rrdesk/health (counts only).
     ("/api/rrdesk/", "rrdesk"),
 ]
@@ -69260,6 +69598,16 @@ async def start_web_server():
                       % _oncall.notify.enabled())
             except Exception as _oce:
                 print("[oncall] wiring failed (on-call disabled, bot unaffected):", _oce)
+
+        # ---- «المقاولات» contracting projects — additive; reuses brain.db ----
+        if _HAS_CONTRACTING:
+            try:
+                _ct_wire()
+                _contracting.register_routes(app)
+                print("[contracting] wired + routes registered (/api/contr/*) — dryrun=%s"
+                      % _contracting.notify.dryrun())
+            except Exception as _cte:
+                print("[contracting] wiring failed (contracting disabled, bot unaffected):", _cte)
 
         # ---- «طلبات سام» RR Desk — additive; reuses brain.db + ops warnings ----
         if _HAS_RRDESK:
@@ -78988,6 +79336,12 @@ async def on_ready():
         bot.add_listener(_oc_interaction, "on_interaction")
         bot.add_listener(_oc_on_message, "on_message")
         bot._oc_listener = True
+    if _HAS_CONTRACTING and not getattr(bot, "_ct_listener", False):
+        # «المقاولات»: «خلص/تأخر/واقف» buttons + photos in project channels; static custom_ids
+        _ct_ready()
+        bot.add_listener(_ct_interaction, "on_interaction")
+        bot.add_listener(_ct_on_message, "on_message")
+        bot._ct_listener = True
     if _HAS_RRDESK and not getattr(bot, "_rd_listener", False):
         # «طلبات سام»: five listeners, static custom_ids (rd:*), rows found by message id
         _rd_ready()
@@ -79179,6 +79533,11 @@ async def on_ready():
             _loop_guard(oncall_loop, "oncall_loop")
             oncall_loop._error_guarded = True
         _pending.append(oncall_loop)            # «المناوبة»: publish/lock/«موجود؟»/ladder, every minute
+    if _HAS_CONTRACTING and not contracting_loop.is_running():
+        if not getattr(contracting_loop, "_error_guarded", False):
+            _loop_guard(contracting_loop, "contracting_loop")
+            contracting_loop._error_guarded = True
+        _pending.append(contracting_loop)       # «المقاولات»: channels + «خلص؟» ladder (dry-run by default)
     if _HAS_RRDESK and not rrdesk_loop.is_running():
         if not getattr(rrdesk_loop, "_error_guarded", False):
             _loop_guard(rrdesk_loop, "rrdesk_loop")
