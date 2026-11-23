@@ -104,6 +104,7 @@ def board_payload():
             "discord_members": [{"name": r.get("name") or "", "user": r.get("user") or ""}
                                 for r in (roster.get("rows") or []) if r.get("name")],
             "discord_loading": bool(roster.get("loading")),
+            "discord_error": bool(roster.get("error")),
             "category": notify.category_name(), "admin_channel": notify.admin_channel_name(),
             "today": today.isoformat(),
             "projects": [_project_view(p, today) for p in db.projects()],

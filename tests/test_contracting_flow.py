@@ -249,6 +249,26 @@ class TestBoard(Base):
             HOST.roster = None
         b = routes.board_payload()                                 # no roster wired → empty, not broken
         self.assertEqual(b["discord_members"], [])
+        self.assertFalse(b["discord_error"])
+
+    def test_board_says_when_discord_members_could_not_load(self):
+        HOST.roster = lambda: {"rows": [], "loading": False, "error": "no members returned"}
+        try:
+            b = routes.board_payload()
+            self.assertTrue(b["discord_error"])                    # the dropdown says so, not «loading» forever
+            self.assertFalse(b["discord_loading"])
+        finally:
+            HOST.roster = None
+
+    def test_live_is_the_default_and_draft_projects_send_nothing(self):
+        os.environ.pop("CONTRACTING_DRYRUN", None)
+        self.assertFalse(notify.dryrun())                          # owner 2026-11-24: live by default
+        os.environ["CONTRACTING_DRYRUN"] = "1"
+        self.assertTrue(notify.dryrun())
+        os.environ.pop("CONTRACTING_DRYRUN", None)
+        rep = notify.tick(dt.datetime(2026, 12, 9, 9, 0))          # both seeds still «ما بدا»
+        self.assertEqual((rep["opened"], rep["sent"]), (0, 0))
+        self.assertEqual(SENT, [])
 
     def test_new_project_from_pasted_lines(self):
         r = routes._new({"title": "مشروع تجربة", "lines": "دهان 1,200" + chr(10) + "إضاءة\t800"},

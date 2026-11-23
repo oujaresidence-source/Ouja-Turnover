@@ -56,6 +56,7 @@
     if (team.length) h += '<optgroup label="' + esc(T('مشرفين المواقع', 'Site supervisors')) + '">' + team.join('') + '</optgroup>';
     if (rest.length) h += '<optgroup label="' + esc(T('كل أعضاء ديسكورد', 'Everyone on Discord')) + '">' + rest.join('') + '</optgroup>';
     else if (S.data && S.data.discord_loading) h += '<option disabled>' + esc(T('جاري تحميل أعضاء ديسكورد…', 'Loading Discord members…')) + '</option>';
+    else if (S.data && S.data.discord_error) h += '<option disabled>' + esc(T('ما قدرت أجيب أعضاء ديسكورد — حدّث بعد ٥ دقايق', 'Could not load Discord members — refresh in 5 min')) + '</option>';
     if (cur && !seen[cur]) h += opt(cur);
     return h + '</select>';
   }
@@ -124,8 +125,8 @@
     var h = '';
     if (D.dryrun) {
       h += '<div class="ct-banner"><b>' + esc(T('وضع التجربة', 'Dry run')) + ':</b> ' +
-        esc(T('النظام يكتب كل رسالة في السجل تحت، وما يرسل شي لديسكورد ولا يفتح قنوات. للتشغيل الفعلي: CONTRACTING_DRYRUN=0 في Railway.',
-          'Every message goes to the log below; nothing is posted to Discord and no channel is opened. To go live: CONTRACTING_DRYRUN=0 in Railway.')) + '</div>';
+        esc(T('النظام يكتب كل رسالة في السجل تحت، وما يرسل شي لديسكورد ولا يفتح قنوات. للتشغيل الفعلي: احذف CONTRACTING_DRYRUN من Railway.',
+          'Every message goes to the log below; nothing is posted to Discord and no channel is opened. To go live: remove CONTRACTING_DRYRUN from Railway.')) + '</div>';
     }
     h += '<div class="ct-tabs">' + ps.map(function (p) {
       return '<button class="ct-chip' + (p.id === S.sel && !S.newOpen ? ' on' : '') + '" data-ct="sel" data-id="' + esc(p.id) + '">' +
@@ -303,15 +304,20 @@
     try { S.data = await api('/api/contr/board'); }
     catch (e) { S.data = null; }
     render();
-    /* the Discord member list fills in the background (~30 s) — look again a few times,
-       but never while someone is typing in the tab */
-    if (S.data && S.data.discord_loading && !arr(S.data.discord_members).length && (S.rosterTries || 0) < 6) {
+    /* the Discord member list fills in the background and names arrive in batches — look
+       again every 8 s while it is still loading (up to ~5 min). If someone is using a field
+       right then, wait and look again instead of giving up (the first version gave up, so an
+       open dropdown froze it on «جاري تحميل» for good). */
+    if (S.data && S.data.discord_loading && (S.rosterTries || 0) < 40 && !S.rosterTimer) rosterPoll();
+  }
+  function rosterPoll() {
+    S.rosterTimer = setTimeout(function () {
+      S.rosterTimer = null;
+      var a = document.activeElement, box = document.getElementById('ctBody');
+      if (a && box && box.contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) { rosterPoll(); return; }
       S.rosterTries = (S.rosterTries || 0) + 1;
-      setTimeout(function () {
-        var a = document.activeElement, box = document.getElementById('ctBody');
-        if (!(a && box && box.contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName))) load(true, true);
-      }, 10000);
-    }
+      load(true, true);
+    }, 8000);
   }
 
   window.ContrTab = { load: load };

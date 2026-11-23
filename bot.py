@@ -11996,38 +11996,107 @@ def _ct_lookup_did(name):
 # the full member list is not available; query_members by PREFIX is (the same call !ouja اربط
 # uses). One sweep over Arabic + Latin + digit prefixes, deduped, refreshed every 30 min on
 # demand. Nothing here writes anywhere — it only reads names.
-_CT_ROSTER = {"at": 0.0, "rows": [], "busy": False}
+_CT_ROSTER = {"at": 0.0, "rows": [], "busy": False, "error": ""}
 _CT_ROSTER_TTL = 1800
+_CT_ROSTER_RETRY = 300               # nothing found → try again in 5 min, not on every open
 _CT_PREFIXES = (list("ابتثجحخدذرزسشصضطظعغفقكلمنهوي") + list("أإآءئؤى")
                 + list("abcdefghijklmnopqrstuvwxyz0123456789_."))
 
 
+def _ct_member_row(d):
+    """A Discord REST member object → {id, name, user}; None for bots."""
+    u = (d or {}).get("user") or {}
+    if not u.get("id") or u.get("bot"):
+        return None
+    uname = u.get("username") or ""
+    return {"id": str(u["id"]), "name": d.get("nick") or u.get("global_name") or uname,
+            "user": uname}
+
+
 async def _ct_roster_refresh():
+    """Three ways in, best first. The gateway prefix query (the first version) waits 30 s per
+    letter when Discord stops answering, which kept the list «loading» for ~26 min — so the
+    REST endpoints go first, and names are published as they arrive, not at the end."""
+    seen = {}
+
+    def publish():
+        _CT_ROSTER["rows"] = sorted(seen.values(), key=lambda r: r["name"])
+
+    def keep(row):
+        if row and row["id"] not in seen:
+            seen[row["id"]] = row
     try:
         g = bot.get_guild(GUILD_ID)
         if g is None:
+            _CT_ROSTER["error"] = "guild not ready"
             return
-        seen = {}
-
-        def keep(m):
-            if not getattr(m, "bot", False) and m.id not in seen:
-                seen[m.id] = {"id": str(m.id), "name": m.display_name or m.name, "user": m.name}
-
         if intents.members and len(getattr(g, "members", []) or []) > 1:
             for m in g.members:
-                keep(m)
+                if not getattr(m, "bot", False):
+                    keep({"id": str(m.id), "name": m.display_name or m.name, "user": m.name})
         else:
-            for pre in _CT_PREFIXES:
-                try:
-                    for m in await g.query_members(query=pre, limit=100, cache=False):
-                        keep(m)
-                except Exception as e:
-                    print("[contracting] roster query %r failed: %s" % (pre, e))
-                await asyncio.sleep(0.6)      # ~100 gateway requests/min, under Discord's 120
+            # 1) List Guild Members (needs the members intent on the portal — may be refused)
+            try:
+                after = None
+                for _ in range(20):
+                    page = await bot.http.get_members(GUILD_ID, 1000, after)
+                    for d in page or []:
+                        keep(_ct_member_row(d))
+                    publish()
+                    if not page or len(page) < 1000:
+                        break
+                    after = page[-1]["user"]["id"]
+            except Exception as e:
+                print("[contracting] roster list refused, searching instead:", e)
+            # 2) Search Guild Members by prefix (REST; discord.py paces the rate limit)
+            if not seen:
+                route = discord.http.Route("GET", "/guilds/{guild_id}/members/search",
+                                           guild_id=GUILD_ID)
+                fails = 0
+                for pre in _CT_PREFIXES:
+                    try:
+                        for d in await bot.http.request(route, params={"query": pre,
+                                                                       "limit": 1000}) or []:
+                            keep(_ct_member_row(d))
+                        publish()
+                        fails = 0
+                    except Exception as e:
+                        fails += 1
+                        print("[contracting] roster search %r failed: %s" % (pre, e))
+                        if fails >= 3 and not seen:
+                            break
+                    await asyncio.sleep(0.25)
+            # 3) Last resort: the gateway prefix query, each capped at 6 s, stop on silence
+            if not seen:
+                fails = 0
+                for pre in _CT_PREFIXES:
+                    try:
+                        ms = await asyncio.wait_for(
+                            g.query_members(query=pre, limit=100, cache=False), timeout=6)
+                        for m in ms:
+                            if not getattr(m, "bot", False):
+                                keep({"id": str(m.id), "name": m.display_name or m.name,
+                                      "user": m.name})
+                        publish()
+                        fails = 0
+                    except Exception as e:
+                        fails += 1
+                        print("[contracting] roster query %r failed: %s" % (pre, e))
+                        if fails >= 3:
+                            break
+                    await asyncio.sleep(0.6)
+        publish()
         if seen:
-            _CT_ROSTER["rows"] = sorted(seen.values(), key=lambda r: r["name"])
             _CT_ROSTER["at"] = time.time()
+            _CT_ROSTER["error"] = ""
             print("[contracting] roster: %d Discord members" % len(seen))
+        else:
+            _CT_ROSTER["at"] = time.time() - _CT_ROSTER_TTL + _CT_ROSTER_RETRY
+            _CT_ROSTER["error"] = "no members returned"
+    except Exception as e:
+        _CT_ROSTER["at"] = time.time() - _CT_ROSTER_TTL + _CT_ROSTER_RETRY
+        _CT_ROSTER["error"] = str(e)[:200]
+        print("[contracting] roster refresh failed:", e)
     finally:
         _CT_ROSTER["busy"] = False
 
@@ -12045,7 +12114,8 @@ def _ct_roster():
         except Exception as e:
             _CT_ROSTER["busy"] = False
             print("[contracting] roster refresh not started:", e)
-    return {"rows": list(_CT_ROSTER["rows"]), "loading": bool(_CT_ROSTER["busy"])}
+    return {"rows": list(_CT_ROSTER["rows"]), "loading": bool(_CT_ROSTER["busy"]),
+            "error": "" if _CT_ROSTER["rows"] else _CT_ROSTER.get("error", "")}
 
 
 def _ct_wire():

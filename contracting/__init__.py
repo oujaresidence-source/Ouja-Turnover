@@ -10,7 +10,7 @@ an answer: 2 days before → the due day 4 PM «خلص؟» → 7 PM Asil → nex
 
     engine.py  PURE rules (dates, gate, schedule) — tests/test_contracting_engine.py
     db.py      contracting_* tables in brain.db; claim() = one key, one message, ever
-    notify.py  the words + tick() + button handlers; CONTRACTING_DRYRUN=1 by default
+    notify.py  the words + tick() + button handlers; live by default; CONTRACTING_DRYRUN=1 = rehearsal
     routes.py  /api/contr/* (login + «contr» permission + admin/ops for writes)
     seed.py    the two signed projects of 22 Nov 2026 and the team
     static/contracting_tab.js   the dashboard tab (a real file: no backslash trap)

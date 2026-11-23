@@ -6,8 +6,10 @@ contracting.notify — what the bot says, and when.
 database, asks engine.due_reminders, CLAIMS each key (db.claim — one key, one message, ever)
 and hands a payload to HOST.send. bot.py posts it and reports back through `delivered()`.
 
-CONTRACTING_DRYRUN=1 (the default): every message is written to the log the tab shows and
-NOTHING reaches Discord — no channel is opened, nobody is mentioned. Flip to 0 to go live.
+LIVE by default since 2026-11-24 (the owner's call). CONTRACTING_DRYRUN=1 in Railway puts it
+back in rehearsal: every message is written to the log the tab shows and NOTHING reaches
+Discord — no channel is opened, nobody is mentioned. Live or not, nothing is sent for a
+project until someone presses «ابدأ» (tick only reads status='active').
 
 The button handlers (`on_*`) are called by bot.py when someone presses «خلص» / «تأخر» /
 «واقف» or drops photos in a project channel; they return the Arabic text to post.
@@ -35,7 +37,7 @@ def enabled():
 
 
 def dryrun():
-    return _env("CONTRACTING_DRYRUN", "1") != "0"
+    return _env("CONTRACTING_DRYRUN", "0") == "1"
 
 
 def category_name():
