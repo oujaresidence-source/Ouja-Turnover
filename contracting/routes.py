@@ -10,6 +10,7 @@ role admin/ops (re-checked here, like decor and oncall).
   POST /api/contr/save       a draft's header + each line's date
   POST /api/contr/start      THE GATE — refused unless engine.start_check passes
   POST /api/contr/due        move one line's date on a running project (logged)
+  POST /api/contr/markdone   ADMIN only: a line finished before the system knew (done_manual)
   POST /api/contr/people     a team member's Discord id / role
   POST /api/contr/delete     drop a draft (never a running project)
   POST /api/contr/retry      try opening a project's Discord channel again
@@ -112,7 +113,12 @@ def board_payload():
 
 
 async def api_board(request):
-    return _json(await _run(board_payload))
+    out = await _run(board_payload)
+    try:
+        out["is_admin"] = (HOST.req_role(request) if HOST.req_role else "") == "admin"
+    except Exception:
+        out["is_admin"] = False
+    return _json(out)
 
 
 # ---------------------------------------------------------------- writes
@@ -212,6 +218,34 @@ async def api_due(request):
     return _json(await _run(_due, b, _actor(request)))
 
 
+def _mark_done(b, by, role):
+    """«اعتبره خالص» — admin only: a line finished before the system knew about it."""
+    if role != "admin":
+        return {"ok": False, "error": "هذا للمدير بس"}
+    it = db.item(str(b.get("item_id") or ""))
+    if not it:
+        return {"ok": False, "error": "ما لقيت البند"}
+    p = db.project(it["project_id"], with_items=False)
+    if p["status"] == "draft":
+        return {"ok": False, "error": "المشروع لسا ما بدأ"}
+    if it["status"] == "done":
+        return {"ok": False, "error": "البند خالص من قبل"}
+    db.mark_done(it["id"], by, str(b.get("note") or "")[:200])
+    db.finish_if_complete(it["project_id"])
+    return {"ok": True}
+
+
+async def api_mark_done(request):
+    if not can_edit(request):
+        return _deny()
+    b = await _body(request)
+    try:
+        role = HOST.req_role(request) if HOST.req_role else "viewer"
+    except Exception:
+        role = "viewer"
+    return _json(await _run(_mark_done, b, _actor(request), role))
+
+
 def _people(b, by):
     name = str(b.get("name") or "").strip()
     if not name:
@@ -280,6 +314,7 @@ def register_routes(app):
     p("/api/contr/save", _safe(api_save))
     p("/api/contr/start", _safe(api_start))
     p("/api/contr/due", _safe(api_due))
+    p("/api/contr/markdone", _safe(api_mark_done))
     p("/api/contr/people", _safe(api_people))
     p("/api/contr/delete", _safe(api_delete))
     p("/api/contr/retry", _safe(api_retry))

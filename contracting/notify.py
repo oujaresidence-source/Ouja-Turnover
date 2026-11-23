@@ -16,6 +16,8 @@ The button handlers (`on_*`) are called by bot.py when someone presses «خلص�
 """
 
 import datetime as dt
+import hashlib
+import json
 import os
 import re
 
@@ -120,6 +122,96 @@ def header_text(p):
     return NL.join(lines)
 
 
+# ---------------------------------------------------------------- the pinned card
+# One Discord embed per project channel, pinned, EDITED in place by the tick whenever what it
+# shows changes (a line closes, moves, stops, or a date passes). Owner 2026-11-24: «ما يمدينا
+# نحسنه؟» — the plain-text header was read once and went stale.
+
+CARD_COLOR = 0xA57A2C            # --gold-logo: Ouja's brand gold, a mark (the embed's side bar)
+
+
+def _words(s):
+    return {w for w in re.split(r"[\W_]+", str(s or "").lower())
+            if w and w != "وحدة"}
+
+
+def _unit_is_in_title(p):
+    u = _words(p.get("unit"))
+    return bool(u) and u <= _words(p.get("title"))
+
+
+def _line_mark(it, today):
+    st = it.get("status")
+    if st == "done":
+        return "✅", ""
+    if st == "blocked":
+        return "⛔", " — واقف"
+    if st == "awaiting_photos":
+        return "📸", " — ينتظر الصور"
+    try:
+        late = dt.date.fromisoformat(str(it.get("due"))[:10]) < today
+    except (TypeError, ValueError):
+        late = False
+    return ("🔴", " — فات موعده") if late else ("⏳", "")
+
+
+def card_embed(p, today):
+    h = engine.health(p["items"], today)
+    state = {"ok": "على الخطة", "late": "🔴 فيه بند متأخر", "blocked": "⛔ فيه بند واقف",
+             "done": "✅ خلص المشروع"}[h["state"]]
+    lines = ["**%d من %d خلصت** · %s" % (h["done"], h["total"], state)]
+    last = object()
+    for it in sorted(p["items"], key=lambda x: x.get("pos", 0)):
+        day = str(it.get("due") or "")[:10]
+        if day != last:
+            lines += ["", "**%s**" % fmt_date(day)]
+            last = day
+        mark, tail = _line_mark(it, today)
+        name = "%d. %s" % (it["pos"], it["name"])
+        lines.append("%s %s%s" % (mark, ("~~%s~~" % name) if mark == "✅" else name, tail))
+    fields = [{"name": "المالك", "value": p.get("owner") or "—", "inline": True}]
+    if p.get("unit") and not _unit_is_in_title(p):
+        fields.append({"name": "الوحدة", "value": p["unit"], "inline": True})
+    fields += [{"name": "مشرف الموقع", "value": mention(p.get("supervisor")), "inline": True},
+               {"name": "المبلغ المعتمد", "value": "%s ر.س" % money(p.get("total_sar")),
+                "inline": True}]
+    foot = ("«خلص» يقفل البند بـ%d صور ترفعها هنا · «تأخر» يطلب السبب والموعد الجديد · "
+            "تنبيه قبل الموعد بيومين، وسؤال «خلص؟» يوم الموعد 4 العصر" % db.PHOTOS_NEEDED)
+    return {"title": str(p.get("title") or "")[:250], "description": NL.join(lines)[:4000],
+            "color": CARD_COLOR, "fields": fields, "footer": {"text": foot}}
+
+
+def card_hash(embed):
+    return hashlib.sha1(json.dumps(embed, ensure_ascii=False, sort_keys=True)
+                        .encode("utf-8")).hexdigest()[:16]
+
+
+def card_payload(p, today):
+    e = card_embed(p, today)
+    return {"kind": "card", "key": "card|" + p["id"], "project_id": p["id"],
+            "channel_id": p.get("channel_id"), "embed": e, "hash": card_hash(e),
+            "msg_id": db.meta("card_msg|" + p["id"])}
+
+
+CARD_RETRY_SEC = 600             # a card sent but not yet reported back is not re-sent for 10 min
+
+
+def _card_due(p, today, now):
+    pl = card_payload(p, today)
+    if pl["hash"] == db.meta("card_hash|" + p["id"]):
+        return None
+    tried = str(db.meta("card_try|" + p["id"]) or "")
+    if tried.startswith(pl["hash"] + "@"):
+        try:
+            at = dt.datetime.fromisoformat(tried.split("@", 1)[1])
+            if (now - at).total_seconds() < CARD_RETRY_SEC:
+                return None
+        except ValueError:
+            pass
+    db.set_meta("card_try|" + p["id"], "%s@%s" % (pl["hash"], now.isoformat(timespec="seconds")))
+    return pl
+
+
 def reminder_text(kind, p, it, ch_ref=""):
     who = _who_for(p, it)
     nm = "«%s»" % it["name"]
@@ -169,10 +261,17 @@ def _post(key, kind, p, it, text, target, view=None, mention_ids=None):
             "mention_ids": mention_ids or []}
 
 
+def open_text(p):
+    return "%s — هذا مشروعك. الكرت المثبّت تحت يتحدث لحاله كل ما خلص بند أو تغيّر موعد." % (
+        mention(p.get("supervisor")))
+
+
 def open_payload(p):
+    e = card_embed(p, local_now().date())
     return {"kind": "open", "key": "open|" + p["id"], "project_id": p["id"],
             "category": category_name(), "admin_channel": admin_channel_name(),
-            "channel_name": channel_name(p), "text": header_text(p)}
+            "channel_name": channel_name(p), "text": open_text(p), "embed": e,
+            "hash": card_hash(e)}
 
 
 def _send(payload):
@@ -183,7 +282,8 @@ def _send(payload):
 
 
 def tick(now=None):
-    rep = {"enabled": enabled(), "dryrun": dryrun(), "opened": 0, "sent": 0, "logged": 0}
+    rep = {"enabled": enabled(), "dryrun": dryrun(), "opened": 0, "sent": 0, "logged": 0,
+           "cards": 0}
     if not enabled():
         return rep
     now = local_now(now)
@@ -216,6 +316,13 @@ def tick(now=None):
                     rep["sent"] += 1
                 else:
                     rep["logged"] += 1
+    if live:                             # the pinned card: post once, then edit on change
+        for p in active + db.projects(["done"]):
+            if p.get("channel_id"):
+                pl = _card_due(p, now.date(), now)
+                if pl:
+                    _send(pl)
+                    rep["cards"] += 1
     if engine.summary_due(now, claimed, bool(active)):
         k = engine.summary_key(now.date())
         text = summary_text(active, now.date())
@@ -246,9 +353,18 @@ def delivered(report):
     """bot.py → package: what actually landed."""
     key = report.get("key") or ""
     ok = bool(report.get("ok"))
+    if key.startswith("card|"):
+        pid = key.split("|", 1)[1]
+        if ok and report.get("msg_id"):
+            db.set_meta("card_msg|" + pid, str(report["msg_id"]))
+            db.set_meta("card_hash|" + pid, str(report.get("hash") or ""))
+        return
     db.delivered(key, ok, report.get("msg_id") or "", report.get("error") or "")
     if key.startswith("open|"):
         pid = key.split("|", 1)[1]
+        if ok and report.get("card_msg_id"):
+            db.set_meta("card_msg|" + pid, str(report["card_msg_id"]))
+            db.set_meta("card_hash|" + pid, str(report.get("hash") or ""))
         if ok and report.get("channel_id"):
             db.set_channel(pid, report["channel_id"])
         elif not ok:

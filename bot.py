@@ -12206,6 +12206,18 @@ class CtAskView(discord.ui.View):
                                         custom_id=CT_BLOCK_PREFIX + iid))
 
 
+async def _ct_post_card(ch, embed):
+    """Post the project card and pin it. Mentions inside an embed never ping — on purpose:
+    the card is edited many times and must not buzz the supervisor each time."""
+    m = await ch.send(embed=discord.Embed.from_dict(embed),
+                      allowed_mentions=discord.AllowedMentions.none())
+    try:
+        await m.pin(reason="«المقاولات» — كرت المشروع")
+    except Exception as e:
+        print("[contracting] card pin failed:", e)
+    return m
+
+
 async def _ct_deliver(payload):
     rep = {"key": payload.get("key"), "type": payload.get("type"),
            "item_id": payload.get("item_id"), "ok": False}
@@ -12227,8 +12239,26 @@ async def _ct_deliver(payload):
                                                      topic="مشروع مقاولات — التحديثات والصور هنا")
             for part in _ct_chunks(payload.get("text")):
                 await ch.send(part, allowed_mentions=mentions)
+            if payload.get("embed"):
+                cm = await _ct_post_card(ch, payload["embed"])
+                rep.update(card_msg_id=str(cm.id), hash=payload.get("hash"))
             await _ct_admin_channel(guild, payload["category"], payload["admin_channel"])
             rep.update(ok=True, channel_id=str(ch.id))
+        elif payload.get("kind") == "card":
+            # the pinned card: edit it in place; post + pin a new one only if it's gone
+            ch = guild.get_channel(int(payload.get("channel_id") or 0))
+            if ch is None:
+                raise RuntimeError("قناة المشروع مو موجودة")
+            emb = discord.Embed.from_dict(payload["embed"])
+            m = None
+            if payload.get("msg_id"):
+                try:
+                    m = await ch.get_partial_message(int(payload["msg_id"])).edit(embed=emb)
+                except discord.NotFound:
+                    m = None
+            if m is None:
+                m = await _ct_post_card(ch, payload["embed"])
+            rep.update(ok=True, msg_id=str(m.id), hash=payload.get("hash"))
         else:
             if payload.get("target") == "project":
                 ch = guild.get_channel(int(payload.get("channel_id") or 0))

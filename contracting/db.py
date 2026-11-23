@@ -8,7 +8,9 @@ Two guarantees live here, not in the callers:
     PRIMARY KEY: one reminder key = at most one message, ever (a restart mid-tick cannot
     double-post — the ops/oncall lesson).
   - a line is `done` only through `add_photos()` reaching PHOTOS_NEEDED. Pressing «خلص»
-    alone moves it to `awaiting_photos`, nothing more.
+    alone moves it to `awaiting_photos`, nothing more. The single exception is
+    `mark_done()` — admin-only, from the dashboard, logged as `done_manual` (owner
+    2026-11-24: the D2 survey was finished before the project started).
 """
 
 import datetime
@@ -374,6 +376,19 @@ def add_photos(item_id, urls, actor):
              actor if done else None, now_iso() if done else None, now_iso(), item_id))
     event(it["project_id"], "done" if done else "photo", actor, "%d صور" % len(ph), item_id)
     return item(item_id), done
+
+
+def mark_done(item_id, actor, note=""):
+    """The ONE way a line is done without photos: an admin, from the dashboard, for work
+    finished before the system knew about it. Logged as done_manual with who and why."""
+    it = item(item_id)
+    if not it or it["status"] == "done":
+        return it
+    execute("UPDATE contracting_items SET status='done', done_by=?, done_at=?, blocked_at=NULL, "
+            "updated_at=? WHERE id=?", (actor, now_iso(), now_iso(), item_id))
+    event(it["project_id"], "done_manual", actor, note or "انعلّم خالص من الداشبورد (بدون صور)",
+          item_id)
+    return item(item_id)
 
 
 def finish_if_complete(project_id):

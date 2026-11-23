@@ -19,6 +19,11 @@ from contracting import db, engine, notify, routes, seed     # noqa: E402
 from contracting.host import HOST                             # noqa: E402
 
 SENT = []
+CARDS = []                    # the pinned live card goes here, so SENT stays the message list
+
+
+def _host_send(pl):
+    (CARDS if pl.get("kind") == "card" else SENT).append(pl)
 
 
 def fresh_db():
@@ -31,7 +36,8 @@ class Base(unittest.TestCase):
     def setUp(self):
         fresh_db()
         SENT.clear()
-        HOST.send = SENT.append
+        CARDS.clear()
+        HOST.send = _host_send
         HOST.lookup_did = lambda name: {"أصيل": "111111111111111111"}.get(name, "")
         HOST.now = lambda: dt.datetime(2026, 11, 23, 10, 0)
         os.environ["CONTRACTING_DRYRUN"] = "0"
@@ -100,7 +106,8 @@ class TestGate(Base):
         self.assertTrue(r["ok"])
         self.assertEqual([s["kind"] for s in SENT], ["open"])
         self.assertIn("مقاولات-", SENT[0]["channel_name"])
-        self.assertIn("رفع مساحي", SENT[0]["text"])
+        self.assertIn("رفع مساحي", SENT[0]["embed"]["description"])   # the card, pinned
+        self.assertIn("@أبو أمين", SENT[0]["text"])                  # the ping above it
         notify.tick(dt.datetime(2026, 11, 23, 10, 5))   # channel not reported yet → no 2nd open
         self.assertEqual([s["kind"] for s in SENT].count("open"), 1)
         self.assertFalse(routes._start(self.d2["id"], "فيصل")["ok"])   # already running
@@ -283,6 +290,103 @@ class TestBoard(Base):
         self.assertFalse(routes._people({"name": "تقي", "did": "123"}, "فيصل")["ok"])
         self.assertTrue(routes._people({"name": "تقي", "did": "222222222222222222"}, "فيصل")["ok"])
         self.assertEqual(notify.mention("تقي"), "<@222222222222222222>")
+
+
+
+class TestCard(Base):
+    """The pinned card: one message per project channel, edited as the lines move."""
+
+    def card(self, today=dt.date(2026, 11, 24)):
+        return notify.card_embed(db.project(self.d2["id"]), today)
+
+    def test_card_shape(self):
+        its = self.d2["items"]
+        db.save_draft(self.d2["id"], {}, {its[i]["id"]: "2026-12-10" for i in (2, 3, 4)})
+        self.start_d2()
+        e = self.card()
+        self.assertEqual(e["title"], self.d2["title"])
+        names = [f["name"] for f in e["fields"]]
+        self.assertEqual(names, ["المالك", "مشرف الموقع", "المبلغ المعتمد"])   # unit repeats the title → hidden
+        self.assertIn("22,317.90", e["fields"][2]["value"])
+        self.assertIn("0 من 8 خلصت", e["description"])
+        self.assertEqual(e["description"].count("الخميس 10 ديسمبر"), 1)       # 4 lines, one header
+        self.assertIn("3 صور", e["footer"]["text"])
+
+    def test_unit_shown_when_the_title_does_not_say_it(self):
+        db.save_draft(self.apt["id"], {"owner": "م. سعد", "unit": "N12"}, {})
+        e = notify.card_embed(db.project(self.apt["id"]), dt.date(2026, 11, 24))
+        self.assertIn("الوحدة", [f["name"] for f in e["fields"]])
+
+    def test_marks_follow_the_lines(self):
+        self.start_d2()
+        its = db.project(self.d2["id"])["items"]
+        db.mark_done(its[0]["id"], "فيصل", "خلص قبل النظام")
+        db.press_done(its[1]["id"], "أبو أمين")
+        e = notify.card_embed(db.project(self.d2["id"]), dt.date(2026, 12, 7))
+        self.assertIn("1 من 8 خلصت", e["description"])
+        self.assertIn("✅", e["description"])
+        self.assertIn("ينتظر الصور", e["description"])
+        self.assertIn("فات موعده", e["description"])        # the 6 Dec line, today the 7th
+
+    def test_tick_posts_the_card_once_then_edits_only_on_change(self):
+        self.start_d2()
+        self.opened(self.d2["id"])
+        notify.tick(dt.datetime(2026, 11, 24, 10, 0))
+        self.assertEqual(len(CARDS), 1)
+        self.assertIsNone(CARDS[0]["msg_id"])                # first time: post + pin
+        notify.tick(dt.datetime(2026, 11, 24, 10, 2))
+        self.assertEqual(len(CARDS), 1)                      # in flight → not twice
+        notify.delivered({"key": CARDS[0]["key"], "ok": True, "msg_id": "777",
+                          "hash": CARDS[0]["hash"]})
+        notify.tick(dt.datetime(2026, 11, 24, 10, 4))
+        self.assertEqual(len(CARDS), 1)                      # nothing changed → silent
+        db.mark_done(db.project(self.d2["id"])["items"][0]["id"], "فيصل", "")
+        notify.tick(dt.datetime(2026, 11, 24, 10, 6))
+        self.assertEqual(len(CARDS), 2)
+        self.assertEqual(CARDS[1]["msg_id"], "777")          # edit the pinned one, not a new post
+
+    def test_open_delivery_remembers_the_card(self):
+        self.start_d2()
+        op = SENT[0]
+        notify.delivered({"key": op["key"], "ok": True, "channel_id": "900", "card_msg_id": "778",
+                          "hash": op["hash"]})
+        notify.tick(dt.datetime(2026, 11, 23, 10, 5))
+        self.assertEqual(CARDS, [])                          # same day, same card → nothing
+
+    def test_no_card_in_dry_run(self):
+        os.environ["CONTRACTING_DRYRUN"] = "1"
+        self.start_d2()
+        db.set_channel(self.d2["id"], "900")
+        notify.tick(dt.datetime(2026, 11, 24, 10, 0))
+        self.assertEqual(CARDS, [])
+
+
+class TestMarkDone(Base):
+    def test_admin_marks_a_line_done_without_photos(self):
+        self.start_d2()
+        first = db.project(self.d2["id"])["items"][0]
+        r = routes._mark_done({"item_id": first["id"]}, "فيصل", "admin")
+        self.assertTrue(r["ok"])
+        it = db.item(first["id"])
+        self.assertEqual((it["status"], it["done_by"]), ("done", "فيصل"))
+        kinds = [e["kind"] for e in db.events(self.d2["id"])]
+        self.assertIn("done_manual", kinds)                  # who closed it without photos stays on record
+
+    def test_only_admin(self):
+        self.start_d2()
+        first = db.project(self.d2["id"])["items"][0]
+        self.assertFalse(routes._mark_done({"item_id": first["id"]}, "ناصر", "ops")["ok"])
+        self.assertEqual(db.item(first["id"])["status"], "open")
+
+    def test_not_on_a_draft(self):
+        first = self.d2["items"][0]
+        self.assertFalse(routes._mark_done({"item_id": first["id"]}, "فيصل", "admin")["ok"])
+
+    def test_last_line_finishes_the_project(self):
+        self.start_d2()
+        for it in db.project(self.d2["id"])["items"]:
+            routes._mark_done({"item_id": it["id"]}, "فيصل", "admin")
+        self.assertEqual(db.project(self.d2["id"])["status"], "done")
 
 
 if __name__ == "__main__":

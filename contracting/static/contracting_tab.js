@@ -155,7 +155,8 @@
   function askLine(p, it, err) {
     if (err) return '<span class="ask err">' + esc(err) + '</span>';
     var who = it.is_handover ? leadName() : (p.supervisor || T('المشرف', 'the supervisor'));
-    if (it.status === 'done') return '<span class="ask">' + esc(T('خلص', 'Done')) + (it.done_by ? ' — ' + esc(it.done_by) : '') + ' · ' + arr(it.photos).length + ' ' + esc(T('صور', 'photos')) + '</span>';
+    if (it.status === 'done') return '<span class="ask">' + esc(T('خلص', 'Done')) + (it.done_by ? ' — ' + esc(it.done_by) : '') + ' · ' +
+      (arr(it.photos).length ? arr(it.photos).length + ' ' + esc(T('صور', 'photos')) : esc(T('بدون صور (انعلّم من الداشبورد)', 'no photos (marked from the dashboard)'))) + '</span>';
     if (it.status === 'awaiting_photos') return '<span class="ask">' + esc(T('ضغط «خلص» — ينتظر الصور', 'Pressed done — waiting for photos')) + ' (' + arr(it.photos).length + '/' + (S.data.photos_needed || 3) + ')</span>';
     if (it.status === 'blocked') return '<span class="ask err">' + esc(T('واقف: ', 'Blocked: ')) + esc(it.blocked_reason || '') + '</span>';
     var extra = it.delays ? ' · ' + esc(T('تأخر ', 'delayed ')) + it.delays + 'x' : '';
@@ -191,7 +192,8 @@
         (draft ? '' : pill(ST, it.status)) + '</div>' +
         '<div class="dt">' + (canDate ? '<input type="date" data-ct="due" data-id="' + esc(it.id) + '" value="' + esc(it.due || '') + '"' + (err ? ' class="bad"' : '') + ' aria-label="' + esc(it.name) + '">' :
           '<span class="ct-sub">' + esc(fmt(it.due)) + '</span>') + '</div>' +
-        askLine(p, it, err) + '</li>';
+        askLine(p, it, err) +
+        (!draft && it.status !== 'done' && S.data.is_admin ? ' <button class="ct-link" data-ct="markdone" data-id="' + esc(it.id) + '">' + esc(T('اعتبره خالص', 'Mark done')) + '</button>' : '') + '</li>';
     }).join('') + '</ol>';
     if (draft) {
       var why = arr(p.gate && p.gate.why);
@@ -284,6 +286,9 @@
     } else if (k === 'del') {
       if (el.getAttribute('data-sure') !== '1') { el.setAttribute('data-sure', '1'); el.textContent = T('متأكد؟ اضغط مرة ثانية', 'Sure? Press again'); return; }
       if (await act('/api/contr/delete', { id: id })) { S.sel = null; toast(T('انحذفت المسودة', 'Draft deleted')); await load(true, true); }
+    } else if (k === 'markdone') {
+      if (!window.confirm(T('تعتبر هذا البند خالص بدون صور؟ ينكتب باسمك في السجل.', 'Mark this line done without photos? It is logged under your name.'))) return;
+      if (await act('/api/contr/markdone', { item_id: id })) { toast(T('انعلّم خالص — الكرت في ديسكورد يتحدث خلال دقيقتين', 'Marked done — the Discord card updates within 2 min')); await load(true, true); }
     } else if (k === 'retry') {
       if (await act('/api/contr/retry', { id: id })) { toast(T('جاري فتح القناة', 'Opening the channel')); await load(true, true); }
     }
