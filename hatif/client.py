@@ -98,6 +98,23 @@ def assign(conversation_id, user_id=None):
     return _call("POST", "/v2/conversations/service-account/%s/assign" % conversation_id, body)
 
 
+def send_template(channel_id, to_number, template, language, body_values, image_url=None):
+    """One Meta-approved template to one number (POST /v1/whatsapp/service-account/sendTemplate,
+    docs.hatif.io «Send Template»). Body variables are positional ({{1}}, {{2}} …). With
+    image_url the header shows THAT picture; without it Hatif uses the template's own example.
+    The docs' schema is camelCase at the top and PascalCase inside `parameters` (as their
+    examples) — confirm on the first live send to a test number."""
+    params = []
+    if image_url:
+        params.append({"Type": "Header", "Values": [{"Type": "image", "ImageUrl": str(image_url)}]})
+    if body_values:
+        params.append({"Type": "Body", "Values": [{"Type": "text", "Text": str(v)[:1000]}
+                                                  for v in body_values]})
+    return _call("POST", "/v1/whatsapp/service-account/sendTemplate", {
+        "channelId": channel_id, "toNumber": str(to_number), "templateName": str(template),
+        "language": language or "ar", "parameters": params, "openConversation": True})
+
+
 def send_text(channel_id, to_number, text):
     return _call("POST", "/v1/whatsapp/service-account/sendText", {
         "channelId": channel_id, "toNumber": str(to_number), "text": str(text)[:4096],

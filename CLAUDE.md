@@ -705,6 +705,19 @@ Around the Hatif marketing templates (first sends Sun 29 Nov 2026). Three jobs, 
   card says why nothing went). The Special Offer itself stays a human click in Hostaway (no API).
   The photo templates (`…_img`) are the same campaign as their text twins (`engine.resolve_template`,
   `config.MIDWEEK_TEMPLATES`) — add a new `_img` name to `config.TEMPLATES` or its taps read «غير محدد».
+- **(5) Per-person sender `campaigns/personal.py` (2026-11-23):** a Hatif campaign has ONE time and ONE
+  header photo; this sends one template per person (`hatif.client.send_template` = POST
+  `/v1/whatsapp/service-account/sendTemplate`, per-message `ImageUrl`) at THAT person's time with THEIR
+  usual unit's photo. Data (Hostaway backup, Reservation date is UTC): the booking HOUR does not repeat
+  per person (31% vs 30% chance) but the LEAD habit does (91%), so send times come from the habit
+  (same-day → 12:00 target day, next-day → 18:00 day before, planners → Fri 18:00). Queue =
+  `campaign_queue` (UNIQUE campaign+phone_key = never twice; the phone is ERASED once sent/suppressed/
+  failed), loaded by ADMIN-only POST `/api/campaigns/queue` {batch, rows}, cancelled by POST
+  `/api/campaigns/queue/cancel`, status GET `/api/campaigns/queue`. `campaigns_personal_loop` (1 min,
+  ≤ `CAMPAIGN_PERSONAL_PER_MIN`=60, Hatif limit 120/min shared) sends only when
+  `CAMPAIGN_PERSONAL_DRYRUN`=0 + Hatif keys + `HATIF_CHANNEL_ID`; `HATIF_TEST_NUMBERS` set ⇒ ONLY those go;
+  opted-out ⇒ «suppressed»; 429 ⇒ back in line. Before loading a batch, CANCEL the Hatif UI campaigns for
+  the same people or they get two messages.
 - **Channels:** a channel Discord refuses to create (500 cap) falls back to `غرفة-المراقبة` with a note.
 - Env: `CAMPAIGNS_ENABLED`(1), `CAMPAIGN_WATCH`(1), `CAMPAIGN_BUTTONS`(1), `CAMPAIGN_BUTTONS_DRYRUN`(1),
   `CAMPAIGN_REPORT`(1), `CAMPAIGN_REPORT_DAY`(6=Sun)/`_HOUR`(9), `CAMPAIGN_OFFERS_CHANNEL`(عروض-خاصة),

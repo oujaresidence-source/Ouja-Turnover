@@ -709,5 +709,173 @@ class CardTests(Base):
         self.assertIn("••4567", everything)
 
 
+# =============================================================== the per-person sender
+class FakeSender:
+    def __init__(self, fail=None):
+        self.sent, self.fail = [], fail
+
+    def send_template(self, ch, phone, template, lang, vals, image_url=None):
+        if self.fail:
+            raise self.fail
+        self.sent.append((ch, phone, template, lang, list(vals), image_url))
+        return {"status": "accepted"}
+
+
+class FakePCfg:
+    def __init__(self, allow=(), channel="ch-1"):
+        self.allow, self.channel = set(allow), channel
+
+    def test_numbers(self):
+        return self.allow
+
+    def channel_id(self):
+        return self.channel
+
+
+class Err429(Exception):
+    status = 429
+
+
+class PersonalTests(Base):
+    """One template per person at their time with their photo — never twice, never in dry-run,
+    never to an opted-out number, only test numbers while the allowlist is set, and the
+    number erased the moment it is sent."""
+
+    def setUp(self):
+        Base.setUp(self)
+        from campaigns import personal
+        self.p = personal
+        self.fake = FakeSender()
+        self.cfg = FakePCfg()
+        self._orig = personal._hatif
+        personal._hatif = lambda: (self.fake, self.cfg)
+        self.t0 = datetime.datetime(2026, 11, 27, 15, 0, tzinfo=UTC)          # Fri 18:00 Riyadh
+
+    def tearDown(self):
+        self.p._hatif = self._orig
+        Base.tearDown(self)
+
+    def row(self, phone="0551234567", at="2026-11-27T18:00:00", **over):
+        r = {"phone": phone, "campaign": "B1", "template": "ouja_midweek_half_img",
+             "values": ["سارة"], "image_url": "https://img.example/437215.jpg", "send_at": at}
+        r.update(over)
+        return r
+
+    def live(self):
+        os.environ["CAMPAIGN_PERSONAL_DRYRUN"] = "0"
+
+    def test_load_validates_and_never_twice(self):
+        res = self.p.load("w1", [self.row(), self.row(phone="+966 55 123 4567"),
+                                 self.row(phone="abc"), self.row(image_url="http://x")])
+        self.assertEqual((res["queued"], res["duplicate"], len(res["rejected"])), (1, 1, 2))
+        self.assertEqual(self.p.load("w2", [self.row()])["duplicate"], 1)     # another batch, same person
+
+    def test_dryrun_sends_nothing(self):
+        self.p.load("w1", [self.row()])
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "dryrun")
+        self.assertEqual(self.fake.sent, [])
+
+    def test_sends_at_their_time_with_their_photo_then_forgets_the_number(self):
+        self.live()
+        self.p.load("w1", [self.row(), self.row(phone="0559999999", at="2026-11-29T12:00:00")])
+        r = self.p.tick(self.t0)
+        self.assertEqual(r["sent"], 1)
+        ch, phone, tpl, lang, vals, img = self.fake.sent[0]
+        self.assertEqual((phone, tpl, vals, img), ("966551234567", "ouja_midweek_half_img", ["سارة"],
+                                                   "https://img.example/437215.jpg"))
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "idle")           # never twice; Sunday waits
+        from brain import db as bdb2
+        import sqlite3
+        cx = sqlite3.connect(bdb2.db_path())
+        self.assertEqual(cx.execute("SELECT COUNT(*) FROM campaign_queue WHERE phone IS NOT NULL "
+                                    "AND state='sent'").fetchone()[0], 0)
+        cx.close()
+
+    def test_test_numbers_only_while_allowlist_is_set(self):
+        self.live()
+        self.cfg.allow = {"966500000001"}
+        self.p.load("w1", [self.row(), self.row(phone="0500000001")])
+        r = self.p.tick(self.t0)
+        self.assertEqual((r["sent"], r["waiting_test_mode"]), (1, 1))
+        self.assertEqual(self.fake.sent[0][1], "966500000001")
+
+    def test_opted_out_is_suppressed(self):
+        self.live()
+        db.add_optout(engine.phone_key("966551234567", db.salt()), "ct-1")
+        self.p.load("w1", [self.row()])
+        self.assertEqual(self.p.tick(self.t0)["suppressed"], 1)
+        self.assertEqual(self.fake.sent, [])
+
+    def test_rate_limit_puts_it_back(self):
+        self.live()
+        self.fake.fail = Err429("slow down")
+        self.p.load("w1", [self.row()])
+        self.p.tick(self.t0)
+        self.fake.fail = None
+        self.assertEqual(self.p.tick(self.t0)["sent"], 1)
+
+    def test_no_keys_or_channel_waits(self):
+        self.live()
+        self.p.load("w1", [self.row()])
+        self.p._hatif = lambda: (None, None)
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "no_keys")
+        self.p._hatif = lambda: (self.fake, FakePCfg(channel=""))
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "no_channel")
+        self.assertEqual(self.fake.sent, [])
+
+    def test_cancel_and_summary(self):
+        self.p.load("w1", [self.row(), self.row(phone="0559999999")])
+        self.assertEqual(self.p.cancel("w1"), 2)
+        self.live()
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "idle")
+        s = self.p.summary()
+        self.assertEqual([(b["state"], b["n"]) for b in s["batches"]], [("cancelled", 2)])
+        self.assertNotIn("551234567", repr(s))
+
+    def test_riyadh_time_is_respected(self):
+        self.live()
+        self.p.load("w1", [self.row(at="2026-11-27T18:00:00")])               # 18:00 Riyadh = 15:00 UTC
+        self.assertEqual(self.p.tick(self.t0 - datetime.timedelta(minutes=1))["outcome"], "idle")
+        self.assertEqual(self.p.tick(self.t0)["sent"], 1)
+
+
+class HatifSendTemplateTests(unittest.TestCase):
+    def test_body_shape(self):
+        from hatif import client as hc
+        calls = []
+
+        class R:
+            def __init__(self, code, body):
+                self.status_code, self._b = code, body
+
+            def json(self):
+                return self._b
+
+        class S:
+            def request(self, method, url, **kw):
+                calls.append((method, url, kw))
+                if url.endswith("/connect/token"):
+                    return R(200, {"access_token": "t", "expires_in": 3600})
+                return R(200, {"status": "accepted"})
+
+        os.environ["HATIF_CLIENT_ID"], os.environ["HATIF_CLIENT_SECRET"] = "id", "secret"
+        try:
+            hc.set_session_for_tests(S())
+            hc.send_template("ch", "966551234567", "ouja_elite_member_img", "ar", ["فهد", "ذهب"],
+                             "https://img/x.jpg")
+        finally:
+            os.environ.pop("HATIF_CLIENT_ID")
+            os.environ.pop("HATIF_CLIENT_SECRET")
+            hc.set_session_for_tests(None)
+        method, url, kw = calls[-1]
+        self.assertTrue(url.endswith("/v1/whatsapp/service-account/sendTemplate"))
+        b = kw["json"]
+        self.assertEqual((b["channelId"], b["toNumber"], b["templateName"], b["language"]),
+                         ("ch", "966551234567", "ouja_elite_member_img", "ar"))
+        self.assertEqual(b["parameters"][0], {"Type": "Header", "Values": [{"Type": "image",
+                                                                           "ImageUrl": "https://img/x.jpg"}]})
+        self.assertEqual([v["Text"] for v in b["parameters"][1]["Values"]], ["فهد", "ذهب"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,8 @@ class ViewTests(unittest.TestCase):
     def test_wiring(self):
         caps = bot._campaigns_caps()
         self.assertIn("send_guest", caps)
+        self.assertIn("is_admin", caps)                          # the per-person queue upload is admin-only
+        self.assertTrue(hasattr(bot, "campaigns_personal_loop"))
         import inspect
         self.assertIn("card", inspect.signature(caps["post"]).parameters)
 

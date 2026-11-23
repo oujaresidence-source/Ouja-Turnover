@@ -86,6 +86,25 @@ CREATE TABLE IF NOT EXISTS campaign_alerts (
     ctx         TEXT
 );
 CREATE INDEX IF NOT EXISTS campaign_alerts_msg ON campaign_alerts(message_id);
+CREATE TABLE IF NOT EXISTS campaign_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch       TEXT,
+    campaign    TEXT,
+    template    TEXT,
+    lang        TEXT,
+    phone       TEXT,
+    phone_key   TEXT,
+    last4       TEXT,
+    vals        TEXT,
+    image_url   TEXT,
+    send_at     TEXT,
+    state       TEXT,
+    created_at  TEXT,
+    sent_at     TEXT,
+    error       TEXT,
+    UNIQUE(campaign, phone_key)
+);
+CREATE INDEX IF NOT EXISTS campaign_queue_due ON campaign_queue(state, send_at);
 """
 
 _init_lock = threading.Lock()
@@ -389,6 +408,86 @@ def end_alert_action(alert_id, state, actor=None, action=None, note=None):
             cx.execute("UPDATE campaign_alerts SET state=?, actor=?, action=?, acted_at=?, note=? "
                        "WHERE id=?", (state, str(actor)[:60], action, now_iso(), note, int(alert_id)))
         cx.commit()
+
+
+# ---------------------------------------------------------------- the per-person queue
+# THE one place a phone number is kept, and only until it is sent: the number is needed to
+# send, then erased (phone_key + last 4 stay for the report and the never-twice rule).
+_Q_KEYS = ("id", "batch", "campaign", "template", "lang", "phone", "phone_key", "last4", "vals",
+           "image_url", "send_at", "state", "created_at", "sent_at", "error")
+
+
+def queue_add(row):
+    """True when queued, False when this person already has this campaign (never twice)."""
+    _ensure()
+    r = dict(row)
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute(
+            "INSERT OR IGNORE INTO campaign_queue(batch, campaign, template, lang, phone, phone_key, "
+            "last4, vals, image_url, send_at, state, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'queued',?)",
+            (r["batch"], r["campaign"], r["template"], r.get("lang") or "ar", r["phone"], r["phone_key"],
+             r.get("last4"), json.dumps(r.get("vals") or [], ensure_ascii=False), r.get("image_url"),
+             r["send_at"], now_iso()))
+        cx.commit()
+        return cur.rowcount == 1
+
+
+def queue_due(now_utc_iso, limit):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT %s FROM campaign_queue WHERE state='queued' AND send_at <= ? "
+                          "ORDER BY send_at, id LIMIT ?" % ", ".join(_Q_KEYS),
+                          (now_utc_iso, int(limit))).fetchall()
+    out = []
+    for r in rows:
+        d = dict(zip(_Q_KEYS, r))
+        try:
+            d["vals"] = json.loads(d["vals"] or "[]")
+        except ValueError:
+            d["vals"] = []
+        out.append(d)
+    return out
+
+
+def queue_claim(qid):
+    """queued → sending, for ONE caller (two bot copies during a redeploy send once)."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute("UPDATE campaign_queue SET state='sending' WHERE id=? AND state='queued'",
+                         (int(qid),))
+        cx.commit()
+        return cur.rowcount == 1
+
+
+def queue_finish(qid, state, error=None):
+    """sent / suppressed / failed erase the number; «queued» puts it back (rate limit)."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        if state == "queued":
+            cx.execute("UPDATE campaign_queue SET state='queued' WHERE id=?", (int(qid),))
+        else:
+            cx.execute("UPDATE campaign_queue SET state=?, phone=NULL, sent_at=?, error=? WHERE id=?",
+                       (state, now_iso(), (error or None) and str(error)[:120], int(qid)))
+        cx.commit()
+
+
+def queue_cancel(batch):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute("UPDATE campaign_queue SET state='cancelled', phone=NULL "
+                         "WHERE batch=? AND state='queued'", (str(batch),))
+        cx.commit()
+        return cur.rowcount
+
+
+def queue_summary():
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT batch, campaign, state, COUNT(*), MIN(send_at), MAX(send_at) "
+                          "FROM campaign_queue GROUP BY batch, campaign, state "
+                          "ORDER BY MIN(send_at)").fetchall()
+    return [{"batch": b, "campaign": c, "state": s, "n": n, "first": f, "last": l}
+            for b, c, s, n, f, l in rows]
 
 
 def _s(v):

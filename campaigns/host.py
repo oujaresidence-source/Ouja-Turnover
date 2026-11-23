@@ -7,6 +7,7 @@ campaigns.wire({...}) once at web-server start. The package never imports bot or
 
 class _Host:
     dash_auth = None        # (request) -> bool
+    is_admin = None         # (request) -> bool   the per-person queue upload is admin-only
     json_response = None    # (data, status=200) -> web.Response
     run = None              # async (fn, *a) -> result   bot.web_thread
     now = None              # () -> tz-aware Riyadh datetime

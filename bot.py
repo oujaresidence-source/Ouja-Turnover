@@ -9871,6 +9871,7 @@ def _campaigns_reservations(start, end):
 def _campaigns_caps():
     return {
         "dash_auth": _dash_auth, "json_response": _json, "run": web_thread, "now": now_riyadh,
+        "is_admin": lambda request: _req_role(request) == "admin",
         "post": _campaigns_post, "log_event": log_event, "calendar": fetch_calendar_days,
         "floor": _campaigns_floor, "responsible": _recovery_unit_owner,
         "links": guest_conversation_links,
@@ -9916,6 +9917,27 @@ async def campaigns_report_loop():
 
 @campaigns_report_loop.before_loop
 async def _campaigns_report_ready():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(minutes=1)
+async def campaigns_personal_loop():
+    """«حملات عوجا» per-person sender: each minute, the due queue rows (one template per person,
+    their time, their apartment's photo). Idle when nothing is queued; sends nothing while
+    CAMPAIGN_PERSONAL_DRYRUN=1. A redeploy re-running this loop is harmless: rows are claimed
+    one by one (queued → sending) and a sent row is never queued again."""
+    if not _HAS_CAMPAIGNS:
+        return
+    try:
+        rep = await asyncio.to_thread(_campaigns.personal.tick)
+        if (rep or {}).get("outcome") == "ran":
+            print("[campaigns] personal tick:", rep)
+    except Exception as e:
+        print("[campaigns] personal loop error (non-fatal):", type(e).__name__)
+
+
+@campaigns_personal_loop.before_loop
+async def _campaigns_personal_ready():
     await bot.wait_until_ready()
 
 
@@ -79777,6 +79799,7 @@ async def on_ready():
                      (discount_catchup_loop, "discount_catchup_loop"),
                      (lm_keeper_loop, "lm_keeper_loop"),
                      (escalation_reping_loop, "escalation_reping_loop"),
+                     (campaigns_personal_loop, "campaigns_personal_loop"),
                      (revenue_loop, "revenue_loop"),
                      (price_opp_loop, "price_opp_loop"),
                      (weekly_review_loop, "weekly_review_loop"),
@@ -79989,6 +80012,8 @@ async def on_ready():
         _pending.append(permits_loop)             # PERMITS «التصاريح»: tickets + 13:00 digest (DRY until «تشغيل»)
     if _HAS_CAMPAIGNS and not campaigns_report_loop.is_running():
         _pending.append(campaigns_report_loop)    # «حملات عوجا»: Sunday 09:00 report (Discord only)
+    if _HAS_CAMPAIGNS and not campaigns_personal_loop.is_running():
+        _pending.append(campaigns_personal_loop)  # «حملات عوجا»: per-person sends (idle until queued; DRYRUN=1)
     # Fire them off spread over time, in the background: on_ready must keep going
     # (the web server starts a few lines above this) while the loops trickle up.
     _pending = ([persist_loop] if persist_loop in _pending else []) + \

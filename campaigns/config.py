@@ -52,6 +52,22 @@ def buttons_dryrun():
     return _flag("CAMPAIGN_BUTTONS_DRYRUN", "1")
 
 
+def personal_enabled():
+    """(4) The per-person sender (campaigns.personal): one template per person, at their time,
+    with their apartment's photo. Idle until a batch is queued."""
+    return enabled() and _flag("CAMPAIGN_PERSONAL", "1")
+
+
+def personal_dryrun():
+    """1 (default) = due rows wait in the queue; nothing is sent."""
+    return _flag("CAMPAIGN_PERSONAL_DRYRUN", "1")
+
+
+def personal_per_tick():
+    """Sends per one-minute tick. Hatif allows 120 API calls a minute per workspace, shared."""
+    return min(100, max(1, _int("CAMPAIGN_PERSONAL_PER_MIN", 60)))
+
+
 def report_enabled():
     """(3) Weekly report, Sunday 09:00 Riyadh, Discord only."""
     return enabled() and _flag("CAMPAIGN_REPORT", "1")
