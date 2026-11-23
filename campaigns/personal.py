@@ -98,11 +98,11 @@ def _tick(now):
     hc, hcfg = _hatif()
     if hc is None or hcfg is None:
         return {"outcome": "no_keys", "due": len(due)}
-    channel = hcfg.channel_id()
+    from .service import is_suppressed, known_channel
+    channel = hcfg.channel_id() or known_channel()          # learned from the first inbound event
     if not channel:
         return {"outcome": "no_channel", "due": len(due)}
     allow = hcfg.test_numbers()
-    from .service import is_suppressed
     sent = suppressed = failed = waiting = 0
     for r in due:
         if allow and r["phone"] not in allow:

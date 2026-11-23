@@ -341,7 +341,29 @@ def _hatif_api():
     return (hc if hcfg.configured() else None), hcfg
 
 
+_seen_channel = {"id": None}
+
+
+def remember_channel(p):
+    """The WhatsApp channel id every inbound Hatif event carries — kept so the per-person sender
+    knows where to send without HATIF_CHANNEL_ID (that env var also FILTERS the reader: a wrong
+    value there would silence it, so it is not needed for sending)."""
+    ch = str((p or {}).get("channelId") or "").strip()
+    if not ch or p.get("direction") != "Inbound" or _seen_channel["id"] == ch:
+        return
+    try:
+        db.set_setting("hatif_channel", ch)
+        _seen_channel["id"] = ch
+    except Exception:
+        traceback.print_exc()
+
+
+def known_channel():
+    return db.get_setting("hatif_channel", "") or ""
+
+
 def _on_hatif(p):
+    remember_channel(p)
     if not config.buttons_enabled() or p.get("direction") != "Inbound":
         return False
     label, hinted, source, raw_keys = extract_tap(p)

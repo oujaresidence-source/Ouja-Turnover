@@ -823,6 +823,16 @@ class PersonalTests(Base):
         self.assertEqual(self.p.tick(self.t0)["outcome"], "no_channel")
         self.assertEqual(self.fake.sent, [])
 
+    def test_channel_learned_from_an_inbound_event(self):
+        self.live()
+        self.p.load("w1", [self.row()])
+        self.p._hatif = lambda: (self.fake, FakePCfg(channel=""))
+        self.assertEqual(self.p.tick(self.t0)["outcome"], "no_channel")
+        service.on_hatif({"direction": "Inbound", "messageType": "Text", "body": "هلا",
+                          "channelId": "ch-live", "conversationEventId": "x1"})
+        self.assertEqual(self.p.tick(self.t0)["sent"], 1)
+        self.assertEqual(self.fake.sent[0][0], "ch-live")
+
     def test_cancel_and_summary(self):
         self.p.load("w1", [self.row(), self.row(phone="0559999999")])
         self.assertEqual(self.p.cancel("w1"), 2)
