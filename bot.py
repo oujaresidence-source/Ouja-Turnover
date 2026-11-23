@@ -171,6 +171,17 @@ except Exception as _hf_err:            # pragma: no cover
     _hatif = None
     _HAS_HATIF = False
 
+# «حملات عوجا» campaign engine stage 1 (2026-11-23): code-word alerts from the Airbnb inbox,
+# Hatif template button taps, the opt-out list and the Sunday report. Posts to Discord only;
+# never writes to Hostaway; a WhatsApp reply needs CAMPAIGN_BUTTONS_DRYRUN=0. Rules: campaigns/__init__.py.
+try:
+    import campaigns as _campaigns
+    _HAS_CAMPAIGNS = True
+except Exception as _cp_err:            # pragma: no cover
+    print("[campaigns] import failed (campaign engine disabled, bot unaffected):", _cp_err)
+    _campaigns = None
+    _HAS_CAMPAIGNS = False
+
 # Cleaning coverage «تغطية التنظيف» — where every apartment is, who cleans it, how
 # OujaCT actually performs, and the head count to bring cleaning fully in-house.
 # READ-ONLY: it computes from the existing stores and writes nothing but its geo cache.
@@ -9692,11 +9703,132 @@ def _hatif_search(check_in, check_out, guests, typ, neighborhood):
     """HOST.search — exactly what /api/stay/search runs for the guest site."""
     return _gw_search(check_in, check_out, guests, typ, None, neighborhood, None)
 
+# ============= «حملات عوجا» campaign engine — the `campaigns/` package =============
+# (1) a Hostaway guest message with a code word → «عروض-خاصة»; (2) Hatif template button taps
+# (routed in by hatif.service through HOST.campaign_tap) → «عروض-خاصة» / «طلبات-الملاك» + the
+# opt-out list; (3) Sunday 09:00 → one report. Hostaway is only READ here.
+def _campaigns_post(where, text, role_id=""):
+    """HOST.post — one message to the offers or owners channel. A channel that cannot be made
+    (Discord's 500-channel cap) falls back to the watchdog room, so an alert is never lost."""
+    async def _post():
+        guild = bot.get_guild(GUILD_ID)
+        if guild is None:
+            return
+        name = (_campaigns.config.owners_channel() if where == "owners"
+                else _campaigns.config.offers_channel())
+        ch = discord.utils.get(guild.text_channels, name=name)
+        if ch is None:
+            try:
+                if where == "owners":
+                    cat = await _onb_category(guild)
+                else:
+                    cat = await get_assistant_category(guild)
+            except Exception as e:
+                print("[campaigns] category lookup failed:", e)
+                cat = None
+            ch = await ensure_channel(guild, name, cat)
+        prefix = ""
+        if ch is None:
+            ch = discord.utils.get(guild.text_channels, name=WATCHDOG_CHANNEL)
+            prefix = "(ما قدرت أفتح #%s — حطيتها هنا)%s" % (name, chr(10))
+        if ch is None:
+            print("[campaigns] no channel to post in:", name)
+            return
+        mention = ("<@&%s> " % role_id) if role_id else ""
+        await ch.send((mention + prefix + str(text))[:1995],
+                      allowed_mentions=discord.AllowedMentions(roles=True, users=False,
+                                                               everyone=False))
+    _stayhub_schedule(_post, "campaigns:post")
+
+
+def _campaigns_floor(lid):
+    """The unit's minimum — the SAME hard stop the same-day price keeper uses (owner's manual
+    floor, lowest-that-sold, global floor). Read from the cached file only: never a Hostaway pull."""
+    try:
+        mins = (_load_json(LM_MINIMUMS_FILE, {}) or {}).get("units") or {}
+    except Exception:
+        mins = {}
+    return lm_unit_minimum(lid, mins)
+
+
+def _campaigns_reservations(start, end):
+    """Confirmed-or-not reservations arriving from start−3 to end+60, in 30-day TARGETED slices
+    (CLAUDE.md trap #4 — never the truncated history cache). The service filters by creation."""
+    out, seen = [], set()
+    d0, d1 = start - timedelta(days=3), end + timedelta(days=60)
+    cur = d0
+    while cur <= d1:
+        nxt = min(d1, cur + timedelta(days=29))
+        try:
+            rows = _ha_reservations_window("arrivalStartDate", "arrivalEndDate",
+                                           cur.isoformat(), nxt.isoformat())
+        except Exception as e:
+            print("[campaigns] reservation window failed:", e)
+            rows = []
+        for r in rows:
+            rid = r.get("id")
+            if rid in seen:
+                continue
+            seen.add(rid)
+            out.append(r)
+        cur = nxt + timedelta(days=1)
+    return out
+
+
+def _campaigns_caps():
+    return {
+        "dash_auth": _dash_auth, "json_response": _json, "run": web_thread, "now": now_riyadh,
+        "post": _campaigns_post, "log_event": log_event, "calendar": fetch_calendar_days,
+        "floor": _campaigns_floor, "responsible": _recovery_unit_owner,
+        "links": guest_conversation_links,
+        "dates_from_text": lambda h: _dates_from_text(h),
+        "reservations": _campaigns_reservations, "search": _hatif_search,
+        "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
+    }
+
+
+def _campaigns_tap(payload):
+    """hatif HOST.campaign_tap — True when campaigns/ handled this WhatsApp message."""
+    if not _HAS_CAMPAIGNS:
+        return False
+    return _campaigns.service.on_hatif(payload)
+
+
+async def _campaigns_on_guest_message(it):
+    """Fire-and-forget from process_assistant_item: never delays or changes a reply."""
+    if not _HAS_CAMPAIGNS:
+        return
+    try:
+        await asyncio.to_thread(_campaigns.service.on_guest_message, dict(it))
+    except Exception as e:
+        print("[campaigns] code-word watcher error (non-fatal):", e)
+
+
+@tasks.loop(minutes=30)
+async def campaigns_report_loop():
+    """Sunday 09:00 Riyadh report. A 30-min tick + a compare-and-set latch in brain.db, never
+    @tasks.loop(time=…), so a redeploy cannot post it twice."""
+    if not _HAS_CAMPAIGNS:
+        return
+    try:
+        rep = await asyncio.to_thread(_campaigns.service.weekly_tick, now_riyadh())
+        if (rep or {}).get("outcome") == "posted":
+            print("[campaigns] weekly report posted")
+    except Exception as e:
+        print("[campaigns] report loop error (non-fatal):", e)
+
+
+@campaigns_report_loop.before_loop
+async def _campaigns_report_ready():
+    await bot.wait_until_ready()
+
+
 def _hatif_caps():
     return {
         "dash_auth": _dash_auth, "json_response": _json, "web": web, "run": web_thread,
         "background": _hatif_background, "now": now_riyadh, "notify": _hatif_notify,
         "log_event": log_event, "search": _hatif_search,
+        "campaign_tap": _campaigns_tap,
         "neighborhoods": lambda: RIYADH_NEIGHBORHOODS,
         "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
         # the WhatsApp «reader» (silent in Phase 1): one routing call per typed message, and the
@@ -18921,6 +19053,11 @@ async def process_assistant_item(it, channel):
     if _mid and not _once_claim("msg:" + _mid):
         print(f"[dedup] guest message {_mid} already handled by another copy — skipping")
         return
+    # «حملات عوجا»: a code word («عرض نص») → an offer alert in «عروض-خاصة». Read BEFORE the
+    # debounce (a follow-up message would replace this item) and fire-and-forget, so the
+    # guest's reply path is untouched. Its own db key stops a double alert.
+    if _HAS_CAMPAIGNS:
+        _bg_task(_campaigns_on_guest_message(it), "campaigns:codeword")
     # v3 debounce: guests type in bursts ("هلا" then the real question 15s later).
     # v2 answered the greeting and never saw the question — 43 bare-greeting
     # replies in 90 days, including one to "Is the unit ready?!".
@@ -69132,6 +69269,15 @@ async def start_web_server():
             except Exception as _hfe:
                 print("[hatif] wiring failed (WhatsApp availability disabled, bot unaffected):", _hfe)
 
+        # ---- «حملات عوجا» — code words, Hatif button taps, opt-outs, Sunday report ----
+        if _HAS_CAMPAIGNS:
+            try:
+                _campaigns.wire(_campaigns_caps())
+                _campaigns.register_routes(app)
+                print("[campaigns] wired + /api/campaigns/status — %s" % _campaigns.bootstrap())
+            except Exception as _cpe:
+                print("[campaigns] wiring failed (campaign engine disabled, bot unaffected):", _cpe)
+
         # ---- «تغطية التنظيف» — the coverage study. READ-ONLY: every capability below is
         # a getter. It reads the same stores the cleaning ops already use and computes
         # locations, crew split, OujaCT throughput and the hiring model from them.
@@ -79480,7 +79626,8 @@ async def on_ready():
                      (watchdog_loop, "watchdog_loop"),
                      (directpay_poll_loop, "directpay_poll_loop"),
                      (directpay_nudge_loop, "directpay_nudge_loop"),
-                     (permits_loop, "permits_loop")):
+                     (permits_loop, "permits_loop"),
+                     (campaigns_report_loop, "campaigns_report_loop")):
         if getattr(_lp, "_error_guarded", False):
             continue                    # on_ready can re-fire on re-identify
         _loop_guard(_lp, _nm)
@@ -79682,6 +79829,8 @@ async def on_ready():
         _pending.append(stayhub_recon_loop)       # StayHub: daily reconciliation + refused-bookings summary
     if _HAS_PERMITS and not permits_loop.is_running():
         _pending.append(permits_loop)             # PERMITS «التصاريح»: tickets + 13:00 digest (DRY until «تشغيل»)
+    if _HAS_CAMPAIGNS and not campaigns_report_loop.is_running():
+        _pending.append(campaigns_report_loop)    # «حملات عوجا»: Sunday 09:00 report (Discord only)
     # Fire them off spread over time, in the background: on_ready must keep going
     # (the web server starts a few lines above this) while the loops trickle up.
     _pending = ([persist_loop] if persist_loop in _pending else []) + \

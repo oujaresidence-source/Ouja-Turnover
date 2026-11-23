@@ -14,6 +14,7 @@ handle(payload) returns {"outcome": ...}:
     handoff     dates unreadable twice, or a monthly request — given to a person
     throttled   over HATIF_MAX_PER_MIN — silent, protects Hostaway
     error       something failed; reported once on Discord, never raised
+    campaign    a campaign template button tap / typed «ايقاف» — handled by campaigns/
 """
 import collections
 import threading
@@ -103,6 +104,17 @@ def handle(p):
 def _handle(p):
     if not config.enabled():
         return {"outcome": "ignored"}
+    # «حملات عوجا»: a template button tap (or a typed «ايقاف») belongs to campaigns/, which
+    # says so by returning True. Everything else — including the menu flow's own taps — goes
+    # on exactly as before.
+    tap = getattr(HOST, "campaign_tap", None)
+    ch0 = config.channel_id()
+    if tap and p.get("direction") == "Inbound" and (not ch0 or str(p.get("channelId") or "") == ch0):
+        try:
+            if tap(p):
+                return {"outcome": "campaign"}
+        except Exception:
+            traceback.print_exc()
     body = str(p.get("body") or "").strip()
     if (p.get("direction") != "Inbound" or p.get("messageType") != "Text"
             or p.get("interactiveReply") or not body):

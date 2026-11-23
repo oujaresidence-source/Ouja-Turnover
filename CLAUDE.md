@@ -657,6 +657,49 @@ the package answers with the units that are really free and their price for thos
   `HATIF_CHANNEL`(the watchdog room). Tests: `tests/test_hatif.py` (parser cases are the spec —
   add a case before changing `hatif/parse.py`).
 
+## «حملات عوجا» campaign engine — the `campaigns/` package (stage 1, 2026-11-23)
+Around the Hatif marketing templates (first sends Sun 29 Nov 2026). Three jobs, each its own flag:
+- **(1) Code-word watcher** (`CAMPAIGN_WATCH`=1): `process_assistant_item` fires
+  `service.on_guest_message` fire-and-forget right after the `_once_claim` (BEFORE the debounce,
+  which would replace the item). A word from `config.CODEWORDS` («عرض نص»/«عرض النص»/«عرض نصف»…,
+  whole words after Arabic folding; `not_before` kills «عرض نص ساعة») → one alert in `عروض-خاصة`:
+  guest, unit, dates (the reservation's, else `_dates_from_text`, never guessed), Sun–Wed check,
+  next-night-free check, and the B1 price from `engine.second_night_offer` (night 1 = calendar
+  price, night 2 = 50 % of ITS calendar price, never under `lm_unit_minimum` — the same hard stop
+  as the price keeper, read from the cached file only). Who acts in 15 min = `_recovery_unit_owner`
+  (today's coverer) + optional `CAMPAIGN_OFFER_ROLE_ID` ping. **Hostaway has NO special-offer API —
+  nothing here writes to Hostaway.** One alert per Hostaway message id (`campaign_hits` PK).
+- **(2) Hatif button taps** (`CAMPAIGN_BUTTONS`=1, `CAMPAIGN_BUTTONS_DRYRUN`=**1**):
+  `hatif.service._handle` offers every inbound message to `HOST.campaign_tap` first; campaigns
+  returns True only for OUR labels (`config.BUTTONS`) or a whole-message «ايقاف»/«stop» — a menu-flow
+  tap returns False and Hatif behaves exactly as before. «إيه، كلموني» → `طلبات-الملاك` (call in 2 h);
+  «وريني الشقق» → `عروض-خاصة` + the next Sun–Wed night's list from `_hatif_search` + `hatif.engine.build_reply`;
+  «وش إيليت؟» → `config.elite_text()` (only what /elite already says; `CAMPAIGN_ELITE_TEXT` overrides);
+  «وريني الباقات» → `عروض-خاصة`; «إيقاف العروض» → `campaign_optouts` (forever, one row per person).
+  A reply is SENT only when CAMPAIGN_BUTTONS_DRYRUN=0 AND HATIF_DRYRUN=0 AND Hatif keys work AND
+  the number passes HATIF_TEST_NUMBERS AND not opted out AND no staff member holds the chat.
+  **UNCONFIRMED:** Hatif's docs do not show a TEMPLATE quick-reply tap. `service.extract_tap`
+  accepts `interactiveReply` / `button` / `buttonReply` / `quickReply` / messageType Button and a
+  plain text equal to a label; the template is only known when Hatif hints it (id/payload/
+  templateName containing the name) — «وريني الشقق» is shared by 4 templates, so it reads «قالب غير
+  محدد» otherwise. The payload carries NO phone: the number comes from `get_conversation` (needs the
+  API keys). `GET /api/campaigns/status` shows the SHAPE (keys only) of the last 30 taps — read it
+  after the first real tap before changing the parser.
+- **(3) Weekly report** (`CAMPAIGN_REPORT`=1): `campaigns_report_loop` (30-min tick) + a
+  compare-and-set latch (`campaign_settings.report_date`) → Sunday 09:00 Riyadh, one message in
+  `عروض-خاصة`: hits per word, taps per template, opt-outs, «انحجز» = a confirmed booking CREATED
+  within `CAMPAIGN_MATCH_DAYS` (7) with the same reservation id / phone key / guest name. Bookings come
+  from `_ha_reservations_window` in 30-day arrival slices — never `get_reservations_cached()`.
+- **Privacy:** no phone stored or posted — `engine.phone_key` = HMAC with a per-install salt in
+  `campaign_settings`, + last 4 digits. Never `import bot`; `HOST` caps only.
+- **Channels:** a channel Discord refuses to create (500 cap) falls back to `غرفة-المراقبة` with a note.
+- Env: `CAMPAIGNS_ENABLED`(1), `CAMPAIGN_WATCH`(1), `CAMPAIGN_BUTTONS`(1), `CAMPAIGN_BUTTONS_DRYRUN`(1),
+  `CAMPAIGN_REPORT`(1), `CAMPAIGN_REPORT_DAY`(6=Sun)/`_HOUR`(9), `CAMPAIGN_OFFERS_CHANNEL`(عروض-خاصة),
+  `CAMPAIGN_OWNERS_CHANNEL`(طلبات-الملاك), `CAMPAIGN_OFFER_ROLE_ID`/`CAMPAIGN_OWNERS_ROLE_ID`(empty),
+  `CAMPAIGN_ACT_MIN`(15), `CAMPAIGN_OWNER_CALL_H`(2), `CAMPAIGN_MATCH_DAYS`(7), `CAMPAIGN_ELITE_TEXT`.
+- Tests: `tests/test_campaigns.py` (code words incl. «نص ساعة», price + floor, opt-out list, routing,
+  hatif hand-over, the Sunday latch).
+
 ## Finance ERP (المركز المالي) traps — mirror of the dashboard traps
 The ERP SPA is `finance/static/erp.js` (~4.7k lines, hand-written, NO build step). Same class
 of outage as `DASHBOARD_HTML`: one bad token kills the whole SPA so the page **won't even log

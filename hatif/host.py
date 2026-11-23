@@ -21,6 +21,7 @@ class _Host:
     classify = None         # (system, user) -> dict|None   the reader's one AI call (claude_json)
     notify_reader = None    # (text) -> None   the silent reader's Discord channel (falls back to notify)
     catalog = None          # () -> [unit dicts]   browse-mode _gw_search results (no availability)
+    campaign_tap = None     # (payload) -> bool   campaigns.service.on_hatif; True = handled
 
     def require(self, attr):
         v = getattr(self, attr, None)
