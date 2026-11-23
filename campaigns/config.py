@@ -127,7 +127,26 @@ TEMPLATES = {
     "ouja_midweek_half": ["وريني الشقق"],
     "ouja_winback": ["وريني الشقق"],
     "ouja_moments_midweek": ["وريني الباقات"],
+    # the same three with a photo header (Meta-approved 2026-11-23) — same buttons, same routes
+    "ouja_owner_recontact_img": ["إيه، كلموني", "مو الحين"],
+    "ouja_elite_member_img": ["وريني الشقق", "وش إيليت؟"],
+    "ouja_midweek_half_img": ["وريني الشقق"],
 }
+
+# The campaign each template belongs to, as the team calls it (shown on the Discord card).
+TEMPLATE_TITLES = {
+    "ouja_owner_recontact": "حقك علينا (الملاك)", "ouja_owner_recontact_img": "حقك علينا (الملاك)",
+    "ouja_elite_member": "عوجا إيليت", "ouja_elite_member_img": "عوجا إيليت",
+    "ouja_elite_invite": "عوجا إيليت",
+    "ouja_midweek_half": "الليلة الثانية بنص", "ouja_midweek_half_img": "الليلة الثانية بنص",
+    "ouja_winback": "وحشتونا", "ouja_moments_midweek": "لحظات وسط الأسبوع",
+}
+
+# The templates whose «وريني الشقق» list also explains the «عرض نص» code word.
+MIDWEEK_TEMPLATES = ("ouja_midweek_half", "ouja_midweek_half_img")
+
+# What «ما رد — أرسل له رسالة» sends an owner on WhatsApp after a missed call.
+OWNER_NOANSWER_TEXT = "هلا فيك 🤍 حاولت أتصل عليك الحين. متى يناسبك نتكلم ١٠ دقايق؟"
 
 BUTTONS = {
     "إيه، كلموني": "owner_call",

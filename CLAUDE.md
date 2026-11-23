@@ -692,6 +692,19 @@ Around the Hatif marketing templates (first sends Sun 29 Nov 2026). Three jobs, 
   from `_ha_reservations_window` in 30-day arrival slices — never `get_reservations_cached()`.
 - **Privacy:** no phone stored or posted — `engine.phone_key` = HMAC with a per-install salt in
   `campaign_settings`, + last 4 digits. Never `import bot`; `HOST` caps only.
+- **(4) Discord cards + one-press buttons (2026-11-23, owner: «ما ينسخون أو يكتبون»):** every alert
+  is a row in `campaign_alerts` (message id = the key) and an embed painted by the PURE
+  `cards.render(alert)` — the SAME function repaints it after every press, so the card always says
+  who did what and when. `bot.CampaignCardView` = 7 fixed custom_ids `camp_<action>` registered in
+  `on_ready`; `_camp_view(card)` keeps only the card's buttons (relabelled) + link buttons. A press →
+  `service.press(message_id, action, actor)` in a thread: compare-and-set `open→busy`
+  (`db.begin_alert_action`) so two presses never send twice. «② أرسلت العرض — بلّغ الضيف» /
+  «ما ينطبق» send into the Airbnb thread via `HOST.send_guest` = `send_guest_message` (kill switch,
+  outbound firewall, duplicate guard); WhatsApp sends go through the SAME `_send_or_hold` gates,
+  the number re-read from Hatif at press time. Every send obeys `CAMPAIGN_BUTTONS_DRYRUN` (=1: the
+  card says why nothing went). The Special Offer itself stays a human click in Hostaway (no API).
+  The photo templates (`…_img`) are the same campaign as their text twins (`engine.resolve_template`,
+  `config.MIDWEEK_TEMPLATES`) — add a new `_img` name to `config.TEMPLATES` or its taps read «غير محدد».
 - **Channels:** a channel Discord refuses to create (500 cap) falls back to `غرفة-المراقبة` with a note.
 - Env: `CAMPAIGNS_ENABLED`(1), `CAMPAIGN_WATCH`(1), `CAMPAIGN_BUTTONS`(1), `CAMPAIGN_BUTTONS_DRYRUN`(1),
   `CAMPAIGN_REPORT`(1), `CAMPAIGN_REPORT_DAY`(6=Sun)/`_HOUR`(9), `CAMPAIGN_OFFERS_CHANNEL`(عروض-خاصة),

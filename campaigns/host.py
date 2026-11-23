@@ -10,7 +10,9 @@ class _Host:
     json_response = None    # (data, status=200) -> web.Response
     run = None              # async (fn, *a) -> result   bot.web_thread
     now = None              # () -> tz-aware Riyadh datetime
-    post = None             # (where, text, role_id="") -> None   where: "offers" | "owners"
+    post = None             # (where, text, role_id="", card=None) -> None   where: "offers" | "owners"
+                            # card = cards.render() + alert_id → an embed with buttons
+    send_guest = None       # (conversation_id, body, comm_type) -> Hostaway reply | a SEND_* refusal string
     log_event = None        # (category, text) -> None
     calendar = None         # (listing_id, start_date, end_date) -> [{date, isAvailable, price, ...}]
     floor = None            # (listing_id) -> int SAR, the unit's minimum (0 = none on file)

@@ -192,7 +192,11 @@ def resolve_template(label, hinted=None):
     if hinted and str(hinted) in config.TEMPLATES:
         return str(hinted)
     cands = templates_for(label)
-    return cands[0] if len(cands) == 1 else None
+    if len(cands) == 1:
+        return cands[0]
+    # the photo version («…_img») is the same campaign as its text twin: report it as one
+    bases = {c[:-4] if c.endswith("_img") else c for c in cands}
+    return bases.pop() if len(bases) == 1 else None
 
 
 def is_stop_message(text):

@@ -71,6 +71,21 @@ CREATE TABLE IF NOT EXISTS campaign_settings (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS campaign_alerts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT,
+    created_at  TEXT,
+    message_id  TEXT,
+    channel_id  TEXT,
+    state       TEXT,
+    claimed_by  TEXT,
+    actor       TEXT,
+    action      TEXT,
+    acted_at    TEXT,
+    note        TEXT,
+    ctx         TEXT
+);
+CREATE INDEX IF NOT EXISTS campaign_alerts_msg ON campaign_alerts(message_id);
 """
 
 _init_lock = threading.Lock()
@@ -278,6 +293,102 @@ def optouts(since_iso=None, until_iso=None):
         rows = cx.execute(q + " ORDER BY created_at", tuple(args)).fetchall()
     keys = ("opt_key", "created_at", "contact_id", "conversation_id", "last4", "source", "template")
     return [dict(zip(keys, r)) for r in rows]
+
+
+# ---------------------------------------------------------------- Discord alert cards
+# One row per card posted in «عروض-خاصة» / «طلبات-الملاك». The Discord message id is the key a
+# button press arrives with; ctx holds what the card shows and what a button sends (no phone
+# number — last 4 + the Hatif conversation id, re-read from the Hatif API at press time).
+# state: open → busy (a press in flight, compare-and-set) → open | waiting | done | dismissed.
+_ALERT_KEYS = ("id", "kind", "created_at", "message_id", "channel_id", "state", "claimed_by",
+               "actor", "action", "acted_at", "note", "ctx")
+
+
+def _alert_row(r):
+    if not r:
+        return None
+    a = dict(zip(_ALERT_KEYS, r))
+    try:
+        a["ctx"] = json.loads(a["ctx"] or "{}")
+    except ValueError:
+        a["ctx"] = {}
+    return a
+
+
+def new_alert(kind, ctx, state="open"):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute("INSERT INTO campaign_alerts(kind, created_at, state, ctx) VALUES(?,?,?,?)",
+                         (str(kind), now_iso(), state,
+                          json.dumps(ctx or {}, ensure_ascii=False, default=str)))
+        cx.commit()
+        return cur.lastrowid
+
+
+def set_alert_message(alert_id, message_id, channel_id=None):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cx.execute("UPDATE campaign_alerts SET message_id=?, channel_id=? WHERE id=?",
+                   (_s(message_id), _s(channel_id), int(alert_id)))
+        cx.commit()
+
+
+def alert(alert_id):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        r = cx.execute("SELECT %s FROM campaign_alerts WHERE id=?" % ", ".join(_ALERT_KEYS),
+                       (int(alert_id),)).fetchone()
+    return _alert_row(r)
+
+
+def alert_by_message(message_id):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        r = cx.execute("SELECT %s FROM campaign_alerts WHERE message_id=? ORDER BY id DESC LIMIT 1"
+                       % ", ".join(_ALERT_KEYS), (_s(message_id),)).fetchone()
+    return _alert_row(r)
+
+
+def set_alert_ctx(alert_id, ctx):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cx.execute("UPDATE campaign_alerts SET ctx=? WHERE id=?",
+                   (json.dumps(ctx or {}, ensure_ascii=False, default=str), int(alert_id)))
+        cx.commit()
+
+
+def claim_alert(alert_id, who):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cx.execute("UPDATE campaign_alerts SET claimed_by=? WHERE id=?", (str(who)[:60], int(alert_id)))
+        cx.commit()
+
+
+def begin_alert_action(alert_id, from_states=("open", "waiting")):
+    """Compare-and-set to «busy»: True for the ONE press that may act (two people pressing
+    «أرسل» at once send one message). Returns the state it moved from, or None."""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        for st in from_states:
+            cur = cx.execute("UPDATE campaign_alerts SET state='busy' WHERE id=? AND state=?",
+                             (int(alert_id), st))
+            if cur.rowcount == 1:
+                cx.commit()
+                return st
+        cx.commit()
+    return None
+
+
+def end_alert_action(alert_id, state, actor=None, action=None, note=None):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        if actor is None:
+            cx.execute("UPDATE campaign_alerts SET state=?, note=? WHERE id=?",
+                       (state, note, int(alert_id)))
+        else:
+            cx.execute("UPDATE campaign_alerts SET state=?, actor=?, action=?, acted_at=?, note=? "
+                       "WHERE id=?", (state, str(actor)[:60], action, now_iso(), note, int(alert_id)))
+        cx.commit()
 
 
 def _s(v):

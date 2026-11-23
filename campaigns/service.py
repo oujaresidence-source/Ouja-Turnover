@@ -13,20 +13,48 @@ import datetime
 import json
 import traceback
 
-from . import config, db, engine
+from . import cards, config, db, engine
 from .host import HOST
 
 OFFERS, OWNERS = "offers", "owners"
 
 
-def _post(where, text, role_id=""):
+def _post(where, text, role_id="", card=None):
+    """One Discord message. With a card, bot.py posts the embed + buttons (the text is the
+    fallback when Discord refuses the embed); a host without card support gets the text."""
     fn = getattr(HOST, "post", None)
     if not fn:
         return
     try:
-        fn(where, str(text)[:1990], role_id or "")
+        if card is not None and _takes_card(fn):
+            fn(where, str(text)[:1990], role_id or "", card=card)
+        else:
+            fn(where, str(text)[:1990], role_id or "")
     except Exception:
         traceback.print_exc()
+
+
+def _takes_card(fn):
+    try:
+        import inspect
+        return "card" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _card_alert(kind, ctx, state="open", action=None):
+    """Store the alert, then paint its card. Returns the card dict (with alert_id) or None
+    when the db is unavailable (the plain text still posts)."""
+    try:
+        aid = db.new_alert(kind, ctx, state)
+        if action:
+            db.end_alert_action(aid, state, "النظام", action)
+        card = cards.render(db.alert(aid))
+        card["alert_id"] = aid
+        return card
+    except Exception:
+        traceback.print_exc()
+        return None
 
 
 def _log(text):
@@ -151,7 +179,8 @@ def _on_guest_message(it):
                 links = []
         now = _now()
         text = alert_text(it, hit, offer, who, links, now, src)
-        _post(OFFERS, text, config.offer_role_id())
+        card = _card_alert("codeword", _codeword_ctx(it, hit, offer, who, links, now, src))
+        _post(OFFERS, text, config.offer_role_id(), card=card)
         db.finish_hit(mid, offer or {})
         _log("كلمة سر «%s» · %s · %s" % (hit["phrase"], it.get("guest") or "ضيف", it.get("unit") or ""))
         return {"outcome": "alerted", "offer": offer, "text": text}
@@ -215,6 +244,26 @@ def alert_text(it, hit, offer, who, links, now, date_source=None):
     return "\n".join(lines)
 
 
+def _codeword_ctx(it, hit, offer, who, links, now, date_source=None):
+    """What the code-word card shows and what its buttons send (Airbnb thread, via Hostaway)."""
+    st = str(it.get("res_status") or "").lower()
+    mins = config.act_within_min()
+    by = ""
+    if hasattr(now, "strftime"):
+        t = now + datetime.timedelta(minutes=mins)
+        by = "%d:%02d %s" % (t.hour % 12 or 12, t.minute, "ص" if t.hour < 12 else "م")
+    ctx = {"guest": it.get("guest") or "ضيف", "first": cards.first_name(it.get("guest")),
+           "unit": it.get("unit"), "phrase": hit.get("phrase"), "title": hit.get("title") or hit.get("code"),
+           "code": hit.get("code"), "booked": st in _CONFIRMED, "res_status": st,
+           "offer": offer or {}, "date_source": date_source, "who": who, "mins": mins, "by": by,
+           "links": [[u, l] for u, l in (links or [])[:3]],
+           "conversation_id": it.get("conversation_id"), "comm_type": it.get("comm_type")}
+    ctx["reply"] = cards.codeword_reply(ctx) if offer is not None else ""
+    if offer is not None:
+        ctx["decline_label"], ctx["decline"] = cards.codeword_decline(ctx)
+    return ctx
+
+
 # =====================================================================================
 # (2) Hatif button taps
 # =====================================================================================
@@ -237,7 +286,8 @@ def _hint(v):
         for k in ("templateName", "template_name", "id", "payload"):
             x = v.get(k)
             if isinstance(x, str):
-                for t in config.TEMPLATES:
+                # longest name first: «ouja_midweek_half_img» must not read as «ouja_midweek_half»
+                for t in sorted(config.TEMPLATES, key=len, reverse=True):
                     if t in x:
                         return t
         t = v.get("template")
@@ -364,24 +414,36 @@ def _opt_keys(ctx):
     return keys
 
 
+def _card_base(ctx):
+    """The tap facts a card needs — never the phone number (last 4 + the Hatif ids only)."""
+    return {k: ctx.get(k) for k in ("guest", "last4", "template", "label", "cid", "contact_id",
+                                     "eid", "kind", "channel")}
+
+
 def _route_owner_call(ctx):
     now = _now()
-    by = (now + datetime.timedelta(hours=config.owner_call_within_h())).strftime("%I:%M %p")
+    t = now + datetime.timedelta(hours=config.owner_call_within_h())
+    by = t.strftime("%I:%M %p")
+    card = _card_alert("owner_call", dict(_card_base(ctx), hours=config.owner_call_within_h(),
+                                          by="%d:%02d %s" % (t.hour % 12 or 12, t.minute,
+                                                             "ص" if t.hour < 12 else "م")))
     _post(OWNERS, "📞 **مالك يبي نكلمه** — ضغط «%s» (%s)\n%s\n⏱️ اتصل خلال %d ساعات (قبل %s). "
                   "الرقم في هاتف ← المحادثات%s."
           % (ctx["label"], _tpl(ctx), _who(ctx), config.owner_call_within_h(), by,
-             (" (المحادثة %s)" % ctx["cid"]) if ctx.get("cid") else ""), config.owners_role_id())
+             (" (المحادثة %s)" % ctx["cid"]) if ctx.get("cid") else ""), config.owners_role_id(),
+          card=card)
     return "alerted"
 
 
 def _route_owner_later(ctx):
-    _post(OWNERS, "⏸️ مالك ضغط «%s» — لا نتصل الحين. %s" % (ctx["label"], _who(ctx)))
+    _post(OWNERS, "⏸️ مالك ضغط «%s» — لا نتصل الحين. %s" % (ctx["label"], _who(ctx)),
+          card=_card_alert("owner_later", _card_base(ctx)))
     return "logged"
 
 
 def _route_packages(ctx):
     _post(OFFERS, "🎉 **يبي يشوف باقات اللحظات** — ضغط «%s» (%s)\n%s\nأرسل له الباقات من محادثة هاتف."
-          % (ctx["label"], _tpl(ctx), _who(ctx)))
+          % (ctx["label"], _tpl(ctx), _who(ctx)), card=_card_alert("show_packages", _card_base(ctx)))
     return "alerted"
 
 
@@ -411,7 +473,7 @@ def _units_reply(ctx):
         except Exception:
             pass
     text = he.build_reply(req, out, site, ctx["hcfg"].max_units() if ctx.get("hcfg") else 6)
-    if ctx.get("template") == "ouja_midweek_half":
+    if ctx.get("template") in config.MIDWEEK_TEMPLATES:
         text += ("\n\nتبي الليلة الثانية بنص السعر؟ راسلنا من محادثة Airbnb للشقة بكلمة «عرض نص» "
                  "قبل ما تحجز، ونرسل لك العرض.")
     return text
@@ -460,8 +522,15 @@ def _route_show_units(ctx):
         body = "📝 الرد الجاهز (ما انرسل — %s). انسخه وأرسله من هاتف:\n%s" % (why, text)
     else:
         body = "⚠️ %s — رد عليه بنفسك من هاتف." % why
-    _post(OFFERS, head + "\n" + body)
+    _post(OFFERS, head + "\n" + body, card=_prepared_card("show_units", ctx, text, state, why))
     return "sent" if state == "sent" else "prepared"
+
+
+def _prepared_card(kind, ctx, text, state, why):
+    c = dict(_card_base(ctx), text=text or "", why=("" if state == "sent" else why))
+    if state == "sent":
+        return _card_alert(kind, c, state="done", action="auto")
+    return _card_alert(kind, c)
 
 
 def _route_elite(ctx):
@@ -472,7 +541,7 @@ def _route_elite(ctx):
         body = "✅ انرسل له شرح إيليت."
     else:
         body = "📝 الرد الجاهز (ما انرسل — %s):\n%s" % (why, text)
-    _post(OFFERS, head + "\n" + body)
+    _post(OFFERS, head + "\n" + body, card=_prepared_card("elite_info", ctx, text, state, why))
     return "sent" if state == "sent" else "prepared"
 
 
@@ -486,13 +555,148 @@ def _route_opt_out(ctx):
                         ctx.get("source") or "button", ctx.get("template"), _utc_iso(_now()))
     if new:
         _post(OFFERS, "🚫 **إيقاف العروض** — %s\nانضاف لقائمة الإيقاف. شيله من قوائم الحملات في هاتف "
-                      "(جهات الاتصال) عشان ما توصله حملة ثانية." % _who(ctx))
+                      "(جهات الاتصال) عشان ما توصله حملة ثانية." % _who(ctx),
+              card=_card_alert("opt_out", _card_base(ctx)))
     return "opted_out" if new else "already_out"
 
 
 _ROUTES = {"owner_call": _route_owner_call, "owner_later": _route_owner_later,
            "show_units": _route_show_units, "elite_info": _route_elite,
            "show_packages": _route_packages, "opt_out": _route_opt_out}
+
+
+# =====================================================================================
+# (4) the buttons on a Discord card — one press does the job, nobody copies or types
+# =====================================================================================
+_PRESS_FROM = {"send": ("open", "waiting"), "decline": ("open",), "called": ("open", "waiting"),
+               "noanswer": ("open",), "notint": ("open", "waiting"), "done": ("open", "waiting")}
+
+_HOSTAWAY_REFUSED = {
+    "blocked_kill_switch": "الإرسال للضيوف موقوف (مفتاح الطوارئ ASSISTANT_SEND_KILL)",
+    "firewall_blocked": "الجدار الناري منع الرسالة — راجعها وأرسلها بيدك",
+}
+
+
+def press(message_id, action, actor):
+    """A button on a card. Blocking, never raises → {"ok", "msg", "card"}: msg goes to the
+    presser only, card (when not None) repaints the message for everyone."""
+    try:
+        return _press(message_id, str(action or ""), str(actor or "—")[:60])
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "msg": "صار خطأ (%s) — جرّب مرة ثانية" % type(e).__name__, "card": None}
+
+
+def paint(alert_id):
+    c = cards.render(db.alert(alert_id))
+    c["alert_id"] = alert_id
+    return c
+
+
+def _press(message_id, action, actor):
+    a = db.alert_by_message(message_id)
+    if not a:
+        return {"ok": False, "msg": "ما لقيت هالتنبيه — يمكن قديم من قبل التحديث.", "card": None}
+    aid = a["id"]
+    if action == "claim":
+        if a.get("claimed_by") and a["claimed_by"] != actor:
+            return {"ok": False, "msg": "%s ماسكه من قبل." % a["claimed_by"], "card": None}
+        db.claim_alert(aid, actor)
+        return {"ok": True, "msg": "تمام، انكتب اسمك عليه ✓", "card": paint(aid)}
+    allowed = _PRESS_FROM.get(action)
+    if not allowed:
+        return {"ok": False, "msg": "زر غير معروف.", "card": None}
+    prev = db.begin_alert_action(aid, allowed)
+    if prev is None:
+        return {"ok": False, "msg": "هالتنبيه خلص، أو أحد ثاني يشتغل عليه الحين.", "card": paint(aid)}
+    try:
+        state, done_as, note, msg = _act(a, action, prev)
+    except Exception:
+        db.end_alert_action(aid, prev)
+        raise
+    if done_as is None:                      # held: back where it was, with the reason on the card
+        db.end_alert_action(aid, prev, note=note)
+    else:
+        db.end_alert_action(aid, state, actor, done_as, note)
+    _log("زر كرت «%s» · %s · %s" % (action, a["kind"], "تم" if done_as else "ما تم"))
+    return {"ok": done_as is not None, "msg": msg, "card": paint(aid)}
+
+
+def _act(a, action, prev):
+    """(new_state, recorded_action | None when nothing happened, note, message to the presser)."""
+    c, kind = a["ctx"], a["kind"]
+    if action == "done":
+        return "done", "done", None, "تمام ✓"
+    if action == "called":
+        return "done", "called", None, "تمام ✓ — سجّلنا إنه مهتم"
+    if action == "notint":
+        return "dismissed", "notint", None, "تمام ✓"
+    if action == "noanswer":
+        ok, why = _hatif_send(c, config.OWNER_NOANSWER_TEXT)
+        if ok:
+            return "waiting", "noanswer", None, "انرسلت له الرسالة على الواتساب ✓"
+        return prev, None, why, "ما انرسلت: %s. أرسلها من هاتف بنفسك." % why
+    if kind == "codeword" and action in ("send", "decline"):
+        text = c.get("reply") if action == "send" else c.get("decline")
+        if not text:
+            return prev, None, None, "ما فيه رد جاهز لهالتنبيه."
+        ok, why = _airbnb_send(c, text)
+        if ok:
+            return "done", action, None, "انرسل للضيف في محادثة Airbnb ✓"
+        return prev, None, why, "ما انرسل: %s." % why
+    if kind in ("show_units", "elite_info") and action == "send":
+        text = c.get("text") or ""
+        if kind == "show_units":
+            try:                                   # fresh availability at press time
+                hc, hcfg = _hatif_api()
+                text = _units_reply({"template": c.get("template"), "hcfg": hcfg}) or text
+            except Exception as e:
+                print("[campaigns] units refresh failed:", type(e).__name__)
+        if not text:
+            return prev, None, None, "ما فيه رد جاهز."
+        ok, why = _hatif_send(c, text)
+        if ok:
+            db.set_alert_ctx(a["id"], dict(c, text=text, why=""))
+            return "done", "send", None, "انرسل له على الواتساب ✓"
+        return prev, None, why, "ما انرسل: %s." % why
+    return prev, None, None, "هالزر ما يخص هالتنبيه."
+
+
+def _hatif_send(c, text):
+    """(sent, why) — the same gates as a tap: both dry-runs, the keys, the test-number list,
+    the opt-out list, a chat held by a staff member. The number is read from Hatif now."""
+    hc, hcfg = _hatif_api()
+    conv, phone = {}, ""
+    if hc and c.get("cid"):
+        try:
+            conv = hc.get_conversation(c["cid"]) or {}
+            phone = engine.normalize_phone(conv.get("phoneNumber"))
+        except Exception as e:
+            return False, "تعذر قراءة المحادثة من هاتف (%s)" % type(e).__name__
+    ctx = {"hc": hc, "hcfg": hcfg, "phone": phone, "contact_id": c.get("contact_id"), "conv": conv,
+           "pkey": engine.phone_key(phone, db.salt()) if phone else "",
+           "channel": c.get("channel") or conv.get("channelId")}
+    state, why = _send_or_hold(ctx, text)
+    return state == "sent", why
+
+
+def _airbnb_send(c, text):
+    """(sent, why) — into the guest's Airbnb thread through Hostaway, with Musaed's own gates
+    (kill switch, outbound firewall, duplicate guard) inside HOST.send_guest."""
+    if config.buttons_dryrun():
+        return False, "تجربة (CAMPAIGN_BUTTONS_DRYRUN=1) — انسخ الرد وأرسله من Hostaway"
+    fn = getattr(HOST, "send_guest", None)
+    if not fn:
+        return False, "الإرسال من ديسكورد مو مركّب"
+    if not c.get("conversation_id"):
+        return False, "ما عندنا رقم المحادثة"
+    try:
+        r = fn(c["conversation_id"], text, c.get("comm_type") or "")
+    except Exception as e:
+        return False, "Hostaway رفض (%s)" % type(e).__name__
+    if isinstance(r, str) and r in _HOSTAWAY_REFUSED:
+        return False, _HOSTAWAY_REFUSED[r]
+    return True, ""                         # sent, or the same text already went (duplicate guard)
 
 
 def is_suppressed(phone=None, contact_id=None):

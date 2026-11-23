@@ -9707,9 +9707,11 @@ def _hatif_search(check_in, check_out, guests, typ, neighborhood):
 # (1) a Hostaway guest message with a code word → «عروض-خاصة»; (2) Hatif template button taps
 # (routed in by hatif.service through HOST.campaign_tap) → «عروض-خاصة» / «طلبات-الملاك» + the
 # opt-out list; (3) Sunday 09:00 → one report. Hostaway is only READ here.
-def _campaigns_post(where, text, role_id=""):
+def _campaigns_post(where, text, role_id="", card=None):
     """HOST.post — one message to the offers or owners channel. A channel that cannot be made
-    (Discord's 500-channel cap) falls back to the watchdog room, so an alert is never lost."""
+    (Discord's 500-channel cap) falls back to the watchdog room, so an alert is never lost.
+    With a card: an embed + CampaignCardView buttons, and the message id is saved on the alert
+    (the key every button press looks up). If Discord refuses the embed, the text still posts."""
     async def _post():
         guild = bot.get_guild(GUILD_ID)
         if guild is None:
@@ -9735,10 +9737,101 @@ def _campaigns_post(where, text, role_id=""):
             print("[campaigns] no channel to post in:", name)
             return
         mention = ("<@&%s> " % role_id) if role_id else ""
-        await ch.send((mention + prefix + str(text))[:1995],
-                      allowed_mentions=discord.AllowedMentions(roles=True, users=False,
-                                                               everyone=False))
+        allowed = discord.AllowedMentions(roles=True, users=False, everyone=False)
+        if card:
+            try:
+                msg = await ch.send(content=(mention + prefix).strip() or None,
+                                    embed=_cw_embed(card["embed"]), view=_camp_view(card),
+                                    allowed_mentions=allowed)
+                if card.get("alert_id"):
+                    await asyncio.to_thread(_campaigns.db.set_alert_message, card["alert_id"],
+                                            msg.id, ch.id)
+                return
+            except Exception as e:
+                print("[campaigns] card post failed, falling back to text:", type(e).__name__)
+        await ch.send((mention + prefix + str(text))[:1995], allowed_mentions=allowed)
     _stayhub_schedule(_post, "campaigns:post")
+
+
+_CAMP_STYLE = {"success": discord.ButtonStyle.success, "secondary": discord.ButtonStyle.secondary,
+               "danger": discord.ButtonStyle.danger, "primary": discord.ButtonStyle.primary}
+
+
+def _camp_view(card):
+    """A CampaignCardView carrying only this card's buttons, relabelled, plus its link buttons.
+    It MUST be the real view with callbacks (see _cg_view: discord.py dispatches a click to the
+    view stored under the message id before the add_view() registration)."""
+    v = CampaignCardView()
+    spec = {"camp_" + k: (lbl, st) for k, lbl, st in (card.get("buttons") or [])}
+    for child in list(v.children):
+        if child.custom_id not in spec:
+            v.remove_item(child)
+            continue
+        child.label, style = spec[child.custom_id]
+        child.style = _CAMP_STYLE.get(style, discord.ButtonStyle.secondary)
+    for label, url in card.get("links") or []:
+        if str(url).startswith("http"):
+            v.add_item(discord.ui.Button(label=label, url=url, style=discord.ButtonStyle.link))
+    return v
+
+
+async def _camp_press(interaction, action):
+    """Every card button: answer within Discord's 3 s, act in a thread (brain.db + Hostaway /
+    Hatif calls), repaint the card for everyone, tell the presser what happened."""
+    if not _HAS_CAMPAIGNS:
+        return await _cw_reply(interaction, "الميزة مو شغالة الحين.")
+    await _cg_defer(interaction)
+    try:
+        actor = getattr(interaction.user, "display_name", None) or str(interaction.user)
+        r = await asyncio.to_thread(_campaigns.service.press, interaction.message.id, action, actor)
+    except Exception as e:
+        print("[campaigns] button %s failed: %s" % (action, type(e).__name__))
+        return await _cw_reply(interaction, "صار خطأ — جرّب مرة ثانية")
+    card = (r or {}).get("card")
+    if card:
+        try:
+            await interaction.message.edit(embed=_cw_embed(card["embed"]), view=_camp_view(card))
+        except Exception as e:
+            print("[campaigns] card repaint failed:", type(e).__name__)
+    await _cw_reply(interaction, (r or {}).get("msg") or "تم")
+
+
+class CampaignCardView(discord.ui.View):
+    """Persistent buttons for «عروض-خاصة» / «طلبات-الملاك» cards. The card's message id IS the
+    key (campaigns.db.alert_by_message), so one registration serves every card across
+    redeploys. Labels shown come from campaigns.cards; these are placeholders."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="أرسل", style=discord.ButtonStyle.success, custom_id="camp_send")
+    async def b_send(self, interaction, button):
+        await _camp_press(interaction, "send")
+
+    @discord.ui.button(label="ما ينطبق", style=discord.ButtonStyle.danger, custom_id="camp_decline")
+    async def b_decline(self, interaction, button):
+        await _camp_press(interaction, "decline")
+
+    @discord.ui.button(label="📞 اتصلت — مهتم", style=discord.ButtonStyle.success,
+                       custom_id="camp_called")
+    async def b_called(self, interaction, button):
+        await _camp_press(interaction, "called")
+
+    @discord.ui.button(label="ما رد", style=discord.ButtonStyle.secondary, custom_id="camp_noanswer")
+    async def b_noanswer(self, interaction, button):
+        await _camp_press(interaction, "noanswer")
+
+    @discord.ui.button(label="مو مهتم", style=discord.ButtonStyle.secondary, custom_id="camp_notint")
+    async def b_notint(self, interaction, button):
+        await _camp_press(interaction, "notint")
+
+    @discord.ui.button(label="🙋 أنا عليه", style=discord.ButtonStyle.secondary, custom_id="camp_claim")
+    async def b_claim(self, interaction, button):
+        await _camp_press(interaction, "claim")
+
+    @discord.ui.button(label="✅ خلصت", style=discord.ButtonStyle.secondary, custom_id="camp_done")
+    async def b_done(self, interaction, button):
+        await _camp_press(interaction, "done")
 
 
 def _campaigns_floor(lid):
@@ -9781,6 +9874,9 @@ def _campaigns_caps():
         "post": _campaigns_post, "log_event": log_event, "calendar": fetch_calendar_days,
         "floor": _campaigns_floor, "responsible": _recovery_unit_owner,
         "links": guest_conversation_links,
+        # a card button's reply into the Airbnb thread: Musaed's own gates (kill switch,
+        # outbound firewall, duplicate guard) live inside send_guest_message
+        "send_guest": lambda cid, body, comm: send_guest_message(cid, body, comm or "email"),
         "dates_from_text": lambda h: _dates_from_text(h),
         "reservations": _campaigns_reservations, "search": _hatif_search,
         "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
@@ -79612,6 +79708,8 @@ async def on_ready():
     if _HAS_DIRECTPAY:
         bot.add_view(DirectpayTicketView())     # «التحصيل» room buttons (the room id IS the ticket id)
         bot.add_view(DirectpayCancelledView())  # «إلغاء الغرفة» under a Hostaway-cancellation note
+    if _HAS_CAMPAIGNS:
+        bot.add_view(CampaignCardView())  # «عروض-خاصة» / «طلبات-الملاك» card buttons (message id = key)
     try:                               # publish the /deletethischannel slash command in-guild
         if GUILD_ID and not getattr(bot, "_slash_synced", False):
             _g = discord.Object(id=GUILD_ID)

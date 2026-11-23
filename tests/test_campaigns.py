@@ -514,5 +514,200 @@ class ReportTests(Base):
         self.assertIn("ما وصلنا أي كلمة سر", self.posts[0][1])
 
 
+# =============================================================== Discord cards + buttons
+class CardTests(Base):
+    """The card shows what the text showed, its buttons do the job in one press, and a press
+    can never send twice, send in dry-run, or post a phone number."""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.cards, self.guest_sent = [], []
+
+        def post(where, text, role="", card=None):
+            self.posts.append((where, text, role))
+            if card is not None:
+                self.cards.append((where, card))
+                db.set_alert_message(card["alert_id"], "msg-%d" % len(self.cards), "ch-1")
+
+        host.HOST.post = post
+        host.HOST.send_guest = lambda cid, body, comm: self.guest_sent.append((cid, body, comm)) or {"id": 1}
+
+    def tearDown(self):
+        host.HOST.send_guest = None
+        Base.tearDown(self)
+
+    def last(self):
+        return self.cards[-1][1], "msg-%d" % len(self.cards)
+
+    def blob(self, card):
+        e = card["embed"]
+        return "\n".join([e["title"], e.get("description", ""), (e.get("footer") or {}).get("text", "")]
+                         + ["%s %s" % (f["name"], f["value"]) for f in e["fields"]]
+                         + [b[1] for b in card["buttons"]] + [l[0] for l in card["links"]])
+
+    def actions(self, card):
+        return [b[0] for b in card["buttons"]]
+
+    # ------------------------------------------------ code word
+    def test_codeword_card_has_the_offer_and_one_press_buttons(self):
+        service.on_guest_message(self.item())
+        card, _ = self.last()
+        b = self.blob(card)
+        for want in ("Abdullah Alharbi", "Ouja | Malqa 2BR", "الأحد 29 نوفمبر", "600 ريال", "200 ريال",
+                     "نورة", "15 دقيقة", "هلا Abdullah", "Special Offer", "② أرسلت العرض"):
+            self.assertIn(want, b, want)
+        self.assertEqual(self.actions(card), ["send", "claim", "done"])
+        self.assertTrue(card["links"][0][0].startswith("①"))
+        self.assertEqual(len(self.posts), 1)                 # one message: the card (text = fallback)
+
+    def test_dryrun_press_sends_nothing_and_says_why(self):
+        service.on_guest_message(self.item())
+        _, mid = self.last()
+        r = service.press(mid, "send", "نورة")
+        self.assertFalse(r["ok"])
+        self.assertIn("تجربة", r["msg"])
+        self.assertEqual(self.guest_sent, [])
+        self.assertIn("send", self.actions(r["card"]))       # still open: the button stays
+        self.assertIn("⚠️", self.blob(r["card"]))
+
+    def test_live_press_sends_once_and_closes_the_card(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        service.on_guest_message(self.item())
+        _, mid = self.last()
+        r = service.press(mid, "send", "نورة")
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(self.guest_sent), 1)
+        cid, body, comm = self.guest_sent[0]
+        self.assertEqual((cid, comm), (5551, "airbnb"))
+        self.assertIn("600 ريال", body)
+        self.assertEqual(r["card"]["buttons"], [])
+        self.assertIn("نورة", self.blob(r["card"]))
+        again = service.press(mid, "send", "سارة")
+        self.assertFalse(again["ok"])
+        self.assertEqual(len(self.guest_sent), 1)            # never twice
+
+    def test_firewall_refusal_keeps_it_open(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        host.HOST.send_guest = lambda cid, body, comm: "firewall_blocked"
+        service.on_guest_message(self.item())
+        _, mid = self.last()
+        r = service.press(mid, "send", "نورة")
+        self.assertFalse(r["ok"])
+        self.assertIn("الجدار الناري", r["msg"])
+        self.assertEqual(db.alert_by_message(mid)["state"], "open")
+
+    def test_not_eligible_offers_the_polite_decline(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        self.cal_rows = cal((SUN, 1, 400, None), (SUN + datetime.timedelta(1), 0, 400, 12))
+        service.on_guest_message(self.item())
+        card, mid = self.last()
+        self.assertEqual(self.actions(card), ["decline", "claim", "done"])
+        self.assertIn("ما ينطبق — أرسل اعتذار", self.blob(card))
+        r = service.press(mid, "decline", "نورة")
+        self.assertTrue(r["ok"])
+        self.assertIn("تاريخ ثاني", self.guest_sent[0][1])
+
+    def test_unknown_date_asks_for_it(self):
+        service.on_guest_message(self.item(checkin=None, checkout=None))
+        card, _ = self.last()
+        self.assertIn("اسأله عن التاريخ", self.blob(card))
+
+    def test_booked_guest_gets_the_alteration_wording(self):
+        service.on_guest_message(self.item(res_status="new"))
+        card, _ = self.last()
+        self.assertIn("أرسلت التعديل", self.blob(card))
+
+    def test_claim_writes_the_name_once(self):
+        service.on_guest_message(self.item())
+        _, mid = self.last()
+        self.assertTrue(service.press(mid, "claim", "نورة")["ok"])
+        self.assertIn("نورة ماسكه", self.blob(service.paint(db.alert_by_message(mid)["id"])))
+        self.assertFalse(service.press(mid, "claim", "سارة")["ok"])
+
+    def test_unknown_message(self):
+        self.assertFalse(service.press("nope", "send", "x")["ok"])
+
+    def test_two_presses_at_once_only_one_acts(self):
+        service.on_guest_message(self.item())
+        aid = db.alert_by_message(self.last()[1])["id"]
+        self.assertEqual(db.begin_alert_action(aid), "open")
+        self.assertIsNone(db.begin_alert_action(aid))
+
+    # ------------------------------------------------ owners
+    def test_owner_card_buttons_and_no_answer_message(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        fake = FakeHC()
+        service._hatif_api = lambda: (fake, FakeCfg(dry=False))
+        service.on_hatif(self.tap("إيه، كلموني", eid="oc1"))
+        card, mid = self.last()
+        self.assertEqual(self.cards[-1][0], "owners")
+        self.assertEqual(self.actions(card), ["called", "noanswer", "notint", "claim"])
+        r = service.press(mid, "noanswer", "فيصل")
+        self.assertTrue(r["ok"])
+        self.assertEqual(fake.sent[-1][2], config.OWNER_NOANSWER_TEXT)
+        self.assertEqual(self.actions(r["card"]), ["called", "notint"])      # waiting for the call
+        r = service.press(mid, "called", "فيصل")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["card"]["buttons"], [])
+
+    # ------------------------------------------------ prepared WhatsApp replies
+    def test_units_held_then_sent_by_one_press(self):
+        fake = FakeHC()
+        service._hatif_api = lambda: (fake, FakeCfg(dry=False))
+        service.on_hatif(self.tap("وريني الشقق", eid="u1"))       # CAMPAIGN_BUTTONS_DRYRUN=1 → held
+        card, mid = self.last()
+        self.assertEqual(fake.sent, [])
+        self.assertEqual(self.actions(card)[0], "send")
+        self.assertIn("Ouja | الملقا غرفتين", self.blob(card))
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        r = service.press(mid, "send", "نورة")
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(fake.sent), 1)
+        self.assertIn("انرسل", self.blob(r["card"]))
+
+    def test_auto_sent_card_says_so(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        fake = FakeHC()
+        service._hatif_api = lambda: (fake, FakeCfg(dry=False))
+        service.on_hatif(self.tap("وش إيليت؟", eid="u2"))
+        card, _ = self.last()
+        self.assertIn("انرسل تلقائياً", self.blob(card))
+        self.assertNotIn("send", self.actions(card))
+
+    def test_opted_out_person_is_not_sent_from_a_card_either(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        fake = FakeHC()
+        service._hatif_api = lambda: (fake, FakeCfg(dry=False))
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "1"
+        service.on_hatif(self.tap("وش إيليت؟", eid="u3"))
+        _, mid = self.last()
+        service.on_hatif(self.tap("إيقاف العروض", eid="u4"))
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        r = service.press(mid, "send", "نورة")
+        self.assertFalse(r["ok"])
+        self.assertEqual(fake.sent, [])
+
+    # ------------------------------------------------ photo templates + privacy
+    def test_photo_template_is_the_same_campaign(self):
+        p = self.tap("وريني الشقق", eid="i1", interactiveReply={"id": "ouja_midweek_half_img_btn0",
+                                                              "text": "وريني الشقق"})
+        service.on_hatif(p)
+        self.assertIn("ouja_midweek_half_img", self.posts[-1][1])
+        self.assertIn("عرض نص", self.posts[-1][1])
+        self.assertIn("الليلة الثانية بنص", self.blob(self.cards[-1][1]))
+        self.assertEqual(engine.resolve_template("إيه، كلموني"), "ouja_owner_recontact")
+
+    def test_no_phone_number_on_any_card_or_row(self):
+        os.environ["CAMPAIGN_BUTTONS_DRYRUN"] = "0"
+        fake = FakeHC()
+        service._hatif_api = lambda: (fake, FakeCfg(dry=True))
+        for i, label in enumerate(("إيه، كلموني", "وريني الشقق", "وش إيليت؟", "إيقاف العروض")):
+            service.on_hatif(self.tap(label, eid="z%d" % i))
+        everything = "\n".join(self.blob(c) for _, c in self.cards)
+        rows = repr([db.alert(c["alert_id"]) for _, c in self.cards])
+        self.assertNotIn("551234567", everything + rows)
+        self.assertIn("••4567", everything)
+
+
 if __name__ == "__main__":
     unittest.main()
