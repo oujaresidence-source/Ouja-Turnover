@@ -46,6 +46,19 @@
   }
   function proj(id) { return arr(S.data && S.data.projects).filter(function (p) { return p.id === id; })[0] || null; }
   function sites() { return arr(S.data && S.data.people).filter(function (p) { return p.role === 'site'; }); }
+  /* the supervisor dropdown: the team's site supervisors first, then everyone on Discord */
+  function supSelect(p) {
+    var cur = p.supervisor || '', seen = {}, team = [], rest = [];
+    function opt(n) { return '<option' + (n === cur ? ' selected' : '') + '>' + esc(n) + '</option>'; }
+    sites().forEach(function (x) { if (x.name && !seen[x.name]) { seen[x.name] = 1; team.push(opt(x.name)); } });
+    arr(S.data && S.data.discord_members).forEach(function (m) { if (m.name && !seen[m.name]) { seen[m.name] = 1; rest.push(opt(m.name)); } });
+    var h = '<select data-ct="f" data-k="supervisor"><option value="">' + esc(T('اختر', 'Choose')) + '</option>';
+    if (team.length) h += '<optgroup label="' + esc(T('مشرفين المواقع', 'Site supervisors')) + '">' + team.join('') + '</optgroup>';
+    if (rest.length) h += '<optgroup label="' + esc(T('كل أعضاء ديسكورد', 'Everyone on Discord')) + '">' + rest.join('') + '</optgroup>';
+    else if (S.data && S.data.discord_loading) h += '<option disabled>' + esc(T('جاري تحميل أعضاء ديسكورد…', 'Loading Discord members…')) + '</option>';
+    if (cur && !seen[cur]) h += opt(cur);
+    return h + '</select>';
+  }
   function leadName() { var l = arr(S.data && S.data.people).filter(function (p) { return p.role === 'lead'; })[0]; return l ? l.name : 'أصيل'; }
 
   function css() {
@@ -158,8 +171,7 @@
       h += '<div class="ct-fields">' +
         '<label>' + esc(T('المالك', 'Owner')) + '<input data-ct="f" data-k="owner" value="' + esc(p.owner || '') + '"' + (p.owner ? '' : ' class="bad"') + '></label>' +
         '<label>' + esc(T('الوحدة', 'Unit')) + '<input data-ct="f" data-k="unit" value="' + esc(p.unit || '') + '"' + (p.unit ? '' : ' class="bad"') + '></label>' +
-        '<label>' + esc(T('مشرف الموقع (له التذكيرات)', 'Site supervisor (gets the reminders)')) + '<select data-ct="f" data-k="supervisor"><option value="">' + esc(T('اختر', 'Choose')) + '</option>' +
-        sites().map(function (x) { return '<option' + (x.name === p.supervisor ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></label></div>' +
+        '<label>' + esc(T('مشرف الموقع (له التذكيرات)', 'Site supervisor (gets the reminders)')) + supSelect(p) + '</label></div>' +
         '<div class="ct-checks"><label><input type="checkbox" data-ct="f" data-k="signed"' + (p.signed ? ' checked' : '') + '>' + esc(T('المالك وقّع العرض', 'Owner signed the quote')) + '</label>' +
         '<label><input type="checkbox" data-ct="f" data-k="paid"' + (p.paid ? ' checked' : '') + '>' + esc(T('الدفعة وصلت', 'Payment received')) + '</label></div>';
     } else {
@@ -291,6 +303,15 @@
     try { S.data = await api('/api/contr/board'); }
     catch (e) { S.data = null; }
     render();
+    /* the Discord member list fills in the background (~30 s) — look again a few times,
+       but never while someone is typing in the tab */
+    if (S.data && S.data.discord_loading && !arr(S.data.discord_members).length && (S.rosterTries || 0) < 6) {
+      S.rosterTries = (S.rosterTries || 0) + 1;
+      setTimeout(function () {
+        var a = document.activeElement, box = document.getElementById('ctBody');
+        if (!(a && box && box.contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName))) load(true, true);
+      }, 10000);
+    }
   }
 
   window.ContrTab = { load: load };

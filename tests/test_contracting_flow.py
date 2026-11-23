@@ -237,6 +237,19 @@ class TestBoard(Base):
         self.assertTrue(asil["linked"])
         self.assertEqual(asil["linked_from"], "ops")
 
+    def test_board_lists_discord_members_for_the_supervisor_dropdown(self):
+        HOST.roster = lambda: {"rows": [{"id": "222222222222222222", "name": "ريم", "user": "reem"}],
+                               "loading": False}
+        try:
+            b = routes.board_payload()
+            self.assertEqual(b["discord_members"], [{"name": "ريم", "user": "reem"}])
+            self.assertFalse(b["discord_loading"])
+            self.assertNotIn("id", b["discord_members"][0])        # names only reach the page
+        finally:
+            HOST.roster = None
+        b = routes.board_payload()                                 # no roster wired → empty, not broken
+        self.assertEqual(b["discord_members"], [])
+
     def test_new_project_from_pasted_lines(self):
         r = routes._new({"title": "مشروع تجربة", "lines": "دهان 1,200" + chr(10) + "إضاءة\t800"},
                         "فيصل")

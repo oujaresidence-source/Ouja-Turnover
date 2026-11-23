@@ -11861,6 +11861,9 @@ def _ct_lookup_did(name):
                 return str(hit[0])
     except Exception as e:
         print("[contracting] ops id map unavailable:", e)
+    for r in list(_CT_ROSTER["rows"]):
+        if name in (r["name"], r["user"]):
+            return r["id"]
     try:
         g = bot.get_guild(GUILD_ID)
         for m in list(getattr(g, "members", []) or []):
@@ -11871,10 +11874,67 @@ def _ct_lookup_did(name):
     return ""
 
 
+# «كل أعضاء ديسكورد» for the supervisor dropdown. The members intent is OFF on this bot, so
+# the full member list is not available; query_members by PREFIX is (the same call !ouja اربط
+# uses). One sweep over Arabic + Latin + digit prefixes, deduped, refreshed every 30 min on
+# demand. Nothing here writes anywhere — it only reads names.
+_CT_ROSTER = {"at": 0.0, "rows": [], "busy": False}
+_CT_ROSTER_TTL = 1800
+_CT_PREFIXES = (list("ابتثجحخدذرزسشصضطظعغفقكلمنهوي") + list("أإآءئؤى")
+                + list("abcdefghijklmnopqrstuvwxyz0123456789_."))
+
+
+async def _ct_roster_refresh():
+    try:
+        g = bot.get_guild(GUILD_ID)
+        if g is None:
+            return
+        seen = {}
+
+        def keep(m):
+            if not getattr(m, "bot", False) and m.id not in seen:
+                seen[m.id] = {"id": str(m.id), "name": m.display_name or m.name, "user": m.name}
+
+        if intents.members and len(getattr(g, "members", []) or []) > 1:
+            for m in g.members:
+                keep(m)
+        else:
+            for pre in _CT_PREFIXES:
+                try:
+                    for m in await g.query_members(query=pre, limit=100, cache=False):
+                        keep(m)
+                except Exception as e:
+                    print("[contracting] roster query %r failed: %s" % (pre, e))
+                await asyncio.sleep(0.6)      # ~100 gateway requests/min, under Discord's 120
+        if seen:
+            _CT_ROSTER["rows"] = sorted(seen.values(), key=lambda r: r["name"])
+            _CT_ROSTER["at"] = time.time()
+            print("[contracting] roster: %d Discord members" % len(seen))
+    finally:
+        _CT_ROSTER["busy"] = False
+
+
+def _ct_roster():
+    """HOST.roster — called from the web thread. Returns what is cached now and, when it is
+    older than 30 min, starts one refresh on the bot loop (never two at once)."""
+    stale = time.time() - _CT_ROSTER["at"] > _CT_ROSTER_TTL
+    if stale and not _CT_ROSTER["busy"]:
+        try:
+            loop = getattr(bot, "loop", None)
+            if loop is not None and loop.is_running() and bot.is_ready():
+                _CT_ROSTER["busy"] = True
+                asyncio.run_coroutine_threadsafe(_ct_roster_refresh(), loop)
+        except Exception as e:
+            _CT_ROSTER["busy"] = False
+            print("[contracting] roster refresh not started:", e)
+    return {"rows": list(_CT_ROSTER["rows"]), "loading": bool(_CT_ROSTER["busy"])}
+
+
 def _ct_wire():
     if not _HAS_CONTRACTING:
         return False
     _contracting.wire({"now": now_riyadh, "send": _ct_send, "lookup_did": _ct_lookup_did,
+                       "roster": _ct_roster,
                        "dash_auth": _dash_auth, "req_role": _req_role, "actor": _req_actor,
                        "json_response": _json, "web": web, "web_thread": web_thread})
     return True

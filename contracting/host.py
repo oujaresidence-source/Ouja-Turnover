@@ -15,6 +15,7 @@ class _Host:
     now = None            # () -> tz-aware Riyadh datetime
     send = None           # (payload) -> None   Discord delivery (bot decides HOW)
     lookup_did = None     # (name) -> discord id string or ""   the ops identity map
+    roster = None         # () -> {"rows": [{"id","name","user"}], "loading": bool}   Discord members
 
     def require(self, attr):
         v = getattr(self, attr, None)

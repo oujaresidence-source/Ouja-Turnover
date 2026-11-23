@@ -94,7 +94,16 @@ def board_payload():
         own = bool(x.get("did"))
         found = own or bool(notify.did_for(x["name"]))
         people.append(dict(x, linked=found, linked_from=("typed" if own else ("ops" if found else ""))))
+    roster = {"rows": [], "loading": False}
+    try:
+        if HOST.roster:
+            roster = HOST.roster() or roster
+    except Exception:
+        traceback.print_exc()
     return {"ok": True, "dryrun": notify.dryrun(), "enabled": notify.enabled(),
+            "discord_members": [{"name": r.get("name") or "", "user": r.get("user") or ""}
+                                for r in (roster.get("rows") or []) if r.get("name")],
+            "discord_loading": bool(roster.get("loading")),
             "category": notify.category_name(), "admin_channel": notify.admin_channel_name(),
             "today": today.isoformat(),
             "projects": [_project_view(p, today) for p in db.projects()],
