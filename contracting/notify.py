@@ -681,11 +681,24 @@ def backfill_candidates(channel_id, messages):
         return []
     db.set_meta(flag, local_now().isoformat(timespec="seconds"))
     known = db.known_photo_msgs(p["id"])
+    # Photos counted by the OLD code carry no message id. Anything posted at or before the
+    # newest counted photo is treated as handled (it was re-sent and counted, or superseded),
+    # and a photo whose link matches a counted one is skipped — never a menu for a photo
+    # that already counts (2026-11-24: Abo Amen re-uploaded before this went live).
+    counted = [x for it in p["items"] for x in (it.get("photos") or [])]
+    for b in db.batches(p["id"]):
+        counted += b["photos"]
+    newest = max([str(x.get("at") or "")[:19] for x in counted] or [""])
+    paths = {str(x.get("url") or "").split("?", 1)[0] for x in counted if x.get("url")}
     out = []
     for m in messages or []:
         if str(m.get("id")) in known:
             continue
+        if newest and str(m.get("at") or "")[:19] and str(m.get("at"))[:19] <= newest:
+            continue
         for u in m.get("urls") or []:
+            if str(u).split("?", 1)[0] in paths:
+                continue
             ph = _photo_dicts([u], p["id"], m.get("id"))
             if not ph:
                 continue

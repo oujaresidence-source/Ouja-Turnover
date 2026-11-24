@@ -257,6 +257,18 @@ class TestButtons(Base):
         self.assertEqual(len(pks), 2)                                # one menu per early photo
         self.assertEqual(notify.backfill_candidates("900", msgs), [])   # never twice
 
+    def test_backfill_skips_photos_the_old_code_already_counted(self):
+        # old rows have no message id; the channel must not get a menu for them
+        notify.on_done_press(self.line["id"], "x")
+        db.add_photos(self.line["id"], [{"url": "https://cdn/x/a.jpg?ex=1", "at": "2026-11-24T14:18:00"},
+                                        {"url": "https://cdn/x/b.jpg", "at": "2026-11-24T14:18:00"},
+                                        {"url": "https://cdn/x/c.jpg", "at": "2026-11-24T14:18:00"}], "x")
+        msgs = [{"id": "e1", "by": "x", "urls": ["https://cdn/x/early.jpg"], "at": "2026-11-24T11:22:00"},
+                {"id": "e2", "by": "x", "urls": ["https://cdn/x/a.jpg?ex=2"], "at": "2026-11-24T14:20:00"},
+                {"id": "e3", "by": "x", "urls": ["https://cdn/x/new.jpg"], "at": "2026-11-24T14:25:00"}]
+        pks = notify.backfill_candidates("900", msgs)
+        self.assertEqual(len(pks), 1)                                # only the unseen, later one
+
     def test_delay_needs_reason_and_valid_date_then_reschedules(self):
         now = dt.datetime(2026, 11, 24, 16, 10)
         self.assertFalse(notify.on_delay(self.line["id"], "أبو أمين", "", "26/11", now)["ok"])

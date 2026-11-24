@@ -12552,7 +12552,8 @@ async def _ct_backfill():
                 continue
             urls = _ct_image_urls(m)
             if urls:
-                msgs.append({"id": str(m.id), "by": m.author.display_name, "urls": urls})
+                msgs.append({"id": str(m.id), "by": m.author.display_name, "urls": urls,
+                             "at": m.created_at.replace(tzinfo=None).isoformat(timespec="seconds")})
         pks = await asyncio.to_thread(_contracting.notify.backfill_candidates, p["channel_id"], msgs)
         for pk in pks:
             await _ct_post_picker(ch, pk)
