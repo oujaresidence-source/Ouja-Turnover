@@ -257,6 +257,23 @@ class TestButtons(Base):
         self.assertEqual(len(pks), 2)                                # one menu per early photo
         self.assertEqual(notify.backfill_candidates("900", msgs), [])   # never twice
 
+    def test_menus_about_already_counted_photos_close_themselves(self):
+        notify.on_done_press(self.line["id"], "x")
+        db.add_photos(self.line["id"], [{"url": "a", "at": "2026-11-24T14:18:30"}] * 3, "x")
+        ep = notify.DISCORD_EPOCH_MS
+        early = str((int(dt.datetime(2026, 11, 24, 11, 22).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) - ep) << 22)
+        late = str((int(dt.datetime(2026, 11, 24, 15, 0).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) - ep) << 22)
+        b1 = db.new_batch(self.d2["id"], [{"url": "e"}], "x", early)
+        b2 = db.new_batch(self.d2["id"], [{"url": "l"}], "x", late)
+        db.set_batch_picker(b1["id"], "p1")
+        db.set_batch_picker(b2["id"], "p2")
+        self.assertEqual(notify._snowflake_utc(early), "2026-11-24T11:22:00")
+        rows = notify.stale_pickers()
+        self.assertEqual([r["picker_msg_id"] for r in rows], ["p1"])
+        self.assertEqual(db.batch(b1["id"])["choice"], "ignore")
+        self.assertIsNone(db.batch(b2["id"])["choice"])
+        self.assertEqual(notify.stale_pickers(), [])                     # once
+
     def test_backfill_skips_photos_the_old_code_already_counted(self):
         # old rows have no message id; the channel must not get a menu for them
         notify.on_done_press(self.line["id"], "x")

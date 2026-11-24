@@ -12533,6 +12533,23 @@ async def _ct_on_message(message):
 _CT_BACKFILL = {"done": False}
 
 
+async def _ct_retire_stale_pickers():
+    """Menus asking about photos a line already counted → one quiet line, menu removed."""
+    rows = await asyncio.to_thread(_contracting.notify.stale_pickers)
+    guild = bot.get_guild(GUILD_ID) if rows else None
+    for r in rows:
+        ch = guild.get_channel(int(r["channel_id"])) if guild else None
+        if ch is None:
+            continue
+        try:
+            await ch.get_partial_message(int(r["picker_msg_id"])).edit(
+                content="✔ صورة محسوبة من قبل — ما يحتاج شي.", embed=None, view=None)
+        except Exception as e:
+            print("[contracting] could not close menu %s: %s" % (r["picker_msg_id"], e))
+    if rows:
+        print("[contracting] closed %d menus for photos already counted" % len(rows))
+
+
 async def _ct_backfill():
     """Once per project, ever (meta flag inside): photos posted before the «لأي بند؟» menu
     existed get a menu each, so nothing posted early is lost (Abo Amen, 2026-11-24)."""
@@ -12581,6 +12598,10 @@ async def contracting_loop():
             await _ct_backfill()
         except Exception as e:
             print("[contracting] backfill failed:", e)
+    try:
+        await _ct_retire_stale_pickers()
+    except Exception as e:
+        print("[contracting] stale menus failed:", e)
 
 
 # ==== «طلبات سام» RR Desk (rrdesk/ package) ===================================================

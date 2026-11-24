@@ -628,6 +628,38 @@ def on_photos(channel_id, urls, actor, message_id="", keep_copy=True):
     return {"done": False, "pick": picker(p, b)}
 
 
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def _snowflake_utc(msg_id):
+    try:
+        ms = (int(msg_id) >> 22) + DISCORD_EPOCH_MS
+        return dt.datetime.utcfromtimestamp(ms / 1000).isoformat(timespec="seconds")
+    except (TypeError, ValueError):
+        return ""
+
+
+def stale_pickers():
+    """Open «لأي بند؟» menus for photos posted at or before the newest photo a line already
+    counted → closed as handled (resolved 'ignore' by «النظام»). 2026-11-24: the first sweep
+    ran on the previous build and asked about photos the old code had already counted.
+    → [{batch_id, picker_msg_id, channel_id}] for the bot to edit."""
+    out = []
+    for p in db.projects(["active", "done"]):
+        counted = [x for it in p["items"] for x in (it.get("photos") or [])]
+        newest = max([str(x.get("at") or "")[:19] for x in counted] or [""])
+        if not newest or not p.get("channel_id"):
+            continue
+        for b in db.batches(p["id"]):
+            if b.get("choice") or not b.get("picker_msg_id"):
+                continue
+            t = _snowflake_utc(b.get("message_id"))
+            if t and t <= newest and db.resolve_batch(b["id"], "ignore", "النظام"):
+                out.append({"batch_id": b["id"], "picker_msg_id": b["picker_msg_id"],
+                            "channel_id": p["channel_id"]})
+    return out
+
+
 def picker_posted(batch_id, msg_id):
     db.set_batch_picker(batch_id, msg_id)
 
