@@ -181,7 +181,7 @@ def card_embed(p, today):
             "color": CARD_COLOR, "fields": fields, "footer": {"text": foot}}
 
 
-CARD_VERSION = 2                 # bump → every card is edited once (v2: the «ملف للمالك» button)
+CARD_VERSION = 3                 # bump → every card is edited once (v3: «✅ خلّصت بند»)
 
 
 def card_hash(embed):
@@ -497,6 +497,35 @@ def retry_open(project_id):
 
 
 # ---------------------------------------------------------------- the buttons
+
+def finish_options(project_id):
+    """«✅ خلّصت بند» on the card: every line not done yet, any date — a line can finish
+    before its day (owner 2026-11-24). → (text, options) for a private menu."""
+    p = db.project(project_id)
+    if not p or p["status"] != "active":
+        return "المشروع مو شغال.", []
+    opts = []
+    for i in sorted(p["items"], key=lambda x: x.get("pos", 0)):
+        if i.get("status") == "done":
+            continue
+        if i.get("status") == "awaiting_photos":
+            desc = "ينتظر الصور (%d من %d)" % (len(i.get("photos") or []), db.PHOTOS_NEEDED)
+        else:
+            desc = "موعده " + fmt_date(i.get("due"))
+        opts.append({"value": i["id"], "label": ("%d. %s" % (i["pos"], i["name"]))[:100],
+                     "description": desc[:100]})
+    if not opts:
+        return "كل البنود خالصة 🎉", []
+    return "أي بند خلص؟ (يقفل لما ترفع %d صور)" % db.PHOTOS_NEEDED, opts[:25]
+
+
+def finish_pick(project_id, item_id, actor):
+    """The private menu's answer — the same as pressing «خلص» on that line."""
+    it = db.item(item_id)
+    if not it or it["project_id"] != project_id:
+        return {"ok": False, "text": "ما لقيت البند."}
+    return on_done_press(item_id, actor)
+
 
 def on_done_press(item_id, actor):
     """«خلص». The instruction to upload photos goes ONLY to the presser (ephemeral) — the

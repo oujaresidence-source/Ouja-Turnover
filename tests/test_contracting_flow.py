@@ -568,6 +568,40 @@ class TestEarlierPhotoCopies(Base):
         self.assertEqual(db.item(line["id"])["photos"][0]["file"], "cp/a.jpg")
 
 
+class TestFinishEarly(Base):
+    """The card's «✅ خلّصت بند»: any open line, any day — still closes on photos."""
+
+    def setUp(self):
+        super().setUp()
+        self.start_d2()
+        self.opened(self.d2["id"], "900")
+
+    def test_lists_every_open_line_whatever_its_date(self):
+        its = db.project(self.d2["id"])["items"]
+        db.mark_done(its[0]["id"], "فيصل", "")
+        text, opts = notify.finish_options(self.d2["id"])
+        self.assertEqual([o["value"] for o in opts], [i["id"] for i in its[1:]])
+        self.assertIn("ديسمبر", opts[-1]["description"])          # a line weeks away is offered
+        self.assertIn("3 صور", text)
+
+    def test_pick_is_a_done_press_and_photos_close_it(self):
+        late = db.project(self.d2["id"])["items"][6]                # the 13 Dec line, today 23 Nov
+        r = notify.finish_pick(self.d2["id"], late["id"], "Eng. Mo")
+        self.assertTrue(r["ok"] and r["ephemeral"])
+        self.assertEqual(db.item(late["id"])["status"], "awaiting_photos")
+        done = notify.on_photos("900", ["a", "b", "c"], "Eng. Mo", "m1")
+        self.assertTrue(done["done"])
+        self.assertEqual(db.item(late["id"])["status"], "done")
+
+    def test_wrong_project_refused(self):
+        other = db.project(self.apt["id"])["items"][0]
+        self.assertFalse(notify.finish_pick(self.d2["id"], other["id"], "x")["ok"])
+        self.assertEqual(db.item(other["id"])["status"], "open")
+
+    def test_card_is_redrawn_once_for_the_new_button(self):
+        self.assertEqual(notify.CARD_VERSION, 3)
+
+
 class TestMarkDone(Base):
     def test_admin_marks_a_line_done_without_photos(self):
         self.start_d2()

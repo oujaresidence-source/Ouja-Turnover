@@ -12196,6 +12196,8 @@ async def _ct_admin_channel(guild, cat_name, ch_name):
 
 CT_PICK_PREFIX = "ct_pick:"
 CT_PDF_PREFIX = "ct_pdf:"
+CT_FIN_PREFIX = "ct_fin:"             # the card's «✅ خلّصت بند» → a private list of open lines
+CT_FINPICK_PREFIX = "ct_finpick:"     # that list's answer (custom_id carries the project)
 
 
 class CtAskView(discord.ui.View):
@@ -12240,6 +12242,8 @@ class CtPickView(discord.ui.View):
 class CtCardView(discord.ui.View):
     def __init__(self, project_id):
         super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="✅ خلّصت بند", style=discord.ButtonStyle.success,
+                                        custom_id=CT_FIN_PREFIX + str(project_id)))
         self.add_item(discord.ui.Button(label="📄 ملف للمالك (للإدارة)",
                                         style=discord.ButtonStyle.secondary,
                                         custom_id=CT_PDF_PREFIX + str(project_id)))
@@ -12434,7 +12438,7 @@ async def _ct_interaction(interaction):
             return
         cid = (interaction.data or {}).get("custom_id") or ""
         if not cid.startswith((CT_DONE_PREFIX, CT_DELAY_PREFIX, CT_BLOCK_PREFIX,
-                               CT_PICK_PREFIX, CT_PDF_PREFIX)):
+                               CT_PICK_PREFIX, CT_PDF_PREFIX, CT_FIN_PREFIX, CT_FINPICK_PREFIX)):
             return
         _ct_ready()
         ref = cid.split(":", 1)[1]
@@ -12452,6 +12456,30 @@ async def _ct_interaction(interaction):
             n = _contracting.notify
             await _cw_reply(interaction, "📄 يتجهز… بيوصلك في #%s خلال دقيقة." % n.admin_channel_name())
             await _ct_send_owner_pdf(interaction.guild, n.ownerpdf_payload(ref, "ask"), who)
+            return
+        if cid.startswith(CT_FINPICK_PREFIX):
+            vals = (interaction.data or {}).get("values") or []
+            if not vals:
+                return
+            r = await asyncio.to_thread(_contracting.notify.finish_pick, ref, str(vals[0]), who)
+            await interaction.response.edit_message(content=(r.get("text") or "ما انحفظ")[:1990],
+                                                    view=None)
+            if r.get("ok") and r.get("done"):
+                await interaction.channel.send(r["text"][:1990])
+            return
+        if cid.startswith(CT_FIN_PREFIX):
+            text, opts = await asyncio.to_thread(_contracting.notify.finish_options, ref)
+            if not opts:
+                await _cw_reply(interaction, text)
+                return
+            v = discord.ui.View(timeout=None)
+            v.add_item(discord.ui.Select(custom_id=CT_FINPICK_PREFIX + ref, placeholder="اختر البند…",
+                                         min_values=1, max_values=1,
+                                         options=[discord.SelectOption(label=o["label"][:100],
+                                                                       value=o["value"][:100],
+                                                                       description=o["description"][:100] or None)
+                                                  for o in opts]))
+            await interaction.response.send_message(text, view=v, ephemeral=True)
             return
         if cid.startswith(CT_PICK_PREFIX):
             vals = (interaction.data or {}).get("values") or []
