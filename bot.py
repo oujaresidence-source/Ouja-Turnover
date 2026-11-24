@@ -12194,23 +12194,63 @@ async def _ct_admin_channel(guild, cat_name, ch_name):
     return ch
 
 
+CT_PICK_PREFIX = "ct_pick:"
+CT_PDF_PREFIX = "ct_pdf:"
+
+
 class CtAskView(discord.ui.View):
-    def __init__(self, item_id):
+    """One row per line: «خلص · name» / تأخر / واقف. A line that is done shows one grey
+    «✅ خلص» instead (redrawn by the tick). `items` = [{id, pos, name, done}] or one id."""
+    def __init__(self, items):
         super().__init__(timeout=None)
-        iid = str(item_id)
-        self.add_item(discord.ui.Button(label="خلص", style=discord.ButtonStyle.success,
-                                        custom_id=CT_DONE_PREFIX + iid))
-        self.add_item(discord.ui.Button(label="تأخر", style=discord.ButtonStyle.primary,
-                                        custom_id=CT_DELAY_PREFIX + iid))
-        self.add_item(discord.ui.Button(label="واقف", style=discord.ButtonStyle.danger,
-                                        custom_id=CT_BLOCK_PREFIX + iid))
+        if not isinstance(items, (list, tuple)):
+            items = [{"id": items, "pos": 0, "name": "", "done": False}]
+        many = len(items) > 1
+        for row, it in enumerate(items[:5]):
+            iid = str(it["id"])
+            nm = str(it.get("name") or "")
+            tag = (" · %s" % (nm[:34] + ("…" if len(nm) > 34 else ""))) if many else ""
+            if it.get("done"):
+                self.add_item(discord.ui.Button(label=("✅ خلص" + tag)[:80], disabled=True,
+                                                style=discord.ButtonStyle.secondary,
+                                                custom_id=CT_DONE_PREFIX + iid, row=row))
+                continue
+            self.add_item(discord.ui.Button(label=("خلص" + tag)[:80], row=row,
+                                            style=discord.ButtonStyle.success,
+                                            custom_id=CT_DONE_PREFIX + iid))
+            self.add_item(discord.ui.Button(label="تأخر", style=discord.ButtonStyle.primary,
+                                            custom_id=CT_DELAY_PREFIX + iid, row=row))
+            self.add_item(discord.ui.Button(label="واقف", style=discord.ButtonStyle.danger,
+                                            custom_id=CT_BLOCK_PREFIX + iid, row=row))
 
 
-async def _ct_post_card(ch, embed):
+class CtPickView(discord.ui.View):
+    """«لأي بند؟» — one menu under a batch of photos (custom_id carries the batch)."""
+    def __init__(self, batch_id, options):
+        super().__init__(timeout=None)
+        sel = discord.ui.Select(custom_id=CT_PICK_PREFIX + str(batch_id),
+                                placeholder="اختر البند…", min_values=1, max_values=1,
+                                options=[discord.SelectOption(label=o["label"][:100],
+                                                              value=o["value"][:100],
+                                                              description=(o.get("description") or "")[:100] or None)
+                                         for o in options[:25]])
+        self.add_item(sel)
+
+
+class CtCardView(discord.ui.View):
+    def __init__(self, project_id):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(label="📄 ملف للمالك (للإدارة)",
+                                        style=discord.ButtonStyle.secondary,
+                                        custom_id=CT_PDF_PREFIX + str(project_id)))
+
+
+async def _ct_post_card(ch, embed, project_id=None):
     """Post the project card and pin it. Mentions inside an embed never ping — on purpose:
     the card is edited many times and must not buzz the supervisor each time."""
+    kw = {"view": CtCardView(project_id)} if project_id else {}
     m = await ch.send(embed=discord.Embed.from_dict(embed),
-                      allowed_mentions=discord.AllowedMentions.none())
+                      allowed_mentions=discord.AllowedMentions.none(), **kw)
     try:
         await m.pin(reason="«المقاولات» — كرت المشروع")
     except Exception as e:
@@ -12240,7 +12280,7 @@ async def _ct_deliver(payload):
             for part in _ct_chunks(payload.get("text")):
                 await ch.send(part, allowed_mentions=mentions)
             if payload.get("embed"):
-                cm = await _ct_post_card(ch, payload["embed"])
+                cm = await _ct_post_card(ch, payload["embed"], payload.get("project_id"))
                 rep.update(card_msg_id=str(cm.id), hash=payload.get("hash"))
             await _ct_admin_channel(guild, payload["category"], payload["admin_channel"])
             rep.update(ok=True, channel_id=str(ch.id))
@@ -12253,12 +12293,26 @@ async def _ct_deliver(payload):
             m = None
             if payload.get("msg_id"):
                 try:
-                    m = await ch.get_partial_message(int(payload["msg_id"])).edit(embed=emb)
+                    m = await ch.get_partial_message(int(payload["msg_id"])).edit(
+                        embed=emb, view=CtCardView(payload.get("project_id")))
                 except discord.NotFound:
                     m = None
             if m is None:
-                m = await _ct_post_card(ch, payload["embed"])
+                m = await _ct_post_card(ch, payload["embed"], payload.get("project_id"))
             rep.update(ok=True, msg_id=str(m.id), hash=payload.get("hash"))
+        elif payload.get("kind") == "askview":
+            # a «خلص؟» message whose line closed: redraw its buttons (done → grey ✅)
+            ch = guild.get_channel(int(payload.get("channel_id") or 0))
+            if ch is not None and payload.get("msg_id"):
+                try:
+                    await ch.get_partial_message(int(payload["msg_id"])).edit(
+                        view=CtAskView(payload.get("ask_items") or []))
+                except discord.NotFound:
+                    pass
+            rep.update(ok=True)
+        elif payload.get("kind") == "ownerpdf":
+            await _ct_send_owner_pdf(guild, payload)
+            rep.update(ok=True)
         else:
             if payload.get("target") == "project":
                 ch = guild.get_channel(int(payload.get("channel_id") or 0))
@@ -12270,9 +12324,11 @@ async def _ct_deliver(payload):
             m = None
             for i, part in enumerate(parts):
                 last = i == len(parts) - 1
-                view = CtAskView(payload["item_id"]) if (last and payload.get("view") == "ask") else None
+                view = (CtAskView(payload.get("ask_items") or payload["item_id"])
+                        if (last and payload.get("view") == "ask") else None)
                 m = await ch.send(part, allowed_mentions=mentions, **({"view": view} if view else {}))
             rep.update(ok=True, msg_id=str(m.id) if m else "")
+        rep.update(keys=payload.get("keys") or [], item_ids=payload.get("item_ids") or [])
     except Exception as e:
         rep["error"] = str(e)[:300]
         print("[contracting] deliver failed (%s): %s" % (payload.get("key"), e))
@@ -12280,6 +12336,26 @@ async def _ct_deliver(payload):
         await asyncio.to_thread(_contracting.notify.delivered, rep)
     except Exception as e:
         print("[contracting] delivery report failed:", e)
+
+
+async def _ct_send_owner_pdf(guild, payload, by=""):
+    """«ملف المالك» → #مقاولات-الإدارة as a file. Built in a worker thread (Chromium)."""
+    n = _contracting.notify
+    r = await asyncio.to_thread(n.owner_pdf, payload["project_id"], payload.get("reason") or "ask", by)
+    ch = await _ct_admin_channel(guild, n.category_name(), n.admin_channel_name())
+    if not r.get("ok"):
+        await ch.send(("⚠️ " + (r.get("error") or "ما قدرت أطلع ملف المالك"))[:1990])
+        return False
+    try:
+        if os.path.getsize(r["path"]) > 9_500_000:
+            await ch.send((r["caption"] + chr(10) + "الملف كبير على ديسكورد — نزّله من الداشبورد: "
+                           "تبويب «المقاولات» ← «📄 ملف للمالك».")[:1990])
+            return True
+        await ch.send(r["caption"][:1990], file=discord.File(r["path"], filename=r["name"]),
+                      allowed_mentions=discord.AllowedMentions.none())
+        return True
+    finally:
+        shutil.rmtree(os.path.dirname(r["path"]), ignore_errors=True)
 
 
 async def _ct_post_admin(text):
@@ -12338,27 +12414,64 @@ class CtBlockModal(discord.ui.Modal, title="البند واقف"):
         await _ct_post_admin(r["admin_text"])
 
 
+async def _ct_is_manager(interaction):
+    """The owner's file is for the office: Discord admins, or a lead/boss in «الفريق»."""
+    u = interaction.user
+    perms = getattr(u, "guild_permissions", None)
+    if perms is not None and (perms.administrator or perms.manage_guild):
+        return True
+    n = _contracting.notify
+    ids = await asyncio.to_thread(lambda: set(n._role_ids("lead")) | set(n._role_ids("boss")))
+    return str(u.id) in ids
+
+
 async def _ct_interaction(interaction):
-    """«خلص / تأخر / واقف». A LISTENER, not a bound view — works on messages from before
-    the last redeploy. The line is found from the custom_id, never from memory."""
+    """«خلص / تأخر / واقف», the «لأي بند؟» menu and «ملف للمالك». A LISTENER, not a bound
+    view — works on messages from before the last redeploy. The line/batch/project is found
+    from the custom_id, never from memory."""
     try:
         if not _HAS_CONTRACTING or interaction.type != discord.InteractionType.component:
             return
         cid = (interaction.data or {}).get("custom_id") or ""
-        if not cid.startswith((CT_DONE_PREFIX, CT_DELAY_PREFIX, CT_BLOCK_PREFIX)):
+        if not cid.startswith((CT_DONE_PREFIX, CT_DELAY_PREFIX, CT_BLOCK_PREFIX,
+                               CT_PICK_PREFIX, CT_PDF_PREFIX)):
             return
         _ct_ready()
-        item_id = cid.split(":", 1)[1]
+        ref = cid.split(":", 1)[1]
+        who = interaction.user.display_name
         if cid.startswith(CT_DELAY_PREFIX):
-            await interaction.response.send_modal(CtDelayModal(item_id))
+            await interaction.response.send_modal(CtDelayModal(ref))
             return
         if cid.startswith(CT_BLOCK_PREFIX):
-            await interaction.response.send_modal(CtBlockModal(item_id))
+            await interaction.response.send_modal(CtBlockModal(ref))
+            return
+        if cid.startswith(CT_PDF_PREFIX):
+            if not await _ct_is_manager(interaction):
+                await _cw_reply(interaction, "هذا للإدارة بس.")
+                return
+            n = _contracting.notify
+            await _cw_reply(interaction, "📄 يتجهز… بيوصلك في #%s خلال دقيقة." % n.admin_channel_name())
+            await _ct_send_owner_pdf(interaction.guild, n.ownerpdf_payload(ref, "ask"), who)
+            return
+        if cid.startswith(CT_PICK_PREFIX):
+            vals = (interaction.data or {}).get("values") or []
+            if not vals:
+                return
+            r = await asyncio.to_thread(_contracting.notify.on_pick, ref, str(vals[0]), who)
+            if not r.get("ok"):
+                await _cw_reply(interaction, r.get("text") or "ما انحفظ")
+                return
+            embs = list(getattr(interaction.message, "embeds", None) or [])
+            if embs:
+                e0 = embs[0]
+                e0.description = r["final"][:4000]
+                await interaction.response.edit_message(embed=e0, view=None)
+            else:
+                await interaction.response.edit_message(content=r["final"][:1990], view=None)
             return
         await interaction.response.defer()
-        r = await asyncio.to_thread(_contracting.notify.on_done_press, item_id,
-                                    interaction.user.display_name)
-        if r.get("ok"):
+        r = await asyncio.to_thread(_contracting.notify.on_done_press, ref, who)
+        if r.get("ok") and not r.get("ephemeral"):
             await interaction.channel.send(r["text"][:1990])
         else:
             await _cw_reply(interaction, r.get("text") or "ما انحفظ")
@@ -12370,26 +12483,81 @@ async def _ct_interaction(interaction):
             pass
 
 
+def _ct_image_urls(message):
+    return [a.url for a in message.attachments
+            if (a.content_type or "").startswith("image/")
+            or (a.filename or "").lower().endswith(_CT_IMG_EXT)]
+
+
+async def _ct_post_picker(channel, pk):
+    """Post one «لأي بند؟» menu (with the photo, so it is clear which one) and remember it."""
+    emb = discord.Embed(description=pk["text"][:4000], color=0xA57A2C)
+    if pk.get("image_url"):
+        emb.set_thumbnail(url=pk["image_url"])
+    m = await channel.send(embed=emb, view=CtPickView(pk["batch_id"], pk["options"]),
+                           allowed_mentions=discord.AllowedMentions.none())
+    await asyncio.to_thread(_contracting.notify.picker_posted, pk["batch_id"], str(m.id))
+    return m
+
+
 async def _ct_on_message(message):
-    """Photos dropped in a project channel count toward the line waiting for proof."""
+    """Photos dropped in a project channel: counted for the one line waiting, or held behind
+    a «لأي بند؟» menu. A partial count is a 📸 reaction, not another message."""
     try:
         if not _HAS_CONTRACTING or message.author.bot or not message.attachments:
             return
         cat = getattr(message.channel, "category", None)
         if cat is None or cat.name != _contracting.notify.category_name():
             return
-        urls = [a.url for a in message.attachments
-                if (a.content_type or "").startswith("image/")
-                or (a.filename or "").lower().endswith(_CT_IMG_EXT)]
+        urls = _ct_image_urls(message)
         if not urls:
             return
         _ct_ready()
         r = await asyncio.to_thread(_contracting.notify.on_photos, str(message.channel.id),
-                                    urls, message.author.display_name)
-        if r:
+                                    urls, message.author.display_name, str(message.id))
+        if not r:
+            return
+        if r.get("pick"):
+            await _ct_post_picker(message.channel, r["pick"])
+        elif r.get("done"):
             await message.channel.send(r["text"][:1990])
+        else:
+            try:
+                await message.add_reaction("📸")
+            except Exception:
+                await message.channel.send(r["text"][:1990])
     except Exception as e:
         print("[contracting] photo hook failed:", e)
+
+
+_CT_BACKFILL = {"done": False}
+
+
+async def _ct_backfill():
+    """Once per project, ever (meta flag inside): photos posted before the «لأي بند؟» menu
+    existed get a menu each, so nothing posted early is lost (Abo Amen, 2026-11-24)."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    projects = await asyncio.to_thread(_contracting.db.projects, ["active"])
+    for p in projects:
+        if not p.get("channel_id") or _contracting.db.meta("backfill|" + p["id"]):
+            continue
+        ch = guild.get_channel(int(p["channel_id"]))
+        if ch is None:
+            continue
+        msgs = []
+        async for m in ch.history(limit=300, oldest_first=True):
+            if m.author.bot or not m.attachments:
+                continue
+            urls = _ct_image_urls(m)
+            if urls:
+                msgs.append({"id": str(m.id), "by": m.author.display_name, "urls": urls})
+        pks = await asyncio.to_thread(_contracting.notify.backfill_candidates, p["channel_id"], msgs)
+        for pk in pks:
+            await _ct_post_picker(ch, pk)
+        if pks:
+            print("[contracting] backfill: %d early photos in %s" % (len(pks), p["title"]))
 
 
 @tasks.loop(minutes=2)
@@ -12406,6 +12574,12 @@ async def contracting_loop():
             print("[contracting] tick:", rep)
     except Exception as e:
         print("[contracting] loop error:", e)
+    if not _CT_BACKFILL["done"] and not _contracting.notify.dryrun():
+        _CT_BACKFILL["done"] = True
+        try:
+            await _ct_backfill()
+        except Exception as e:
+            print("[contracting] backfill failed:", e)
 
 
 # ==== «طلبات سام» RR Desk (rrdesk/ package) ===================================================

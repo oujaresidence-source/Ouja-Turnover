@@ -182,7 +182,8 @@
       h += '<div class="ct-meta"><span>' + esc(T('مشرف الموقع: ', 'Supervisor: ')) + '<b>' + esc(p.supervisor || '—') + '</b></span>' +
         (p.health ? '<span>' + p.health.done + ' ' + esc(T('من', 'of')) + ' ' + p.health.total + ' ' + esc(T('خلصت', 'done')) + '</span>' : '') +
         '<span>' + ch + '</span>' +
-        (p.channel_error && ed ? '<button class="ct-link" data-ct="retry" data-id="' + esc(p.id) + '">' + esc(T('جرّب مرة ثانية', 'Retry')) + '</button>' : '') + '</div>';
+        (p.channel_error && ed ? '<button class="ct-link" data-ct="retry" data-id="' + esc(p.id) + '">' + esc(T('جرّب مرة ثانية', 'Retry')) + '</button>' : '') +
+        (ed ? '<button class="ct-link" data-ct="ownerpdf" data-id="' + esc(p.id) + '">' + esc(T('📄 ملف للمالك', '📄 Owner file')) + '</button>' : '') + '</div>';
     }
     h += '<ol class="ct-list">' + arr(p.items).map(function (it) {
       var err = probs[it.id] || '';
@@ -289,6 +290,29 @@
     } else if (k === 'markdone') {
       if (!window.confirm(T('تعتبر هذا البند خالص بدون صور؟ ينكتب باسمك في السجل.', 'Mark this line done without photos? It is logged under your name.'))) return;
       if (await act('/api/contr/markdone', { item_id: id })) { toast(T('انعلّم خالص — الكرت في ديسكورد يتحدث خلال دقيقتين', 'Marked done — the Discord card updates within 2 min')); await load(true, true); }
+    } else if (k === 'ownerpdf') {
+      el.disabled = true;
+      var keep = el.textContent;
+      el.textContent = T('يتجهز…', 'Preparing…');
+      try {
+        var res = await fetch('/api/contr/ownerpdf?id=' + encodeURIComponent(id), { headers: { 'X-Token': tok() } });
+        var type = res.headers.get('Content-Type') || '';
+        if (type.indexOf('application/pdf') !== 0) {
+          var j = await res.json().catch(function () { return {}; });
+          toast(j.error || T('ما قدرت أطلع الملف', 'Could not build the file'));
+        } else {
+          var blob = await res.blob();
+          var cd = res.headers.get('Content-Disposition') || '';
+          var m = cd.match(/filename="([^"]+)"/);
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = m ? m[1] : 'Ouja-owner-file.pdf';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        }
+      } catch (err) { toast(T('ما قدرت أطلع الملف — جرب مرة ثانية', 'Could not build the file — try again')); }
+      el.disabled = false;
+      el.textContent = keep;
     } else if (k === 'retry') {
       if (await act('/api/contr/retry', { id: id })) { toast(T('جاري فتح القناة', 'Opening the channel')); await load(true, true); }
     }

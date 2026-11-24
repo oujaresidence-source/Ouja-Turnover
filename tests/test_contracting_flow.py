@@ -197,9 +197,65 @@ class TestButtons(Base):
         self.assertIn("منقل غاز", r2["text"])                 # names the next line
         self.assertEqual(db.item(self.line["id"])["status"], "done")
 
-    def test_photos_without_a_press_are_ignored(self):
-        self.assertIsNone(notify.on_photos("900", ["u1", "u2", "u3"], "أبو أمين"))
+    def test_photos_before_the_press_get_a_menu_not_the_bin(self):
+        # owner 2026-11-24: Abo Amen uploaded before the question and the photos vanished
+        r = notify.on_photos("900", ["u1", "u2", "u3"], "أبو أمين", "m1")
+        self.assertIn("pick", r)
+        vals = [o["value"] for o in r["pick"]["options"]]
+        self.assertEqual(vals[-2:], ["progress", "ignore"])
+        self.assertIn(self.line["id"], vals)
+        self.assertIn("لأي بند", r["pick"]["text"])
         self.assertIsNone(notify.on_photos("777", ["u1"], "x"))     # not a project channel
+        done = notify.on_pick(r["pick"]["batch_id"], self.line["id"], "أبو أمين")
+        self.assertTrue(done["ok"] and done["done"])                 # picking = «خلص» + 3 photos
+        self.assertEqual(db.item(self.line["id"])["status"], "done")
+        again = notify.on_pick(r["pick"]["batch_id"], self.line["id"], "أصيل")
+        self.assertFalse(again["ok"])                                # first answer wins
+
+    def test_one_photo_picked_then_the_rest_follow_on_their_own(self):
+        r = notify.on_photos("900", ["u1"], "أبو أمين", "m1")
+        res = notify.on_pick(r["pick"]["batch_id"], self.line["id"], "أبو أمين")
+        self.assertFalse(res["done"])
+        self.assertIn("1 من 3", res["final"])
+        r2 = notify.on_photos("900", ["u2", "u3"], "أبو أمين", "m2")   # only line waiting → no menu
+        self.assertTrue(r2["done"])
+
+    def test_two_lines_waiting_means_ask_dont_guess(self):
+        its = db.project(self.d2["id"])["items"]
+        notify.on_done_press(its[0]["id"], "أبو أمين")
+        notify.on_done_press(its[1]["id"], "أبو أمين")
+        r = notify.on_photos("900", ["u1", "u2", "u3"], "أبو أمين", "m1")
+        self.assertIn("pick", r)
+        self.assertEqual(db.item(its[0]["id"])["photos"], [])
+        self.assertEqual(r["pick"]["options"][0]["description"][:5], "ينتظر")   # waiting lines first
+
+    def test_press_tells_only_the_presser_and_closes_if_photos_came_first(self):
+        r = notify.on_done_press(self.line["id"], "أبو أمين")
+        self.assertTrue(r["ephemeral"])
+        line2 = db.project(self.d2["id"])["items"][1]
+        b = notify.on_photos("900", ["a", "b", "c"], "أبو أمين", "m9")      # line 1 waits → goes there
+        self.assertTrue(b["done"])
+        db.execute("UPDATE contracting_items SET photos=? WHERE id=?",
+                   ('[{"url":"x"},{"url":"y"},{"url":"z"}]', line2["id"]))
+        r2 = notify.on_done_press(line2["id"], "أبو أمين")
+        self.assertTrue(r2["done"])
+        self.assertEqual(db.item(line2["id"])["status"], "done")
+
+    def test_progress_photos_close_nothing_and_are_kept(self):
+        r = notify.on_photos("900", ["u1", "u2"], "أبو أمين", "m1")
+        res = notify.on_pick(r["pick"]["batch_id"], "progress", "أبو أمين")
+        self.assertIn("شغل جاري", res["final"])
+        self.assertEqual(len(db.batches(self.d2["id"], "progress")), 1)
+        self.assertEqual(db.item(self.line["id"])["status"], "open")
+
+    def test_backfill_once_and_only_unknown_photos(self):
+        notify.on_done_press(self.line["id"], "أبو أمين")
+        notify.on_photos("900", ["k1"], "أبو أمين", "known")
+        msgs = [{"id": "known", "by": "أبو أمين", "urls": ["k1"]},
+                {"id": "old1", "by": "أبو أمين", "urls": ["o1", "o2"]}]
+        pks = notify.backfill_candidates("900", msgs)
+        self.assertEqual(len(pks), 2)                                # one menu per early photo
+        self.assertEqual(notify.backfill_candidates("900", msgs), [])   # never twice
 
     def test_delay_needs_reason_and_valid_date_then_reschedules(self):
         now = dt.datetime(2026, 11, 24, 16, 10)
@@ -211,8 +267,8 @@ class TestButtons(Base):
         self.assertEqual(db.item(self.line["id"])["due"], "2026-11-26")
         self.assertEqual(db.item(self.line["id"])["delays"], 1)
         SENT.clear()
-        notify.tick(dt.datetime(2026, 11, 26, 16, 1))
-        self.assertEqual([s["type"] for s in SENT], ["ask"])
+        notify.tick(dt.datetime(2026, 11, 26, 16, 1))      # a Thursday: the owner's file goes too
+        self.assertEqual([s["type"] for s in SENT if s["kind"] == "post"], ["ask"])
 
     def test_block_tells_asil_now_and_faisal_after_a_day(self):
         now = dt.datetime(2026, 11, 24, 11, 0)
@@ -359,6 +415,109 @@ class TestCard(Base):
         db.set_channel(self.d2["id"], "900")
         notify.tick(dt.datetime(2026, 11, 24, 10, 0))
         self.assertEqual(CARDS, [])
+
+
+class TestGrouped(Base):
+    """Lines due together → one message; a closed line's buttons go grey."""
+
+    def setUp(self):
+        super().setUp()
+        its = self.d2["items"]
+        db.save_draft(self.d2["id"], {}, {its[i]["id"]: "2026-12-10" for i in (2, 3, 4)})
+        self.start_d2()
+        self.opened(self.d2["id"])
+        SENT.clear()
+
+    def posts(self):
+        return [x for x in SENT if x.get("kind") == "post"]
+
+    def test_four_lines_one_question(self):
+        notify.tick(dt.datetime(2026, 12, 10, 16, 1))
+        asks = [x for x in self.posts() if x["type"] == "ask"]
+        self.assertEqual(len(asks), 1)
+        a = asks[0]
+        self.assertEqual(len(a["keys"]), 4)
+        self.assertEqual(len(a["ask_items"]), 4)
+        self.assertIn("هالبنود موعدها اليوم", a["text"])
+        notify.delivered({"key": a["key"], "keys": a["keys"], "item_ids": a["item_ids"],
+                          "ok": True, "msg_id": "60", "type": "ask"})
+        for iid in a["item_ids"]:
+            self.assertEqual(db.item(iid)["ask_msg_id"], "60")
+        notify.tick(dt.datetime(2026, 12, 10, 19, 2))
+        esc = [x for x in self.posts() if x["type"] == "esc_lead"]
+        self.assertEqual(len(esc), 1)                                # one escalation, four lines
+        self.assertEqual(esc[0]["text"].count("ما انرد"), 4)
+
+    def test_a_closed_line_greys_its_buttons_once(self):
+        notify.tick(dt.datetime(2026, 12, 10, 16, 1))
+        a = [x for x in self.posts() if x["type"] == "ask"][0]
+        notify.delivered({"key": a["key"], "keys": a["keys"], "item_ids": a["item_ids"],
+                          "ok": True, "msg_id": "60", "type": "ask"})
+        CARDS.clear()
+        notify.tick(dt.datetime(2026, 12, 10, 16, 3))
+        self.assertEqual([c for c in CARDS if c["kind"] == "askview"], [])
+        db.mark_done(a["item_ids"][0], "فيصل", "")
+        notify.tick(dt.datetime(2026, 12, 10, 16, 5))
+        av = [c for c in SENT + CARDS if c.get("kind") == "askview"]
+        self.assertEqual(len(av), 1)
+        self.assertEqual([i["done"] for i in av[0]["ask_items"]], [True, False, False, False])
+        notify.tick(dt.datetime(2026, 12, 10, 16, 7))
+        self.assertEqual(len([c for c in SENT + CARDS if c.get("kind") == "askview"]), 1)
+
+
+class TestOwnerFile(Base):
+    def test_thursday_once_and_handover_once(self):
+        self.start_d2()
+        self.opened(self.d2["id"])
+        SENT.clear()
+        notify.tick(dt.datetime(2026, 11, 26, 13, 0))               # Thursday
+        notify.tick(dt.datetime(2026, 11, 26, 15, 0))
+        pdfs = [x for x in SENT if x.get("kind") == "ownerpdf"]
+        self.assertEqual([x["reason"] for x in pdfs], ["weekly"])
+        notify.tick(dt.datetime(2026, 11, 27, 13, 0))               # Friday — nothing
+        self.assertEqual(len([x for x in SENT if x.get("kind") == "ownerpdf"]), 1)
+        for it in db.project(self.d2["id"])["items"]:
+            db.mark_done(it["id"], "فيصل", "")
+        db.finish_if_complete(self.d2["id"])
+        notify.tick(dt.datetime(2026, 11, 28, 10, 0))
+        notify.tick(dt.datetime(2026, 11, 28, 10, 2))
+        self.assertEqual([x["reason"] for x in SENT if x.get("kind") == "ownerpdf"],
+                         ["weekly", "final"])
+
+    def test_the_page_is_for_the_owner(self):
+        from contracting import ownerpdf
+        self.start_d2()
+        its = db.project(self.d2["id"])["items"]
+        db.mark_done(its[0]["id"], "فيصل", "")
+        notify.on_delay(its[1]["id"], "أبو أمين", "المورد تأخر <b>", "3/12",
+                        dt.datetime(2026, 11, 25, 10, 0))
+        p, page = ownerpdf.project_html(self.d2["id"], "weekly", dt.date(2026, 11, 26))
+        self.assertIn("الجلسة الخارجية", page)
+        self.assertIn("1</span><span class='of'>من 8", page)
+        self.assertIn("المورد تأخر &lt;b&gt;", page)                # escaped, and the reason shows
+        self.assertNotIn("أبو أمين", page)                          # no staff names in the owner's file
+        self.assertNotIn("فيصل", page)
+        self.assertIn("22,317.90", page)
+
+
+class TestPhotoCopies(Base):
+    def test_shrinks_and_respects_the_ceiling(self):
+        import io
+        from PIL import Image
+        from contracting import photos
+        buf = io.BytesIO()
+        Image.new("RGB", (4000, 3000), (200, 180, 150)).save(buf, "PNG")
+        rel = photos.keep("", "cp_x", raw=buf.getvalue())
+        self.assertTrue(rel)
+        with Image.open(photos.path_of(rel)) as im:
+            self.assertEqual(max(im.size), photos.MAX_PX)
+        self.assertEqual(photos.path_of("../../etc/passwd"), "")
+        os.environ["CONTRACTING_PHOTO_CAP_MB"] = "0"
+        try:
+            self.assertEqual(photos.keep("", "cp_x", raw=buf.getvalue()), "")
+        finally:
+            os.environ.pop("CONTRACTING_PHOTO_CAP_MB", None)
+        self.assertEqual(photos.keep("not-a-url", "cp_x"), "")
 
 
 class TestMarkDone(Base):

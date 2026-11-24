@@ -11,12 +11,14 @@ role admin/ops (re-checked here, like decor and oncall).
   POST /api/contr/start      THE GATE — refused unless engine.start_check passes
   POST /api/contr/due        move one line's date on a running project (logged)
   POST /api/contr/markdone   ADMIN only: a line finished before the system knew (done_manual)
+  GET  /api/contr/ownerpdf   «ملف المالك» — the owner's PDF as a download (admin/ops)
   POST /api/contr/people     a team member's Discord id / role
   POST /api/contr/delete     drop a draft (never a running project)
   POST /api/contr/retry      try opening a project's Discord channel again
 """
 
 import os
+import shutil
 import traceback
 
 from . import db, engine, notify, seed
@@ -246,6 +248,30 @@ async def api_mark_done(request):
     return _json(await _run(_mark_done, b, _actor(request), role))
 
 
+def _owner_pdf_bytes(pid, by):
+    r = notify.owner_pdf(pid, "ask", by)
+    if not r.get("ok"):
+        return None, "", r.get("error") or "ما قدرت أطلع الملف"
+    try:
+        with open(r["path"], "rb") as f:
+            data = f.read()
+    finally:
+        shutil.rmtree(os.path.dirname(r["path"]), ignore_errors=True)
+    return data, r["name"], ""
+
+
+async def api_owner_pdf(request):
+    if not can_edit(request):
+        return _deny()
+    pid = str(request.query.get("id") or "")
+    data, name, err = await _run(_owner_pdf_bytes, pid, _actor(request))
+    if data is None:
+        return _json({"ok": False, "error": err}, 200)
+    return HOST.web.Response(body=data, content_type="application/pdf",
+                             headers={"Content-Disposition": 'attachment; filename="%s"' % name,
+                                      "Cache-Control": "no-store"})
+
+
 def _people(b, by):
     name = str(b.get("name") or "").strip()
     if not name:
@@ -315,6 +341,7 @@ def register_routes(app):
     p("/api/contr/start", _safe(api_start))
     p("/api/contr/due", _safe(api_due))
     p("/api/contr/markdone", _safe(api_mark_done))
+    g("/api/contr/ownerpdf", _safe(api_owner_pdf))
     p("/api/contr/people", _safe(api_people))
     p("/api/contr/delete", _safe(api_delete))
     p("/api/contr/retry", _safe(api_retry))

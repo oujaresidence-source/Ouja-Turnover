@@ -8,7 +8,9 @@ Two guarantees live here, not in the callers:
     PRIMARY KEY: one reminder key = at most one message, ever (a restart mid-tick cannot
     double-post — the ops/oncall lesson).
   - a line is `done` only through `add_photos()` reaching PHOTOS_NEEDED. Pressing «خلص»
-    alone moves it to `awaiting_photos`, nothing more. The single exception is
+    alone moves it to `awaiting_photos`, nothing more. Photos dropped BEFORE the press are
+    not lost (owner 2026-11-24): they wait in contracting_photo_batches until someone picks
+    their line, and picking a line counts as its «خلص». The single exception is
     `mark_done()` — admin-only, from the dashboard, logged as `done_manual` (owner
     2026-11-24: the D2 survey was finished before the project started).
 """
@@ -104,6 +106,23 @@ CREATE TABLE IF NOT EXISTS contracting_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Photos that arrived when the bot could not tell which line they prove (none or several
+-- lines waiting). The channel gets a «لأي بند؟» picker; the choice resolves the batch.
+-- choice: item id | 'progress' (work-in-progress, kept for the owner's file) | 'ignore'.
+CREATE TABLE IF NOT EXISTS contracting_photo_batches (
+    id            TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    message_id    TEXT,
+    photos        TEXT,                               -- JSON [{url, file, by, at, msg}]
+    by            TEXT,
+    at            TEXT NOT NULL,
+    picker_msg_id TEXT,
+    choice        TEXT,
+    resolved_by   TEXT,
+    resolved_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ctr_batches_proj ON contracting_photo_batches(project_id, at);
 """
 
 _inited = set()
@@ -363,12 +382,25 @@ def awaiting_photo_item(project_id):
     return _item_out(r) if r else None
 
 
+def _photo_rows(photos, actor):
+    """urls (str) or ready dicts {url, file, msg} → stored rows."""
+    out = []
+    for u in photos or []:
+        d = dict(u) if isinstance(u, dict) else {"url": u}
+        if not d.get("url") and not d.get("file"):
+            continue
+        d.setdefault("by", actor)
+        d.setdefault("at", now_iso())
+        out.append(d)
+    return out
+
+
 def add_photos(item_id, urls, actor):
     """→ (item, became_done). Done only at PHOTOS_NEEDED photos."""
     it = item(item_id)
     if not it or it["status"] != "awaiting_photos":
         return it, False
-    ph = it["photos"] + [{"url": u, "by": actor, "at": now_iso()} for u in urls if u]
+    ph = it["photos"] + _photo_rows(urls, actor)
     done = len(ph) >= PHOTOS_NEEDED
     execute("UPDATE contracting_items SET photos=?, status=?, done_by=?, done_at=?, updated_at=? "
             "WHERE id=?",
@@ -376,6 +408,61 @@ def add_photos(item_id, urls, actor):
              actor if done else None, now_iso() if done else None, now_iso(), item_id))
     event(it["project_id"], "done" if done else "photo", actor, "%d صور" % len(ph), item_id)
     return item(item_id), done
+
+
+def awaiting_items(project_id):
+    return [_item_out(r) for r in
+            q("SELECT * FROM contracting_items WHERE project_id=? AND status='awaiting_photos' "
+              "ORDER BY updated_at DESC", (project_id,))]
+
+
+def new_batch(project_id, photos, actor, message_id=""):
+    bid = _uid("cb")
+    execute("INSERT INTO contracting_photo_batches (id, project_id, message_id, photos, by, at) "
+            "VALUES (?,?,?,?,?,?)",
+            (bid, project_id, str(message_id or ""),
+             json.dumps(_photo_rows(photos, actor), ensure_ascii=False), actor, now_iso()))
+    return batch(bid)
+
+
+def batch(batch_id):
+    r = q1("SELECT * FROM contracting_photo_batches WHERE id=?", (batch_id,))
+    if r:
+        r["photos"] = _j(r.get("photos"), [])
+    return r
+
+
+def batches(project_id, choice=None):
+    rows = q("SELECT * FROM contracting_photo_batches WHERE project_id=?" +
+             (" AND choice=?" if choice else "") + " ORDER BY at",
+             (project_id, choice) if choice else (project_id,))
+    for r in rows:
+        r["photos"] = _j(r.get("photos"), [])
+    return rows
+
+
+def set_batch_picker(batch_id, msg_id):
+    execute("UPDATE contracting_photo_batches SET picker_msg_id=? WHERE id=?",
+            (str(msg_id or ""), batch_id))
+
+
+def resolve_batch(batch_id, choice, actor):
+    """First answer wins — two people picking at once cannot count the photos twice."""
+    n = execute("UPDATE contracting_photo_batches SET choice=?, resolved_by=?, resolved_at=? "
+                "WHERE id=? AND choice IS NULL", (choice, actor, now_iso(), batch_id))
+    return bool(n)
+
+
+def known_photo_msgs(project_id):
+    """Discord message ids whose photos are already counted somewhere (line or batch)."""
+    seen = set()
+    for it in items(project_id):
+        seen |= {str(x.get("msg")) for x in it["photos"] if x.get("msg")}
+    for b in batches(project_id):
+        seen |= {str(x.get("msg")) for x in b["photos"] if x.get("msg")}
+        if b.get("message_id"):
+            seen.add(str(b["message_id"]))
+    return seen
 
 
 def mark_done(item_id, actor, note=""):
@@ -483,6 +570,6 @@ def names_with_role(role):
 def counts():
     out = {}
     for t in ("contracting_projects", "contracting_items", "contracting_events",
-              "contracting_sent", "contracting_people"):
+              "contracting_sent", "contracting_people", "contracting_photo_batches"):
         out[t] = q1("SELECT COUNT(*) AS n FROM %s" % t)["n"]
     return out
