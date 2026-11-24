@@ -9881,6 +9881,7 @@ def _campaigns_caps():
         "dates_from_text": lambda h: _dates_from_text(h),
         "reservations": _campaigns_reservations, "search": _hatif_search,
         "site_host": lambda: (os.environ.get("HATIF_SITE_HOST", "") or "oujares.com"),
+        "web": web,                 # «الحملات» tab script is served as JavaScript
     }
 
 
@@ -26749,6 +26750,20 @@ html[dir="ltr"] .more-chev{transform:scaleX(-1)}
         <div id="ctBody"><div class="empty sk">—</div></div>
       </section>
 
+      <!-- ============ «الحملات» WhatsApp campaigns (when · who · expected · what came back) ============ -->
+      <section class="view" id="view_camp">
+        <div class="page-head">
+          <div>
+            <div class="page-title">📣 الحملات</div>
+            <div class="page-sub">كل رسائل الواتساب: متى تطلع، لمين، كم المتوقع، وكم جابت فعلاً</div>
+          </div>
+          <div class="page-tools">
+            <button class="btn ghost sm" onclick="loadCamp(1)">↻ تحديث</button>
+          </div>
+        </div>
+        <div id="cmBody"><div class="empty sk">—</div></div>
+      </section>
+
       <!-- ============ KB — قاعدة المعرفة (who owns what · who pays the cleaning · when the owner is paid) ============ -->
       <section class="view" id="view_kb">
         <div class="page-head">
@@ -30224,6 +30239,7 @@ function go(id){
   if(id==='oncall') loadOncall();
   if(id==='rrdesk') loadRrdesk();
   if(id==='contr') loadContr();
+  if(id==='camp') loadCamp();
   if(id==='guests') loadGuests();
   if(id==='rec') loadRecovery();
   if(id==='quality') loadQuality();
@@ -40321,6 +40337,17 @@ function loadContr(force){
   s.onerror=function(){ window.__ctLoading=0; putHtml('ctBody', errorState('loadContr(1)')); };
   document.head.appendChild(s);
 }
+/* «الحملات» — the tab's code is the real file /campaigns/static/campaigns_tab.js (no backslash trap here) */
+function loadCamp(force){
+  if(window.__cmJs){ return window.CampTab.load(force); }
+  if(window.__cmLoading){ return; }
+  window.__cmLoading=1;
+  var s=document.createElement('script');
+  s.src='/campaigns/static/campaigns_tab.js?v=__CAMP_JS_V__';
+  s.onload=function(){ window.__cmJs=1; window.CampTab.load(force); };
+  s.onerror=function(){ window.__cmLoading=0; putHtml('cmBody', errorState('loadCamp(1)')); };
+  document.head.appendChild(s);
+}
 /* «طلبات سام» — the tab's code is the real file /rrdesk/static/rrdesk_tab.js (no backslash trap here) */
 function loadRrdesk(force){
   if(window.__rdJs){ return window.RrdeskTab.load(force); }
@@ -49220,7 +49247,7 @@ NAV_DEF = {
                                   "cleanteams", "coverage", "wifi", "permits", "rvpush", "oncall", "listings", "quality", "onb", "mot", "pmo", "design", "contr"]},
         {"tk": "cat_pricing", "ids": ["brain", "gaps", "pricing", "plab", "monthlylab", "strat", "rev"]},
         {"tk": "cat_owner_sales", "ids": ["quote", "aqd"]},
-        {"tk": "cat_content", "ids": ["studio", "digest"]},
+        {"tk": "cat_content", "ids": ["camp", "studio", "digest"]},
         {"tk": "cat_finance", "ids": ["erp", "expenses", "finance", "weekly", "ownrep", "meet"]},
         {"tk": "cat_guests", "ids": ["guests", "rec", "gw", "cp", "guide", "reviews"]},
         {"tk": "cat_system", "ids": ["kb", "users", "learn", "train", "log"]},
@@ -49257,6 +49284,7 @@ NAV_DEF = {
         {"id": "users", "ic": "users", "tk": "users", "adminOnly": True},
         {"id": "quote", "ic": "quote", "tk": "quote"},
         {"id": "aqd", "ic": "quote", "tk": "aqd", "badge": "aqd"},                # «العقود»
+        {"id": "camp", "ic": "strat", "tk": "camp"},                                # «الحملات» (campaigns/board.py)
         {"id": "studio", "ic": "design", "tk": "studio"},
         {"id": "digest", "ic": "design", "tk": "digest", "href": "/digest"},
         {"id": "weekly", "ic": "weekly", "tk": "weekly"},
@@ -49302,6 +49330,7 @@ NAV_DEF = {
             "rev": "الإيرادات", "learn": "ما تعلّمه", "train": "تدريب مساعد", "log": "النشاط", "kb": "قاعدة المعرفة",
             "studio": "استوديو عوجا",
             "digest": "نشرة الأسبوع",
+            "camp": "الحملات",
             "cat_overview": "نظرة عامة", "cat_ops": "العمليات",
             "cat_pricing": "التسعير والإيرادات", "cat_owner_sales": "عروض الملاك / المبيعات",
             "cat_content": "المحتوى والتسويق",
@@ -49326,6 +49355,7 @@ NAV_DEF = {
             "rev": "Revenue", "learn": "Learnings", "train": "Musaed Training", "log": "Activity", "kb": "Knowledge Base",
             "studio": "Ouja Studio",
             "digest": "Weekend Digest",
+            "camp": "Campaigns",
             "cat_overview": "Overview", "cat_ops": "Operations",
             "cat_pricing": "Pricing & Revenue", "cat_owner_sales": "Owner / Sales",
             "cat_content": "Content & Marketing",
@@ -49362,6 +49392,11 @@ if not _HAS_OWNER_MEET:
     NAV_DEF["items"] = [i for i in NAV_DEF["items"] if i.get("id") != "meet"]
     for _c in NAV_DEF.get("cats") or []:
         _c["ids"] = [x for x in (_c.get("ids") or []) if x != "meet"]
+# «الحملات» needs the campaigns/ package; without it the tab would only show an error.
+if not _HAS_CAMPAIGNS:
+    NAV_DEF["items"] = [i for i in NAV_DEF["items"] if i.get("id") != "camp"]
+    for _c in NAV_DEF.get("cats") or []:
+        _c["ids"] = [x for x in (_c.get("ids") or []) if x != "camp"]
 _NAV_DEF_JSON = json.dumps(NAV_DEF, ensure_ascii=False)
 # One-time bake at import: the dashboard's `const NAVD = __NAV_DEF_JSON__;` becomes real JS.
 DASHBOARD_HTML = DASHBOARD_HTML.replace("__NAV_DEF_JSON__", _NAV_DEF_JSON, 1)
@@ -49383,6 +49418,9 @@ DASHBOARD_HTML = DASHBOARD_HTML.replace(
 # «المقاولات»: same pattern — the tab script lives in contracting/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__CONTR_JS_V__", (_contracting.routes.js_version() if _contracting is not None else "0"), 1)
+# «الحملات»: same pattern — the tab script lives in campaigns/static/, ?v= is its mtime.
+DASHBOARD_HTML = DASHBOARD_HTML.replace(
+    "__CAMP_JS_V__", (_campaigns.routes.js_version() if _HAS_CAMPAIGNS else "0"), 1)
 # «طلبات سام»: same pattern — the tab script lives in rrdesk/static/, ?v= is its mtime.
 DASHBOARD_HTML = DASHBOARD_HTML.replace(
     "__RRDESK_JS_V__", (_rrdesk.routes.js_version() if _rrdesk is not None else "0"), 1)
@@ -68790,6 +68828,7 @@ _ROLE_WRITE_RULES = [
     ("/api/reviewask/", "rvpush"),           # «رفع التقييم» — pins + template editor re-check admin inside
     ("/api/oncall/", "oncall"),              # «المناوبة» — writes re-check admin/ops inside
     ("/api/contr/", "contr"),                # «المقاولات» — writes re-check admin/ops inside
+    ("/api/campaigns/", "camp"),             # «الحملات» — every write re-checks admin inside
     ("/api/rrdesk/", "rrdesk"),              # «طلبات سام» — settings re-check admin inside
 ]
 # GET data reads that must honor the page's READ permission. Only page-scoped, sensitive
@@ -68860,6 +68899,9 @@ _ROLE_READ_RULES = [
     # «المقاولات»: owners' names, quote amounts, who missed what. The tab script is
     # /contracting/static/ (outside /api/), so this prefix cannot lock it out.
     ("/api/contr/", "contr"),
+    # «الحملات»: campaign results, taps (last 4 digits). The tab script is /campaigns/static/ and
+    # Hatif's webhook is /hatif/webhook — both outside /api/, so this prefix cannot lock them out.
+    ("/api/campaigns/", "camp"),
     # «طلبات سام»: per-person KPIs + Sam's request text. Public door is /rrdesk/health (counts only).
     ("/api/rrdesk/", "rrdesk"),
 ]

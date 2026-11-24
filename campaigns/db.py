@@ -105,6 +105,27 @@ CREATE TABLE IF NOT EXISTS campaign_queue (
     UNIQUE(campaign, phone_key)
 );
 CREATE INDEX IF NOT EXISTS campaign_queue_due ON campaign_queue(state, send_at);
+CREATE TABLE IF NOT EXISTS campaign_audience (
+    campaign    TEXT,
+    phone_key   TEXT,
+    name_key    TEXT,
+    role        TEXT,
+    created_at  TEXT,
+    PRIMARY KEY (campaign, phone_key)
+);
+CREATE TABLE IF NOT EXISTS campaign_board_numbers (
+    campaign    TEXT PRIMARY KEY,
+    sent        INTEGER,
+    delivered   INTEGER,
+    read_n      INTEGER,
+    replied     INTEGER,
+    signed      INTEGER,
+    send_at     TEXT,
+    status      TEXT,
+    note        TEXT,
+    updated_at  TEXT,
+    updated_by  TEXT
+);
 """
 
 _init_lock = threading.Lock()
@@ -488,6 +509,76 @@ def queue_summary():
                           "ORDER BY MIN(send_at)").fetchall()
     return [{"batch": b, "campaign": c, "state": s, "n": n, "first": f, "last": l}
             for b, c, s, n, f, l in rows]
+
+
+# ---------------------------------------------------------------- «الحملات» board
+def audience_add(campaign, rows, role="sent"):
+    """rows: [(phone_key, name_key)]. Keys only — the number never reaches this table.
+    → how many were new (a re-load never doubles a person)."""
+    _ensure()
+    now = now_iso()
+    n = 0
+    with closing(_bdb.connect()) as cx:
+        for pk, nk in rows:
+            if not pk:
+                continue
+            cur = cx.execute("INSERT OR IGNORE INTO campaign_audience(campaign, phone_key, name_key, role, "
+                             "created_at) VALUES(?,?,?,?,?)", (str(campaign), pk, nk or "", role, now))
+            n += cur.rowcount
+        cx.commit()
+    return n
+
+
+def audience_clear(campaign):
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        cur = cx.execute("DELETE FROM campaign_audience WHERE campaign=?", (str(campaign),))
+        cx.commit()
+        return cur.rowcount
+
+
+def audiences():
+    """{campaign: {"sent": [(phone_key, name_key)], "holdout": [...]}}"""
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT campaign, phone_key, name_key, role FROM campaign_audience").fetchall()
+    out = {}
+    for c, pk, nk, role in rows:
+        out.setdefault(c, {}).setdefault(role or "sent", []).append((pk, nk or ""))
+    return out
+
+
+_N_KEYS = ("sent", "delivered", "read_n", "replied", "signed", "send_at", "status", "note",
+           "updated_at", "updated_by")
+
+
+def board_numbers():
+    _ensure()
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT campaign, %s FROM campaign_board_numbers" % ", ".join(_N_KEYS)).fetchall()
+    return {r[0]: dict(zip(_N_KEYS, r[1:])) for r in rows}
+
+
+def set_board_numbers(campaign, fields, who=""):
+    """Upsert only the fields given (None clears one). Unknown keys are ignored."""
+    _ensure()
+    f = {k: v for k, v in (fields or {}).items() if k in _N_KEYS[:8]}
+    with closing(_bdb.connect()) as cx:
+        cx.execute("INSERT OR IGNORE INTO campaign_board_numbers(campaign) VALUES(?)", (str(campaign),))
+        if f:
+            cx.execute("UPDATE campaign_board_numbers SET %s WHERE campaign=?"
+                       % ", ".join("%s=?" % k for k in f), tuple(f.values()) + (str(campaign),))
+        cx.execute("UPDATE campaign_board_numbers SET updated_at=?, updated_by=? WHERE campaign=?",
+                   (now_iso(), str(who or "")[:60], str(campaign)))
+        cx.commit()
+
+
+def taps_all():
+    _ensure()
+    keys = ("created_at", "template", "kind", "phone_key", "guest_key")
+    with closing(_bdb.connect()) as cx:
+        rows = cx.execute("SELECT %s FROM campaign_taps ORDER BY created_at" % ", ".join(keys)).fetchall()
+    return [dict(zip(keys, r)) for r in rows]
 
 
 def _s(v):

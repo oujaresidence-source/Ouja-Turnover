@@ -23,6 +23,7 @@ class _Host:
     reservations = None     # (start_date, end_date) -> Hostaway reservations CREATED in the window
     search = None           # (check_in, check_out, guests, type, hood) -> _gw_search dict
     site_host = None        # () -> "oujares.com"
+    web = None              # aiohttp.web — the «الحملات» tab script is served as JavaScript
 
     def require(self, attr):
         v = getattr(self, attr, None)

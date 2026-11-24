@@ -718,6 +718,21 @@ Around the Hatif marketing templates (first sends Sun 29 Nov 2026). Three jobs, 
   `CAMPAIGN_PERSONAL_DRYRUN`=0 + Hatif keys + `HATIF_CHANNEL_ID`; `HATIF_TEST_NUMBERS` set ⇒ ONLY those go;
   opted-out ⇒ «suppressed»; 429 ⇒ back in line. Before loading a batch, CANCEL the Hatif UI campaigns for
   the same people or they get two messages.
+- **(6) «الحملات» board `campaigns/board.py` (2026-11-24):** dashboard tab `camp` (NAV cat_content;
+  script `campaigns/static/campaigns_tab.js`, a REAL file loaded by the `loadCamp()` stub, `node --check`
+  it). Hatif has NO campaign API, so the campaign list is a mirror: `campaigns/board_seed.json`
+  (`$STATE_DIR/campaign_board.json` wins; NO phone numbers — a test greps for them). When a send moves
+  or is cancelled in Hatif, mirror it here (admin form on the tab, or the seed). `compute()` is PURE
+  and TDD-locked (`tests/test_campaign_board.py`): a booking counts only for a person in the campaign's
+  audience (`campaign_audience`, salted phone keys — upload phones via ADMIN POST
+  `/api/campaigns/audience` {campaign, phones, role sent|holdout}; numbers are never stored) who books
+  INSIDE the window (14 days; owners + monthly 30). «عادةً بدون رسالة» = the group's back-tested
+  no-message rate (Hostaway backup Mar–Oct: B1 0.8%, A3 7.6%, A4 1.1% per 14 days) × the share of the
+  window measured — A3 elite members book a lot anyway, so their raw count flatters the message; read
+  the lift. B1 has a real holdout (`B1-holdout`, 44 people never messaged). Sent / delivered / read only
+  exist on Hatif's page → typed in by an admin (POST `/api/campaigns/board/numbers`). Bookings come
+  from targeted arrival windows (trap #4), cached 10 min. `/api/campaigns/` is in BOTH role-rule lists
+  as page `camp`: non-admin users see the tab only after it is ticked in الصلاحيات.
 - **Channels:** a channel Discord refuses to create (500 cap) falls back to `غرفة-المراقبة` with a note.
 - Env: `CAMPAIGNS_ENABLED`(1), `CAMPAIGN_WATCH`(1), `CAMPAIGN_BUTTONS`(1), `CAMPAIGN_BUTTONS_DRYRUN`(1),
   `CAMPAIGN_REPORT`(1), `CAMPAIGN_REPORT_DAY`(6=Sun)/`_HOUR`(9), `CAMPAIGN_OFFERS_CHANNEL`(عروض-خاصة),

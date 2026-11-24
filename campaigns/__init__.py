@@ -30,7 +30,7 @@ THE RULES — do not simplify:
     * Never state how many apartments Ouja has (the availability text comes from hatif.engine,
       which already obeys that rule).
 """
-from . import cards, config, db, engine, personal, routes, service  # noqa: F401
+from . import board, cards, config, db, engine, personal, routes, service  # noqa: F401
 from .host import HOST, wire  # noqa: F401
 from .routes import register_routes  # noqa: F401
 
