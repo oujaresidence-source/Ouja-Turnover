@@ -410,6 +410,11 @@ def add_photos(item_id, urls, actor):
     return item(item_id), done
 
 
+def set_item_photos(item_id, photos):
+    execute("UPDATE contracting_items SET photos=? WHERE id=?",
+            (json.dumps(photos, ensure_ascii=False), item_id))
+
+
 def awaiting_items(project_id):
     return [_item_out(r) for r in
             q("SELECT * FROM contracting_items WHERE project_id=? AND status='awaiting_photos' "

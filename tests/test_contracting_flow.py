@@ -549,6 +549,25 @@ class TestPhotoCopies(Base):
         self.assertEqual(photos.keep("not-a-url", "cp_x"), "")
 
 
+class TestEarlierPhotoCopies(Base):
+    def test_old_photos_get_a_copy_once(self):
+        from contracting import photos
+        self.start_d2()
+        line = db.project(self.d2["id"])["items"][0]
+        notify.on_done_press(line["id"], "x")
+        db.add_photos(line["id"], [{"url": "https://cdn.example/a.jpg"}, {"url": "nope"}], "x")
+        calls = []
+        real = photos.keep
+        photos.keep = lambda url, pid, raw=None: calls.append(url) or "cp/a.jpg"
+        try:
+            self.assertEqual(notify.fill_missing_copies(), 1)
+            self.assertEqual(notify.fill_missing_copies(), 0)          # never twice
+        finally:
+            photos.keep = real
+        self.assertEqual(calls, ["https://cdn.example/a.jpg"])
+        self.assertEqual(db.item(line["id"])["photos"][0]["file"], "cp/a.jpg")
+
+
 class TestMarkDone(Base):
     def test_admin_marks_a_line_done_without_photos(self):
         self.start_d2()

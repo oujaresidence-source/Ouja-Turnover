@@ -12602,6 +12602,12 @@ async def contracting_loop():
         await _ct_retire_stale_pickers()
     except Exception as e:
         print("[contracting] stale menus failed:", e)
+    try:
+        n = await asyncio.to_thread(_contracting.notify.fill_missing_copies)
+        if n:
+            print("[contracting] copied %d earlier photos for the owner's file" % n)
+    except Exception as e:
+        print("[contracting] photo copies failed:", e)
 
 
 # ==== «طلبات سام» RR Desk (rrdesk/ package) ===================================================

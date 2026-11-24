@@ -660,6 +660,29 @@ def stale_pickers():
     return out
 
 
+def fill_missing_copies(limit=12):
+    """Photos counted before copies existed (or whose copy failed) → copy them now, while
+    the Discord link still works (links expire in about a day). A few per loop."""
+    done = 0
+    for p in db.projects(["active", "done"]):
+        for it in p["items"]:
+            ph = it.get("photos") or []
+            changed = False
+            for x in ph:
+                if done >= limit:
+                    break
+                if x.get("file") or x.get("copy_failed") or not str(x.get("url") or "").startswith("http"):
+                    continue
+                x["file"] = photos.keep(x["url"], p["id"])
+                if not x["file"]:
+                    x["copy_failed"] = 1
+                changed = True
+                done += 1
+            if changed:
+                db.set_item_photos(it["id"], ph)
+    return done
+
+
 def picker_posted(batch_id, msg_id):
     db.set_batch_picker(batch_id, msg_id)
 
