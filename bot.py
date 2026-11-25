@@ -64536,10 +64536,13 @@ async def _handle_stay_hero_image(request):
 
 
 # ============================================================================================
-# OUJA ELITE — members booking site (/elite). VIP twin of /stay: Marriott-Bonvoy editorial.
-# Public, READ-ONLY. Reuses the live GW data + /api/stay/search + /api/stay/listing/{id}.
-# Conversion is WhatsApp-ONLY (concierge). NO Airbnb anywhere. RAW string (r-prefixed) so any
-# backslash in the embedded JS is literal — no Python mangling. No backticks; literal { } are JS.
+# OUJA ELITE — members booking site (/elite). VIP twin of /apartments, on «لوك عوجا» since
+# 2026-11-25 (docs/brand/OUJA_LOOK.md): limestone paper, night ink, gold for marks only, the two
+# Thmanyah faces, 52px ink pills, hairlines instead of boxes, the same date sheet and photo viewer.
+# Public, READ-ONLY. Reuses the live GW data + /api/stay/search|featured|listing/{id}.
+# Conversion is WhatsApp-ONLY (concierge). NO Airbnb anywhere, and no apartment counts.
+# RAW string, and the JS holds ZERO backslashes (tests/test_elite_look.py) — newlines in the
+# WhatsApp text come from String.fromCharCode(10). No backticks; literal { } are JS.
 # ============================================================================================
 ELITE_HTML = r"""<!doctype html>
 <html lang="ar" dir="rtl">
@@ -64548,7 +64551,7 @@ ELITE_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>__ELITE_TITLE__</title>
 <meta name="description" content="__ELITE_DESC__">
-<meta name="theme-color" content="#FBF7EF">
+<meta name="theme-color" content="#F4EFE7">
 <meta name="robots" content="noindex">
 <meta property="og:title" content="__ELITE_TITLE__">
 <meta property="og:description" content="__ELITE_DESC__">
@@ -64558,789 +64561,970 @@ ELITE_HTML = r"""<!doctype html>
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="__ELITE_URL__">
 <script type="application/ld+json">/*__ELITE_JSONLD__*/null</script>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Reem+Kufi:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" href="/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-:root{--canvas:#FBF7EF;--surface:#FFFFFF;--surface-2:#F4EDE0;--ink:#1F2D3A;--ink-soft:#5B6976;--mut:#8C7E6A;--gold:#B0894E;--gold-deep:#8A6B33;--gold-soft:#E7D7B4;--line:rgba(31,45,58,.12);--line-gold:rgba(176,137,78,.40);--ease:cubic-bezier(.23,1,.32,1);--maxw:1040px}
+@font-face{font-family:"Thmanyah Serif";font-weight:700;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-bold.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Serif";font-weight:900;font-display:swap;src:url(/monthly/static/fonts/thmanyah-serif-display-black.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:400;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-regular.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:500;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-medium.v20260827a.woff2) format("woff2")}
+@font-face{font-family:"Thmanyah Sans";font-weight:700;font-display:swap;src:url(/monthly/static/fonts/thmanyah-sans-bold.v20260827a.woff2) format("woff2")}
+/* «لوك عوجا», the same tokens as /apartments (STAY_HTML). Gold is a mark, never a surface:
+   buttons are ink. No letter-spacing on Arabic; Latin-only labels may track. */
+:root{
+  --paper:#F4EFE7;--paper2:#ECE5D9;--card:#FBF8F3;--ink:#1D1813;--ink2:#463C33;--mut:#6B5F52;
+  --line:#DCD2C3;--line2:#E8E1D5;--gold:#A57A2C;--gold-soft:#EBDDC2;--night:#15110D;--night2:#231C16;
+  --ok:#2E6A49;--warn:#8A4B2A;
+  --f-d:"Thmanyah Serif","Thmanyah Sans",Georgia,serif;
+  --f-t:"Thmanyah Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --ease:cubic-bezier(.23,1,.32,1);--drawer:cubic-bezier(.32,.72,0,1);
+  --r:14px;--r-lg:22px;--pad:clamp(16px,4.4vw,44px);--maxw:1240px;
+}
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--canvas);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;font-weight:400;line-height:1.78;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:72px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-t);font-size:16px;line-height:1.7;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:var(--ink);color:var(--paper)}
 img{max-width:100%;display:block}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
-@media(max-width:560px){.wrap{padding:0 18px}}
-.serif{font-family:"Cormorant Garamond",serif}
-.kufi{font-family:"Reem Kufi","IBM Plex Sans Arabic",serif}
-.num{font-family:"Cormorant Garamond",serif;font-weight:600;font-feature-settings:"lnum" 1}
-.center{text-align:center}
-.eyebrow{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.34em;font-size:12px;font-weight:600;color:var(--gold-deep);display:block;margin-bottom:10px}
-.eyebrow.center{text-align:center}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:var(--pad)}
+.ic{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ic.f{fill:currentColor;stroke:none}
+.num{font-variant-numeric:tabular-nums;unicode-bidi:isolate}
+[hidden]{display:none!important}
 .muted{color:var(--mut)}
-.sec{margin-top:60px}
-@media(min-width:760px){.sec{margin-top:92px}}
-.sec-head{margin-bottom:24px}
-.h-sec{font-size:27px;line-height:1.25;font-weight:500;margin:0;color:var(--ink);text-wrap:balance}
-@media(min-width:760px){.h-sec{font-size:33px}}
-/* register mark */
-.reg-wrap{display:flex;justify-content:center;margin:56px 0}
-@media(min-width:760px){.reg-wrap{margin:84px 0}}
-.reg{display:block;color:var(--gold);opacity:.9}
-/* header */
-.head{position:sticky;top:0;z-index:50;background:rgba(251,247,239,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.head-in{display:flex;align-items:center;justify-content:space-between;height:62px}
-.brand{display:flex;align-items:baseline;gap:10px}
-.brand-ar{font-family:"Reem Kufi",serif;font-size:21px;font-weight:600;color:var(--ink);letter-spacing:.01em}
-.brand-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.32em;font-size:12px;color:var(--gold-deep);font-weight:600}
-.conc-link{font-size:13px;color:var(--ink-soft);font-weight:500;display:flex;align-items:center;gap:6px;min-height:44px;padding-inline:4px}
-.conc-link:hover{color:var(--gold-deep)}
-.head-reg{display:flex;justify-content:center;padding:7px 0 0}
-.head-reg .reg{opacity:.7}
-/* hero */
-.hero{position:relative;min-height:74vh;display:flex;align-items:flex-end;overflow:hidden;background:linear-gradient(135deg,#2a3a47,#16212b)}
-.hero .bgimg{position:absolute;inset:0;background-size:cover;background-position:center;transform:scale(1.06);animation:ken 22s ease-out both}
-.hero .ph-hero{background:radial-gradient(120% 90% at 70% 10%,#3a4a55,#16212b)}
-.hero-ov{position:absolute;inset:0;z-index:2;background:linear-gradient(to top,var(--canvas) 0,rgba(251,247,239,0) 80px),radial-gradient(95% 75% at 80% 6%,rgba(176,137,78,.24),transparent 55%),linear-gradient(to top,rgba(22,33,43,.74) 0,rgba(31,45,58,.30) 46%,rgba(31,45,58,.52) 100%)}
-.hero-in{position:relative;z-index:4;width:100%;padding-bottom:74px;padding-top:90px}
-@media(min-width:760px){.hero-in{padding-bottom:92px}}
-.hero .eyebrow{color:var(--gold-soft)}
-.h-hero{font-size:clamp(33px,7.6vw,53px);line-height:1.22;font-weight:500;color:#fff;margin:0 0 14px;max-width:18ch;text-wrap:balance;text-shadow:0 1px 30px rgba(15,22,30,.45)}
-.hero-sub{font-style:italic;font-size:clamp(17px,2.4vw,21px);color:rgba(255,255,255,.86);margin-bottom:14px;letter-spacing:.01em}
-.hero-lead{font-size:15.5px;line-height:1.8;color:rgba(255,255,255,.9);margin:0;max-width:42ch}
-/* widget */
-.band-tight{margin-top:-44px;position:relative;z-index:10}
-.widget{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 26px 60px rgba(31,45,58,.12)}
-@media(max-width:560px){.widget{padding:20px}}
-.wfields{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:14px}
-@media(min-width:760px){.wfields{grid-template-columns:repeat(4,1fr)}}
-.field{display:flex;flex-direction:column;gap:7px}
-.field label{font-size:12px;font-weight:600;color:var(--ink-soft);letter-spacing:.01em}
-.field input,.field select{font:inherit;font-size:16px;padding:13px 13px;min-height:52px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);width:100%;appearance:none}
-.field input:focus,.field select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(176,137,78,.18)}
-.err{display:none;background:rgba(180,84,63,.07);border:1px solid rgba(180,84,63,.34);color:#a04a37;font-size:13px;border-radius:9px;padding:10px 13px;margin-bottom:13px}
-.err.on{display:block}
-.qps{display:flex;gap:9px;overflow-x:auto;padding:2px 0 13px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.qps::-webkit-scrollbar{display:none}
-.qp{flex:0 0 auto;font:inherit;font-size:13px;font-weight:500;padding:0 16px;min-height:44px;display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;white-space:nowrap;transition:all .2s var(--ease)}
-.qp.active{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
-/* buttons — the Bonvoy register */
-.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:2px;padding:0 28px;min-height:54px;font:inherit;font-size:15px;font-weight:500;cursor:pointer;background:var(--ink);color:var(--canvas);transition:transform .25s var(--ease),background .25s var(--ease)}
-.btn .lbl{font-weight:500}
-.btn .micro{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.3em;font-size:10px;font-weight:600;opacity:.74}
-.btn.stacked{flex-direction:column;gap:2px;line-height:1.15;padding-top:9px;padding-bottom:9px}
-.btn::after{content:"";position:absolute;inset-inline:24px;bottom:11px;height:1px;background:var(--gold);transform:scaleX(0);transition:transform .35s var(--ease)}
-.btn:hover{background:#16212b}
-.btn:hover::after{transform:scaleX(1)}
-.btn:active{transform:scale(.975)}
-.btn.block{display:flex;width:100%}
-.btn.secondary{background:var(--canvas);color:var(--gold-deep);border:1px solid var(--line-gold)}
-.btn.secondary:hover{background:var(--surface-2)}
-.btn.secondary::after{background:var(--gold-deep)}
-.btn.off,.btn[disabled]{background:var(--surface-2);color:var(--mut);cursor:not-allowed;border:1px solid var(--line)}
-.btn.off::after{display:none}
-.btn .wag{width:19px;height:19px;flex:0 0 auto}
-/* promise band */
-.pillars{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line);border-inline-start:1px solid var(--line)}
-@media(min-width:760px){.pillars{grid-template-columns:repeat(4,1fr)}}
-.pillar{padding:24px 18px;border-bottom:1px solid var(--line);border-inline-end:1px solid var(--line)}
-.pi{display:inline-flex;align-items:center;justify-content:center;width:50px;height:50px;border-radius:999px;border:1px solid var(--line-gold);background:radial-gradient(120% 120% at 30% 20%,rgba(176,137,78,.13),rgba(176,137,78,.02));color:var(--gold-deep);margin-bottom:14px}
-.pi svg{width:24px;height:24px}
-.pl{font-family:"Reem Kufi",serif;font-size:15.5px;font-weight:500;color:var(--ink);margin-bottom:5px}
-.pt{font-size:13px;color:var(--ink-soft);line-height:1.65}
-/* collection grid + cards */
-.grid{display:grid;grid-template-columns:1fr;gap:22px}
-@media(min-width:760px){.grid{grid-template-columns:1fr 1fr}}
-.col-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:11px;overflow:hidden;cursor:pointer;transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
-.col-card:hover{transform:translateY(-4px);border-color:var(--line-gold);box-shadow:0 20px 44px rgba(31,45,58,.11)}
-.col-card:active{transform:translateY(-1px)}
-.cover{position:relative;aspect-ratio:3/2;overflow:hidden;background:linear-gradient(135deg,var(--surface-2),var(--gold-soft))}
-.cover img{width:100%;height:100%;object-fit:cover;transition:transform .65s var(--ease)}
-.col-card:hover .cover img{transform:scale(1.04)}
-.cover .frame{position:absolute;inset:10px;border:1px solid var(--line-gold);pointer-events:none;border-radius:3px}
-.mono{display:flex;align-items:center;justify-content:center;height:100%;font-family:"Cormorant Garamond",serif;font-size:62px;color:rgba(138,107,51,.42)}
-.tags{position:absolute;top:14px;inset-inline-start:14px;display:flex;gap:6px;flex-wrap:wrap}
-.tag{font-size:11px;font-weight:600;padding:4px 11px;border-radius:999px;background:rgba(22,33,43,.7);color:#fff;backdrop-filter:blur(5px);letter-spacing:.02em}
-.tag.ok{background:rgba(56,107,79,.92)}
-.tag.gold{background:var(--gold)}
-.cc-body{padding:17px 18px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
-.cc-area{font-size:12px;letter-spacing:.04em;color:var(--mut);text-transform:uppercase;font-family:"Cormorant Garamond",serif;font-weight:600}
-.cc-name{font-size:19px;font-weight:500;color:var(--ink);line-height:1.35;margin:0}
-.cc-meta{display:flex;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft)}
-.cc-meta i{opacity:.4;font-style:normal}
-.chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{font-size:11.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line-gold);color:var(--gold-deep);background:rgba(176,137,78,.06);white-space:nowrap}
-.chip.solid{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
-.cc-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
-.price{font-size:15px;color:var(--ink);font-weight:500}
-.price .num{font-size:20px;margin-inline-end:2px}
-.price-sub{font-size:12px;color:var(--mut);margin-top:2px}
-.price.soft{color:var(--mut);font-weight:400;font-size:13.5px}
-.discover{font-size:12.5px;color:var(--gold-deep);font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:5px}
-.discover .arr{transition:transform .3s var(--ease)}
-.col-card:hover .discover .arr{transform:translateX(-4px)}
-.cc-foot{flex-wrap:wrap}
-.lbln{font-size:12px;color:var(--mut);margin-inline-start:2px}
-.from{font-size:11.5px;color:var(--mut);margin-inline-end:5px}
-/* card deal — compact before/after */
-.deal-mini{display:flex;flex-direction:column;gap:3px}
-.dm-top{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
-.dm-was{text-decoration:line-through;text-decoration-color:rgba(140,126,106,.6);color:var(--mut);font-family:"Cormorant Garamond",serif;font-weight:600;font-size:14px}
-.dm-now{color:var(--ink);font-weight:600}
-.dm-now .num{font-family:"Cormorant Garamond",serif;font-size:23px;margin-inline-end:2px}
-.dm-save{font-size:11.5px;font-weight:600;color:var(--gold-deep)}
-/* listing deal — the hero moment */
-.l-price{position:relative;overflow:hidden;border:1px solid var(--line-gold);border-radius:14px;padding:20px 22px;margin:18px 0;background:linear-gradient(180deg,rgba(176,137,78,.12),rgba(176,137,78,.02))}
-.lp-seal{position:absolute;top:18px;inset-inline-end:18px;background:var(--gold);color:#fff;font-weight:700;font-size:13px;letter-spacing:.01em;padding:6px 14px;border-radius:999px;box-shadow:0 5px 14px rgba(176,137,78,.4)}
-.lp-reg{font-size:13px;color:var(--mut);margin-bottom:13px}
-.lp-reg-lbl{margin-inline-end:7px}
-.lp-was{text-decoration:line-through;text-decoration-color:rgba(140,126,106,.7);font-family:"Cormorant Garamond",serif;font-weight:600}
-.lp-mlabel{font-size:12px;color:var(--gold-deep);font-weight:600;margin-bottom:4px}
-.lp-now{display:flex;align-items:baseline;gap:7px;line-height:1}
-.lp-now .num{font-family:"Cormorant Garamond",serif;font-size:46px;font-weight:600;color:var(--ink)}
-.lp-cur{font-size:18px;color:var(--ink);font-weight:600}
-.lp-per{font-size:13px;color:var(--mut)}
-.lp-total{font-size:13.5px;color:var(--ink-soft);margin-top:14px}
-.lp-total .lp-was{font-size:12.5px;margin-inline-end:6px}
-.lp-total b{color:var(--ink);font-weight:600}
-.lp-save{display:inline-flex;align-items:center;gap:7px;margin-top:14px;font-size:13.5px;font-weight:600;color:var(--gold-deep);background:rgba(176,137,78,.13);border:1px solid var(--line-gold);border-radius:999px;padding:8px 15px}
-.lp-note{font-size:12px;color:var(--mut);margin-top:13px;display:flex;align-items:center;gap:7px}
-.lp-note::before{content:"";flex:0 0 16px;height:1px;background:var(--line-gold)}
-/* tiers */
-.tiers{border-top:1px solid var(--line)}
-.tier{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:start;padding:22px 4px;border-bottom:1px solid var(--line)}
-.rn{font-size:38px;line-height:.9;color:var(--gold-deep);min-width:46px}
-.tn{font-size:18px;font-weight:500;color:var(--ink);margin-bottom:4px}
-.tn-en{text-transform:uppercase;letter-spacing:.18em;font-size:13px;color:var(--mut);margin-inline-start:8px;font-weight:600}
-.tb{font-size:14px;color:var(--ink-soft);line-height:1.6}
-.tier-b{min-width:0}
-.tier-top{background:linear-gradient(180deg,rgba(176,137,78,.08),rgba(176,137,78,.02));border:1px solid var(--line-gold);border-radius:12px;padding-inline:16px}
-.tier-badge{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--gold);color:#fff;margin-inline-start:8px;letter-spacing:.03em;vertical-align:middle}
-.tier-act{margin-top:12px}
-.tier-sub{font-size:13.5px;color:var(--ink-soft);text-align:center;margin:0 auto 22px;max-width:46ch;line-height:1.7}
-/* ouja standard */
-.standard{padding:8px 0}
-.h-standard{font-size:clamp(26px,5vw,40px);font-weight:500;color:var(--ink);line-height:1.3;margin:8px 0 16px;text-wrap:balance}
-.standard-p{font-size:15.5px;color:var(--ink-soft);line-height:1.85;max-width:46ch;margin:0 auto}
-/* concierge band */
-.concierge{border:1px solid var(--line-gold);border-radius:14px;background:linear-gradient(180deg,rgba(176,137,78,.05),rgba(176,137,78,.02));padding:40px 26px;text-align:center;margin-top:60px}
-@media(min-width:760px){.concierge{margin-top:92px;padding:52px 30px}}
-.conc-h{font-size:25px;font-weight:500;color:var(--ink);margin:6px 0 10px;text-wrap:balance}
-.conc-p{font-size:15px;color:var(--ink-soft);line-height:1.8;max-width:40ch;margin:0 auto 22px}
-/* search summary */
-.summary{position:sticky;top:62px;z-index:30;background:rgba(251,247,239,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.summary-in{display:flex;gap:12px;align-items:center;height:54px}
-.summary .s{flex:1;font-size:13.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.btn.mini{min-height:44px;padding:0 16px;font-size:13px;border-radius:2px}
-.note{font-size:12.5px;color:var(--mut);letter-spacing:.01em;display:flex;align-items:center;gap:7px;margin:14px 0}
-.note::before{content:"";flex:0 0 16px;height:1px;background:var(--line-gold)}
-.res-head{font-size:24px;font-weight:500;color:var(--ink);margin:22px 0 4px}
-.state{text-align:center;padding:56px 18px}
-.state .em{color:var(--gold);margin-bottom:14px}
-.state h2{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 8px}
-.state p{color:var(--ink-soft);margin:0 0 20px}
-/* listing */
-.gal{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0}
-.gal.one{grid-template-columns:1fr}
-.gcell{position:relative;aspect-ratio:4/5;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,var(--surface-2),var(--gold-soft))}
-.gal.one .gcell{aspect-ratio:16/10}
-.gcell img{width:100%;height:100%;object-fit:cover}
-.gcell .frame{position:absolute;inset:9px;border:1px solid var(--line-gold);pointer-events:none;border-radius:3px}
-@media(min-width:560px){.gcell{aspect-ratio:4/3}}
-.g-all{position:absolute;bottom:14px;inset-inline-end:14px;font:inherit;font-size:12px;font-weight:500;padding:0 16px;min-height:44px;border:0;border-radius:999px;background:rgba(22,33,43,.72);color:#fff;cursor:pointer;backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px}
-.g-all:active{transform:scale(.96)}
-.lb{position:fixed;inset:0;z-index:90;background:rgba(15,22,30,.95);display:flex;flex-direction:column;animation:fade .25s var(--ease)}
-.lb-x{position:absolute;top:calc(14px + env(safe-area-inset-top));inset-inline-end:16px;z-index:2;width:44px;height:44px;border:0;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-size:17px;cursor:pointer;backdrop-filter:blur(6px)}
-.lb-strip{flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding:66px 16px calc(22px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
-.lb-strip img{display:block;flex:none;width:100%;height:auto;border-radius:10px;background:#243039}
-.l-eyebrow{margin-top:6px}
-.l-title{font-family:"Reem Kufi",serif;font-size:27px;font-weight:500;color:var(--ink);line-height:1.3;margin:2px 0 6px;text-wrap:balance}
-.l-area{font-size:14px;color:var(--mut);font-family:"Cormorant Garamond",serif;letter-spacing:.04em;text-transform:uppercase;font-weight:600;margin-bottom:10px}
-.booking-strip{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin:14px 0;font-size:13.5px;color:var(--ink);background:var(--surface)}
-.booking-strip .num{font-size:15px}
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(74px,1fr));margin:18px 0;border:1px solid var(--line);border-radius:11px;overflow:hidden}
-.fact{padding:15px 10px;text-align:center;border-inline-start:1px solid var(--line)}
-.fact:first-child{border-inline-start:0}
-.fk{font-size:11.5px;color:var(--mut);margin-bottom:4px}
-.fv{font-family:"Cormorant Garamond",serif;font-size:23px;font-weight:600;color:var(--ink);line-height:1}
-.why{display:flex;flex-direction:column;gap:9px}
-.why-row{display:flex;gap:11px;align-items:center;font-size:14px;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:13px 15px;background:var(--surface)}
-.wi{color:var(--gold);flex:0 0 auto}.wi svg{width:20px;height:20px;display:block}
-.amen-group{margin-bottom:16px}
-.ag-h{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.18em;font-size:12px;color:var(--gold-deep);font-weight:600;margin:0 0 9px}
-.amen{display:flex;gap:8px;flex-wrap:wrap}
-.amen span{font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 13px;color:var(--ink-soft)}
-.more{background:none;border:0;color:var(--gold-deep);font:inherit;font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;text-decoration:underline;text-underline-offset:3px}
-.descblk{line-height:1.9;color:var(--ink);font-size:15px;border-inline-start:2px solid var(--line-gold);padding:4px 16px;margin:10px 0}
-.descblk.ltr{direction:ltr;text-align:left;border-inline-start:0;border-inline-end:2px solid var(--line-gold)}
-.perks{display:grid;grid-template-columns:1fr;gap:0;border-top:1px solid var(--line)}
-.perk{display:flex;gap:12px;align-items:flex-start;padding:15px 2px;border-bottom:1px solid var(--line)}
-.perk .pk-i{color:var(--gold);flex:0 0 auto;margin-top:2px}.perk .pk-i svg{width:20px;height:20px;display:block}
-.perk b{font-weight:500;color:var(--ink);font-size:14.5px}
-.perk span{font-size:13px;color:var(--ink-soft)}
-.sticky-cta{position:fixed;bottom:0;inset-inline:0;z-index:40;background:rgba(251,247,239,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line-gold);padding:12px 0 calc(12px + env(safe-area-inset-bottom))}
-.sticky-cta .wrap{display:flex;flex-direction:column;gap:7px}
-.reassure{text-align:center;font-size:12px;color:var(--mut);letter-spacing:.01em}
-/* footer */
-.foot{background:var(--ink);color:rgba(255,255,255,.74);margin-top:70px;padding:48px 0 56px;text-align:center;border-top:2px solid var(--gold)}
-.foot .reg{color:var(--gold);margin:0 auto 20px}
-.foot-line{font-family:"Reem Kufi",serif;font-size:19px;color:#fff;font-weight:500;margin-bottom:9px}
-.foot-sub{font-size:13px;color:rgba(255,255,255,.6);margin-bottom:5px}
-.foot-sub.serif{font-style:italic;letter-spacing:.02em;font-size:14px;color:var(--gold-soft)}
-/* skeleton + motion */
-.sk{background:linear-gradient(90deg,var(--surface-2) 25%,#f7f0e3 50%,var(--surface-2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:7px}
-.cover.sk{border-radius:0}
-@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
-@keyframes ken{from{transform:scale(1.06)}to{transform:scale(1.13)}}
-@keyframes fade{from{opacity:0}to{opacity:1}}
-.rise{animation:rise .55s var(--ease) both}
-@keyframes rise{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:none}}
-/* ===== ELEVATION PASS — cinematic luxury, same palette ===== */
-html{scroll-behavior:smooth}
-.grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:140px 140px}
-.reveal{opacity:0;transform:translateY(20px);transition:opacity .75s var(--ease),transform .75s var(--ease)}
-.reveal.in{opacity:1;transform:none}
-.reveal.d1{transition-delay:.07s}.reveal.d2{transition-delay:.14s}.reveal.d3{transition-delay:.21s}.reveal.d4{transition-delay:.28s}
-.hero-grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.12;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='m'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23m)'/%3E%3C/svg%3E")}
-.hero-frame{position:absolute;inset:14px;z-index:3;border:1px solid rgba(231,215,180,.42);border-radius:2px;pointer-events:none}
-@media(min-width:760px){.hero-frame{inset:22px}}
-.h-rule{display:block;width:62px;height:1px;background:linear-gradient(90deg,var(--gold-soft),rgba(231,215,180,0));margin:4px 0 16px;transform-origin:right;animation:ruleIn 1s var(--ease) both;animation-delay:.12s}
-@keyframes ruleIn{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
-.reg-wrap .reg path{stroke-dasharray:300;stroke-dashoffset:300;transition:stroke-dashoffset 1.2s var(--ease)}
-.reg-wrap.in .reg path{stroke-dashoffset:0}
-.pillar{transition:background .3s var(--ease)}
-.pillar:hover{background:rgba(176,137,78,.045)}
-.tags,.cover .frame{z-index:2}
-.cover::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.22) 48%,transparent 60%);transform:translateX(-130%);transition:transform .9s var(--ease)}
-.col-card:hover .cover::after{transform:translateX(130%)}
-.col-card:hover .cover .frame{border-color:rgba(176,137,78,.6);inset:8px}
-.tier-sub{margin-bottom:6px}
-.tier-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:18px}
-@media(min-width:760px){.tier-grid{grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}}
-.tier-card{position:relative;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:24px 22px;overflow:hidden;transition:transform .3s var(--ease),box-shadow .3s var(--ease),border-color .3s var(--ease)}
-.tier-card:hover{transform:translateY(-4px);box-shadow:0 20px 44px rgba(31,45,58,.11);border-color:var(--line-gold)}
-.tier-card:active{transform:translateY(-1px)}
-.tier-card.top{border-color:var(--line-gold);background:linear-gradient(180deg,rgba(176,137,78,.11),rgba(176,137,78,.015))}
-.tier-card.top::before{content:"";position:absolute;top:0;inset-inline:0;height:3px;background:linear-gradient(90deg,rgba(176,137,78,0),var(--gold),rgba(176,137,78,0))}
-.tc-seal{position:absolute;top:16px;inset-inline-end:18px;color:var(--gold)}
-.tc-seal svg{width:30px;height:30px}
-.tc-head{display:flex;align-items:center;gap:13px;margin-bottom:4px}
-.tc-rn{font-family:"Cormorant Garamond",serif;font-size:34px;font-weight:600;color:var(--gold-deep);line-height:1;min-width:32px}
-.tc-name{display:block;font-family:"Reem Kufi",serif;font-size:19px;font-weight:500;color:var(--ink);line-height:1.2}
-.tc-en{display:block;font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.22em;font-size:11.5px;color:var(--mut);font-weight:600;margin-top:3px}
-.tc-badge{display:inline-block;font-size:10.5px;font-weight:600;padding:3px 11px;border-radius:999px;background:var(--gold);color:#fff;letter-spacing:.04em;margin:10px 0 0}
-.tc-body{font-size:14px;color:var(--ink-soft);line-height:1.7;margin:12px 0 18px}
-.tc-cta{margin-top:auto}
-.tc-cta .btn{width:100%}
-.concierge{position:relative;overflow:hidden}
-.concierge::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(80% 120% at 50% 0,rgba(176,137,78,.10),transparent 60%)}
-.concierge>*{position:relative;z-index:1}
-.conc-mark{display:inline-flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:999px;border:1px solid var(--line-gold);color:var(--gold-deep);background:radial-gradient(120% 120% at 30% 20%,rgba(176,137,78,.14),rgba(176,137,78,.02));margin-bottom:14px}
-.conc-mark svg{width:30px;height:30px}
-.standard{position:relative}
-.standard .crest{display:block;color:var(--gold);margin:0 auto 10px}
-.standard .crest svg{width:26px;height:26px;margin:0 auto}
-@media(prefers-reduced-motion:reduce){.reveal{opacity:1!important;transform:none!important}.reg-wrap .reg path{stroke-dashoffset:0!important}.h-rule{animation:none}}
-/* ===== BEST PASS — hero video, image fade-in, motion craft, explore map ===== */
-/* #1 cinematic hero video */
-.bgvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;transform:scale(1.04)}
-/* #8 image fade-in (blur-up feel) */
-.fadein{opacity:0;transform:scale(1.015);transition:opacity .8s var(--ease),transform .8s var(--ease)}
-.fadein.loaded{opacity:1;transform:none}
-/* #9 cross-page view-transition morph (card photo -> listing hero) */
-@view-transition{navigation:auto}
-::view-transition-group(*){animation-duration:.5s;animation-timing-function:cubic-bezier(.23,1,.32,1)}
-/* #9 brand intro (first visit per session) */
-.intro{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--canvas)}
-.intro.show{display:flex;animation:introOut .6s var(--ease) .9s forwards}
-.intro-mark{color:var(--gold);animation:introMark .9s var(--ease) both}
-.intro-mark svg{width:40px;height:40px}
-.intro-ar{font-size:30px;color:var(--ink);font-weight:600;letter-spacing:.02em;animation:introUp .8s var(--ease) .12s both}
-.intro-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.42em;font-size:12px;color:var(--gold-deep);font-weight:600;animation:introUp .8s var(--ease) .22s both}
-@keyframes introMark{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
-@keyframes introUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@keyframes introOut{to{opacity:0;visibility:hidden}}
-/* #6 explore Riyadh map */
-.map-wrap{position:relative;border:1px solid var(--line-gold);border-radius:16px;overflow:hidden;background:radial-gradient(120% 100% at 50% 0,#fdfaf3,#f4ede0)}
-.map-svg{display:block;width:100%;height:auto}
-.map-svg .wadi{fill:none;stroke:var(--gold);stroke-width:2.4;opacity:.5;stroke-linecap:round}
-.map-svg .rlabel{fill:var(--mut);font-family:"Cormorant Garamond",serif;font-size:12px;letter-spacing:.34em}
-.pin{cursor:pointer}
-.pin .dot{fill:var(--surface);stroke:var(--gold);stroke-width:1.6;transition:transform .25s var(--ease),fill .25s var(--ease);transform-box:fill-box;transform-origin:center}
-.pin .ring{fill:none;stroke:var(--gold);stroke-width:1.1;opacity:0;transition:opacity .25s var(--ease)}
-.pin .plabel{fill:var(--ink);font-family:"Reem Kufi",serif;font-size:12px;font-weight:500}
-.pin .pcount{fill:var(--gold-deep);font-family:"Cormorant Garamond",serif;font-size:12px;font-weight:700}
-.pin:hover .dot,.pin.on .dot{fill:var(--gold);transform:scale(1.25)}
-.pin.on .ring{opacity:.55}
-.pin.empty{opacity:.3;pointer-events:none}
-.area-panel{padding:20px 18px}
-.area-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-.area-name{font-family:"Reem Kufi",serif;font-size:20px;font-weight:500;color:var(--ink)}
-.area-en{font-family:"Cormorant Garamond",serif;text-transform:uppercase;letter-spacing:.2em;font-size:11.5px;color:var(--mut);font-weight:600}
-.area-guide{font-size:14px;color:var(--ink-soft);line-height:1.75;margin:0 0 16px}
-.area-res{display:grid;grid-template-columns:1fr;gap:14px}
-.area-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.area-chip{font:inherit;font-size:13px;font-weight:500;padding:0 14px;min-height:40px;display:inline-flex;align-items:center;gap:7px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;transition:background .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease)}
-.area-chip.on{background:var(--ink);color:var(--canvas);border-color:var(--ink)}
-.area-chip .ac-n{font-family:"Cormorant Garamond",serif;font-weight:700;color:var(--gold-deep)}
-.area-chip.on .ac-n{color:var(--gold-soft)}
-@media(min-width:820px){.map-wrap{display:grid;grid-template-columns:1.1fr .9fr;align-items:stretch}.map-svg{height:100%}.area-panel{border-inline-start:1px solid var(--line)}}
-.emap{height:360px;width:100%;background:var(--surface-2)}
-@media(min-width:820px){.emap{height:auto;min-height:420px}}
+s{text-decoration-thickness:1px;color:var(--mut)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:52px;padding:0 24px;border:0;border-radius:999px;background:var(--ink);color:var(--paper);font-family:var(--f-t);font-size:16px;font-weight:700;cursor:pointer;text-decoration:none;transition:transform .12s var(--ease),background-color .2s var(--ease)}
+.btn:hover{background:#3A3027}
+.btn:active{transform:scale(.97)}
+.btn.block{width:100%}
+.btn.sm{min-height:44px;padding:0 18px;font-size:14.5px}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.btn.ghost:hover{background:var(--paper2)}
+.btn.light{background:var(--paper);color:var(--ink)}
+.btn.light:hover{background:var(--card)}
+.btn[disabled],.btn.off{background:var(--paper2);color:var(--mut);box-shadow:none;cursor:not-allowed;transform:none}
+.link{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:5px;text-decoration-color:var(--gold)}
+.link:hover{text-decoration-color:var(--ink)}
+
+/* ---------- header ---------- */
+.head{position:sticky;top:0;z-index:50;background:rgba(244,239,231,.92);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid transparent;transition:background-color .3s var(--ease),border-color .3s var(--ease),color .3s var(--ease)}
+.head.scrolled{border-bottom-color:var(--line)}
+.head .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.brand{display:flex;align-items:baseline;gap:10px;line-height:1;white-space:nowrap}
+.brand .ar{font-family:var(--f-d);font-weight:900;font-size:28px}
+.brand .en{font-size:10.5px;font-weight:700;letter-spacing:.22em;color:var(--mut)}
+@media(max-width:430px){.brand .en{display:none}.brand .ar{font-size:25px}}
+.nav{display:flex;align-items:center;gap:4px}
+.nav a{display:inline-flex;align-items:center;gap:7px;padding:10px 12px;border-radius:999px;font-size:15px;font-weight:500;min-height:44px}
+.nav a .ic{width:18px;height:18px}
+.nav a:hover{background:rgba(29,24,19,.06)}
+.nav a.on{font-weight:700}
+body.home .head{position:fixed;inset-inline:0;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;color:#fff}
+body.home .head .brand .en{color:rgba(255,255,255,.75)}
+body.home .head .nav a:hover{background:rgba(255,255,255,.12)}
+body.home .head.solid{background:rgba(244,239,231,.94);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);color:var(--ink);border-bottom-color:var(--line)}
+body.home .head.solid .brand .en{color:var(--mut)}
+
+/* ---------- home hero ---------- */
+.hero{position:relative;min-height:100vh;display:flex;align-items:flex-end;color:#fff;overflow:hidden;background:var(--night)}
+@supports(min-height:100svh){.hero{min-height:100svh}}
+.hero .bgimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 60%}
+.hero .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(21,17,13,.55) 0%,rgba(21,17,13,0) 22%,rgba(21,17,13,0) 34%,rgba(21,17,13,.64) 66%,rgba(21,17,13,.92) 100%)}
+@media(min-width:760px){.hero .shade{background:linear-gradient(180deg,rgba(21,17,13,.5) 0%,rgba(21,17,13,0) 20%),linear-gradient(270deg,rgba(21,17,13,.66) 0%,rgba(21,17,13,.32) 45%,rgba(21,17,13,0) 70%),linear-gradient(180deg,rgba(21,17,13,0) 55%,rgba(21,17,13,.82) 100%)}}
+.hero .in{position:relative;width:100%;padding-top:96px;padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+.hero h1{font-family:var(--f-d);font-weight:900;font-size:clamp(42px,7.8vw,88px);line-height:1.18;margin:0 0 22px;max-width:12ch;text-wrap:balance}
+.hero .lede{font-size:clamp(17px,2.1vw,21px);line-height:1.6;margin:0 0 20px;max-width:40ch;color:rgba(255,255,255,.9)}
+.hero .proof{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:14.5px;color:rgba(255,255,255,.88);margin:0 0 26px}
+.hero .proof .ic{width:17px;height:17px;color:#E7C27A}
+.hero .proof b{color:#fff;font-weight:700}
+.hero .proof .sep{width:4px;height:4px;border-radius:9px;background:rgba(255,255,255,.5)}
+.enter{animation:rise .9s var(--ease) both}
+.enter.d1{animation-delay:.08s}.enter.d2{animation-delay:.16s}.enter.d3{animation-delay:.24s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.hero .bgimg.enter{animation:settle 1.6s var(--ease) both}
+@keyframes settle{from{transform:scale(1.07)}to{transform:scale(1)}}
+
+/* ---------- the search bar ---------- */
+.sbar{display:flex;align-items:stretch;background:var(--card);color:var(--ink);border-radius:999px;padding:6px;box-shadow:0 2px 6px rgba(21,17,13,.08),0 24px 60px rgba(21,17,13,.28);max-width:760px}
+.sbar .seg{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:8px 20px;border:0;background:none;text-align:start;cursor:pointer;border-radius:999px;transition:background-color .2s var(--ease)}
+.sbar .seg:hover{background:var(--paper2)}
+.sbar .seg+.seg{position:relative}
+.sbar .seg+.seg:before{content:"";position:absolute;inset-inline-start:0;top:22%;bottom:22%;width:1px;background:var(--line)}
+.sbar .seg:hover:before,.sbar .seg:hover+.seg:before{opacity:0}
+.sbar .k{font-size:12.5px;font-weight:700;color:var(--ink)}
+.sbar .v{font-size:15px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbar .v.set{color:var(--ink)}
+.sbar .go{flex:none;width:56px;height:56px;min-height:0;padding:0;border-radius:50%}
+.sbar .go .ic{width:22px;height:22px}
+.sbar .go .t{display:none}
+@media(min-width:760px){.sbar .go{width:auto;padding:0 26px;border-radius:999px}.sbar .go .t{display:inline}}
+@media(max-width:600px){.sbar .seg.opt{display:none}.sbar .seg{padding:8px 16px}}
+.note{margin:16px 0 0;font-size:13.5px;line-height:1.7;color:rgba(255,255,255,.82);max-width:62ch}
+
+/* ---------- sections ---------- */
+.sec{padding:clamp(64px,10vw,128px) 0 0}
+.sec-h{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:0 0 clamp(24px,3.4vw,40px)}
+.sec-h h2,.h2{font-family:var(--f-d);font-weight:700;font-size:clamp(30px,5vw,54px);line-height:1.14;margin:0;text-wrap:balance}
+.sec-h p{margin:10px 0 0;color:var(--mut);font-size:16.5px;max-width:52ch}
+.sec-h .link{flex:none;white-space:nowrap}
+
+/* unit cards: the photo is the card, no box around it */
+.grid{display:grid;grid-template-columns:1fr;gap:34px 22px}
+@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:1024px){.grid{grid-template-columns:repeat(3,1fr)}}
+.unit{display:flex;flex-direction:column;gap:14px;min-width:0;-webkit-tap-highlight-color:transparent}
+.unit .ph{position:relative;aspect-ratio:4/3;border-radius:var(--r-lg);overflow:hidden;background:var(--paper2);isolation:isolate}
+.unit .ph img{width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease)}
+@media(hover:hover) and (pointer:fine){.unit:hover .ph img{transform:scale(1.03)}}
+.unit:active .ph{transform:scale(.985);transition:transform .12s var(--ease)}
+.tagrow{position:absolute;top:12px;inset-inline-start:12px;display:flex;gap:6px;flex-wrap:wrap;z-index:1}
+.tag{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px;border-radius:999px;background:rgba(251,248,243,.94);color:var(--ink);font-size:12.5px;font-weight:700}
+.tag.ok{background:var(--ok);color:#fff}
+.tag.ok:before{content:"";width:6px;height:6px;border-radius:9px;background:#9BE3B9}
+.noimg{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--f-d);font-weight:900;font-size:44px;color:var(--line)}
+.u-b{display:flex;flex-direction:column;gap:4px;padding:0 2px}
+.u-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;color:var(--mut)}
+.u-area{display:inline-flex;align-items:center;gap:5px}
+.u-area .ic{width:16px;height:16px}
+.rate{display:inline-flex;align-items:center;gap:4px;color:var(--ink);font-weight:700;font-size:14px;white-space:nowrap}
+.rate .ic{width:14px;height:14px;color:var(--gold)}
+.rate i{font-style:normal;font-weight:400;color:var(--mut)}
+.unit h3{margin:0;font-size:18px;font-weight:700;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.u-meta{font-size:14.5px;color:var(--ink2)}
+.u-meta .dot{display:inline-block;width:3px;height:3px;border-radius:9px;background:var(--mut);vertical-align:middle;margin:0 7px}
+.u-price{margin-top:4px;font-size:15px;color:var(--ink2)}
+.u-price b{font-size:17px;color:var(--ink)}
+.u-price s{font-size:14px;margin-inline-end:6px}
+
+/* featured rail: scroll on phones, grid on wide screens */
+.rail{display:grid;grid-auto-flow:column;grid-auto-columns:82%;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;padding-inline:var(--pad);margin-inline:calc(var(--pad) * -1);scroll-padding-inline:var(--pad);scrollbar-width:none;overscroll-behavior-x:contain}
+.rail::-webkit-scrollbar{display:none}
+.rail>*{scroll-snap-align:start}
+@media(min-width:640px){.rail{grid-auto-columns:46%}}
+@media(min-width:1024px){.rail{grid-auto-flow:row;grid-template-columns:repeat(3,1fr);grid-auto-columns:auto;overflow:visible;margin:0;padding:0;gap:40px 22px}}
+
+/* membership perks: a hairline list, no boxes */
+.perks{list-style:none;margin:0;padding:0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr}
+@media(min-width:760px){.perks{grid-template-columns:1fr 1fr;column-gap:56px}.perks li:nth-child(2){border-top:0}}
+.perks li{display:flex;gap:16px;align-items:flex-start;padding:22px 0;border-bottom:1px solid var(--line)}
+.perks .ic{width:26px;height:26px;stroke-width:1.5;color:var(--ink);margin-top:2px}
+.perks b{display:block;font-size:18px;font-weight:700;line-height:1.4}
+.perks span{display:block;font-size:15.5px;color:var(--ink2)}
+
+/* membership tiers: hairline rows, gold numerals */
+.tiers{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.tiers li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 20px;padding:26px 0;border-bottom:1px solid var(--line)}
+.tiers .n{font-family:var(--f-d);font-weight:900;font-size:44px;line-height:1;color:var(--gold);grid-row:span 2;min-width:34px}
+.tiers h3{margin:0 0 6px;font-size:22px;font-weight:700;line-height:1.35;display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px}
+.tiers h3 .en{font-size:11.5px;letter-spacing:.2em;font-weight:700;color:var(--mut)}
+.tiers .top{display:inline-flex;align-items:center;height:28px;padding:0 11px;border-radius:999px;background:var(--gold-soft);color:var(--ink);font-size:12.5px;font-weight:700}
+.tiers p{margin:0;color:var(--ink2);font-size:16px;max-width:58ch}
+.tiers .act{grid-column:2;margin-top:12px}
+@media(min-width:900px){.tiers li{grid-template-columns:72px minmax(0,1fr) auto;align-items:center;gap:6px 36px}.tiers .n{grid-row:auto}.tiers .act{grid-column:auto;margin:0}}
+
+/* neighbourhood index: the page's one type moment */
+.hoods{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+@media(min-width:900px){.hoods{display:grid;grid-template-columns:1fr 1fr;column-gap:56px}.hoods li:nth-child(2){border-top:0}}
+.hoods li{border-bottom:1px solid var(--line)}
+.hoods a{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:clamp(14px,2.2vw,22px) 2px;font-family:var(--f-d);font-weight:700;font-size:clamp(30px,5.2vw,54px);line-height:1.2;transition:color .3s var(--ease),padding .35s var(--ease)}
+.hoods a .ic{width:28px;height:28px;color:var(--mut);transition:transform .35s var(--ease),color .3s var(--ease)}
+@media(max-width:600px){.hoods .en{display:none}}
+.hoods .en{font-family:var(--f-t);font-size:13px;font-weight:700;letter-spacing:.18em;color:var(--mut);margin-inline-start:auto;margin-inline-end:18px;text-transform:uppercase}
+@media(hover:hover) and (pointer:fine){
+  .hoods:hover a{color:#B9AE9F}
+  .hoods a:hover{color:var(--ink);padding-inline-start:18px}
+  .hoods a:hover .ic{color:var(--ink);transform:translateX(-6px)}
+}
+.peek{position:fixed;z-index:20;width:240px;aspect-ratio:4/5;border-radius:18px;overflow:hidden;pointer-events:none;opacity:0;transform:scale(.94) rotate(-2deg);transition:opacity .25s var(--ease),transform .35s var(--ease);box-shadow:0 30px 60px rgba(29,24,19,.28);background:var(--paper2)}
+.peek.on{opacity:1;transform:scale(1) rotate(-2deg)}
+.peek img{width:100%;height:100%;object-fit:cover}
+@media(hover:none),(pointer:coarse){.peek{display:none}}
+
+/* the map: one panel, a hairline between map and the chosen stay */
+.mapbox{display:grid;grid-template-columns:1fr;border-radius:var(--r-lg);overflow:hidden;background:var(--card);box-shadow:0 0 0 1px var(--line)}
+@media(min-width:900px){.mapbox{grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr)}}
+.emap{height:340px;width:100%;background:var(--paper2)}
+@media(min-width:900px){.emap{height:auto;min-height:480px}}
+.apanel{padding:22px;border-top:1px solid var(--line)}
+@media(min-width:900px){.apanel{border-top:0;border-inline-start:1px solid var(--line)}}
+.apanel h3{margin:0 0 2px;font-size:20px;font-weight:700;line-height:1.35}
+.apanel>p{margin:0 0 16px;font-size:14.5px}
 .emap .leaflet-tile-pane{filter:sepia(.12) saturate(.94) brightness(1.02)}
-.leaflet-container{font-family:inherit;background:var(--surface-2)}
-.leaflet-control-attribution{font-size:9px;background:rgba(251,247,239,.72);color:var(--mut)}
-.leaflet-control-attribution a{color:var(--gold-deep)}
+.leaflet-container{font-family:var(--f-t);background:var(--paper2)}
+.leaflet-control-attribution{font-size:9px;background:rgba(244,239,231,.8);color:var(--mut)}
 .leaflet-bar a{color:var(--ink)}
-.leaflet-tooltip{background:var(--ink);color:var(--canvas);border:0;border-radius:5px;font:500 12px "IBM Plex Sans Arabic",sans-serif;box-shadow:0 6px 16px rgba(31,45,58,.22);padding:5px 9px}
-.leaflet-tooltip-top::before{border-top-color:var(--ink)}
-@media (prefers-reduced-motion: reduce){.fadein{opacity:1!important;transform:none!important}.intro{display:none!important}.bgvid{display:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
-.btn:focus-visible,.qp:focus-visible,.col-card:focus-visible,.conc-link:focus-visible,.more:focus-visible,.g-all:focus-visible,.lb-x:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
-.has-cta .foot{padding-bottom:118px}
-@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.hero .bgimg{transform:none}}
+.leaflet-tooltip{background:var(--ink);color:var(--paper);border:0;border-radius:8px;font:500 13px var(--f-t);box-shadow:0 6px 16px rgba(29,24,19,.22);padding:5px 10px}
+.leaflet-tooltip-top:before{border-top-color:var(--ink)}
+
+/* how booking works */
+.how{display:grid;grid-template-columns:1fr;gap:0;margin:0;padding:0;border-top:1px solid var(--line)}
+@media(min-width:860px){.how{grid-template-columns:repeat(3,1fr);border-top:0}}
+.how li{list-style:none;display:grid;grid-template-columns:auto 1fr;gap:4px 18px;padding:24px 0;border-bottom:1px solid var(--line)}
+@media(min-width:860px){.how li{grid-template-columns:1fr;padding:28px 28px 0 0;border-bottom:0;border-inline-start:1px solid var(--line)}.how li:first-child{border-inline-start:0;padding-inline-start:0}}
+.how .n{font-family:var(--f-d);font-weight:900;font-size:44px;line-height:1;color:var(--gold);grid-row:span 2}
+.how h3{margin:0;font-size:20px;font-weight:700;line-height:1.4}
+.how p{margin:0;color:var(--ink2);font-size:15.5px;max-width:34ch}
+.lic{display:flex;align-items:center;gap:10px;margin:26px 0 0;font-size:15px;color:var(--ink2)}
+.lic .ic{color:var(--ok)}
+
+/* guest voices */
+.vhead{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin:-4px 0 18px;font-size:15px;color:var(--ink2)}
+.vhead .ic{width:18px;height:18px;color:var(--gold)}
+.vhead b{font-family:var(--f-d);font-weight:700;font-size:24px;color:var(--ink)}
+.voices{list-style:none;margin:0;padding:0;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.voice{display:flex;flex-direction:column;gap:14px;padding:22px;border-radius:18px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2)}
+.voice .q{width:28px;height:28px;color:var(--gold);stroke-width:1.4}
+.voice blockquote{margin:0;font-size:16.5px;line-height:1.85;color:var(--ink)}
+.voice blockquote[dir=ltr]{text-align:left}
+.voice cite{margin-top:auto;font-style:normal;font-size:14px;color:var(--mut)}
+.voice cite b{color:var(--ink);font-weight:700}
+.voice .on{display:block;margin-top:4px;font-size:13.5px;color:var(--ink2);text-decoration:underline;text-underline-offset:4px;text-decoration-color:var(--gold)}
+.vrail{display:grid;grid-auto-flow:column;grid-auto-columns:84%;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding-inline:var(--pad);margin-inline:calc(var(--pad) * -1);scroll-padding-inline:var(--pad);scrollbar-width:none;list-style:none;margin-top:0;margin-bottom:0}
+.vrail::-webkit-scrollbar{display:none}
+.vrail>*{scroll-snap-align:start}
+@media(min-width:760px){.vrail{grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:repeat(3,1fr);overflow:visible;margin-inline:0;padding:0}}
+
+/* footer: the night bookend, with the concierge as its first line */
+.foot{margin-top:clamp(72px,10vw,140px);background:var(--night);color:rgba(244,239,231,.78);padding:56px 0 calc(34px + env(safe-area-inset-bottom));font-size:14.5px}
+.foot .wrap{display:flex;flex-direction:column;gap:26px}
+.foot .conc{display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding-bottom:40px;border-bottom:1px solid rgba(244,239,231,.14)}
+.foot .conc h2{margin:0;font-family:var(--f-d);font-weight:700;font-size:clamp(30px,5vw,50px);line-height:1.16;color:var(--paper);text-wrap:balance}
+.foot .conc p{margin:0 0 6px;font-size:16.5px;max-width:46ch}
+.foot .fb{display:flex;align-items:baseline;gap:10px;color:var(--paper)}
+.foot .fb .ar{font-family:var(--f-d);font-weight:900;font-size:40px;line-height:1}
+.foot .fb .en{font-size:11px;letter-spacing:.24em;font-weight:700;color:rgba(244,239,231,.62)}
+.foot .fl{display:flex;flex-wrap:wrap;gap:6px 22px}
+.foot .fl a{color:var(--paper);text-decoration:underline;text-underline-offset:4px;text-decoration-color:rgba(244,239,231,.35);min-height:44px;display:inline-flex;align-items:center}
+.foot .fl a:hover{text-decoration-color:var(--paper)}
+.foot .fine{border-top:1px solid rgba(244,239,231,.14);padding-top:20px;font-size:13px;color:rgba(244,239,231,.62)}
+body.unitpage .foot{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+@media(min-width:960px){body.unitpage .foot{padding-bottom:40px}}
+
+/* ---------- search page ---------- */
+.stop{position:sticky;top:64px;z-index:40;background:rgba(244,239,231,.94);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line);padding:10px 0}
+.stop .wrap{display:flex;align-items:center;gap:10px}
+.sum{flex:1;max-width:620px;min-width:0;display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 8px 6px 20px;border:0;border-radius:999px;background:var(--card);box-shadow:0 0 0 1px var(--line),0 4px 14px rgba(29,24,19,.06);cursor:pointer;text-align:start;transition:box-shadow .2s var(--ease)}
+.sum:hover{box-shadow:0 0 0 1px var(--ink2),0 4px 14px rgba(29,24,19,.08)}
+.sum .t{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.sum .t b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sum .t span{font-size:13px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fbtn{position:relative;flex:none;width:52px;height:52px;border-radius:50%;border:0;background:var(--card);box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;cursor:pointer}
+.fbtn:active,.sum:active{transform:scale(.97)}
+.fbtn i{position:absolute;top:-2px;inset-inline-end:-2px;min-width:20px;height:20px;border-radius:99px;background:var(--ink);color:var(--paper);font-style:normal;font-size:11.5px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.qchips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:14px var(--pad) 2px;margin-inline:calc(var(--pad) * -1)}
+.qchips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 16px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);font-size:14.5px;font-weight:500;color:var(--ink);cursor:pointer;white-space:nowrap;transition:background-color .18s var(--ease),color .18s var(--ease),box-shadow .18s var(--ease)}
+.chip:hover{box-shadow:inset 0 0 0 1px var(--ink2)}
+.chip.on{background:var(--ink);color:var(--paper);box-shadow:none}
+.chip:active{transform:scale(.97)}
+.res-h{padding:clamp(28px,4vw,48px) 0 clamp(20px,3vw,32px)}
+.res-h h1{font-family:var(--f-d);font-weight:700;font-size:clamp(32px,5vw,56px);line-height:1.12;margin:0;text-wrap:balance}
+.res-h p{margin:10px 0 0;color:var(--mut);font-size:16px;max-width:60ch}
+.res-h .cta{margin-top:18px}
+.banner{display:flex;gap:12px;align-items:flex-start;padding:14px 18px;border-radius:var(--r);background:var(--gold-soft);color:var(--ink);font-size:14.5px;margin:0 0 26px}
+.banner .ic{color:var(--warn);margin-top:3px}
+.empty{padding:clamp(40px,8vw,90px) 0;max-width:560px}
+.empty h2{font-family:var(--f-d);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.2;margin:0 0 10px}
+.empty p{margin:0 0 22px;color:var(--ink2)}
+.empty .acts{display:flex;gap:10px;flex-wrap:wrap}
+.sk{background:linear-gradient(90deg,var(--paper2) 25%,#F1EBE1 50%,var(--paper2) 75%);background-size:200% 100%;animation:sh 1.4s linear infinite;border-radius:10px}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.skc .ph{aspect-ratio:4/3;border-radius:var(--r-lg)}
+.foot-n{margin:34px 0 0;font-size:13.5px;color:var(--mut)}
+
+/* ---------- the sheet: dates, guests, area, type ---------- */
+.scrim{position:fixed;inset:0;z-index:80;background:rgba(21,17,13,.46);opacity:0;transition:opacity .3s var(--ease)}
+.scrim.on{opacity:1}
+.sheet{position:fixed;z-index:81;inset-inline:0;bottom:0;max-height:calc(100% - 24px);display:flex;flex-direction:column;background:var(--card);border-radius:24px 24px 0 0;box-shadow:0 -10px 40px rgba(21,17,13,.2);transform:translateY(100%);transition:transform .42s var(--drawer)}
+.sheet.on{transform:none}
+@media(min-width:760px){
+  .sheet{inset:auto;top:50%;left:50%;bottom:auto;width:600px;max-height:min(860px,calc(100% - 64px));border-radius:26px;transform:translate(-50%,-48%) scale(.97);opacity:0;transition:transform .3s var(--ease),opacity .22s var(--ease)}
+  .sheet.on{transform:translate(-50%,-50%);opacity:1}
+}
+.sh-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px 12px;border-bottom:1px solid var(--line2)}
+.sh-top h2{margin:0;font-size:19px;font-weight:700}
+.xbtn{width:44px;height:44px;border-radius:50%;border:0;background:var(--paper2);display:grid;place-items:center;cursor:pointer}
+.xbtn:active{transform:scale(.94)}
+.grab{width:40px;height:5px;border-radius:9px;background:var(--line);margin:8px auto 0}
+@media(min-width:760px){.grab{display:none}}
+.sh-body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 20px 24px}
+.sh-sec{padding:20px 0;border-bottom:1px solid var(--line2)}
+.sh-sec:last-child{border-bottom:0}
+.sh-sec h3{margin:0 0 4px;font-size:17px;font-weight:700}
+.sh-sec .hint{margin:0 0 14px;font-size:14px;color:var(--mut)}
+.sh-foot{display:flex;align-items:center;gap:12px;padding:14px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line2);background:var(--card)}
+.sh-foot .clr{flex:none;border:0;background:none;font-weight:700;text-decoration:underline;text-underline-offset:4px;cursor:pointer;min-height:44px;padding:0 6px}
+.sh-foot .btn{flex:1}
+.err{display:none;margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#F6E2DA;color:#7A3420;font-size:14px}
+.err.on{display:block}
+.dpick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 14px}
+.dbox{padding:10px 14px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);min-height:62px}
+.dbox.cur{box-shadow:inset 0 0 0 2px var(--ink)}
+.dbox span{display:block;font-size:12.5px;font-weight:700}
+.dbox b{display:block;font-size:15.5px;font-weight:500;color:var(--mut)}
+.dbox b.set{color:var(--ink)}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin:2px 0 6px}
+.cal-nav b{font-size:16.5px}
+.cal-nav button{width:44px;height:44px;border-radius:50%;border:0;background:none;display:grid;place-items:center;cursor:pointer}
+.cal-nav button:hover{background:var(--paper2)}
+.cal-nav button[disabled]{opacity:.3;cursor:default;background:none}
+.cal-wd,.cal-g{display:grid;grid-template-columns:repeat(7,1fr)}
+.cal-wd span{font-size:12px;color:var(--mut);text-align:center;padding:6px 0}
+.cal-g button{position:relative;height:46px;border:0;background:none;cursor:pointer;font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink);padding:0}
+.cal-g button span{position:relative;z-index:1;display:grid;place-items:center;width:42px;height:42px;margin:auto;border-radius:50%;transition:background-color .12s var(--ease),color .12s var(--ease)}
+.cal-g button:hover span{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.cal-g button[disabled]{color:#B8AD9F;cursor:default;text-decoration:line-through;text-decoration-color:rgba(184,173,159,.6)}
+.cal-g button[disabled] span{box-shadow:none}
+.cal-g .today span{font-weight:700;text-decoration:underline;text-underline-offset:4px;text-decoration-color:var(--gold)}
+.cal-g .in:before,.cal-g .s.hasE:before,.cal-g .e:before{content:"";position:absolute;top:2px;bottom:2px;inset-inline:0;background:var(--gold-soft)}
+.cal-g .s.hasE:before{inset-inline-start:50%}
+.cal-g .e:before{inset-inline-end:50%}
+.cal-g .s span,.cal-g .e span{background:var(--ink);color:var(--paper)}
+.cal-n{margin:10px 0 0;font-size:14px;color:var(--ink2);min-height:24px}
+.step{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.step .lbl b{display:block;font-size:16px}
+.step .lbl span{font-size:14px;color:var(--mut)}
+.step .ctl{display:flex;align-items:center;gap:14px}
+.step .ctl b{min-width:26px;text-align:center;font-size:18px;font-variant-numeric:tabular-nums}
+.pm{width:44px;height:44px;border-radius:50%;border:0;background:none;box-shadow:inset 0 0 0 1px var(--line);display:grid;place-items:center;cursor:pointer}
+.pm:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.pm[disabled]{opacity:.35;cursor:default;box-shadow:inset 0 0 0 1px var(--line)}
+.pm:active{transform:scale(.94)}
+.cwrap{display:flex;flex-wrap:wrap;gap:8px}
+
+/* ---------- unit page ---------- */
+.gal{position:relative;margin:0 calc(var(--pad) * -1)}
+.gal-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+.gal-strip::-webkit-scrollbar{display:none}
+.gal-strip button{flex:0 0 100%;scroll-snap-align:center;aspect-ratio:4/3;border:0;padding:0;background:var(--paper2);cursor:zoom-in}
+.gal-strip img{width:100%;height:100%;object-fit:cover}
+.gal .cnt{position:absolute;bottom:14px;inset-inline-start:14px;height:30px;padding:0 12px;border-radius:999px;background:rgba(21,17,13,.66);color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.gal .all{position:absolute;bottom:14px;inset-inline-end:14px;height:36px;min-height:0;padding:0 14px;font-size:13.5px}
+.mosaic{display:none}
+@media(min-width:900px){
+  .gal{margin:28px 0 0}
+  .gal-strip{display:none}
+  .gal .cnt{display:none}
+  .mosaic{display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:240px 240px;gap:8px;border-radius:var(--r-lg);overflow:hidden}
+  .mosaic button{border:0;padding:0;background:var(--paper2);cursor:zoom-in;overflow:hidden}
+  .mosaic button:first-child{grid-row:span 2}
+  .mosaic img{width:100%;height:100%;object-fit:cover;transition:transform .6s var(--ease),filter .3s var(--ease)}
+  .mosaic button:hover img{transform:scale(1.025);filter:brightness(.94)}
+  .mosaic.n1{grid-template-columns:1fr;grid-template-rows:480px}
+  .mosaic.n2,.mosaic.n3,.mosaic.n4{grid-template-columns:2fr 1fr;grid-template-rows:240px 240px}
+  .mosaic.n2 button:nth-child(2){grid-row:span 2}
+  .gal .all{bottom:18px;inset-inline-end:18px}
+}
+.ulay{display:grid;grid-template-columns:1fr;gap:0}
+@media(min-width:960px){.ulay{grid-template-columns:minmax(0,1fr) 380px;gap:72px;align-items:start}}
+.uhead{padding:24px 0 26px;border-bottom:1px solid var(--line)}
+.uhead .loc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:15px;color:var(--ink2);margin:0 0 10px}
+.uhead h1{font-family:var(--f-d);font-weight:700;font-size:clamp(30px,4.6vw,48px);line-height:1.18;margin:0;text-wrap:balance}
+.uhead .tl{margin:14px 0 0;font-size:18px;color:var(--ink2);max-width:52ch}
+.facts{display:flex;flex-wrap:wrap;gap:10px 24px;margin:18px 0 0;padding:0;list-style:none;font-size:15.5px}
+.facts li{display:flex;align-items:center;gap:8px}
+.facts .ic{color:var(--ink2)}
+.ublock{padding:30px 0;border-bottom:1px solid var(--line)}
+.ublock:last-child{border-bottom:0}
+.ublock h2{font-size:22px;font-weight:700;margin:0 0 16px;line-height:1.35}
+.why{list-style:none;margin:0;padding:0;display:grid;gap:18px}
+@media(min-width:640px){.why{grid-template-columns:1fr 1fr}}
+.why li{display:flex;gap:14px;align-items:flex-start;font-size:16px;line-height:1.55}
+.why .ic{width:26px;height:26px;color:var(--gold);margin-top:1px;stroke-width:1.5}
+.ublock .perks li{padding:16px 0}
+.ublock .perks b{font-size:16.5px}
+.ublock .perks span{font-size:15px}
+.desc{font-size:16.5px;line-height:1.85;color:var(--ink2);white-space:pre-line;max-width:68ch}
+.desc[dir=ltr]{text-align:left}
+.desc.clip{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.more{margin-top:12px;border:0;background:none;padding:8px 0;min-height:44px;font-weight:700;text-decoration:underline;text-underline-offset:5px;text-decoration-color:var(--gold);cursor:pointer}
+.ag{margin:0 0 22px}
+.ag h3{font-size:15px;font-weight:700;margin:0 0 10px;color:var(--ink)}
+.ag ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:10px 20px}
+.ag li{display:flex;align-items:center;gap:10px;font-size:15.5px;color:var(--ink2)}
+.ag li .ic{width:19px;height:19px;color:var(--ink2);stroke-width:1.5}
+.ag li.ni:before{content:"";flex:none;width:5px;height:5px;border-radius:9px;background:var(--gold)}
+.am-tiles{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:640px){.am-tiles{grid-template-columns:repeat(4,1fr)}}
+.am-tiles li{display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:14px;padding:16px;min-height:104px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);font-size:15px;font-weight:500;line-height:1.4}
+.am-tiles .ic{width:28px;height:28px;color:var(--ink);stroke-width:1.4}
+.am-all{margin-top:22px}
+.stsec{margin:0 0 22px}
+.stsec h3{font-size:17px;font-weight:700;margin:0 0 6px}
+.emb{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}
+.emb span{display:inline-flex;align-items:center;min-height:34px;padding:0 14px;border-radius:999px;background:var(--paper2);font-size:14px;font-weight:500}
+/* booking panel (desktop) and bar (phone) */
+.bk{display:none}
+@media(min-width:960px){.bk{display:block;position:sticky;top:96px;margin-top:28px;padding:26px;border-radius:var(--r-lg);background:var(--card);box-shadow:0 0 0 1px var(--line),0 24px 60px rgba(29,24,19,.1)}}
+.bk .was{font-size:14.5px;color:var(--mut);margin:0 0 2px}
+.bk .pr{font-size:15px;color:var(--ink2);margin:0 0 4px}
+.bk .pr b{font-family:var(--f-d);font-weight:700;font-size:30px;color:var(--ink)}
+.bk .tot{font-size:14.5px;color:var(--ink2);margin:0 0 6px}
+.bk .tot b{color:var(--ink)}
+.bk .save{display:flex;align-items:center;gap:8px;font-size:14.5px;color:var(--ink);margin:6px 0 18px}
+.bk .save .ic{width:18px;height:18px;color:var(--gold)}
+.bk .dates{display:grid;grid-template-columns:1fr 1fr;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);margin:16px 0 12px;overflow:hidden}
+.bk .dates button{border:0;background:none;text-align:start;padding:12px 14px;cursor:pointer;min-height:62px}
+.bk .dates button+button{border-inline-start:1px solid var(--line)}
+.bk .dates button:hover{background:var(--paper)}
+.bk .dates span{display:block;font-size:12px;font-weight:700}
+.bk .dates b{display:block;font-weight:500;font-size:15px;color:var(--ink2)}
+.bk .hint{font-size:14.5px;color:var(--ink2);margin:0 0 4px}
+.small{font-size:13px;line-height:1.65;color:var(--mut);margin:12px 0 0}
+.bbar{position:fixed;inset-inline:0;bottom:0;z-index:45;background:rgba(251,248,243,.97);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:12px 0 calc(10px + env(safe-area-inset-bottom))}
+@media(min-width:960px){.bbar{display:none}}
+.bbar .row{display:flex;align-items:center;gap:14px}
+.bbar .info{flex:1;min-width:0;line-height:1.35}
+.bbar .info b{display:block;font-size:16px}
+.bbar .info button{border:0;background:none;padding:0;font-weight:700;font-size:15px;text-decoration:underline;text-underline-offset:4px;cursor:pointer;min-height:44px}
+.bbar .info span{font-size:13px;color:var(--mut)}
+.bbar .btn{flex:none}
+.bbar .small{margin:8px 0 0;font-size:12px;text-align:center}
+/* lightbox: every photo at its real shape */
+.lb{position:fixed;inset:0;z-index:90;background:var(--night);color:#fff;display:flex;flex-direction:column;animation:fade .22s var(--ease)}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.lb-top{display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top)) var(--pad) 10px}
+.lb-top b{font-size:15px;font-variant-numeric:tabular-nums}
+.lb-x{width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer}
+.lb-strip{flex:1;overflow-y:auto;padding:0 var(--pad) calc(24px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr;gap:10px;align-content:start}
+@media(min-width:760px){.lb-strip{grid-template-columns:1fr 1fr;max-width:1200px;margin:0 auto;width:100%}}
+.lb-strip img{display:block;width:100%;height:auto;border-radius:12px;background:var(--night2)}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  .hero .bgimg.enter{transform:none}
+  .hero video.bgimg{display:none}
+}
 </style>
 </head>
 <body>
-<div class="grain" aria-hidden="true"></div>
-<div class="intro" id="introScreen" aria-hidden="true"><div class="intro-mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 7.4L21 12l-7.4 1.6L12 21l-1.6-7.4L3 12l7.4-1.6L12 3Z"/></svg></div><div class="intro-ar kufi">عوجا إيليت</div><div class="intro-en">Ouja Elite</div></div>
-<header class="head"><div class="wrap head-in"><a class="brand" href="/elite"><span class="brand-ar">عوجا إيليت</span><span class="brand-en">Ouja Elite</span></a><a class="conc-link" id="headConc" href="#"><svg class="wag" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z" opacity=".18"/><path d="M12 4a8 8 0 0 0-6.9 12l.3.5-.7 2.5 2.6-.7.5.3A8 8 0 1 0 12 4Z"/></svg>كونسيرج</a></div><div class="wrap head-reg"></div></header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></symbol>
+<symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 18V6M3 14h18v4M21 14v-2.5A3.5 3.5 0 0 0 17.5 8H11v6"/><circle cx="7" cy="10.5" r="2"/></symbol>
+<symbol id="i-bath" viewBox="0 0 24 24"><path d="M4 12h16v3a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-3zM6 12V6a2 2 0 0 1 3.7-1M7 20l-1 1.5M17 20l1 1.5"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-chl" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+<symbol id="i-chr" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-arw" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 8.2 7 9.5 4-1.3 7-5.1 7-9.5V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></symbol>
+<symbol id="i-building" viewBox="0 0 24 24"><path d="M5 21V4.5A1.5 1.5 0 0 1 6.5 3h7A1.5 1.5 0 0 1 15 4.5V21M15 9h3.5A1.5 1.5 0 0 1 20 10.5V21M3 21h18M8.5 7h3M8.5 11h3M8.5 15h3"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7z"/></symbol>
+<symbol id="i-sofa" viewBox="0 0 24 24"><path d="M4 11V8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3"/><path d="M2.5 13a2 2 0 0 1 4 0v2h11v-2a2 2 0 0 1 4 0v5h-19zM5 18v2M19 18v2"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 1-11.8 7L4 20l1.5-4.1A8 8 0 1 1 20 11.5z"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/></symbol>
+<symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2.5v19M4 7l16 10M20 7 4 17M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/></symbol>
+<symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-pot" viewBox="0 0 24 24"><path d="M4 10h16v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM2 10h20M9 6.5c0-1 1-1.5 1-2.5M14 6.5c0-1 1-1.5 1-2.5"/></symbol>
+<symbol id="i-fridge" viewBox="0 0 24 24"><rect x="5.5" y="2.5" width="13" height="19" rx="2"/><path d="M5.5 10h13M9 6v1.5M9 13v2.5"/></symbol>
+<symbol id="i-washer" viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="2"/><circle cx="12" cy="13" r="4.5"/><path d="M8 6h.01M11 6h2"/></symbol>
+<symbol id="i-car" viewBox="0 0 24 24"><path d="M5 11l2-5h10l2 5M3.5 11h17v5h-17zM6.5 19v-3M17.5 19v-3"/><circle cx="7.5" cy="13.5" r=".8"/><circle cx="16.5" cy="13.5" r=".8"/></symbol>
+<symbol id="i-elevator" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M12 3v18M7.5 10l1.5-2 1.5 2M13.5 14l1.5 2 1.5-2"/></symbol>
+<symbol id="i-waves" viewBox="0 0 24 24"><path d="M2.5 16c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5M2.5 20c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5M8 12.5V5a2 2 0 0 1 4 0M14 12.5V5a2 2 0 0 1 4 0M8 8.5h6"/></symbol>
+<symbol id="i-dumbbell" viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></symbol>
+<symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol>
+<symbol id="i-cup" viewBox="0 0 24 24"><path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10.5h1.5a2.5 2.5 0 0 1 0 5H17M8 3.5v2M12 3.5v2"/></symbol>
+<symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-9-1 2-2 3-3.5 3.5C9 8 9 6 9 5c-2 2-3 5-3 8a6 6 0 0 0 6 8z"/></symbol>
+<symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></symbol>
+<symbol id="i-iron" viewBox="0 0 24 24"><path d="M2.5 17.5h18V14a6 6 0 0 0-6-6H9a5 5 0 0 0-4.7 3.3zM9 11.5h7"/></symbol>
+<symbol id="i-hanger" viewBox="0 0 24 24"><path d="M10 5.5a2 2 0 1 1 2 2v1.5L3.3 15.6a1 1 0 0 0 .6 1.9h16.2a1 1 0 0 0 .6-1.9L12 9"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+<symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 7.5h4l1.5-2.5h7L17 7.5h4V19H3z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+<symbol id="i-baby" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></symbol>
+<symbol id="i-quote" viewBox="0 0 24 24"><path d="M10 7H6.5A2.5 2.5 0 0 0 4 9.5V13h4.5v-2.5H10zM20 7h-3.5A2.5 2.5 0 0 0 14 9.5V13h4.5v-2.5H20zM4 13c0 3 1.3 4.8 4 5.7M14 13c0 3 1.3 4.8 4 5.7"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M5 18h14M12 6.5a5.5 5.5 0 0 0-5.5 5.5V18h11v-6A5.5 5.5 0 0 0 12 6.5zM12 6.5V4M10.5 4h3"/></symbol>
+<symbol id="i-badge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M8.5 12.2l2.3 2.3 4.6-4.8"/></symbol>
+</defs></svg>
+<header class="head" id="head"><div class="wrap"><a class="brand" href="/elite" aria-label="عوجا إيليت، الصفحة الرئيسية"><span class="ar">عوجا إيليت</span><span class="en">OUJA ELITE</span></a><nav class="nav" aria-label="الأقسام"><a href="/elite/search" id="nv-s">الإقامات</a><a href="#" data-wa="header" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-chat"/></svg>كونسيرج</a></nav></div></header>
 <main id="view"></main>
-<footer class="foot"><div class="wrap"><div class="reg-foot"></div><div class="foot-line">من أهل الدرعية 🤎</div><div class="foot-sub serif">Ouja Elite · Curated residences in Riyadh</div><div class="foot-sub">إقامات مختارة في الرياض</div></div></footer>
+<footer class="foot"><div class="wrap">
+<div class="conc"><h2>نرتّب إقامتك من أولها لآخرها</h2><p>راسلنا على واتساب ونتكفّل بالباقي: التوفر، السعر، والوصول.</p><a class="btn light" href="#" data-wa="footer" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-chat"/></svg>تواصل مع الكونسيرج</a></div>
+<div class="fb"><span class="ar">عوجا إيليت</span><span class="en">OUJA ELITE · RIYADH</span></div>
+<div class="fl"><a href="/elite/search">كل الإقامات</a><a href="#" data-wa="footer-link" target="_blank" rel="noopener">كونسيرج واتساب</a></div>
+<div class="fine">عوجا إيليت · إقامات مختارة في الرياض · الحجز عبر كونسيرج واتساب · من أهل الدرعية</div>
+</div></footer>
 <script>
 var ELITE=/*__ELITE_DATA__*/null;
 var V=document.getElementById('view');
+var DISCOUNT=0.20;
 var GEN_MSG='حياك الله 🤍 أبغى أستفسر عن إقامات عوجا إيليت';
-var DISCOUNT=0.20;var OFF='خصم 20%';
-var WAG='<svg class="wag" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm0 2a8 8 0 1 1-4.2 14.8l-.5-.3-2.6.7.7-2.5-.3-.5A8 8 0 0 1 12 4Zm5.6 12.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.5-2.7-1.2-4.4-3.9-4.6-4.1-.1-.2-1-1.4-1-2.7s.6-1.9.9-2.1c.2-.3.4-.3.6-.3h.4c.2 0 .4 0 .5.4l.7 1.8c.1.1.1.3 0 .4l-.3.5-.3.3c-.1.1-.3.3-.1.5.1.3.6 1 1.3 1.6.8.7 1.5 1 1.8 1.1.2.1.3.1.5-.1l.6-.7c.2-.2.3-.2.5-.1l1.7.8c.2.1.4.2.4.3.1.1.1.5-.1 1.1Z"/></svg>';
-var REG='<svg class="reg" width="200" height="16" viewBox="0 0 200 16" fill="none" aria-hidden="true"><path d="M8 12 H85" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M85 12 L91 12 L91 9 L96 9 L96 6 L100 3 L104 6 L104 9 L109 9 L109 12 L115 12" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/><path d="M115 12 H192" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>';
-var IC={bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18h14M12 6.5a5.5 5.5 0 0 0-5.5 5.5V18h11v-6A5.5 5.5 0 0 0 12 6.5ZM12 6.5V4M10.5 4h3"/></svg>',car:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l1.6-4.6A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.4L20 13v5h-2.2v-1.8H6.2V18H4v-5Z"/><path d="M7.5 15.4h.01M16.5 15.4h.01"/></svg>',badge:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M8.5 12.2l2.3 2.3 4.6-4.8"/></svg>',key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="3.6"/><path d="M10.6 11.6 19 20M16.2 17.2l1.8-1.8M14.4 15.4l1.8-1.8"/></svg>',spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.6 4.8L18.4 12l-4.8 1.6L12 18l-1.6-4.4L5.6 12l4.8-1.6Z"/></svg>'};
 function he(s){return (s==null?'':String(s)).replace(/[<>&"]/g,function(c){return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];});}
-function pimg(u,w){if(!u)return u;try{if(ELITE&&ELITE.config&&ELITE.config.imgproxy)return '/elite/img?u='+encodeURIComponent(u)+(w?('&w='+w):'');}catch(e){}return u;}
 function sid(){try{var k='ouja_elite_sid',v=localStorage.getItem(k);if(!v){v='e'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
 function qs(){return new URLSearchParams(location.search);}
+function CFG(){return (ELITE&&ELITE.config)||{};}
+// Photos through the WebP proxy (/elite/img). Absolute URLs only; ELITE_IMG_PROXY=0 turns it off.
+function pimg(u,w){try{if(u&&CFG().imgproxy&&/^https?:/i.test(u))return '/elite/img?u='+encodeURIComponent(u)+(w?('&w='+w):'');}catch(e){}return u;}
 function utm(){var p=qs(),o={};['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o[k]=p.get(k);});return o;}
 function track(ev,extra){try{var b=Object.assign({event:ev,session:sid(),route:location.pathname,referrer:document.referrer||''},utm(),extra||{});var s=JSON.stringify(b);if(navigator.sendBeacon){navigator.sendBeacon('/api/stay/event',new Blob([s],{type:'application/json'}));}else{fetch('/api/stay/event',{method:'POST',headers:{'Content-Type':'application/json'},body:s,keepalive:true});}}catch(e){}}
-function grp(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US');}catch(e){return ''+n;}}
 function carry(){var p=qs(),o=[];['utm_source','utm_medium','utm_campaign','utm_content'].forEach(function(k){if(p.get(k))o.push(k+'='+encodeURIComponent(p.get(k)));});return o.length?('&'+o.join('&')):'';}
+function money(n){if(n==null)return '';try{return Number(n).toLocaleString('en-US')+' ر.س';}catch(e){return n+' ر.س';}}
+function disc(n){return Math.round(Number(n)*(1-DISCOUNT));}
 function nightsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ليلة وحدة';if(n==2)return 'ليلتين';if(n<=10)return n+' ليالٍ';return n+' ليلة';}
 function isLatin(s){s=String(s||'');var lat=(s.match(/[A-Za-z]/g)||[]).length,ar=(s.match(/[؀-ۿ]/g)||[]).length;return lat>ar;}
 function validateDates(ci,co){if((ci&&!co)||(!ci&&co))return 'حط تاريخ الدخول والخروج، أو خلّهم فاضيين للتصفح.';if(ci&&co&&!(co>ci))return 'تاريخ الخروج لازم يكون بعد تاريخ الدخول.';return '';}
-function waNum(){return (ELITE&&ELITE.config&&ELITE.config.whatsapp)||'';}
+
+/* ---------- small shared pieces ---------- */
+function svg(id,cls){return '<svg class="ic'+(cls?(' '+cls):'')+'" aria-hidden="true"><use href="#i-'+id+'"/></svg>';}
+function areaName(l){var a=l&&l.area;if(!a||a==='Riyadh')return 'الرياض';return a;}
+function guestsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'ضيف واحد';if(n==2)return 'ضيفين';if(n<=10)return n+' ضيوف';return n+' ضيف';}
+function roomsLabel(n){if(n==null||n==='')return '';n=Number(n);if(n===0)return 'استوديو';if(n==1)return 'غرفة نوم';if(n==2)return 'غرفتين';if(n<=10)return n+' غرف';return n+' غرفة';}
+function bathsLabel(n){n=Number(n)||0;if(n<=0)return '';if(n==1)return 'حمام';if(n==2)return 'حمامين';if(n<=10)return n+' حمامات';return n+' حمام';}
+function metaLine(l){var f=[guestsLabel(l.capacity),roomsLabel(l.beds),bathsLabel(l.baths)].filter(Boolean);return f.map(he).join('<span class="dot"></span>');}
+function ratingHtml(l){if(l==null||l.rating==null||!l.reviews_count)return '';var r=Math.round(l.rating*100)/100;return '<span class="rate" aria-label="التقييم '+r+' من 5">'+svg('star','f')+'<span class="num">'+r+'</span> <i>(<span class="num">'+l.reviews_count+'</span>)</i></span>';}
+var AR_M=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+var AR_D=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function ymd(d){var m=d.getMonth()+1,dd=d.getDate();return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;}
+function parseYmd(s){s=String(s||'');if(s.length!==10||s.charAt(4)!=='-'||s.charAt(7)!=='-')return null;var p=s.split('-'),y=parseInt(p[0],10),m=parseInt(p[1],10),d=parseInt(p[2],10);if(!(y>2000)||!(m>=1&&m<=12)||!(d>=1&&d<=31))return null;return new Date(y,m-1,d);}
+function fmtD(s,day){var d=parseYmd(s);if(!d)return '';return (day?(AR_D[d.getDay()]+' '):'')+d.getDate()+' '+AR_M[d.getMonth()];}
+function nightsBetween(a,b){var x=parseYmd(a),y=parseYmd(b);if(!x||!y)return 0;return Math.round((y-x)/86400000);}
+function rangeLabel(ci,co){var a=parseYmd(ci),b=parseYmd(co);if(!a||!b)return '';if(a.getMonth()===b.getMonth()&&a.getFullYear()===b.getFullYear())return a.getDate()+' – '+b.getDate()+' '+AR_M[b.getMonth()];return fmtD(ci)+' – '+fmtD(co);}
+function nooOf(cats){return (CFG().noo||[]).filter(function(o){return cats.indexOf(o.category)>=0;});}
+function typeChips(){var lay=nooOf(['layout']).slice().sort(function(a,b){return String(a.key).localeCompare(String(b.key));});return lay.concat((CFG().noo||[]).filter(function(o){return o.category!=='layout'&&o.category!=='area';}));}
+function hoodName(k){var o=(CFG().neighborhoods||[]).filter(function(x){return x.key===k;})[0];return o?(o.ar||o.en):'';}
+function readQ(){var p=qs();return {ci:p.get('check_in')||'',co:p.get('check_out')||'',g:parseInt(p.get('guests'),10)||0,nb:p.get('neighborhood')||'',tags:(p.get('tags')||'').split(',').filter(Boolean),ty:p.get('type')||'all'};}
+function buildQ(s,only){var q=[];if(s.g)q.push('guests='+s.g);if(!only){if(s.tags&&s.tags.length)q.push('tags='+encodeURIComponent(s.tags.join(',')));if(s.nb)q.push('neighborhood='+encodeURIComponent(s.nb));}if(s.ci&&s.co){q.push('check_in='+s.ci);q.push('check_out='+s.co);}var c=carry();if(c)q.push(c.slice(1));return q.length?('?'+q.join('&')):'';}
+function imgTag(u,alt,w,eager,sizes){if(!u)return '<span class="noimg">عوجا</span>';var w2=Math.round(w*1.6);return '<img '+(eager?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="'+w+'" height="'+Math.round(w*0.75)+'" alt="'+he(alt||'')+'" src="'+he(pimg(u,w))+'" srcset="'+he(pimg(u,w))+' '+w+'w, '+he(pimg(u,w2))+' '+w2+'w" sizes="'+(sizes||'100vw')+'">';}
+
+/* ---------- WhatsApp concierge: the only way to book ---------- */
+function waNum(){return CFG().whatsapp||'';}
 function waHref(text){var n=waNum();return n?('https://wa.me/'+n+'?text='+encodeURIComponent(text)):'';}
 function waBook(l,ci,co,nights,guests){var NL=String.fromCharCode(10);var x=['حياك الله 🤍 معك عضو عوجا إيليت، أرغب بالحجز:'];x.push('🏛️ الإقامة: '+(l.name_ar||l.name_en||''));if(ci&&co&&co>ci){x.push('🗓️ الدخول: '+ci);x.push('🗓️ الخروج: '+co);}if(Number(nights)>0)x.push('🌙 الليالي: '+nights);if(guests)x.push('👥 الضيوف: '+guests);var tg=(l.tags||[]).slice(0,4).map(function(t){return t.ar||t.en;}).filter(Boolean);if(tg.length)x.push('🏷️ '+tg.join(' · '));if(l.area)x.push('📍 '+l.area);x.push('🎟️ خصم عضوية عوجا إيليت: 20%');x.push('');x.push('أبغى أأكد التوفر والسعر، مشكورين 🌟');return x.join(NL);}
-function waBtn(text,ev,cls,label){var h=waHref(text);var c='btn '+(cls||'primary block');if(!h)return '<button class="'+c+' off" disabled>'+WAG+'<span class="lbl">'+he(label||'الكونسيرج غير متاح حاليًا')+'</span></button>';return '<a class="'+c+'" target="_blank" rel="noopener" data-ev="'+he(ev||'')+'" href="'+he(h)+'">'+WAG+'<span class="lbl">'+he(label||'تواصل مع الكونسيرج')+'</span></a>';}
-function metaRow(l){var f=[];if(l.capacity)f.push(l.capacity+' ضيوف');if(l.beds!=null)f.push(l.beds==0?'استوديو':l.beds+' غرفة');if(l.baths)f.push(l.baths+' حمام');return f.map(function(x){return '<span>'+he(x)+'</span>';}).join('<i>·</i>');}
-function badges(l,mx){return (l.tags||[]).slice(0,mx||3).map(function(t){return '<span class="chip">'+he(t.ar||t.en)+'</span>';}).join('');}
-var EMBL={wifi:'📶',parking:'🅿️',pool:'🏊',kitchen:'🍳',ac:'❄️',tv:'📺',washer:'🧺',dryer:'🌀',view:'🌆',tower:'🏙️',balcony:'🪟',terrace:'🌿',garden:'🌳',bed:'🛏️',bath:'🛁',family:'👨‍👩‍👧',kids:'🧸',gym:'🏋️',elevator:'🛗',security:'🔒',location:'📍',coffee:'☕',workspace:'💻',self_entry:'🚪',bbq:'🍢',sauna:'🧖',jacuzzi:'♨️',netflix:'🎬',sound:'🔊',dishwasher:'🍽️',heating:'🔥',pets:'🐾',smart:'🤖',cleaning:'🧹',luxury:'✨',default:'✨'};
-function emblemsRow(st){if(!st||!st.emblems||!st.emblems.length)return '';return '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:18px 0">'+st.emblems.map(function(e){return '<span class="chip">'+(EMBL[e.icon]||EMBL.default)+' '+he(e.ar||e.en)+'</span>';}).join('')+'</div>';}
-function structuredCards(st){if(!st)return '';var out='';(st.sections||[]).forEach(function(s){var ti=(s.title_ar||s.title_en||''),bo=(s.body_ar||s.body_en||'');if(!ti&&!bo)return;out+='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">'+he(ti)+'</span><div class="descblk'+(isLatin(bo)?' ltr':'')+'">'+he(bo)+'</div></div>';});var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)out+='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">الموقع والحي</span><div class="descblk'+(isLatin(nb)?' ltr':'')+'">'+he(nb)+'</div></div>';return out;}
-function divider(){return '<div class="reg-wrap reveal">'+REG+'</div>';}
-function monoPh(){return '<div class="mono">ع</div>';}
-function skeletons(n){var s='';for(var i=0;i<(n||2);i++){s+='<div class="col-card"><div class="cover sk"></div><div class="cc-body"><div class="sk" style="height:13px;width:38%"></div><div class="sk" style="height:20px;width:72%;margin-top:8px"></div><div class="sk" style="height:13px;width:52%;margin-top:10px"></div><div class="sk" style="height:34px;width:100%;margin-top:12px"></div></div></div>';}return s;}
-var _io=null;
-var RM=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
-function imgFade(){
-  document.querySelectorAll('img.fadein:not(.loaded)').forEach(function(i){
-    if(i.complete&&i.naturalWidth>0){i.classList.add('loaded');}
-    else{i.addEventListener('load',function(){i.classList.add('loaded');});i.addEventListener('error',function(){i.classList.add('loaded');});}
-  });
-}
-function magnetize(){
-  if(RM||!(window.matchMedia&&matchMedia('(pointer:fine)').matches))return;
-  document.querySelectorAll('.btn.primary:not([data-mag])').forEach(function(b){
-    b.setAttribute('data-mag','1');
-    b.addEventListener('mousemove',function(e){var r=b.getBoundingClientRect();var x=Math.max(-8,Math.min(8,(e.clientX-(r.left+r.width/2))*0.15));var y=Math.max(-6,Math.min(6,(e.clientY-(r.top+r.height/2))*0.3));b.style.transform='translate('+x.toFixed(1)+'px,'+y.toFixed(1)+'px)';});
-    b.addEventListener('mouseleave',function(){b.style.transform='';});
-  });
-}
-function reveal(){
-  var ns=document.querySelectorAll('.reveal:not(.in)');
-  if(!('IntersectionObserver' in window)){ns.forEach(function(e){e.classList.add('in');});}
-  else{if(!_io){_io=new IntersectionObserver(function(en){en.forEach(function(x){if(x.isIntersecting){x.target.classList.add('in');_io.unobserve(x.target);}});},{rootMargin:'0px 0px -7% 0px',threshold:.06});}ns.forEach(function(e){_io.observe(e);});}
-  imgFade();magnetize();
-}
+function waBtn(text,ev,cls,label,lid){var h=waHref(text);var c='btn'+(cls?(' '+cls):'');if(!h)return '<button class="'+c+' off" disabled>'+svg('chat')+he('الكونسيرج غير متاح حاليًا')+'</button>';return '<a class="'+c+' wa-go" target="_blank" rel="noopener" data-ev="'+he(ev||'')+'"'+(lid!=null?(' data-lid="'+he(lid)+'"'):'')+' href="'+he(h)+'">'+svg('chat')+he(label||'تواصل مع الكونسيرج')+'</a>';}
 
-function pillarsHtml(){
-  var P=[[IC.bell,'كونسيرج خاص ٢٤/٧','فريق يرتّب كل تفصيل قبل وبعد وصولك.'],
-   [IC.car,'سائق خاص','مرسيدس · سواري المسافر تحت طلبك.'],
-   [IC.badge,'حجز مباشر بدون رسوم','تحجز معنا مباشرة بلا رسوم منصات.'],
-   [IC.key,'دخول ذاتي ووصول سلس','تدخل إقامتك بدون انتظار ولا تعقيد.']];
-  return P.map(function(p){return '<div class="pillar"><div class="pi">'+p[0]+'</div><div class="pl">'+he(p[1])+'</div><div class="pt">'+he(p[2])+'</div></div>';}).join('');
+/* ---------- unit card: the photo is the card ---------- */
+function priceLine(l){
+  if(l.est_avg!=null&&l.est_avg>0&&l.nights>0)return '<div class="u-price"><s class="num">'+money(l.est_avg)+'</s><b class="num">'+money(disc(l.est_avg))+'</b> / الليلة · سعر العضو</div>';
+  if(l.price_base!=null&&Number(l.price_base)>0)return '<div class="u-price">تبدأ من <s class="num">'+money(l.price_base)+'</s><b class="num">'+money(disc(l.price_base))+'</b> / الليلة</div>';
+  return '';
 }
-function tiersHtml(){
-  var crown='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 18.2h14l1.2-9.4-4.8 3.2L12 5l-3.6 7-4.8-3.2 1.2 9.4Zm0 1.5h14V21H5v-1.3Z"/></svg>';
-  var T=[['I','طُريف','TURAIF','أرقى عضوياتنا — أكثر من خصم 20%: ترقيات تلقائية، أولوية في التوفر، وكونسيرج مخصّص لك.','elite_join_turaif','حياك الله 🤍 أرغب بعضوية عوجا إيليت — طُريف (الأعلى)، وأبغى أعرف المزايا الإضافية.',true],
-   ['II','ذهب','GOLD','خصم 20% ثابت على إقاماتك، دخول مبكر، وهدايا ترحيب مختارة.','elite_join_gold','حياك الله 🤍 أرغب بعضوية عوجا إيليت — ذهب (Gold).',false],
-   ['III','فضّة','SILVER','خصم 20% على الحجز المباشر ومزايا الأعضاء على مدار السنة.','elite_join_silver','حياك الله 🤍 أرغب بعضوية عوجا إيليت — فضّة (Silver).',false]];
-  var sub='<div class="tier-sub reveal">كل الأعضاء يحصلون على خصم 20% على إقاماتهم — وأعضاء طُريف يحصلون على أكثر.</div>';
-  return sub+'<div class="tier-grid">'+T.map(function(t,i){
-    var cta=waBtn(t[5],t[4],'secondary mini','تواصل عن '+t[1]);
-    var seal=t[6]?('<span class="tc-seal">'+crown+'</span>'):'';
-    var badge=t[6]?'<span class="tc-badge">الأعلى</span>':'';
-    return '<div class="tier-card reveal d'+(i+1)+(t[6]?' top':'')+'">'+seal
-      +'<div class="tc-head"><span class="tc-rn num">'+t[0]+'</span><span><span class="tc-name kufi">عوجا '+he(t[1])+'</span><span class="tc-en serif">'+he(t[2])+'</span></span></div>'
-      +badge
-      +'<div class="tc-body">'+he(t[3])+'</div>'
-      +'<div class="tc-cta">'+cta+'</div></div>';
-  }).join('')+'</div>';
+function card(l,eager){
+  var tags=[];if(l.available===true)tags.push('<span class="tag ok">متاحة</span>');if(l.badge)tags.push('<span class="tag">'+he(l.badge)+'</span>');
+  var name=l.name_ar||l.name_en||'';
+  return '<a class="unit" href="/elite/'+he(l.slug)+he(location.search)+'">'
+    +'<div class="ph">'+imgTag(l.cover,name,560,eager,'(min-width:1024px) 400px, (min-width:640px) 48vw, 92vw')+(tags.length?('<div class="tagrow">'+tags.join('')+'</div>'):'')+'</div>'
+    +'<div class="u-b"><div class="u-top"><span class="u-area">'+svg('pin')+he(areaName(l))+'</span>'+ratingHtml(l)+'</div>'
+    +'<h3 dir="auto">'+he(name)+'</h3>'
+    +'<div class="u-meta">'+metaLine(l)+'</div>'+priceLine(l)+'</div></a>';
 }
-function conciergeBand(){
-  return '<span class="conc-mark">'+WAG+'</span><span class="eyebrow center">كونسيرج عوجا إيليت</span><div class="conc-h kufi">نرتّب إقامتك من أولها لآخرها</div><p class="conc-p">راسلنا على واتساب ونتكفّل بالباقي — التوفر، السعر، والوصول.</p>'+waBtn(GEN_MSG,'elite_whatsapp_click','primary',null);
+function skelCards(n){var s='';for(var i=0;i<n;i++){s+='<div class="unit skc" aria-hidden="true"><div class="ph sk"></div><div class="u-b"><div class="sk" style="height:14px;width:40%"></div><div class="sk" style="height:20px;width:85%;margin-top:6px"></div><div class="sk" style="height:14px;width:55%;margin-top:6px"></div></div></div>';}return s;}
+function monthLabel(ym){ym=String(ym||'');var y=ym.slice(0,4),m=parseInt(ym.slice(5,7),10);return (y.length===4&&m>=1&&m<=12)?(AR_M[m-1]+' '+y):'';}
+function voiceHtml(v,withUnit){
+  return '<li class="voice">'+svg('quote','q')+'<blockquote dir="'+(isLatin(v.text)?'ltr':'rtl')+'">'+he(v.text)+'</blockquote>'
+    +'<cite><b>'+he(v.name||'ضيف')+'</b>'+(v.date?(' · '+he(monthLabel(v.date))):'')
+    +(withUnit&&v.slug?('<a class="on" href="/elite/'+he(v.slug)+he(location.search)+'" dir="auto">'+he(v.unit||'')+'</a>'):'')+'</cite></li>';
 }
-function disc(n){return Math.round(Number(n)*(1-DISCOUNT));}
-function save(n){return Number(n)-disc(n);}
-function priceHtml(l){
-  if(l.est_avg!=null&&l.est_avg>0&&l.nights>0){
-    return '<div class="deal-mini"><div class="dm-top"><span class="dm-was">'+grp(l.est_avg)+' ر.س</span><span class="dm-now"><span class="num">'+grp(disc(l.est_avg))+'</span> ر.س</span><span class="lbln">/ الليلة</span></div><div class="dm-save">'+OFF+' · وفّرت '+grp(save(l.est_avg))+' ر.س كل ليلة</div></div>';
-  }
-  if(l.price_base!=null&&Number(l.price_base)>0){
-    return '<div class="deal-mini"><div class="dm-top"><span class="from">تبدأ من</span><span class="dm-was">'+grp(l.price_base)+'</span><span class="dm-now"><span class="num">'+grp(disc(l.price_base))+'</span> ر.س</span><span class="lbln">/ الليلة</span></div><div class="dm-save">'+OFF+' · وفّرت '+grp(save(l.price_base))+' ر.س كل ليلة</div></div>';
-  }
-  return '<div class="price soft">السعر يظهر مع الكونسيرج</div>';
-}
-function listingPrice(l){
-  var seal='<div class="lp-seal">'+OFF+'</div>';
-  if(l.est_avg!=null&&l.est_avg>0&&l.nights>0){
-    return '<div class="l-price">'+seal
-      +'<div class="lp-reg"><span class="lp-reg-lbl">السعر العادي</span><span class="lp-was">'+grp(l.est_avg)+' ر.س / الليلة</span></div>'
-      +'<div class="lp-mlabel">سعر عضو عوجا إيليت — بعد الخصم</div>'
-      +'<div class="lp-now"><span class="num">'+grp(disc(l.est_avg))+'</span><span class="lp-cur">ر.س</span><span class="lp-per">/ الليلة</span></div>'
-      +'<div class="lp-total">الإجمالي لـ '+nightsLabel(l.nights)+': <span class="lp-was">'+grp(l.est_total)+' ر.س</span> <b>'+grp(disc(l.est_total))+' ر.س</b></div>'
-      +'<div class="lp-save">🤎 وفّرت '+grp(save(l.est_total))+' ر.س مع عضوية عوجا إيليت</div>'
-      +'<div class="lp-note">السعر النهائي يتأكّد مع الكونسيرج · أعضاء طُريف يحصلون على أكثر</div></div>';
-  }
-  if(l.price_base!=null&&Number(l.price_base)>0){
-    return '<div class="l-price">'+seal
-      +'<div class="lp-reg"><span class="lp-reg-lbl">السعر العادي</span><span class="lp-was">'+grp(l.price_base)+' ر.س / الليلة</span></div>'
-      +'<div class="lp-mlabel">سعر عضو عوجا إيليت — بعد الخصم</div>'
-      +'<div class="lp-now"><span class="num">'+grp(disc(l.price_base))+'</span><span class="lp-cur">ر.س</span><span class="lp-per">/ الليلة</span></div>'
-      +'<div class="lp-save">🤎 وفّرت '+grp(save(l.price_base))+' ر.س كل ليلة · حط تواريخك للإجمالي</div>'
-      +'<div class="lp-note">السعر النهائي يتأكّد مع الكونسيرج · أعضاء طُريف يحصلون على أكثر</div></div>';
-  }
-  return '<div class="l-price"><div class="lp-mlabel">سعر عضو عوجا إيليت</div><div class="lp-now"><span class="lp-cur">يظهر مع الكونسيرج</span></div><div class="lp-note">أعضاء طُريف يحصلون على أكثر من خصم 20%</div></div>';
-}
+function perksList(P){return '<ul class="perks">'+P.map(function(p){return '<li>'+svg(p[0])+'<div><b>'+he(p[1])+'</b><span>'+he(p[2])+'</span></div></li>';}).join('')+'</ul>';}
 
-var DISTRICTS=[
-  {k:'الماجدية',alt:['ماجدية','الماجديه','majdiah','almajdiah'],en:'Al Majdiah',x:96,y:44},
-  {k:'الملقا',alt:['ملقا','malqa','almalqa'],en:'Al Malqa',x:170,y:54},
-  {k:'النرجس',alt:['نرجس','narjis','alnarjis'],en:'Al Narjis',x:256,y:46},
-  {k:'الدرعية',alt:['درعية','الدرعيه','diriyah','bujairi','البجيري','طريف'],en:'Diriyah',x:70,y:98},
-  {k:'الياسمين',alt:['ياسمين','الياسمن','yasmin','jasmine'],en:'Al Yasmin',x:274,y:92},
-  {k:'الصحافة',alt:['صحافة','sahafa','alsahafa'],en:'Al Sahafa',x:214,y:104},
-  {k:'العقيق',alt:['عقيق','aqiq','al-aqiq','alaqiq','kafd','financial'],en:'Al Aqiq · KAFD',x:150,y:130},
-  {k:'النخيل',alt:['نخيل','nakheel','nakhil'],en:'Al Nakheel',x:242,y:148},
-  {k:'حطين',alt:['حطين','hittin'],en:'Hittin',x:104,y:162},
-  {k:'العليا',alt:['عليا','olaya','البوليفارد','boulevard','owa'],en:'Olaya · Boulevard',x:206,y:196}
-];
-var AREA_GUIDES={
-  'الدرعية':'مهد الدولة وموطن التراث — البجيري ومطاعمه على ضفاف وادي حنيفة. من هنا نحن: من أهل الدرعية 🤎',
-  'حطين':'حيٌّ راقٍ هادئ غرب الرياض، قريب من وادي حنيفة وأرقى المطاعم والمقاهي — مثالي لإقامة عائلية مريحة.',
-  'الملقا':'وجهة شمالية أنيقة، مقاهٍ ومطاعم عصرية وشوارع واسعة — قريبة من كل شيء.',
-  'النرجس':'شمال الرياض الجديد، مساحات رحبة وسكنٌ هادئ بعيد عن الزحام.',
-  'الياسمين':'حيٌّ عائلي محبوب، مقاهٍ وحدائق وقربٌ من الوجهات الشمالية.',
-  'الصحافة':'حيٌّ شمالي راقٍ، خدمات متكاملة وقربٌ من المراكز الحيوية.',
-  'النخيل':'قلب الأعمال والمراكز التجارية، قريب من برج المملكة والوجهات المركزية.',
-  'العليا':'نبض الرياض — البوليفارد، أرقى المطاعم والتسوّق والحياة على بُعد دقائق.',
-  'العقيق':'موطن مركز الملك عبدالله المالي (KAFD) وأبراجه — حيٌّ حديث نابض قرب أهم وجهات الأعمال.',
-  'الماجدية':'شمال غرب الرياض — هدوء ومساحات جديدة بعيدًا عن الزحام.'
-};
-function matchListing(l){
-  var hay=((l.name_ar||'')+' '+(l.name_en||'')+' '+(l.area||'')).toLowerCase();
-  var tk=(l.tag_keys||[]);
-  if(tk&&tk.indexOf&&tk.indexOf('boulevard')>=0)return 'العليا';
-  for(var i=0;i<DISTRICTS.length;i++){var d=DISTRICTS[i];
-    if(hay.indexOf(d.k.toLowerCase())>=0)return d.k;
-    var alt=d.alt||[];for(var j=0;j<alt.length;j++){if(alt[j]&&hay.indexOf(alt[j].toLowerCase())>=0)return d.k;}
+/* ---------- the sheet: dates, guests, area, type ---------- */
+var SH=null;
+function openSheet(mode,focus){
+  if(SH)return;
+  var s=readQ(),today=new Date();today.setHours(0,0,0,0);
+  var st={ci:s.ci,co:s.co,g:s.g||0,nb:s.nb,tags:s.tags.slice(),mode:mode};
+  var first=parseYmd(st.ci)||today;var view={y:first.getFullYear(),m:first.getMonth()};
+  var opener=document.activeElement;
+  var scrim=document.createElement('div');scrim.className='scrim';
+  var el=document.createElement('div');el.className='sheet';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-labelledby','sh-t');
+  var hoods=(CFG().neighborhoods||[]);
+  var types=typeChips();
+  el.innerHTML='<div class="grab"></div><div class="sh-top"><h2 id="sh-t">'+(mode==='unit'?'تواريخ إقامتك':'وش تدوّر؟')+'</h2><button class="xbtn" id="sh-x" aria-label="إغلاق">'+svg('x')+'</button></div>'
+    +'<div class="sh-body"><div class="err" id="sh-err" role="alert"></div>'
+    +'<section class="sh-sec" id="sh-dates"><h3>متى بتجي؟</h3><p class="hint">اختر يوم الدخول ثم يوم الخروج.</p><div class="dpick"><div class="dbox" id="db-ci"><span>الدخول</span><b></b></div><div class="dbox" id="db-co"><span>الخروج</span><b></b></div></div><div id="cal"></div><p class="cal-n" id="cal-n"></p></section>'
+    +'<section class="sh-sec" id="sh-guests"><div class="step"><div class="lbl"><b>الضيوف</b><span>كم شخص بيسكن؟</span></div><div class="ctl"><button class="pm" id="g-m" aria-label="أقل">'+svg('minus')+'</button><b id="g-v" aria-live="polite"></b><button class="pm" id="g-p" aria-label="أكثر">'+svg('plus')+'</button></div></div></section>'
+    +(mode!=='unit'&&hoods.length?('<section class="sh-sec" id="sh-hood"><h3>الحي</h3><p class="hint">اختر حي واحد، أو خلّها على كل الأحياء.</p><div class="cwrap" id="hd">'+['<button type="button" class="chip" data-nb="">كل الأحياء</button>'].concat(hoods.map(function(o){return '<button type="button" class="chip" data-nb="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';})).join('')+'</div></section>'):'')
+    +(mode!=='unit'&&types.length?('<section class="sh-sec" id="sh-type"><h3>نوع الإقامة</h3><p class="hint">تقدر تختار أكثر من وحدة، ونعرض اللي فيها كلها.</p><div class="cwrap" id="ty">'+types.map(function(o){return '<button type="button" class="chip" data-k="'+he(o.key)+'" aria-pressed="false">'+he(o.ar||o.en)+'</button>';}).join('')+'</div></section>'):'')
+    +'</div><div class="sh-foot"><button class="clr" id="sh-c">مسح</button><button class="btn" id="sh-go">'+svg('search')+(mode==='unit'?'اعرض سعر العضو لتواريخك':'اعرض الإقامات')+'</button></div>';
+  document.body.appendChild(scrim);document.body.appendChild(el);
+  document.body.style.overflow='hidden';
+  function $(id){return el.querySelector('#'+id);}
+  function paint(){
+    var ci=$('db-ci'),co=$('db-co');
+    ci.querySelector('b').textContent=st.ci?fmtD(st.ci,true):'أضف تاريخ';ci.querySelector('b').className=st.ci?'set':'';
+    co.querySelector('b').textContent=st.co?fmtD(st.co,true):'أضف تاريخ';co.querySelector('b').className=st.co?'set':'';
+    ci.classList.toggle('cur',!st.ci||!!st.co);co.classList.toggle('cur',!!st.ci&&!st.co);
+    var n=nightsBetween(st.ci,st.co);$('cal-n').textContent=(st.ci&&st.co&&n>0)?(nightsLabel(n)+' · '+rangeLabel(st.ci,st.co)):'';
+    var gv=st.g||1;$('g-v').textContent=gv;$('g-m').disabled=gv<=1;$('g-p').disabled=gv>=16;
+    var hd=$('hd');if(hd)hd.querySelectorAll('.chip').forEach(function(b){var on=(b.getAttribute('data-nb')||'')===(st.nb||'');b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');});
+    var ty=$('ty');if(ty)ty.querySelectorAll('.chip').forEach(function(b){var on=st.tags.indexOf(b.getAttribute('data-k'))>=0;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');});
+    drawCal();
   }
-  return null;
-}
-function mapHtml(){
-  return '<div class="map-wrap"><div id="emap" class="emap"></div><div class="area-panel" id="areaPanel"><div class="muted" style="font-size:13px">اختر دائرة على الخريطة لعرض الإقامة — المواقع تقريبية للخصوصية.</div></div></div>';
-}
-function withLeaflet(cb){
-  if(typeof L!=='undefined'){cb();return;}
-  window._lfQ=window._lfQ||[];window._lfQ.push(cb);
-  if(window._lfLoading)return;window._lfLoading=true;
-  var css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
-  var sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
-  sc.onload=function(){(window._lfQ||[]).forEach(function(f){try{f();}catch(e){}});window._lfQ=[];};
-  sc.onerror=function(){var sec=document.querySelector('.explore');if(sec)sec.style.display='none';};
-  document.head.appendChild(sc);
-}
-function loadAreas(){
-  var sec=document.querySelector('.explore');
-  Promise.all([
-    fetch('/api/elite/geo').then(function(r){return r.json();}).catch(function(){return null;}),
-    fetch('/api/stay/search').then(function(r){return r.json();}).catch(function(){return null;})
-  ]).then(function(rs){
-    var pts=((rs[0]||{}).points)||{},list=((rs[1]||{}).results)||[];
-    var ids=Object.keys(pts);
-    if(!ids.length){if(sec)sec.style.display='none';return;}
-    var byId={};list.forEach(function(l){byId[String(l.id)]=l;});
-    withLeaflet(function(){initEmap(pts,byId,ids,sec);});
-  }).catch(function(){if(sec)sec.style.display='none';});
-}
-function initEmap(pts,byId,ids,sec){
-  if(typeof L==='undefined'){if(sec)sec.style.display='none';return;}
-  var el=document.getElementById('emap');if(!el)return;
-  var map=L.map(el,{scrollWheelZoom:false,zoomAnimation:!RM,fadeAnimation:!RM,markerZoomAnimation:!RM}).setView([24.71,46.68],11);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
-  var grp=[];
-  ids.forEach(function(id){
-    var p=pts[id],l=byId[id];if(!p)return;
-    var c=L.circle([p[0],p[1]],{radius:600,color:'#B0894E',weight:1.4,opacity:.9,fillColor:'#B0894E',fillOpacity:.16}).addTo(map);
-    grp.push(c);
-    if(l){
-      c.on('click',function(){paintArea(l.name_ar||l.name_en||'','',(l.area?('في '+l.area):'الموقع تقريبي للخصوصية'),[l]);try{track('elite_geo_select',{listing_id:l.id});}catch(e){}});
-      c.bindTooltip(he(l.name_ar||l.name_en||''),{direction:'top'});
+  function drawCal(){
+    var y=view.y,m=view.m,firstDay=new Date(y,m,1),off=firstDay.getDay(),days=new Date(y,m+1,0).getDate();
+    var minView=(y<today.getFullYear())||(y===today.getFullYear()&&m<=today.getMonth());
+    var h='<div class="cal-nav"><button type="button" id="cal-p" aria-label="الشهر السابق"'+(minView?' disabled':'')+'>'+svg('chr')+'</button><b>'+AR_M[m]+' '+y+'</b><button type="button" id="cal-x" aria-label="الشهر الجاي">'+svg('chl')+'</button></div>';
+    h+='<div class="cal-wd">'+['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'].map(function(d){return '<span>'+d+'</span>';}).join('')+'</div><div class="cal-g">';
+    for(var i=0;i<off;i++)h+='<span></span>';
+    for(var d=1;d<=days;d++){
+      var dt=new Date(y,m,d),k=ymd(dt),c=[];
+      var past=dt<today;
+      if(k===ymd(today))c.push('today');
+      if(k===st.ci){c.push('s');if(st.co)c.push('hasE');}
+      if(k===st.co)c.push('e');
+      if(st.ci&&st.co&&k>st.ci&&k<st.co)c.push('in');
+      h+='<button type="button" data-d="'+k+'" class="'+c.join(' ')+'"'+(past?' disabled':'')+' aria-label="'+fmtD(k,true)+'"'+((k===st.ci||k===st.co)?' aria-pressed="true"':'')+'><span>'+d+'</span></button>';
+    }
+    $('cal').innerHTML=h+'</div>';
+    var p=$('cal-p'),x=$('cal-x');
+    p.onclick=function(){if(view.m===0){view.m=11;view.y--;}else view.m--;drawCal();};
+    x.onclick=function(){if(view.m===11){view.m=0;view.y++;}else view.m++;drawCal();};
+  }
+  el.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    var k=b.getAttribute('data-d');
+    if(k){if(!st.ci||(st.ci&&st.co)){st.ci=k;st.co='';}else if(k<=st.ci){st.ci=k;}else{st.co=k;}$('sh-err').classList.remove('on');paint();return;}
+    if(b.hasAttribute('data-nb')){st.nb=b.getAttribute('data-nb');paint();return;}
+    if(b.hasAttribute('data-k')){var t=b.getAttribute('data-k'),i=st.tags.indexOf(t);if(i>=0)st.tags.splice(i,1);else st.tags.push(t);paint();return;}
+    if(b.id==='g-m'){st.g=Math.max(1,(st.g||1)-1);paint();}
+    else if(b.id==='g-p'){st.g=Math.min(16,(st.g||1)+1);paint();}
+    else if(b.id==='sh-c'){st.ci='';st.co='';st.g=0;st.nb='';st.tags=[];paint();}
+    else if(b.id==='sh-x'){close();}
+    else if(b.id==='sh-go'){
+      var ev=validateDates(st.ci,st.co);if(ev){var er=$('sh-err');er.textContent=ev;er.classList.add('on');el.querySelector('.sh-body').scrollTop=0;return;}
+      var q={ci:st.ci,co:st.co,g:st.g,nb:st.nb,tags:st.tags};
+      track('elite_search_submit',{mode:mode});
+      if(mode==='unit'){location.href=location.pathname+buildQ({ci:q.ci,co:q.co,g:q.g},true);}
+      else if(mode==='search-inplace'){close();history.replaceState(null,'','/elite/search'+buildQ(q));runSearch();}
+      else{location.href='/elite/search'+buildQ(q);}
     }
   });
-  try{if(grp.length){map.fitBounds(L.featureGroup(grp).getBounds().pad(0.2));}}catch(e){}
-  setTimeout(function(){try{map.invalidateSize();}catch(e){}},250);
+  function onKey(e){if(e.key==='Escape')close();}
+  function close(){
+    document.removeEventListener('keydown',onKey);
+    el.classList.remove('on');scrim.classList.remove('on');
+    setTimeout(function(){el.remove();scrim.remove();},380);
+    document.body.style.overflow='';SH=null;try{if(opener&&opener.focus)opener.focus();}catch(e){}
+  }
+  scrim.onclick=close;document.addEventListener('keydown',onKey);
+  paint();
+  SH=el;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){el.classList.add('on');scrim.classList.add('on');
+    var tgt=focus&&$(focus);if(tgt&&focus!=='sh-dates'){el.querySelector('.sh-body').scrollTop=tgt.offsetTop-12;}
+    $('sh-x').focus({preventScroll:true});});});
 }
-function selectArea(k){
-  var A=window._eliteAreas||{byKey:{}};var list=A.byKey[k]||[];var d=null;DISTRICTS.forEach(function(dd){if(dd.k===k)d=dd;});
-  document.querySelectorAll('.pin').forEach(function(p){p.classList.toggle('on',p.getAttribute('data-k')===k);});
-  document.querySelectorAll('.area-chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-k')===k);});
-  paintArea(k,(d&&d.en)||'',AREA_GUIDES[k]||'حيٌّ راقٍ في الرياض، باقة من إقامات عوجا المختارة.',list);
-  track('elite_area_select',{area:k});
-}
-function selectExtra(a){
-  var A=window._eliteAreas||{extra:{}};var list=A.extra[a]||[];
-  document.querySelectorAll('.pin').forEach(function(p){p.classList.remove('on');});
-  document.querySelectorAll('.area-chip').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-a')===a);});
-  paintArea(a,'',AREA_GUIDES[a]||'حيٌّ راقٍ في الرياض، باقة من إقامات عوجا المختارة.',list);
-  track('elite_area_select',{area:a});
-}
-function paintArea(name,en,guide,list){
-  var el=document.getElementById('areaPanel');if(!el)return;
-  var cards=(list||[]).map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}),true);}).join('');
-  el.innerHTML='<div class="area-h"><span class="area-name kufi">'+he(name)+'</span>'+(en?('<span class="area-en serif">'+he(en)+'</span>'):'')+'</div>'
-    +'<p class="area-guide">'+he(guide)+'</p>'
-    +(cards?('<div class="area-res">'+cards+'</div>'):'<div class="muted" style="font-size:13px">تواصل مع الكونسيرج لعرض إقامات هذا الحي.</div>');
-  reveal();
+
+/* ---------- home ---------- */
+var TIERS=[['١','طُريف','TURAIF','أرقى عضوياتنا — أكثر من خصم 20%: ترقيات تلقائية، أولوية في التوفر، وكونسيرج مخصّص لك.','elite_join_turaif','حياك الله 🤍 أرغب بعضوية عوجا إيليت — طُريف (الأعلى)، وأبغى أعرف المزايا الإضافية.',true],
+  ['٢','ذهب','GOLD','خصم 20% ثابت على إقاماتك، دخول مبكر، وهدايا ترحيب مختارة.','elite_join_gold','حياك الله 🤍 أرغب بعضوية عوجا إيليت — ذهب (Gold).',false],
+  ['٣','فضّة','SILVER','خصم 20% على الحجز المباشر ومزايا الأعضاء على مدار السنة.','elite_join_silver','حياك الله 🤍 أرغب بعضوية عوجا إيليت — فضّة (Silver).',false]];
+function tiersHtml(){
+  return '<ol class="tiers">'+TIERS.map(function(t){
+    return '<li><span class="n num">'+t[0]+'</span><div><h3>عوجا '+he(t[1])+'<span class="en" dir="ltr">'+t[2]+'</span>'+(t[6]?'<span class="top">الأعلى</span>':'')+'</h3><p>'+he(t[3])+'</p></div>'
+      +'<div class="act">'+waBtn(t[5],t[4],'ghost sm','تواصل عن '+t[1])+'</div></li>';
+  }).join('')+'</ol>';
 }
 function viewHome(){
   track('elite_page_view',{});
-  var cfg=(ELITE&&ELITE.config)||{noo:[],count:0};var p=qs();
-  var hero=cfg.hero||'';
-  var heroSrc=pimg(hero,1600);
-  var heroBg=hero?('<div class="bgimg" style="background-image:url('+JSON.stringify(heroSrc).replace(/"/g,'&quot;')+')"></div>'):'<div class="bgimg ph-hero"></div>';
-  var heroVid=(cfg.video)?('<video class="bgvid" autoplay muted loop playsinline preload="auto"'+(hero?(' poster="'+he(heroSrc)+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
-  var nbs=(cfg.neighborhoods||[]);var nbopts='<option value="">كل الأحياء</option>'+nbs.map(function(o){return '<option value="'+he(o.key)+'"'+((p.get('neighborhood')===o.key)?' selected':'')+'>'+he(o.ar||o.en)+(o.count?(' ('+o.count+')'):'')+'</option>';}).join('');
-  var gopt='';for(var i=1;i<=10;i++){gopt+='<option value="'+i+'"'+((p.get('guests')==String(i))?' selected':'')+'>'+i+'</option>';}
-  var chips=(cfg.noo||[]).slice(0,16).map(function(o){return '<button type="button" class="qp" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
-  V.innerHTML=
-    '<section class="hero">'+heroBg+heroVid+'<div class="hero-grain"></div><div class="hero-ov"></div><div class="hero-frame"></div><div class="hero-in"><div class="wrap">'
-      +'<span class="eyebrow rise" style="animation-delay:.02s">Ouja Elite · عضوية مختارة</span>'
-      +'<span class="h-rule"></span>'
-      +'<h1 class="h-hero kufi rise" style="animation-delay:.16s">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
-      +'<div class="hero-sub serif rise" style="animation-delay:.30s">A curated residence collection · Riyadh</div>'
-      +'<p class="hero-lead rise" style="animation-delay:.40s">نختار لك من إقامات عوجا ما يليق بضيافتك، ونرتّب كل تفصيل قبل وصولك.</p>'
-    +'</div></div></section>'
-    +'<section class="wrap band-tight"><div class="widget rise" style="animation-delay:.52s">'
-      +'<span class="eyebrow">احجز إقامتك</span>'
-      +'<div id="err" class="err"></div>'
-      +'<div class="wfields">'
-        +'<div class="field"><label>تاريخ الدخول</label><input type="date" id="ci"></div>'
-        +'<div class="field"><label>تاريخ الخروج</label><input type="date" id="co"></div>'
-        +'<div class="field"><label>الضيوف</label><select id="g">'+gopt+'</select></div>'
-        +'<div class="field"><label>الحي</label><select id="nb">'+nbopts+'</select></div>'
-      +'</div>'
-      +(chips?('<div class="qps" id="chips" style="margin-top:8px">'+chips+'</div>'):'')
-      +'<button class="btn primary block stacked" id="go"><span class="micro">View Residences</span><span class="lbl">اعرض الإقامات المتاحة</span></button>'
+  document.body.classList.add('home');
+  var cfg=CFG(),hc=cfg.hero_cfg||{},s=readQ();
+  var fpos=({center:'center',top:'center top',bottom:'center bottom',left:'left center',right:'right center'})[hc.focal||'center']||'center';
+  var heroBg=cfg.hero?('<img class="bgimg enter" alt="" fetchpriority="high" decoding="async" src="'+he(pimg(cfg.hero,1600))+'" srcset="'+he(pimg(cfg.hero,900))+' 900w, '+he(pimg(cfg.hero,1600))+' 1600w, '+he(pimg(cfg.hero,2400))+' 2400w" sizes="100vw" style="object-position:'+fpos+'">'):'';
+  var heroVid=cfg.video?('<video class="bgimg" autoplay muted loop playsinline preload="metadata"'+(cfg.hero?(' poster="'+he(pimg(cfg.hero,1600))+'"'):'')+'><source src="'+he(cfg.video)+'" type="video/mp4"></video>'):'';
+  var ovOp=(hc.overlay!=null?Math.max(.35,hc.overlay/100):1);
+  var ro=(cfg.rating_overall||null),proof=[];
+  if(ro&&ro.avg)proof.push(svg('star','f')+'<span><b class="num">'+he(ro.avg)+'</b> من <span class="num">'+Number(ro.count||0).toLocaleString('en-US')+'</span> تقييم ضيف</span>');
+  proof.push('<span>مرخّصة من وزارة السياحة</span>');
+  var dv=(s.ci&&s.co)?rangeLabel(s.ci,s.co):'',gv=s.g?guestsLabel(s.g):'',nv=s.nb?hoodName(s.nb):'';
+  var vs=(cfg.voices||[]);
+  V.innerHTML='<section class="hero">'+heroBg+heroVid+'<div class="shade" style="opacity:'+ovOp+'"></div><div class="in wrap">'
+    +'<h1 class="enter">إقاماتٌ مختارة، وضيافةٌ على قدر المقام</h1>'
+    +'<p class="lede enter d1">نختار لك من إقامات عوجا ما يليق بضيافتك، ونرتّب كل تفصيل قبل وصولك.</p>'
+    +'<div class="proof enter d1">'+proof.join('<span class="sep"></span>')+'</div>'
+    +'<div class="sbar enter d2" role="search"><button class="seg" data-f="sh-dates"><span class="k">متى؟</span><span class="v'+(dv?' set':'')+'">'+he(dv||'أضف التواريخ')+'</span></button>'
+    +'<button class="seg" data-f="sh-guests"><span class="k">الضيوف</span><span class="v'+(gv?' set':'')+'">'+he(gv||'كم شخص؟')+'</span></button>'
+    +((cfg.neighborhoods||[]).length?('<button class="seg opt" data-f="sh-hood"><span class="k">الحي</span><span class="v'+(nv?' set':'')+'">'+he(nv||'كل الأحياء')+'</span></button>'):'')
+    +'<a class="btn go" id="go" href="/elite/search'+he(buildQ(s))+'" aria-label="اعرض الإقامات">'+svg('search')+'<span class="t">اعرض الإقامات</span></a></div>'
+    +'<div class="enter d3"><p class="note">الحجز عبر كونسيرج واتساب · خصم 20% لأعضاء عوجا إيليت على إقاماتهم.</p></div>'
     +'</div></section>'
-    +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec"><span class="eyebrow center reveal">لماذا عوجا إيليت</span><div class="pillars reveal d1">'+pillarsHtml()+'</div></section>'
-    +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">إقامات مختارة</span><h2 class="h-sec kufi">مجموعتنا المنتقاة</h2></div>'
-      +'<div id="collection" class="grid">'+skeletons(2)+'</div>'
-      +'<div class="center reveal" style="margin-top:28px"><a class="btn secondary" href="/elite/search'+location.search+'"><span class="lbl">اعرض كل الإقامات</span></a></div>'
-    +'</section>'
-    +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec explore"><div class="sec-head reveal"><span class="eyebrow">استكشف الرياض</span><h2 class="h-sec kufi">خريطة إقاماتنا في الرياض</h2></div>'+mapHtml()+'</section>'
-    +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec"><div class="sec-head reveal"><span class="eyebrow">عضوية عوجا إيليت</span><h2 class="h-sec kufi">مراتب العضوية</h2></div>'+tiersHtml()+'</section>'
-    +'<div class="wrap">'+divider()+'</div>'
-    +'<section class="wrap sec standard center reveal"><span class="crest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 7.4L21 12l-7.4 1.6L12 21l-1.6-7.4L3 12l7.4-1.6L12 3Z"/></svg></span><span class="eyebrow center">معيار عوجا</span><div class="h-standard kufi">من أهل الدرعية 🤎</div><p class="standard-p">في عوجا، لا نقيس أنفسنا بمدارس الضيافة القائمة… نحن نبني المدرسة التي سيُقاس بها غيرنا.</p></section>'
-    +'<section class="wrap"><div class="concierge reveal">'+conciergeBand()+'</div></section>';
-  setupWidget();
-  loadCollection();
-  loadAreas();
-  reveal();
+    +'<div class="wrap">'
+    +'<section class="sec" id="feat"><div class="sec-h"><div><h2>مختارات عوجا إيليت</h2></div><a class="link" href="/elite/search'+he(buildQ(s))+'">كل الإقامات '+svg('arw')+'</a></div><div class="rail">'+skelCards(3)+'</div></section>'
+    +'<section class="sec" id="perks"><div class="sec-h"><div><h2>ليش عوجا إيليت؟</h2></div></div>'
+    +perksList([['bell','كونسيرج خاص ٢٤/٧','فريق يرتّب كل تفصيل قبل وبعد وصولك.'],['car','سائق خاص','مرسيدس · سواري المسافر تحت طلبك.'],['badge','حجز مباشر بدون رسوم','تحجز معنا مباشرة بلا رسوم منصات.'],['key','دخول ذاتي ووصول سلس','تدخل إقامتك بدون انتظار ولا تعقيد.']])+'</section>'
+    +(vs.length>=2?('<section class="sec" id="voices"><div class="sec-h"><div><h2>وش قالوا ضيوفنا</h2><p>من تقييمات ضيوف عوجا'+((ro&&ro.avg)?(': <span class="num">'+he(ro.avg)+'</span> من <span class="num">'+Number(ro.count||0).toLocaleString('en-US')+'</span> تقييم'):'')+'. هذي كلماتهم.</p></div></div><ul class="vrail">'+vs.slice(0,6).map(function(v){return voiceHtml(v,true);}).join('')+'</ul></section>'):'')
+    +'<section class="sec" id="tiers"><div class="sec-h"><div><h2>مراتب العضوية</h2><p>كل الأعضاء يحصلون على خصم 20% على إقاماتهم، وأعضاء طُريف يحصلون على أكثر.</p></div></div>'+tiersHtml()+'</section>'
+    +((cfg.neighborhoods||[]).length?('<section class="sec" id="hoods"><div class="sec-h"><div><h2>اختر حيّك</h2><p>إقاماتنا موزعة في أحياء الرياض. اختر الحي الأقرب لمشاويرك.</p></div></div><ul class="hoods">'
+      +(cfg.neighborhoods||[]).map(function(o){return '<li><a href="/elite/search?neighborhood='+encodeURIComponent(o.key)+he(carry())+'" data-nb="'+he(o.key)+'"><span>'+he(o.ar||o.en)+'</span>'+(o.en?('<span class="en" dir="ltr">'+he(o.en)+'</span>'):'')+svg('arw')+'</a></li>';}).join('')
+      +'</ul></section>'):'')
+    +'<section class="sec" id="areas" hidden><div class="sec-h"><div><h2>خريطة إقاماتنا</h2><p>المواقع تقريبية للخصوصية. اضغط على دائرة عشان تشوف الإقامة.</p></div></div><div class="mapbox"><div id="emap" class="emap"></div><div class="apanel" id="ap"><p class="muted">اختر دائرة على الخريطة لعرض الإقامة.</p></div></div></section>'
+    +'<section class="sec" id="how"><div class="sec-h"><div><h2>كيف تحجز؟</h2></div></div><ol class="how">'
+    +'<li><span class="n num">١</span><h3>اختر إقامتك من هنا</h3><p>صور كل إقامة ومواصفاتها وحيّها، وسعر العضو لما تحط تواريخك.</p></li>'
+    +'<li><span class="n num">٢</span><h3>أرسل طلبك للكونسيرج</h3><p>زر واحد يفتح واتساب برسالة فيها الإقامة والتواريخ، ونأكد لك التوفر والسعر.</p></li>'
+    +'<li><span class="n num">٣</span><h3>ادخل بنفسك</h3><p>دخول ذاتي بدون انتظار استقبال، في الوقت اللي يناسبك.</p></li>'
+    +'</ol><p class="lic">'+svg('shield')+'وحدات عوجا مرخّصة من وزارة السياحة.</p></section>'
+    +'<section class="sec" id="std"><div class="sec-h"><div><h2>من أهل الدرعية</h2><p>في عوجا، لا نقيس أنفسنا بمدارس الضيافة القائمة… نحن نبني المدرسة التي سيُقاس بها غيرنا.</p></div></div></section>'
+    +'</div>';
+  V.querySelectorAll('.sbar .seg').forEach(function(b){b.onclick=function(){openSheet('search',b.getAttribute('data-f'));};});
+  document.getElementById('go').addEventListener('click',function(){track('elite_search_submit',{mode:'bar'});});
+  var head=document.getElementById('head'),hero=V.querySelector('.hero');
+  function hs(){head.classList.toggle('solid',window.scrollY>hero.offsetHeight-80);}
+  window.addEventListener('scroll',hs,{passive:true});hs();
+  var fe=document.querySelector('#feat .rail');
+  fetch('/api/stay/featured').then(function(r){return r.json();}).then(function(d){
+    var res=((d&&d.results)||[]).slice(0,6);
+    if(!res.length){document.getElementById('feat').remove();return;}
+    fe.innerHTML=res.map(function(l){return card(l,false);}).join('');
+  }).catch(function(){var f=document.getElementById('feat');if(f)f.remove();});
+  var once=false;
+  function more(){if(once)return;once=true;
+    fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
+      var all=((d&&d.results)||[]);
+      var cov={};all.forEach(function(l){if(l.cover&&l.neighborhood&&!cov[l.neighborhood])cov[l.neighborhood]=l.cover;});
+      peekInit(cov);
+      loadAreas(all);
+    }).catch(function(){});
+  }
+  var watch=document.getElementById('tiers');
+  if(watch&&'IntersectionObserver' in window){var io=new IntersectionObserver(function(es){if(es.some(function(e){return e.isIntersecting;})){io.disconnect();more();}},{rootMargin:'600px 0px'});io.observe(watch);}else more();
+}
+function peekInit(cov){
+  var list=document.querySelector('.hoods');if(!list||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;
+  var pk=document.createElement('div');pk.className='peek';pk.innerHTML='<img alt="">';document.body.appendChild(pk);var im=pk.querySelector('img');
+  list.addEventListener('mousemove',function(e){pk.style.left=(e.clientX-260)+'px';pk.style.top=(e.clientY-150)+'px';});
+  list.querySelectorAll('a').forEach(function(a){var k=a.getAttribute('data-nb');if(!cov[k])return;
+    a.addEventListener('mouseenter',function(){im.src=pimg(cov[k],480);pk.classList.add('on');});
+    a.addEventListener('mouseleave',function(){pk.classList.remove('on');});});
+}
+/* the map: approximate circles for privacy, only for stays that are on the site */
+function withLeaflet(cb,fail){
+  if(typeof L!=='undefined'){cb();return;}
+  var css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
+  var sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+  sc.onload=function(){try{cb();}catch(e){if(fail)fail();}};sc.onerror=function(){if(fail)fail();};
+  document.head.appendChild(sc);
+}
+function loadAreas(list){
+  var sec=document.getElementById('areas');if(!sec)return;
+  fetch('/api/elite/geo').then(function(r){return r.json();}).then(function(g){
+    var pts=(g&&g.points)||{},byId={};
+    (list||[]).forEach(function(l){byId[String(l.id)]=l;});
+    var ids=Object.keys(pts).filter(function(id){return byId[id]&&pts[id];});
+    if(!ids.length)return;
+    sec.hidden=false;
+    withLeaflet(function(){initEmap(pts,byId,ids);},function(){sec.hidden=true;});
+  }).catch(function(){});
+}
+function initEmap(pts,byId,ids){
+  var el=document.getElementById('emap');if(!el||typeof L==='undefined')return;
+  var RM=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var map=L.map(el,{scrollWheelZoom:false,zoomAnimation:!RM,fadeAnimation:!RM,markerZoomAnimation:!RM}).setView([24.71,46.68],11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:18,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+  var shapes=[];
+  ids.forEach(function(id){
+    var p=pts[id],l=byId[id];
+    var c=L.circle([p[0],p[1]],{radius:600,color:'#A57A2C',weight:1.4,opacity:.9,fillColor:'#A57A2C',fillOpacity:.16}).addTo(map);
+    shapes.push(c);
+    c.on('click',function(){paintArea(l);track('elite_geo_select',{listing_id:l.id});});
+    c.bindTooltip(he(l.name_ar||l.name_en||''),{direction:'top'});
+  });
+  try{map.fitBounds(L.featureGroup(shapes).getBounds().pad(0.2));}catch(e){}
+  setTimeout(function(){try{map.invalidateSize();}catch(e){}},250);
+}
+function paintArea(l){
+  var ap=document.getElementById('ap');if(!ap)return;
+  ap.innerHTML='<h3 dir="auto">'+he(l.name_ar||l.name_en||'')+'</h3><p class="muted">'+he(l.area?('في '+areaName(l)+' · الموقع تقريبي للخصوصية'):'الموقع تقريبي للخصوصية')+'</p>'+card(Object.assign({},l,{available:null,est_total:null,nights:null}));
 }
 
-function setupWidget(){
-  var ciEl=document.getElementById('ci'),coEl=document.getElementById('co'),err=document.getElementById('err'),p=qs();
-  if(!ciEl)return;
-  var t=new Date(),iso=function(d){return d.toISOString().slice(0,10);};
-  ciEl.min=iso(t);coEl.min=iso(new Date(t.getTime()+86400000));
-  if(p.get('check_in'))ciEl.value=p.get('check_in');if(p.get('check_out'))coEl.value=p.get('check_out');
-  ciEl.onchange=function(){var d=ciEl.value?new Date(ciEl.value):t;coEl.min=iso(new Date(d.getTime()+86400000));};
-  var chipsEl=document.getElementById('chips');
-  var preTags=(p.get('tags')||'').split(',').filter(Boolean);
-  if(chipsEl){chipsEl.querySelectorAll('.qp').forEach(function(b){if(preTags.indexOf(b.getAttribute('data-k'))>=0)b.classList.add('active');b.onclick=function(){b.classList.toggle('active');track('elite_filter_changed',{});};});}
-  document.getElementById('go').onclick=function(){
-    var ci=ciEl.value,co=coEl.value,g=document.getElementById('g').value;
-    var nb=(document.getElementById('nb')||{}).value||'';var tg=[];if(chipsEl){chipsEl.querySelectorAll('.qp.active').forEach(function(x){tg.push(x.getAttribute('data-k'));});}
-    var ev=validateDates(ci,co);if(ev){err.textContent=ev;err.classList.add('on');return;}
-    err.classList.remove('on');
-    var q='?guests='+encodeURIComponent(g);
-    if(tg.length)q+='&tags='+encodeURIComponent(tg.join(','));
-    if(nb)q+='&neighborhood='+encodeURIComponent(nb);
-    if(ci)q+='&check_in='+ci;if(co)q+='&check_out='+co;q+=carry();
-    location.href='/elite/search'+q;
-  };
+/* ---------- search ---------- */
+function summaryText(s){
+  var a=(s.ci&&s.co)?rangeLabel(s.ci,s.co):'أي وقت';
+  var b=[s.g?guestsLabel(s.g):'',s.nb?hoodName(s.nb):'كل الأحياء'].filter(Boolean).join(' · ');
+  return '<b>'+he(a)+'</b><span>'+he(b)+'</span>';
 }
-
-function loadCollection(){
-  fetch('/api/stay/search').then(function(r){return r.json();}).then(function(d){
-    var res=((d&&d.results)||[]).slice(0,4);var el=document.getElementById('collection');if(!el)return;
-    if(!res.length){el.innerHTML='<p class="muted" style="grid-column:1/-1">تواصل مع الكونسيرج لعرض الإقامات المتاحة.</p>';return;}
-    el.innerHTML=res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('');reveal();
-  }).catch(function(){var el=document.getElementById('collection');if(el)el.innerHTML='<p class="muted" style="grid-column:1/-1">تعذّر تحميل الإقامات حاليًا، جرّب بعد قليل.</p>';});
-}
-
-function card(l,novt){
-  var avail=(l.available===true);
-  var vt=(novt?'':' style="view-transition-name:r'+he(l.id)+'"');
-  var cov=l.cover?('<img class="fadein" loading="lazy" width="600" height="400" alt="'+he(l.name_ar||l.name_en)+'"'+vt+' src="'+he(pimg(l.cover,800))+'">'):monoPh();
-  var ovr=[];if(avail)ovr.push('<span class="tag ok">متاحة</span>');if(l.badge)ovr.push('<span class="tag gold">'+he(l.badge)+'</span>');
-  var price=priceHtml(l);
-  return '<a class="col-card reveal" href="/elite/'+he(l.slug)+location.search+'">'
-    +'<div class="cover">'+cov+'<div class="frame"></div>'+(ovr.length?('<div class="tags">'+ovr.join('')+'</div>'):'')+'</div>'
-    +'<div class="cc-body">'
-      +(l.area?('<div class="cc-area">'+he(l.area)+'</div>'):'')
-      +'<h3 class="cc-name kufi">'+he(l.name_ar||l.name_en)+'</h3>'
-      +'<div class="cc-meta">'+metaRow(l)+'</div>'
-      +(badges(l,3)?('<div class="chips">'+badges(l,3)+'</div>'):'')
-      +'<div class="cc-foot"><div>'+price+'</div><span class="discover">اكتشف الإقامة <span class="arr">←</span></span></div>'
-    +'</div></a>';
-}
-
-function searchSummary(ci,co,g,ty){
-  var bits=[];if(ci&&co)bits.push(he(ci)+' ← '+he(co));else bits.push('تصفّح');if(g)bits.push(he(g)+' ضيوف');
-  var pp=qs();var noo=((ELITE&&ELITE.config&&ELITE.config.noo)||[]);
-  var nb=pp.get('neighborhood')||'';var nbl=((ELITE&&ELITE.config&&ELITE.config.neighborhoods)||[]).filter(function(o){return o.key===nb;})[0];if(nb&&nbl)bits.push('📍 '+he(nbl.ar||nbl.en));
-  (pp.get('tags')||'').split(',').filter(Boolean).forEach(function(k){var o=noo.filter(function(x){return x.key===k;})[0];bits.push(he(o?(o.ar||o.en):k));});
-  var tyl=noo.filter(function(o){return o.key===ty;})[0];if(ty&&ty!=='all')bits.push(he(tyl?(tyl.ar||tyl.en):ty));
-  return '<div class="summary"><div class="wrap summary-in"><span class="s">'+bits.join(' · ')+'</span><a class="btn secondary mini" href="/elite'+location.search+'">تعديل البحث</a></div></div>';
-}
-
 function viewSearch(){
-  var p=qs(),ci=p.get('check_in'),co=p.get('check_out'),g=p.get('guests')||'',ty=p.get('type')||'all';
+  document.getElementById('nv-s').classList.add('on');
+  var s=readQ();
+  var nf=(s.nb?1:0)+s.tags.length;
+  V.innerHTML='<div class="stop"><div class="wrap"><button class="sum" id="sum" aria-label="عدّل البحث">'+svg('search')+'<span class="t" id="sum-t">'+summaryText(s)+'</span></button><button class="fbtn" id="fb" aria-label="الفلاتر">'+svg('sliders')+'<i id="fb-n"'+(nf?'':' hidden')+'>'+nf+'</i></button></div></div>'
+    +'<div class="wrap"><div class="qchips" id="qc"></div><div class="res-h" id="rh"></div><div id="rs"></div></div>';
+  document.getElementById('sum').onclick=function(){openSheet('search-inplace','sh-dates');};
+  document.getElementById('fb').onclick=function(){openSheet('search-inplace','sh-hood');};
+  runSearch();
+}
+function runSearch(){
+  var s=readQ(),ci=s.ci,co=s.co,g=s.g?String(s.g):'',ty=s.ty;
+  var nf=(s.nb?1:0)+s.tags.length,fbn=document.getElementById('fb-n');if(fbn){fbn.textContent=nf;fbn.hidden=!nf;}
+  var st=document.getElementById('sum-t');if(st)st.innerHTML=summaryText(s);
+  var qc=document.getElementById('qc'),rh=document.getElementById('rh'),rs=document.getElementById('rs');
+  qc.innerHTML=typeChips().map(function(o){var on=s.tags.indexOf(o.key)>=0;return '<button type="button" class="chip'+(on?' on':'')+'" aria-pressed="'+on+'" data-k="'+he(o.key)+'">'+he(o.ar||o.en)+'</button>';}).join('');
+  qc.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){var t=b.getAttribute('data-k'),q=readQ(),i=q.tags.indexOf(t);if(i>=0)q.tags.splice(i,1);else q.tags.push(t);history.replaceState(null,'','/elite/search'+buildQ(q));track('elite_filter_changed',{});runSearch();};});
   var verr=validateDates(ci,co);
-  if(verr){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>'+he(verr)+'</h2><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل التواريخ</span></a></div></div>';return;}
-  V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="grid" style="margin:20px 0">'+skeletons(4)+'</div></div>';
-  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+((p.get('tags'))?('&tags='+encodeURIComponent(p.get('tags'))):'')+((p.get('neighborhood'))?('&neighborhood='+encodeURIComponent(p.get('neighborhood'))):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
+  if(verr){rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>'+he(verr)+'</h2><div class="acts"><button class="btn" id="fix">'+svg('cal')+'عدّل التواريخ</button></div></div>';document.getElementById('fix').onclick=function(){openSheet('search-inplace','sh-dates');};return;}
+  rh.innerHTML='<div class="sk" style="height:44px;width:min(420px,70%)"></div><div class="sk" style="height:16px;width:min(320px,55%);margin-top:14px"></div>';
+  rs.innerHTML='<div class="grid">'+skelCards(6)+'</div>';
+  var url='/api/stay/search?guests='+encodeURIComponent(g)+'&type='+encodeURIComponent(ty)+(s.tags.length?('&tags='+encodeURIComponent(s.tags.join(','))):'')+(s.nb?('&neighborhood='+encodeURIComponent(s.nb)):'')+(ci?('&check_in='+ci):'')+(co?('&check_out='+co):'');
   track('elite_search',{type:ty,guests:g,check_in:ci,check_out:co});
+  var my=(runSearch.n=(runSearch.n||0)+1);
   fetch(url).then(function(r){return r.json();}).then(function(d){
-    var res=(d&&d.results)||[],browse=d&&d.browse,sm=searchSummary(ci,co,g,ty);
-    if(d&&d.invalid_dates){V.innerHTML=sm+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div></div>';return;}
-    var head='<div class="wrap">';
-    if(d&&d.avail_error)head+='<div class="note">تعذّر تحديث التوفر حاليًا، جرّب بعد قليل.</div>';
+    if(my!==runSearch.n)return;
+    var res=(d&&d.results)||[],browse=d&&d.browse;
+    if(d&&d.invalid_dates){rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>تاريخ الخروج لازم يكون بعد تاريخ الدخول.</h2></div>';return;}
+    var where=s.nb?hoodName(s.nb):'';
+    var h1,p,cta='';
+    if(browse){h1=where?('إقامات '+where):'كل الإقامات';p='حط تواريخك عشان نوريك المتاح وسعر العضو.';cta='<div class="cta"><button class="btn ghost sm" id="pick">'+svg('cal')+'اختر التواريخ</button></div>';}
+    else{h1='متاحة '+rangeLabel(ci,co)+(where?(' في '+where):'');p=nightsLabel(nightsBetween(ci,co))+' · التوفر والسعر النهائي يتأكدون مع الكونسيرج.';}
+    rh.innerHTML='<h1>'+he(h1)+'</h1><p>'+he(p)+'</p>'+cta;
+    var pk=document.getElementById('pick');if(pk)pk.onclick=function(){openSheet('search-inplace','sh-dates');};
+    var head='';
+    if(d&&d.avail_error)head+='<div class="banner" role="status">'+svg('alert')+'<span>تعذر تحديث التوفر حاليًا، جرّب بعد قليل.</span></div>';
     if(res.length){
       track('elite_results_view',{type:ty,count:res.length});
-      head+='<h2 class="res-head">'+(browse?('عندنا '+res.length+' إقامة مختارة'):('لقينا لك '+res.length+' إقامة مختارة'))+'</h2>';
-      head+='<div class="note">التوفر والسعر النهائي يتأكّد مع الكونسيرج</div>';
-      V.innerHTML=sm+head+'<div class="grid" style="margin:8px 0 30px">'+res.map(function(l){return card(l);}).join('')+'</div>'+inlineConcierge()+'</div>';reveal();
+      rs.innerHTML=head+'<div class="grid">'+res.map(function(l,i){return card(l,i<2);}).join('')+'</div><p class="foot-n">سعر العضو بعد خصم 20%. السعر النهائي والتوفر يتأكدون مع الكونسيرج.</p>';
     } else {
       track('elite_no_results',{type:ty,check_in:ci,check_out:co});
-      V.innerHTML=sm+head+'<div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا إقامات بنفس الاختيارات</h2><p>جرّب تغيير التاريخ أو نوع الإقامة — أو خلّ الكونسيرج يرشّح لك.</p><a class="btn primary" href="/elite'+location.search+'"><span class="lbl">عدّل البحث</span></a></div><div id="sim"></div>'+inlineConcierge()+'</div>';
-      loadSimilar(ty);
+      rs.innerHTML=head+'<div class="empty"><h2>ما لقينا إقامة تطابق كل اختياراتك</h2><p>جرّب تواريخ ثانية، أو شيل فلتر أو اثنين، أو خلّ الكونسيرج يرشّح لك.</p><div class="acts"><button class="btn" id="ed">عدّل البحث</button>'+(nf?'<button class="btn ghost" id="clr">شيل الفلاتر</button>':'')+waBtn(GEN_MSG,'elite_whatsapp_click','ghost','اسأل الكونسيرج')+'</div></div><div id="sim"></div>';
+      document.getElementById('ed').onclick=function(){openSheet('search-inplace','sh-dates');};
+      var cl=document.getElementById('clr');if(cl)cl.onclick=function(){var q=readQ();q.tags=[];q.nb='';history.replaceState(null,'','/elite/search'+buildQ(q));runSearch();};
+      if(ci&&co){loadSimilar(ty);}
     }
-  }).catch(function(){V.innerHTML=searchSummary(ci,co,g,ty)+'<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>تعذّر تحديث التوفر حاليًا</h2><p>جرّب بعد قليل، أو راسل الكونسيرج مباشرة.</p></div>'+inlineConcierge()+'</div>';});
+  }).catch(function(){
+    if(my!==runSearch.n)return;
+    rh.innerHTML='';rs.innerHTML='<div class="empty"><h2>ما قدرنا نجيب الإقامات الحين</h2><p>تعذر تحديث التوفر حاليًا، جرّب بعد قليل أو راسل الكونسيرج مباشرة.</p><div class="acts"><button class="btn" id="re">حاول مرة ثانية</button>'+waBtn(GEN_MSG,'elite_whatsapp_click','ghost','اسأل الكونسيرج')+'</div></div>';
+    document.getElementById('re').onclick=runSearch;
+  });
 }
-function inlineConcierge(){return '<div class="concierge" style="margin:30px 0 40px">'+conciergeBand()+'</div>';}
 function loadSimilar(ty){
   fetch('/api/stay/search?type='+encodeURIComponent(ty)).then(function(r){return r.json();}).then(function(d){
-    var res=((d&&d.results)||[]).slice(0,4);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
-    el.innerHTML='<h2 class="res-head" style="font-size:20px">إقامات مشابهة — جرّب تواريخ مختلفة</h2><div class="grid" style="margin:8px 0 20px">'+res.map(function(l){return card(Object.assign({},l,{available:null,est_total:null,nights:null}));}).join('')+'</div>';reveal();
+    var res=((d&&d.results)||[]).slice(0,3);if(!res.length)return;var el=document.getElementById('sim');if(!el)return;
+    el.innerHTML='<div class="sec-h" style="margin-top:12px"><div><h2 class="h2" style="font-size:clamp(24px,3.4vw,34px)">إقامات تقدر تجرّب لها تواريخ ثانية</h2></div></div><div class="grid">'+res.map(function(l){l=Object.assign({},l,{available:null,est_total:null});return card(l);}).join('')+'</div>';
   }).catch(function(){});
 }
 
+/* ---------- one stay ---------- */
+var WHY={cinema:['film','سينما خاصة داخل الإقامة'],balcony:['sun','بلكونة لجلسة هادية'],boulevard:['spark','قريبة من البوليفارد'],tower_view:['building','إطلالة من برج'],self_entry:['key','دخول ذاتي بدون انتظار'],family:['users','مساحة تكفي العائلة'],studio:['sofa','استوديو عملي للإقامات القصيرة'],'1br':['bed','غرفة وصالة مريحة'],'2br':['bed','غرفتين تكفي مجموعة'],'3br':['bed','ثلاث غرف لعائلة أو شلة']};
 function viewListing(){
+  document.body.classList.add('unitpage');
   var l=(ELITE&&ELITE.listing)||null;
-  var _vlogged=false;
-  function agHtml(gp){return '<div class="amen-group"><h3 class="ag-h">'+he(gp.ar)+'</h3><div class="amen">'+(gp.items||[]).map(function(a){return '<span>'+he(a)+'</span>';}).join('')+'</div></div>';}
-  function openGallery(imgs,alt){
-    var ov=document.createElement('div');ov.className='lb';
-    ov.innerHTML='<button class="lb-x" aria-label="إغلاق">✕</button><div class="lb-strip">'+imgs.map(function(u){return '<img loading="lazy" width="800" height="600" src="'+he(pimg(u,1600))+'" alt="'+he(alt||'')+'">';}).join('')+'</div>';
+  var logged=false;
+  function render(l){
+    var old=document.querySelector('.bbar');if(old)old.remove();
+    if(!l){V.innerHTML='<div class="wrap"><div class="empty"><h2>ما لقينا هالإقامة</h2><p>يمكن تغيّر رابطها أو انشالت من القائمة.</p><div class="acts"><a class="btn" href="/elite/search">شوف كل الإقامات</a></div></div></div>';return;}
+    if(!logged){logged=true;track('elite_listing_view',{listing_id:l.id});}
+    var name=l.name_ar||l.name_en||'';
+    var imgs=(l.images||[]).slice();if(!imgs.length&&l.cover)imgs=[l.cover];
+    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out'),dg=pq.get('guests'),dated=!!(dci&&dco&&dco>dci);
+    var gallery='';
+    if(imgs.length){
+      var strip=imgs.map(function(u,i){return '<button type="button" data-i="'+i+'" aria-label="صورة '+(i+1)+' من '+imgs.length+'"><img '+(i===0?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="900" height="675" alt="'+he(name)+'" src="'+he(pimg(u,900))+'"></button>';}).join('');
+      var mo=imgs.slice(0,5).map(function(u,i){return '<button type="button" data-i="'+i+'" aria-label="صورة '+(i+1)+'"><img '+(i===0?'fetchpriority="high"':'loading="lazy"')+' decoding="async" width="'+(i===0?1200:600)+'" height="'+(i===0?900:450)+'" alt="'+he(name)+'" src="'+he(pimg(u,i===0?1400:700))+'"></button>';}).join('');
+      gallery='<div class="gal"><div class="gal-strip" id="gs">'+strip+'</div><div class="mosaic n'+Math.min(imgs.length,5)+'">'+mo+'</div>'
+        +(imgs.length>1?('<span class="cnt" id="gc">1 / '+imgs.length+'</span><button type="button" class="btn light sm all" id="gall">'+svg('grid')+'كل الصور <span class="num">('+imgs.length+')</span></button>'):'')+'</div>';
+    }
+    var facts=[];if(l.capacity)facts.push(['users',guestsLabel(l.capacity)]);if(l.beds!=null)facts.push(['bed',roomsLabel(l.beds)]);if(l.baths)facts.push(['bath',bathsLabel(l.baths)]);if(l.self_entry)facts.push(['key','دخول ذاتي']);
+    var st=l.structured;
+    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<p class="tl" dir="auto">'+he(st.tagline_ar||st.tagline_en)+'</p>'):'';
+    var emb=(st&&st.emblems&&st.emblems.length)?('<div class="emb">'+st.emblems.map(function(e){return '<span>'+he(e.ar||e.en)+'</span>';}).join('')+'</div>'):'';
+    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k]&&wr.length<5)wr.push('<li>'+svg(WHY[k][0])+'<span>'+he(WHY[k][1])+'</span></li>');});
+    if(l.area&&l.area!=='Riyadh'&&wr.length<4)wr.push('<li>'+svg('pin')+'<span>في حي '+he(l.area)+'</span></li>');
+    var why=wr.length?('<section class="ublock"><h2>ليش هالإقامة؟</h2><ul class="why">'+wr.join('')+'</ul></section>'):'';
+    var perks='<section class="ublock"><h2>امتيازات عوجا إيليت</h2>'+perksList([['bell','كونسيرج خاص ٢٤/٧','نرتّب طلباتك قبل وأثناء الإقامة.'],['car','سائق خاص','مرسيدس · سواري المسافر تحت طلبك.'],['badge','حجز مباشر','بدون رسوم منصات الحجز.'],['spark','أولوية العضوية','أفضليّة في التوفر والترقيات.'],['key','دخول ذاتي','وصول سلس بدون انتظار.']])+'</section>';
+    var about='';
+    if(st&&st.sections&&st.sections.length){
+      about=st.sections.map(function(x){var ti=(x.title_ar||x.title_en||''),bo=(x.body_ar||x.body_en||'');if(!ti&&!bo)return '';return '<div class="stsec"><h3 dir="auto">'+he(ti)+'</h3><div class="desc" dir="'+(isLatin(bo)?'ltr':'rtl')+'">'+he(bo)+'</div></div>';}).join('');
+      var nb=(st.neighborhood_ar||st.neighborhood_en||'');if(nb)about+='<div class="stsec"><h3>الموقع والحي</h3><div class="desc" dir="'+(isLatin(nb)?'ltr':'rtl')+'">'+he(nb)+'</div></div>';
+      about='<section class="ublock"><h2>عن الإقامة</h2>'+about+'</section>';
+    } else {
+      var desc=(l.desc_ar||l.short_ar||'');
+      if(desc){var long=desc.length>420;about='<section class="ublock"><h2>عن الإقامة</h2><div class="desc'+(long?' clip':'')+'" id="dsc" dir="'+(isLatin(desc)?'ltr':'rtl')+'">'+he(desc)+'</div>'+(long?'<button class="more" id="dmore">اقرأ الوصف كامل</button>':'')+'</section>';}
+    }
+    var groups=(l.amenity_groups||[]),tiles=(l.amenity_tiles||[]),amen='';
+    if(groups.length||tiles.length){
+      var total=0;groups.forEach(function(g){total+=(g.items||[]).length;});
+      var gh=function(gp){var ics=gp.icons||[];return '<div class="ag"><h3>'+he(gp.ar)+'</h3><ul>'+(gp.items||[]).map(function(a,i){return ics[i]?('<li>'+svg(ics[i])+he(a)+'</li>'):('<li class="ni">'+he(a)+'</li>');}).join('')+'</ul></div>';};
+      var tl=tiles.length?('<ul class="am-tiles">'+tiles.map(function(t){return '<li>'+svg(t.icon)+'<span>'+he(t.ar)+'</span></li>';}).join('')+'</ul>'):'';
+      amen='<section class="ublock"><h2>وش في الإقامة؟</h2>'+tl
+        +(tiles.length?('<div id="amr" class="am-all" hidden>'+groups.map(gh).join('')+'</div><button class="more" id="amtog">كل المميزات <span class="num">('+total+')</span></button>'):('<div>'+groups.map(gh).join('')+'</div>'))
+        +'</section>';
+    }
+    var gv=(l.guest_reviews||[]),voices='';
+    if(gv.length){
+      voices='<section class="ublock" id="voices"><h2>وش قالوا عنها ضيوفنا</h2>'
+        +'<p class="vhead">'+((l.rating!=null&&l.reviews_count)?(svg('star','f')+'<b class="num">'+(Math.round(l.rating*100)/100)+'</b><span>من <span class="num">'+l.reviews_count+'</span> تقييم · من تقييمات ضيوف عوجا</span>'):'<span>من تقييمات ضيوف عوجا</span>')+'</p>'
+        +'<ul class="voices">'+gv.slice(0,3).map(function(v){return voiceHtml(v,false);}).join('')+'</ul></section>';
+    }
+    // booking panel: the member price, the dates, one WhatsApp button
+    var hasP=(l.est_avg!=null&&l.est_avg>0&&l.nights>0),base=(l.price_base!=null&&Number(l.price_base)>0)?Number(l.price_base):0;
+    var priceTop='';
+    if(dated&&hasP){
+      priceTop='<p class="was">السعر العادي <s class="num">'+money(l.est_avg)+'</s> / الليلة</p><p class="pr"><b class="num">'+money(disc(l.est_avg))+'</b> / الليلة لعضو إيليت</p>'
+        +(l.est_total?('<p class="tot">الإجمالي لـ'+nightsLabel(l.nights)+': <s class="num">'+money(l.est_total)+'</s> <b class="num">'+money(disc(l.est_total))+'</b></p><p class="save">'+svg('spark')+'<span>توفّر <b class="num">'+money(Number(l.est_total)-disc(l.est_total))+'</b> مع خصم العضوية</span></p>'):'');
+    } else if(base){
+      priceTop='<p class="was">تبدأ من <s class="num">'+money(base)+'</s> / الليلة</p><p class="pr"><b class="num">'+money(disc(base))+'</b> / الليلة لعضو إيليت</p><p class="hint">'+(dated?'السعر لتواريخك يأكده الكونسيرج.':'حط تواريخك عشان نوريك سعر العضو لإقامتك.')+'</p>';
+    } else {
+      priceTop='<p class="hint">'+(dated?'السعر لتواريخك يأكده الكونسيرج.':'حط تواريخك عشان نوريك سعر العضو.')+'</p>';
+    }
+    var msg=waBook(l,dci,dco,(l.nights||0),dg);
+    var bk='<aside class="bk" aria-label="الحجز">'+priceTop
+      +'<div class="dates"><button type="button" class="pickd"><span>الدخول</span><b>'+he(dated?fmtD(dci,true):'أضف تاريخ')+'</b></button><button type="button" class="pickd"><span>الخروج</span><b>'+he(dated?fmtD(dco,true):'أضف تاريخ')+'</b></button></div>'
+      +waBtn(msg,'elite_whatsapp_click','block','احجز عبر كونسيرج واتساب',l.id)+'<p class="small">السعر النهائي والتوفر يتأكدون مع الكونسيرج · أعضاء طُريف يحصلون على أكثر.</p></aside>';
+    var loc='<div class="loc"><span class="u-area">'+svg('pin')+he(areaName(l))+'</span>'+ratingHtml(l)+(l.badge?('<span class="tag" style="background:var(--paper2)">'+he(l.badge)+'</span>'):'')+'</div>';
+    V.innerHTML='<div class="wrap">'+gallery
+      +'<div class="ulay"><div class="umain"><header class="uhead">'+loc+'<h1 dir="auto">'+he(name)+'</h1>'+tagline
+      +(facts.length?('<ul class="facts">'+facts.map(function(f){return '<li>'+svg(f[0])+he(f[1])+'</li>';}).join('')+'</ul>'):'')+emb+'</header>'
+      +why+perks+voices+amen+about+'</div>'+bk+'</div></div>';
+    // phone booking bar
+    var info=(dated&&hasP)?('<b class="num">'+money(disc(l.est_avg))+' / الليلة</b><span>'+he(rangeLabel(dci,dco))+' · سعر العضو</span>')
+      :(dated?('<b>'+he(rangeLabel(dci,dco))+'</b><span>السعر مع الكونسيرج</span>'):('<button type="button" class="pickd">أضف تواريخك</button><span> لسعر العضو</span>'));
+    var bar=document.createElement('div');bar.className='bbar';
+    bar.innerHTML='<div class="wrap"><div class="row"><div class="info">'+info+'</div>'+waBtn(msg,'elite_whatsapp_click','','احجز عبر واتساب',l.id)+'</div>'
+      +'<p class="small">السعر النهائي والتوفر يتأكدون مع الكونسيرج.</p></div>';
+    document.body.appendChild(bar);
+    document.querySelectorAll('.pickd').forEach(function(b){b.onclick=function(){openSheet('unit','sh-dates');};});
+    var gs=document.getElementById('gs'),gc=document.getElementById('gc');
+    if(gs&&gc){gs.addEventListener('scroll',function(){var i=Math.round(Math.abs(gs.scrollLeft)/Math.max(1,gs.clientWidth));gc.textContent=(i+1)+' / '+imgs.length;},{passive:true});}
+    V.querySelectorAll('.gal [data-i]').forEach(function(b){b.onclick=function(){openGallery(imgs,name,+b.getAttribute('data-i'));};});
+    var ga=document.getElementById('gall');if(ga)ga.onclick=function(){openGallery(imgs,name,0);};
+    var dm=document.getElementById('dmore');if(dm)dm.onclick=function(){var d=document.getElementById('dsc');var open=d.classList.toggle('clip');dm.textContent=open?'اقرأ الوصف كامل':'اختصر الوصف';};
+    var tg=document.getElementById('amtog');if(tg){var tgl=tg.innerHTML;tg.onclick=function(){var r=document.getElementById('amr');r.hidden=!r.hidden;tg.innerHTML=r.hidden?tgl:'عرض أقل';};}
+  }
+  // the viewer keeps every photo's real shape (width 100%, height auto, no crop)
+  function openGallery(imgs,alt,start){
+    var ov=document.createElement('div');ov.className='lb';ov.setAttribute('role','dialog');ov.setAttribute('aria-modal','true');ov.setAttribute('aria-label','كل الصور');
+    ov.innerHTML='<div class="lb-top"><b><span class="num">'+imgs.length+'</span> صورة</b><button class="lb-x" aria-label="إغلاق">'+svg('x')+'</button></div><div class="lb-strip">'+imgs.map(function(u,i){return '<img loading="'+(Math.abs(i-start)<3?'eager':'lazy')+'" decoding="async" src="'+he(pimg(u,1400))+'" alt="'+he(alt||'')+'" data-i="'+i+'">';}).join('')+'</div>';
     function close(){ov.remove();document.removeEventListener('keydown',esc);document.body.style.overflow='';}
     function esc(e){if(e.key==='Escape')close();}
-    ov.addEventListener('click',function(e){if(e.target===ov||(e.target.className||'').indexOf('lb-x')>=0)close();});
+    ov.querySelector('.lb-x').onclick=close;
     document.addEventListener('keydown',esc);document.body.style.overflow='hidden';document.body.appendChild(ov);
+    ov.querySelector('.lb-x').focus();
+    if(start>0){var t=ov.querySelector('[data-i="'+start+'"]');if(t)requestAnimationFrame(function(){t.scrollIntoView({block:'start'});});}
   }
-  function render(l){
-    if(!l){V.innerHTML='<div class="wrap"><div class="state"><div class="em">'+IC.spark+'</div><h2>ما لقينا هالإقامة</h2><p>يمكن تكون اتغيّرت. <a href="/elite" style="color:var(--gold-deep)">ارجع للمجموعة</a></p></div></div>';return;}
-    var _ob=document.querySelector('.sticky-cta');if(_ob)_ob.remove();   // avoid duplicate bars on re-render
-    if(!_vlogged){_vlogged=true;track('elite_listing_view',{listing_id:l.id});}
-    var imgs=(l.images||[]);
-    var gallery;
-    if(imgs.length){
-      var c1='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(pimg(imgs[0],1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div>';
-      var c2='';
-      if(imgs.length>1){var moreBtn=(imgs.length>2)?('<button class="g-all" id="gall">كل الصور · '+imgs.length+'</button>'):'';c2='<div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" src="'+he(pimg(imgs[1],1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div>'+moreBtn+'</div>';}
-      gallery='<div class="gal'+(imgs.length>1?'':' one')+'">'+c1+c2+'</div>';
-    } else if(l.cover){gallery='<div class="gal one"><div class="gcell"><img class="fadein" loading="lazy" width="800" height="600" style="view-transition-name:r'+he(l.id)+'" src="'+he(pimg(l.cover,1200))+'" alt="'+he(l.name_ar)+'"><div class="frame"></div></div></div>';}
-    else{gallery='<div class="gcell" style="aspect-ratio:16/10;margin:18px 0">'+monoPh()+'<div class="frame"></div></div>';}
-    var pq=qs(),dci=pq.get('check_in'),dco=pq.get('check_out');
-    var dsum='';
-    if(dci&&dco&&dco>dci){dsum='<div class="booking-strip"><span style="color:var(--gold)">'+IC.spark+'</span><div><b>طلبك:</b> '+he(dci)+' ← '+he(dco)+(pq.get('guests')?(' · '+he(pq.get('guests'))+' ضيوف'):'')+'</div></div>';}
-    var kv=[];if(l.capacity)kv.push(['الضيوف',l.capacity]);if(l.beds!=null)kv.push(['الغرف',l.beds==0?'استوديو':l.beds]);if(l.baths)kv.push(['الحمامات',l.baths]);if(l.self_entry)kv.push(['الدخول','ذاتي']);
-    var facts=kv.length?('<div class="facts">'+kv.map(function(x){return '<div class="fact"><div class="fk">'+he(x[0])+'</div><div class="fv">'+he(x[1])+'</div></div>';}).join('')+'</div>'):'';
-    var WHY={cinema:[IC.spark,'سينما خاصة لتجربة مشاهدة أهدى'],balcony:[IC.spark,'بلكونة مناسبة لجلسة خفيفة'],boulevard:[IC.spark,'قريبة من البوليفارد وأهم وجهات الرياض'],tower_view:[IC.spark,'إطلالة من برج مميز'],self_entry:[IC.key,'دخول ذاتي بدون انتظار'],family:[IC.spark,'مساحة مناسبة للعائلة'],studio:[IC.spark,'استوديو عملي للإقامات القصيرة'],'1br':[IC.spark,'غرفة وصالة مريحة'],'2br':[IC.spark,'مساحة أوسع تكفي مجموعة']};
-    var wr=[];(l.tag_keys||[]).forEach(function(k){if(WHY[k])wr.push('<div class="why-row"><span class="wi">'+WHY[k][0]+'</span><span>'+he(WHY[k][1])+'</span></div>');});
-    if(l.area&&wr.length<4)wr.push('<div class="why-row"><span class="wi">'+IC.spark+'</span><span>موقع مميز في '+he(l.area)+'</span></div>');
-    var why=wr.length?('<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">ليش هالإقامة؟</span><div class="why">'+wr.slice(0,5).join('')+'</div></div>'):'';
-    var groups=(l.amenity_groups||[]);
-    var amen='';
-    if(groups.length){var first=groups.slice(0,2).map(agHtml).join(''),rest=groups.slice(2);amen='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">المميزات</span><div id="amf">'+first+'</div>'+(rest.length?('<div id="amr" style="display:none">'+rest.map(agHtml).join('')+'</div><button class="more" id="amtog">عرض كل المميزات</button>'):'')+'</div>';}
-    var desc=(l.desc_ar||l.short_ar||'');
-    var descBlk=desc?('<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">عن الإقامة</span><div class="descblk'+(isLatin(desc)?' ltr':'')+'">'+he(desc)+'</div></div>'):'';
-    var st=l.structured, embl=emblemsRow(st), stcards=structuredCards(st);
-    var tagline=(st&&(st.tagline_ar||st.tagline_en))?('<div style="font-size:16px;opacity:.82;margin:10px 0 2px;line-height:1.5"'+(isLatin(st.tagline_ar||st.tagline_en)?' dir="ltr"':'')+'>'+he(st.tagline_ar||st.tagline_en)+'</div>'):'';
-    var perks='<div class="sec reveal" style="margin-top:32px"><span class="eyebrow">امتيازات عوجا إيليت</span><div class="perks">'
-      +'<div class="perk"><span class="pk-i">'+IC.bell+'</span><div><b>كونسيرج خاص ٢٤/٧</b> <span>— نرتّب طلباتك قبل وأثناء الإقامة.</span></div></div>'
-      +'<div class="perk"><span class="pk-i">'+IC.car+'</span><div><b>سائق خاص</b> <span>— مرسيدس · سواري المسافر تحت طلبك.</span></div></div>'
-      +'<div class="perk"><span class="pk-i">'+IC.badge+'</span><div><b>حجز مباشر</b> <span>— بدون رسوم منصات الحجز.</span></div></div>'
-      +'<div class="perk"><span class="pk-i">'+IC.spark+'</span><div><b>أولوية العضوية</b> <span>— أفضليّة في التوفر والترقيات.</span></div></div>'
-      +'<div class="perk"><span class="pk-i">'+IC.key+'</span><div><b>دخول ذاتي</b> <span>— وصول سلس بدون انتظار.</span></div></div>'
-    +'</div></div>';
-    V.innerHTML='<div class="wrap">'+gallery+dsum
-      +'<div class="l-eyebrow eyebrow">Ouja Elite Residence</div>'
-      +'<h1 class="l-title">'+he(l.name_ar||l.name_en)+'</h1>'
-      +(l.area?('<div class="l-area">'+he(l.area)+'</div>'):'')
-      +tagline
-      +((l.badge?('<span class="chip solid">'+he(l.badge)+'</span> '):'')+(badges(l,6)?('<span class="chips" style="display:inline-flex">'+badges(l,6)+'</span>'):''))
-      +embl
-      +listingPrice(l)
-      +facts+why+(stcards||descBlk)+amen+perks
-      +'<div style="height:120px"></div></div>';
-    var num=waNum();
-    var msg=waBook(l,dci,dco,(l.nights||0),pq.get('guests'));
-    var cta=num?('<a class="btn primary block" id="wabtn" target="_blank" rel="noopener" href="'+he(waHref(msg))+'">'+WAG+'<span class="lbl">احجز عبر كونسيرج واتساب</span></a>'):('<button class="btn primary block off" disabled>'+WAG+'<span class="lbl">الكونسيرج غير متاح حاليًا</span></button>');
-    var bar=document.createElement('div');bar.className='sticky-cta';bar.innerHTML='<div class="wrap">'+cta+'<div class="reassure">السعر النهائي يتأكّد مع الكونسيرج · ضيافة عوجا إيليت</div></div>';
-    document.body.appendChild(bar);document.body.classList.add('has-cta');reveal();
-    var wb=document.getElementById('wabtn');if(wb){wb.addEventListener('click',function(){track('elite_whatsapp_click',{listing_id:l.id});});}
-    var gall=document.getElementById('gall');if(gall){gall.onclick=function(){openGallery(imgs,l.name_ar);};}
-    var tg=document.getElementById('amtog');if(tg){tg.onclick=function(){var r=document.getElementById('amr');if(r){var open=r.style.display!=='none';r.style.display=open?'none':'block';tg.textContent=open?'عرض كل المميزات':'عرض أقل';}};}
-  }
-  var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out');
-  var token=(l&&l.slug)||location.pathname.replace(/^\/elite\/(id\/)?/,'').split('?')[0];
-  var dated=(ci&&co&&co>ci);
-  if(l){render(l);}                                  // instant: server-injected content, never blocks
-  if(dated&&token){                                  // then enhance with live availability/price (non-blocking)
-    fetch('/api/stay/listing/'+encodeURIComponent(token)+'?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)).then(function(r){return r.json();}).then(function(d){if(d&&d.listing)render(d.listing);}).catch(function(){});
-  } else if(!l){                                     // /elite/id with no server data — fetch the full listing
+  var pp=qs(),ci=pp.get('check_in'),co=pp.get('check_out'),dated=!!(ci&&co&&co>ci);
+  var parts=location.pathname.split('/').filter(Boolean);
+  var token=(l&&l.slug)||parts[parts.length-1]||'';
+  if(token==='elite'||token==='id')token='';
+  if(l){render(l);}
+  else{V.innerHTML='<div class="wrap"><div class="sk" style="aspect-ratio:4/3;border-radius:22px;margin-top:20px"></div></div>';}
+  if(dated&&token){
+    fetch('/api/stay/listing/'+encodeURIComponent(token)+'?check_in='+encodeURIComponent(ci)+'&check_out='+encodeURIComponent(co)).then(function(r){return r.json();}).then(function(d){if(d&&d.listing)render(d.listing);else if(!l)render(null);}).catch(function(){if(!l)render(null);});
+  } else if(!l&&token){
     fetch('/api/stay/listing/'+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){render((d&&d.listing)||null);}).catch(function(){render(null);});
-  }
+  } else if(!l){render(null);}
 }
 
 (function(){
-  try{var _intro=document.getElementById('introScreen');if(_intro){if(!RM&&!sessionStorage.getItem('ouja_elite_intro')){sessionStorage.setItem('ouja_elite_intro','1');_intro.classList.add('show');_intro.onclick=function(){if(_intro.parentNode)_intro.parentNode.removeChild(_intro);};setTimeout(function(){if(_intro&&_intro.parentNode)_intro.parentNode.removeChild(_intro);},2000);}else if(_intro.parentNode){_intro.parentNode.removeChild(_intro);}}}catch(e){}
-  try{var hc=document.getElementById('headConc');if(hc){var h=waHref(GEN_MSG);if(h){hc.href=h;hc.setAttribute('target','_blank');hc.setAttribute('rel','noopener');hc.addEventListener('click',function(){track('elite_whatsapp_click',{src:'header'});});}else{hc.style.display='none';}}}catch(e){}
-  try{var rf=document.querySelector('.reg-foot');if(rf)rf.innerHTML=REG;var rh=document.querySelector('.head-reg');if(rh)rh.innerHTML=REG;}catch(e){}
-  var path=location.pathname;
-  if(path==='/elite'||path==='/elite/'){viewHome();}
+  var head=document.getElementById('head');
+  var h=waHref(GEN_MSG);
+  document.querySelectorAll('[data-wa]').forEach(function(a){if(h){a.href=h;}else{a.hidden=true;}});
+  document.addEventListener('click',function(e){var a=(e.target&&e.target.closest)?e.target.closest('a.wa-go,a[data-wa]'):null;if(a)track(a.getAttribute('data-ev')||'elite_whatsapp_click',{src:a.getAttribute('data-wa')||'',listing_id:a.getAttribute('data-lid')||undefined});});
+  var path=location.pathname;if(path.length>1&&path.charAt(path.length-1)==='/')path=path.slice(0,-1);
+  if(path==='/elite'){viewHome();}
   else if(path==='/elite/search'){viewSearch();}
   else{viewListing();}
+  if(!document.body.classList.contains('home')){var hs=function(){head.classList.toggle('scrolled',window.scrollY>4);};window.addEventListener('scroll',hs,{passive:true});hs();}
 })();
 </script>
 </body></html>"""
@@ -65370,14 +65554,24 @@ def _elite_render(route="home", listing=None, base=""):
         desc = (listing.get("short_ar") or listing.get("desc_ar") or desc)[:160]
         og = listing.get("cover") or ""
         path = "/elite/" + (listing.get("slug") or str(listing.get("id")))
-    vis = _gw_visible_snaps()
     hcfg = _gw_hero_resolve()
     if not listing and hcfg.get("url"):
         og = og or hcfg["url"]
+    if listing:   # Elite never mentions Airbnb, not even in the page's hidden data
+        listing = {k: v for k, v in listing.items() if "airbnb" not in k}
+    # Owner rule: never state how many apartments we have — not on screen and not in the page data,
+    # so the total and the per-neighbourhood counts are left out on purpose.
+    hoods = [{k: v for k, v in n.items() if k != "count"}
+             for n in (_gw_neighborhoods_with_counts() or []) if isinstance(n, dict)]
     data = {"route": route, "listing": listing,
-            "config": {"noo": _gw_noo_options(), "count": len(vis),
-                       "hero": (hcfg.get("url") or ""), "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""), "imgproxy": ELITE_IMG_PROXY, "whatsapp": ELITE_WHATSAPP,
-                       "neighborhoods": _gw_neighborhoods_with_counts()}}
+            "config": {"noo": _gw_noo_options(),
+                       "hero": (hcfg.get("url") or ""),
+                       "hero_cfg": {"focal": hcfg.get("focal"), "overlay": hcfg.get("overlay")},
+                       "video": (os.environ.get("ELITE_HERO_VIDEO", "") or ""),
+                       "imgproxy": bool(ELITE_IMG_PROXY), "whatsapp": ELITE_WHATSAPP,
+                       "neighborhoods": hoods,
+                       "rating_overall": _gw_ratings_overall(),
+                       "voices": (_gw_review_wall(6) if route == "home" else [])}}
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # SEO/share JSON-LD — Apartment per unit, LodgingBusiness on the landing.
     if listing:
@@ -65427,6 +65621,8 @@ async def _handle_elite_detail(request):
     token = request.match_info.get("slug", "")
     snap, ov = _gw_find_by_slug_or_id(token)
     listing = _gw_listing_public(snap, ov, with_airbnb=False) if snap else None   # with_airbnb=False — Elite never shows Airbnb
+    if listing:
+        listing["guest_reviews"] = _gw_review_picks(listing.get("id"))   # same picks as /apartments
     return web.Response(text=_elite_render("listing", listing, base=str(request.url.origin())), content_type="text/html")
 
 

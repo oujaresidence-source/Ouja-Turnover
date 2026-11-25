@@ -380,7 +380,9 @@ reaching a reader.
 - Dashboard, Finance Center, `/team`, and the side pages: tokens adopted in commits a31ae1f and c2f249a.
   Locked by `tests/test_ouja_tokens.py`.
 - `/cp` company profile: moved to this look on 2026-11-22 (`cp/templates/ar_v2.html`, `cp/templates/fonts.css`).
-- Not yet: `/elite`, `/monthly`, `/guide`, the `/cp` PDF, owner statements, and the other print documents.
+- `/elite` (`ELITE_HTML`): moved to this look on 2026-11-25, the VIP twin of /apartments with WhatsApp-only
+  booking. Locked by `tests/test_elite_look.py`.
+- Not yet: `/monthly`, `/guide`, the `/cp` PDF, owner statements, and the other print documents.
 
 ## 14. Font licence (Thmanyah, read before using the files anywhere new)
 
