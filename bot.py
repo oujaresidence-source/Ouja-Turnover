@@ -62255,6 +62255,14 @@ def _gw_ratings_overall(min_total=20, max_age=3600):
     c["t"], c["val"], c["set"] = now, val, True
     return val
 
+def _gw_site_images(ov):
+    """Override photo list for /apartments + /elite: https URLs only, de-duplicated, max 60."""
+    seen, out = set(), []
+    for u in ((ov or {}).get("images") or []):
+        if isinstance(u, str) and u.startswith("https://") and u not in seen:
+            seen.add(u); out.append(u)
+    return out[:60]
+
 def _gw_listing_public(snap, ov=None, with_airbnb=True):
     ov = ov if ov is not None else (_gw_overrides.get(str(snap.get("id")), {}) or {})
     url, src = _gw_airbnb_url(snap, ov)
@@ -62276,8 +62284,10 @@ def _gw_listing_public(snap, ov=None, with_airbnb=True):
         "beds": snap.get("beds"), "bedrooms": snap.get("bedrooms"), "beds_count": snap.get("beds_count"),
         "baths": snap.get("baths"), "capacity": snap.get("capacity"),
         "ptype": snap.get("ptype"), "badge": (ov.get("badge") or ""),
-        "images": [im["url"] for im in (snap.get("images") or [])],
-        "cover": ((ov.get("hero_image") or snap.get("cover")) or ""),
+        # Site-only photo list (owner 2026-11-25): the Airbnb photos were edited inside Airbnb, so
+        # Hostaway still holds the old ones. A non-empty ov["images"] wins; empty/absent = Hostaway.
+        "images": (_gw_site_images(ov) or [im["url"] for im in (snap.get("images") or [])]),
+        "cover": ((ov.get("hero_image") or (_gw_site_images(ov) or [None])[0] or snap.get("cover")) or ""),
         "amenities": snap.get("amenities") or [],
         "amenity_groups": _am[0],
         "amenity_tiles": _am[1],
@@ -65542,7 +65552,7 @@ try:
 except Exception:
     _ELITE_PIL = False
 ELITE_IMG_PROXY = (os.environ.get("ELITE_IMG_PROXY", "1") != "0") and _ELITE_PIL
-_ELITE_IMG_HOSTS = ("hostaway", "amazonaws", "cloudfront", "googleusercontent", "akamaized", "cloudinary", "imgix")
+_ELITE_IMG_HOSTS = ("hostaway", "amazonaws", "cloudfront", "googleusercontent", "akamaized", "cloudinary", "imgix", "muscache")
 
 def _elite_render(route="home", listing=None, base=""):
     title = "عوجا إيليت · إقامات مختارة في الرياض"
@@ -68725,7 +68735,7 @@ async def _api_gw_listing(request):
     ov = _gw_overrides.get(lid, {}) or {}
     for k in ("visible", "title_ar", "title_en", "short_ar", "short_en", "full_ar", "full_en",
               "area", "neighborhood", "slug", "badge", "sort", "hero_image", "airbnb_override",
-              "notes", "structured", "featured", "bedrooms"):
+              "notes", "structured", "featured", "bedrooms", "images"):
         if k in b:
             ov[k] = b.get(k)
     # bedrooms: "" / None = follow Hostaway; 0 = studio; 1..12 = that many bedrooms
